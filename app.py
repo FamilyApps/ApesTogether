@@ -429,5 +429,14 @@ def stock_comparison():
 with app.app_context():
     db.create_all()
 
+# Temporary route to initialize the database in production
+# THIS SHOULD BE REMOVED AFTER ONE-TIME USE
+@app.route('/create-my-database-for-real-c1a9b3e8a6f04d5f8c7b6a5e4d3c2b1a/init-db')
+def init_database():
+    with app.app_context():
+        db.create_all()
+    return "Database initialized successfully!"
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
