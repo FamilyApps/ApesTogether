@@ -236,14 +236,13 @@ def save_onboarding():
             except ValueError:
                 flash(f'Invalid quantity for {ticker}. Skipped.', 'warning')
     
-    # If we have valid stocks, add them all at once
+    # If we have stocks to check, validate and add them
     if stocks_to_add:
+        stocks_added_count = 0
         for stock_data in stocks_to_add:
-            try:
-                # Get price (will use cache if available)
-                current_price = get_stock_price(stock_data['ticker'])
-                
-                # Create new stock
+            current_price = get_stock_price(stock_data['ticker'])
+            
+            if current_price is not None:
                 stock = Stock(
                     ticker=stock_data['ticker'],
                     quantity=stock_data['quantity'],
@@ -251,21 +250,15 @@ def save_onboarding():
                     user_id=current_user.id
                 )
                 db.session.add(stock)
-                
-            except Exception as e:
-                # Use fallback price on error
-                stock = Stock(
-                    ticker=stock_data['ticker'],
-                    quantity=stock_data['quantity'],
-                    purchase_price=100.0,  # Fallback price
-                    user_id=current_user.id
-                )
-                db.session.add(stock)
+                stocks_added_count += 1
+            else:
+                flash(f"Could not find ticker '{stock_data['ticker']}'. It was not added.", 'warning')
         
-        db.session.commit()
-        flash('Your portfolio has been set up with current market prices!', 'success')
+        if stocks_added_count > 0:
+            db.session.commit()
+            flash(f'Successfully added {stocks_added_count} stock(s) to your portfolio!', 'success')
     else:
-        flash('No valid stocks were entered.', 'warning')
+        flash('No stocks were entered.', 'warning')
     
     return redirect(url_for('dashboard'))
 
@@ -273,41 +266,37 @@ def save_onboarding():
 @login_required
 def add_stock():
     ticker = request.form.get('ticker')
-    quantity = request.form.get('quantity')
+    quantity_str = request.form.get('quantity')
     
-    if not ticker or not quantity:
-        flash('Please fill in all fields', 'danger')
+    if not ticker or not quantity_str:
+        flash('Please provide both a ticker and a quantity.', 'danger')
         return redirect(url_for('dashboard'))
-    
+
     try:
-        # Fetch current price (will use cache if available)
-        ticker = ticker.upper()
-        current_price = get_stock_price(ticker)
+        quantity = float(quantity_str)
+        if quantity <= 0:
+            flash('Quantity must be a positive number.', 'danger')
+            return redirect(url_for('dashboard'))
+    except ValueError:
+        flash('Invalid quantity. Please enter a number.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    ticker = ticker.upper()
+    current_price = get_stock_price(ticker)
+    
+    if current_price is None:
+        flash(f"Could not fetch the price for '{ticker}'. Please check the ticker symbol and try again.", 'danger')
+        return redirect(url_for('dashboard'))
         
-        # Create new stock with fetched price
-        stock = Stock(
-            ticker=ticker,
-            quantity=float(quantity),
-            purchase_price=current_price,  # Already a float from get_stock_price
-            user_id=current_user.id
-        )
-        db.session.add(stock)
-        db.session.commit()
-        flash(f'Added {quantity} shares of {ticker} at ${current_price:.2f}', 'success')
-    except Exception as e:
-        # Use a fallback price if there's an error
-        try:
-            stock = Stock(
-                ticker=ticker,
-                quantity=float(quantity),
-                purchase_price=100.0,  # Fallback price
-                user_id=current_user.id
-            )
-            db.session.add(stock)
-            db.session.commit()
-            flash(f'Added {quantity} shares of {ticker} with placeholder price of $100.', 'warning')
-        except Exception as e2:
-            flash(f'Error adding stock: {str(e2)}', 'danger')
+    stock = Stock(
+        ticker=ticker,
+        quantity=quantity,
+        purchase_price=current_price,
+        user_id=current_user.id
+    )
+    db.session.add(stock)
+    db.session.commit()
+    flash(f'Successfully added {quantity} shares of {ticker} to your portfolio.', 'success')
     
     return redirect(url_for('dashboard'))
 
@@ -332,27 +321,36 @@ def delete_stock(stock_id):
 def portfolio_value():
     stocks = current_user.stocks.all()
     total_value = 0
-    stock_values = []
+    portfolio_data = []
     
     for stock in stocks:
-        # For demo purposes, we'll use the purchase price as the current price
-        # In a real app, you would fetch real-time prices from a stock API
-        current_price = stock.purchase_price
-        value = stock.quantity * current_price
+        current_price = get_stock_price(stock.ticker)
+        
+        if current_price is None:
+            # Gracefully handle API failure: show purchase price as current, 0 gain/loss
+            display_price = stock.purchase_price
+            value = stock.quantity * stock.purchase_price
+            gain_loss = 0
+        else:
+            display_price = current_price
+            value = stock.quantity * current_price
+            gain_loss = (current_price - stock.purchase_price) * stock.quantity
+
         total_value += value
-        stock_values.append({
+        
+        portfolio_data.append({
+            'id': stock.id,
             'ticker': stock.ticker,
             'quantity': stock.quantity,
-            'current_price': current_price,
-            'value': value,
             'purchase_price': stock.purchase_price,
-            'gain_loss': 0,  # No gain/loss in demo mode
-            'id': stock.id
+            'current_price': display_price,
+            'value': value,
+            'gain_loss': gain_loss
         })
     
     return jsonify({
         'total_value': total_value,
-        'stocks': stock_values
+        'stocks': portfolio_data
     })
 
 # Simple in-memory cache for stock prices to avoid repeated API calls
