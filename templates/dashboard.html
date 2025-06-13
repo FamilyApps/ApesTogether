@@ -1,0 +1,263 @@
+{% extends "base.html" %}
+
+{% block extra_head %}
+<style>
+    .stock-card {
+        transition: transform 0.2s;
+    }
+    .stock-card:hover {
+        transform: translateY(-5px);
+    }
+    .gain {
+        color: #28a745;
+    }
+    .loss {
+        color: #dc3545;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-8">
+        <h2>Welcome, {{ current_user.name }}</h2>
+        <p class="text-muted">Manage your stock portfolio</p>
+    </div>
+    <div class="col-md-4 text-end">
+        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addStockModal">
+            <i class="fas fa-plus-circle me-2"></i>Add Stock
+        </button>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">Portfolio Summary</h5>
+            </div>
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h6 class="mb-0">Total Value:</h6>
+                    <h4 id="total-value">Loading...</h4>
+                </div>
+                <div class="d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0">Total Gain/Loss:</h6>
+                    <h4 id="total-gain-loss">Loading...</h4>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">Portfolio Allocation</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="allocation-chart" height="200"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow mb-4">
+    <div class="card-header bg-primary text-white">
+        <h5 class="mb-0">Your Stocks</h5>
+    </div>
+    <div class="card-body">
+        {% if stocks %}
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Ticker</th>
+                        <th>Quantity</th>
+                        <th>Purchase Price</th>
+                        <th>Current Price</th>
+                        <th>Value</th>
+                        <th>Gain/Loss</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="stocks-table-body">
+                    <tr>
+                        <td colspan="7" class="text-center">Loading stock data...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center py-5">
+            <i class="fas fa-chart-line fa-4x text-muted mb-3"></i>
+            <h4>No stocks in your portfolio yet</h4>
+            <p>Click the "Add Stock" button to get started</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Add Stock Modal -->
+<div class="modal fade" id="addStockModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">Add Stock to Portfolio</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form action="{{ url_for('add_stock') }}" method="post">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="ticker" class="form-label">Ticker Symbol</label>
+                        <input type="text" class="form-control" id="ticker" name="ticker" placeholder="e.g. AAPL" required>
+                        <div class="form-text">Enter the stock ticker symbol (e.g. AAPL for Apple)</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="quantity" class="form-label">Quantity</label>
+                        <input type="number" class="form-control" id="quantity" name="quantity" step="0.01" min="0.01" placeholder="Number of shares" required>
+                    </div>
+                    <div class="form-text mb-3">We'll automatically fetch the current market price for this stock.</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add Stock</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Fetch portfolio data
+    fetchPortfolioData();
+    
+    // Set up refresh interval (every 60 seconds)
+    setInterval(fetchPortfolioData, 60000);
+});
+
+function fetchPortfolioData() {
+    fetch('{{ url_for("portfolio_value") }}')
+        .then(response => response.json())
+        .then(data => {
+            updatePortfolioSummary(data);
+            updateStocksTable(data.stocks);
+            updateAllocationChart(data.stocks);
+        })
+        .catch(error => console.error('Error fetching portfolio data:', error));
+}
+
+function updatePortfolioSummary(data) {
+    // Update total value
+    const totalValue = document.getElementById('total-value');
+    totalValue.textContent = '$' + data.total_value.toFixed(2);
+    
+    // Calculate total gain/loss
+    let totalGainLoss = 0;
+    data.stocks.forEach(stock => {
+        totalGainLoss += stock.gain_loss;
+    });
+    
+    // Update total gain/loss
+    const totalGainLossElement = document.getElementById('total-gain-loss');
+    totalGainLossElement.textContent = '$' + totalGainLoss.toFixed(2);
+    totalGainLossElement.className = totalGainLoss >= 0 ? 'gain' : 'loss';
+}
+
+function updateStocksTable(stocks) {
+    const tableBody = document.getElementById('stocks-table-body');
+    
+    if (stocks.length === 0) {
+        tableBody.innerHTML = `<tr><td colspan="7" class="text-center">No stocks in your portfolio</td></tr>`;
+        return;
+    }
+    
+    let html = '';
+    stocks.forEach(stock => {
+        const gainLossClass = stock.gain_loss >= 0 ? 'gain' : 'loss';
+        const gainLossIcon = stock.gain_loss >= 0 ? 'fa-arrow-up' : 'fa-arrow-down';
+        
+        html += `
+            <tr>
+                <td><strong>${stock.ticker}</strong></td>
+                <td>${stock.quantity}</td>
+                <td>$${stock.purchase_price.toFixed(2)}</td>
+                <td>$${stock.current_price.toFixed(2)}</td>
+                <td>$${stock.value.toFixed(2)}</td>
+                <td class="${gainLossClass}">
+                    <i class="fas ${gainLossIcon} me-1"></i>
+                    $${Math.abs(stock.gain_loss).toFixed(2)}
+                </td>
+                <td>
+                    <form action="/delete_stock/${stock.id}" method="post" class="d-inline">
+                        <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to remove this stock?')">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </form>
+                </td>
+            </tr>
+        `;
+    });
+    
+    tableBody.innerHTML = html;
+}
+
+function updateAllocationChart(stocks) {
+    if (stocks.length === 0) return;
+    
+    const ctx = document.getElementById('allocation-chart').getContext('2d');
+    
+    // Prepare data for chart
+    const labels = stocks.map(stock => stock.ticker);
+    const data = stocks.map(stock => stock.value);
+    const backgroundColors = generateColors(stocks.length);
+    
+    // Create or update chart
+    if (window.allocationChart) {
+        window.allocationChart.data.labels = labels;
+        window.allocationChart.data.datasets[0].data = data;
+        window.allocationChart.data.datasets[0].backgroundColor = backgroundColors;
+        window.allocationChart.update();
+    } else {
+        window.allocationChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: data,
+                    backgroundColor: backgroundColors
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        position: 'right'
+                    }
+                }
+            }
+        });
+    }
+}
+
+function generateColors(count) {
+    const colors = [
+        '#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b',
+        '#5a5c69', '#6f42c1', '#fd7e14', '#20c9a6', '#858796'
+    ];
+    
+    // If we need more colors than in our predefined list, generate them
+    if (count > colors.length) {
+        for (let i = colors.length; i < count; i++) {
+            const r = Math.floor(Math.random() * 255);
+            const g = Math.floor(Math.random() * 255);
+            const b = Math.floor(Math.random() * 255);
+            colors.push(`rgb(${r}, ${g}, ${b})`);
+        }
+    }
+    
+    return colors.slice(0, count);
+}
+</script>
+{% endblock %}

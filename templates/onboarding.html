@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}Set Up Your Portfolio{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="row justify-content-center">
+        <div class="col-md-10">
+            <div class="card shadow">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="mb-0">Welcome to Stock Portfolio Tracker</h3>
+                </div>
+                <div class="card-body">
+                    <h4 class="mb-4">Let's set up your portfolio</h4>
+                    <p class="mb-4">Enter your stock holdings below. You can add up to 10 stocks at once. We'll automatically fetch the current prices for you.</p>
+                    
+                    <form action="{{ url_for('save_onboarding') }}" method="post" id="onboardingForm">
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Stock Symbol</th>
+                                        <th>Quantity</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for i in range(10) %}
+                                    <tr>
+                                        <td>
+                                            <input type="text" name="ticker_{{ i }}" class="form-control" placeholder="e.g., AAPL">
+                                        </td>
+                                        <td>
+                                            <input type="number" name="quantity_{{ i }}" class="form-control" placeholder="e.g., 10" step="0.01" min="0">
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        <div class="d-flex justify-content-between mt-4">
+                            <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">Later</a>
+                            <button type="submit" class="btn btn-primary">Finished</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Simple validation to ensure at least one row has data before submitting
+        document.getElementById('onboardingForm').addEventListener('submit', function(e) {
+            let hasData = false;
+            
+            for (let i = 0; i < 10; i++) {
+                const ticker = document.querySelector(`input[name="ticker_${i}"]`).value;
+                const quantity = document.querySelector(`input[name="quantity_${i}"]`).value;
+                
+                if (ticker && quantity) {
+                    hasData = true;
+                    break;
+                }
+            }
+            
+            if (!hasData) {
+                e.preventDefault();
+                alert('Please enter at least one stock or click "Later" to skip.');
+            }
+        });
+    });
+</script>
+{% endblock %}
