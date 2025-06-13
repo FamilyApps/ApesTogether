@@ -58,7 +58,7 @@ apple = oauth.register(
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(150), unique=True, nullable=False)
-    username = db.Column(db.String(80), unique=True, nullable=True) # Temporarily allow null for migration
+    username = db.Column(db.String(80), unique=True, nullable=False)
     password_hash = db.Column(db.String(200))
     oauth_provider = db.Column(db.String(20))
     oauth_id = db.Column(db.String(100))
@@ -450,43 +450,6 @@ def stock_comparison():
                          tsla_prices=tsla_prices,
                          sp500_prices=sp500_prices)
 
-# Secret route to migrate existing users to have a username
-@app.route('/migrate-users-to-usernames-b4e3c2d1/run-migration')
-def migrate_users():
-    # Step 1: Ensure the 'username' column exists using raw SQL.
-    # This is necessary because db.create_all() does not alter existing tables.
-    try:
-        with db.engine.connect() as connection:
-            with connection.begin():
-                connection.execute(text('ALTER TABLE "user" ADD COLUMN username VARCHAR(80)'))
-    except ProgrammingError:
-        # Column likely already exists, which is fine. We can ignore this error.
-        pass
-    except Exception as e:
-        return f"An unexpected error occurred during column creation: {e}", 500
-
-    # Step 2: Populate the username for any users that don't have one.
-    try:
-        users_to_migrate = User.query.filter(User.username.is_(None)).all()
-        migrated_count = 0
-        if users_to_migrate:
-            for user in users_to_migrate:
-                while True:
-                    adjectives = ['clever', 'brave', 'sharp', 'wise', 'happy', 'lucky', 'sunny', 'proud', 'witty', 'gentle']
-                    nouns = ['fox', 'lion', 'eagle', 'tiger', 'river', 'ocean', 'bear', 'wolf', 'horse', 'raven']
-                    adjective = random.choice(adjectives)
-                    noun = random.choice(nouns)
-                    username = f"{adjective}-{noun}"
-                    if not User.query.filter_by(username=username).first():
-                        user.username = username
-                        db.session.add(user)
-                        break
-                migrated_count += 1
-            db.session.commit()
-        return f"Migration complete. Updated {migrated_count} users."
-    except Exception as e:
-        db.session.rollback()
-        return f"An error occurred during username population: {e}", 500
 
 # Create database tables
 with app.app_context():
