@@ -322,19 +322,30 @@ def portfolio_value():
     stocks = current_user.stocks.all()
     total_value = 0
     portfolio_data = []
-    
+
     for stock in stocks:
-        current_price = get_stock_price(stock.ticker)
+        current_price_api = get_stock_price(stock.ticker)
         
-        if current_price is None:
-            # Gracefully handle API failure: show purchase price as current, 0 gain/loss
-            display_price = stock.purchase_price
-            value = stock.quantity * stock.purchase_price
-            gain_loss = 0
+        # Ensure purchase_price_db is a float, default to 0.0 if None from DB.
+        purchase_price_db = stock.purchase_price if stock.purchase_price is not None else 0.0
+
+        value = 0
+        gain_loss = 0
+        display_current_price = 0  # Price to show as 'current' on the dashboard
+
+        if current_price_api is not None:
+            display_current_price = current_price_api
+            value = stock.quantity * current_price_api
+            # Only calculate gain/loss if the original purchase_price from DB was not None.
+            if stock.purchase_price is not None:
+                gain_loss = (current_price_api - purchase_price_db) * stock.quantity
+            # If original stock.purchase_price was None, gain_loss remains 0.
         else:
-            display_price = current_price
-            value = stock.quantity * current_price
-            gain_loss = (current_price - stock.purchase_price) * stock.quantity
+            # API failed to get current price. Use purchase_price_db as current for display.
+            # Value is based on purchase_price_db. Gain/loss is 0.
+            display_current_price = purchase_price_db
+            value = stock.quantity * purchase_price_db
+            gain_loss = 0 # Cannot determine gain/loss if current live price is unknown
 
         total_value += value
         
@@ -342,8 +353,8 @@ def portfolio_value():
             'id': stock.id,
             'ticker': stock.ticker,
             'quantity': stock.quantity,
-            'purchase_price': stock.purchase_price,
-            'current_price': display_price,
+            'purchase_price': purchase_price_db,  # Send a valid float (original or 0.0)
+            'current_price': display_current_price, # Send a valid float
             'value': value,
             'gain_loss': gain_loss
         })
