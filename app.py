@@ -6,6 +6,7 @@ from authlib.integrations.flask_client import OAuth
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
 import json
+import random
 import requests
 from datetime import datetime
 
@@ -54,8 +55,8 @@ apple = oauth.register(
 # Database models
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    email = db.Column(db.String(100), unique=True)
-    name = db.Column(db.String(100))
+    email = db.Column(db.String(150), unique=True, nullable=False)
+    username = db.Column(db.String(80), unique=True, nullable=True) # Temporarily allow null for migration
     password_hash = db.Column(db.String(200))
     oauth_provider = db.Column(db.String(20))
     oauth_id = db.Column(db.String(100))
@@ -96,10 +97,20 @@ def authorize_google():
     user = User.query.filter_by(email=user_info['email']).first()
     
     if not user:
+        # Generate a unique random username
+        while True:
+            adjectives = ['clever', 'brave', 'sharp', 'wise', 'happy', 'lucky', 'sunny', 'proud', 'witty', 'gentle']
+            nouns = ['fox', 'lion', 'eagle', 'tiger', 'river', 'ocean', 'bear', 'wolf', 'horse', 'raven']
+            adjective = random.choice(adjectives)
+            noun = random.choice(nouns)
+            username = f"{adjective}-{noun}"
+            if not User.query.filter_by(username=username).first():
+                break
+
         # Create new user
         user = User(
             email=user_info['email'],
-            name=user_info.get('name', user_info['email']),
+            username=username,
             oauth_provider='google',
             oauth_id=user_info['sub']  # OpenID Connect uses 'sub' for the user ID
         )
@@ -127,10 +138,20 @@ def authorize_apple():
     user = User.query.filter_by(email=user_info.get('email')).first()
     
     if not user:
+        # Generate a unique random username
+        while True:
+            adjectives = ['clever', 'brave', 'sharp', 'wise', 'happy', 'lucky', 'sunny', 'proud', 'witty', 'gentle']
+            nouns = ['fox', 'lion', 'eagle', 'tiger', 'river', 'ocean', 'bear', 'wolf', 'horse', 'raven']
+            adjective = random.choice(adjectives)
+            noun = random.choice(nouns)
+            username = f"{adjective}-{noun}"
+            if not User.query.filter_by(username=username).first():
+                break
+
         # Create new user
         user = User(
             email=user_info.get('email'),
-            name=user_info.get('name', user_info.get('email')),
+            username=username,
             oauth_provider='apple',
             oauth_id=user_info.get('sub')
         )
@@ -426,6 +447,26 @@ def stock_comparison():
                          dates=common_dates,
                          tsla_prices=tsla_prices,
                          sp500_prices=sp500_prices)
+
+# Secret route to migrate existing users to have a username
+@app.route('/migrate-users-to-usernames-b4e3c2d1/run-migration')
+def migrate_users():
+    users_to_migrate = User.query.filter(User.username == None).all()
+    migrated_count = 0
+    for user in users_to_migrate:
+        while True:
+            adjectives = ['clever', 'brave', 'sharp', 'wise', 'happy', 'lucky', 'sunny', 'proud', 'witty', 'gentle']
+            nouns = ['fox', 'lion', 'eagle', 'tiger', 'river', 'ocean', 'bear', 'wolf', 'horse', 'raven']
+            adjective = random.choice(adjectives)
+            noun = random.choice(nouns)
+            username = f"{adjective}-{noun}"
+            if not User.query.filter_by(username=username).first():
+                user.username = username
+                db.session.add(user)
+                break
+        migrated_count += 1
+    db.session.commit()
+    return f"Migration complete. Updated {migrated_count} users."
 
 # Create database tables
 with app.app_context():
