@@ -18,7 +18,7 @@ if database_url:
     database_url = database_url.replace('postgres://', 'postgresql://')
 app.config['SQLALCHEMY_DATABASE_URI'] = database_url or 'sqlite:///portfolio.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SERVER_NAME'] = 'localhost:5000'
+
 
 # Initialize extensions
 db = SQLAlchemy(app)
