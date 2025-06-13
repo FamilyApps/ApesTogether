@@ -9,6 +9,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
 import json
 import random
+import re
 import requests
 from datetime import datetime
 
@@ -166,6 +167,36 @@ def authorize_apple():
     if user.stocks.count() == 0:
         return redirect(url_for('onboarding'))
     return redirect(url_for('dashboard'))
+
+@app.route('/update-username', methods=['POST'])
+@login_required
+def update_username():
+    new_username = request.form.get('username')
+
+    # Validation
+    if not new_username:
+        flash('Username cannot be empty.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    if len(new_username) < 3 or len(new_username) > 20:
+        flash('Username must be between 3 and 20 characters.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    if not re.match(r'^[a-zA-Z0-9_-]+$', new_username):
+        flash('Username can only contain letters, numbers, dashes, and underscores.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    existing_user = User.query.filter(User.username == new_username).first()
+    if existing_user and existing_user.id != current_user.id:
+        flash('That username is already taken. Please choose another.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    # Update username
+    current_user.username = new_username
+    db.session.commit()
+    flash('Username updated successfully!', 'success')
+    return redirect(url_for('dashboard'))
+
 
 @app.route('/logout')
 @login_required

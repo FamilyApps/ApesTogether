@@ -20,7 +20,7 @@
 {% block content %}
 <div class="row mb-4">
     <div class="col-md-8">
-        <h2>Welcome, {{ current_user.name }}</h2>
+        <h2>Welcome, {{ current_user.username }}</h2>
         <p class="text-muted">Manage your stock portfolio</p>
     </div>
     <div class="col-md-4 text-end">
@@ -60,39 +60,61 @@
     </div>
 </div>
 
-<div class="card shadow mb-4">
-    <div class="card-header bg-primary text-white">
-        <h5 class="mb-0">Your Stocks</h5>
+<div class="row">
+    <div class="col-md-8">
+        <div class="card shadow mb-4">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">Your Stocks</h5>
+            </div>
+            <div class="card-body">
+                {% if stocks %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Ticker</th>
+                                <th>Quantity</th>
+                                <th>Purchase Price</th>
+                                <th>Current Price</th>
+                                <th>Value</th>
+                                <th>Gain/Loss</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="stocks-table-body">
+                            <tr>
+                                <td colspan="7" class="text-center">Loading stock data...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-5">
+                    <i class="fas fa-chart-line fa-4x text-muted mb-3"></i>
+                    <h4>No stocks in your portfolio yet</h4>
+                    <p>Click the "Add Stock" button to get started</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
     </div>
-    <div class="card-body">
-        {% if stocks %}
-        <div class="table-responsive">
-            <table class="table table-hover">
-                <thead>
-                    <tr>
-                        <th>Ticker</th>
-                        <th>Quantity</th>
-                        <th>Purchase Price</th>
-                        <th>Current Price</th>
-                        <th>Value</th>
-                        <th>Gain/Loss</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="stocks-table-body">
-                    <tr>
-                        <td colspan="7" class="text-center">Loading stock data...</td>
-                    </tr>
-                </tbody>
-            </table>
+    <div class="col-md-4">
+        <div class="card shadow mb-4">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">User Settings</h5>
+            </div>
+            <div class="card-body">
+                <form action="{{ url_for('update_username') }}" method="POST">
+                    <div class="mb-3">
+                        <label for="username" class="form-label">Username</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="username" name="username" value="{{ current_user.username }}">
+                            <button type="submit" class="btn btn-success" id="saveUsernameBtn" style="display: none;">Save</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
         </div>
-        {% else %}
-        <div class="text-center py-5">
-            <i class="fas fa-chart-line fa-4x text-muted mb-3"></i>
-            <h4>No stocks in your portfolio yet</h4>
-            <p>Click the "Add Stock" button to get started</p>
-        </div>
-        {% endif %}
     </div>
 </div>
 
@@ -130,6 +152,18 @@
 {% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    const usernameInput = document.getElementById('username');
+    const saveUsernameBtn = document.getElementById('saveUsernameBtn');
+    let initialUsername = usernameInput.value;
+
+    usernameInput.addEventListener('input', function() {
+        if (usernameInput.value !== initialUsername) {
+            saveUsernameBtn.style.display = 'block';
+        } else {
+            saveUsernameBtn.style.display = 'none';
+        }
+    });
+
     // Fetch portfolio data
     fetchPortfolioData();
     
