@@ -1,6 +1,8 @@
 import os
 from flask import Flask, render_template, redirect, url_for, flash, request, session, jsonify
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from authlib.integrations.flask_client import OAuth
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -451,22 +453,40 @@ def stock_comparison():
 # Secret route to migrate existing users to have a username
 @app.route('/migrate-users-to-usernames-b4e3c2d1/run-migration')
 def migrate_users():
-    users_to_migrate = User.query.filter(User.username == None).all()
-    migrated_count = 0
-    for user in users_to_migrate:
-        while True:
-            adjectives = ['clever', 'brave', 'sharp', 'wise', 'happy', 'lucky', 'sunny', 'proud', 'witty', 'gentle']
-            nouns = ['fox', 'lion', 'eagle', 'tiger', 'river', 'ocean', 'bear', 'wolf', 'horse', 'raven']
-            adjective = random.choice(adjectives)
-            noun = random.choice(nouns)
-            username = f"{adjective}-{noun}"
-            if not User.query.filter_by(username=username).first():
-                user.username = username
-                db.session.add(user)
-                break
-        migrated_count += 1
-    db.session.commit()
-    return f"Migration complete. Updated {migrated_count} users."
+    # Step 1: Ensure the 'username' column exists using raw SQL.
+    # This is necessary because db.create_all() does not alter existing tables.
+    try:
+        with db.engine.connect() as connection:
+            with connection.begin():
+                connection.execute(text('ALTER TABLE "user" ADD COLUMN username VARCHAR(80)'))
+    except ProgrammingError:
+        # Column likely already exists, which is fine. We can ignore this error.
+        pass
+    except Exception as e:
+        return f"An unexpected error occurred during column creation: {e}", 500
+
+    # Step 2: Populate the username for any users that don't have one.
+    try:
+        users_to_migrate = User.query.filter(User.username.is_(None)).all()
+        migrated_count = 0
+        if users_to_migrate:
+            for user in users_to_migrate:
+                while True:
+                    adjectives = ['clever', 'brave', 'sharp', 'wise', 'happy', 'lucky', 'sunny', 'proud', 'witty', 'gentle']
+                    nouns = ['fox', 'lion', 'eagle', 'tiger', 'river', 'ocean', 'bear', 'wolf', 'horse', 'raven']
+                    adjective = random.choice(adjectives)
+                    noun = random.choice(nouns)
+                    username = f"{adjective}-{noun}"
+                    if not User.query.filter_by(username=username).first():
+                        user.username = username
+                        db.session.add(user)
+                        break
+                migrated_count += 1
+            db.session.commit()
+        return f"Migration complete. Updated {migrated_count} users."
+    except Exception as e:
+        db.session.rollback()
+        return f"An error occurred during username population: {e}", 500
 
 # Create database tables
 with app.app_context():
