@@ -382,7 +382,7 @@ def get_stock_price(ticker):
     # Update cache if price is valid
     if price is not None:
         price_cache[ticker] = price
-        cache_expiry[ticker] = current_time + 60  # Cache for 1 minute
+        cache_expiry[ticker] = current_time + 90  # Cache for 90 seconds
     
     return price
 
