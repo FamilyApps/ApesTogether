@@ -1,31 +1,46 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-md-6">
-        <div class="card shadow">
-            <div class="card-header bg-primary text-white">
-                <h4 class="mb-0">Sign In</h4>
-            </div>
-            <div class="card-body">
-                <div class="text-center mb-4">
-                    <p>Use your Apple or Google account to sign in</p>
-                </div>
-                
-                <div class="d-grid gap-3">
-                    <a href="{{ url_for('login_apple') }}" class="btn btn-outline-dark btn-lg">
-                        <i class="fab fa-apple me-2"></i>Sign in with Apple
-                        <small class="d-block mt-1">Supports Face ID</small>
-                    </a>
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-6 col-lg-5">
+            <div class="card shadow-lg">
+                <div class="card-body p-5">
+                    <h2 class="card-title text-center mb-4">Sign In</h2>
                     
-                    <a href="{{ url_for('login_google') }}" class="btn btn-outline-primary btn-lg">
-                        <i class="fab fa-google me-2"></i>Sign in with Google
-                        <small class="d-block mt-1">Supports Face Unlock</small>
-                    </a>
-                </div>
-                
-                <div class="mt-4 text-center">
-                    <p class="text-muted">By signing in, you agree to our Terms of Service and Privacy Policy</p>
+                    <form action="{{ url_for('login') }}" method="POST">
+                        <div class="mb-3">
+                            <label for="username" class="form-label">Username</label>
+                            <input type="text" class="form-control" id="username" name="username" required>
+                        </div>
+                        <div class="mb-4">
+                            <label for="password" class="form-label">Password</label>
+                            <input type="password" class="form-control" id="password" name="password" required>
+                        </div>
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary btn-lg">Sign In</button>
+                        </div>
+                    </form>
+
+                    <div class="mt-4 text-center">
+                        <p>New to the platform? <a href="{{ url_for('register') }}">Create an account</a></p>
+                    </div>
+
+                    <div class="d-flex align-items-center my-4">
+                        <hr class="flex-grow-1">
+                        <span class="px-3 text-muted">OR</span>
+                        <hr class="flex-grow-1">
+                    </div>
+
+                    <div class="d-grid gap-3">
+                        <a href="{{ url_for('login_apple') }}" class="btn btn-outline-dark btn-lg">
+                            <i class="fab fa-apple me-2"></i>Sign in with Apple
+                        </a>
+                        <a href="{{ url_for('login_google') }}" class="btn btn-outline-primary btn-lg">
+                            <i class="fab fa-google me-2"></i>Sign in with Google
+                        </a>
+                    </div>
+
                 </div>
             </div>
         </div>

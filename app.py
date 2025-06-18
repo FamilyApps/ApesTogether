@@ -60,7 +60,7 @@ class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(150), unique=True, nullable=False)
     username = db.Column(db.String(80), unique=True, nullable=False)
-    password_hash = db.Column(db.String(200))
+    password_hash = db.Column(db.String(200), nullable=True)
     oauth_provider = db.Column(db.String(20))
     oauth_id = db.Column(db.String(100))
     stocks = db.relationship('Stock', backref='owner', lazy='dynamic')
@@ -82,8 +82,24 @@ def load_user(user_id):
 def index():
     return render_template('index.html')
 
-@app.route('/login')
+@app.route('/login', methods=['GET', 'POST'])
 def login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        user = User.query.filter_by(username=username).first()
+        
+        if user and user.password_hash and check_password_hash(user.password_hash, password):
+            login_user(user)
+            # Redirect to onboarding if the user has no stocks, otherwise to dashboard
+            if user.stocks.count() == 0:
+                return redirect(url_for('onboarding'))
+            return redirect(url_for('dashboard'))
+        else:
+            flash('Invalid username or password.', 'danger')
+            return redirect(url_for('login'))
+            
     return render_template('login.html')
 
 @app.route('/login/google')
@@ -131,6 +147,40 @@ def authorize_google():
 def login_apple():
     redirect_uri = url_for('authorize_apple', _external=True)
     return apple.authorize_redirect(redirect_uri)
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        email = request.form.get('email')
+        username = request.form.get('username')
+        password = request.form.get('password')
+
+        # Basic validation
+        if not email or not username or not password:
+            flash('Please fill in all fields.', 'danger')
+            return redirect(url_for('register'))
+
+        # Check if user already exists
+        if User.query.filter((User.email == email) | (User.username == username)).first():
+            flash('Email or username already exists.', 'danger')
+            return redirect(url_for('register'))
+
+        # Create new user with hashed password
+        new_user = User(
+            email=email,
+            username=username,
+            password_hash=generate_password_hash(password, method='pbkdf2:sha256'),
+            oauth_provider='local' # To distinguish from Google/Apple users
+        )
+        db.session.add(new_user)
+        db.session.commit()
+
+        login_user(new_user)
+        flash('Registration successful! Welcome.', 'success')
+        return redirect(url_for('dashboard'))
+
+    return render_template('register.html')
+
 
 @app.route('/login/apple/authorize')
 def authorize_apple():
