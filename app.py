@@ -600,92 +600,189 @@ def explore():
 @login_required
 def profile(username):
     """Display a user's profile page."""
-    # Redirect to own dashboard if viewing self
-    if current_user.username == username:
-        return redirect(url_for('dashboard'))
+    try:
+        app.logger.info(f"Profile request for username: {username}")
+        
+        # Redirect to own dashboard if viewing self
+        if current_user.username == username:
+            app.logger.info(f"Redirecting to dashboard for self-view: {username}")
+            return redirect(url_for('dashboard'))
 
-    user_to_view = User.query.filter_by(username=username).first_or_404()
+        try:
+            user_to_view = User.query.filter_by(username=username).first()
+            if not user_to_view:
+                app.logger.warning(f"User not found: {username}")
+                abort(404)
+        except Exception as e:
+            app.logger.error(f"Database error when looking up user {username}: {str(e)}")
+            abort(500)
+            
+        app.logger.info(f"Found user: {user_to_view.username} (ID: {user_to_view.id})")
+        
+        # Log subscription price info
+        app.logger.info(f"User subscription price: {user_to_view.subscription_price}")
+        app.logger.info(f"User stripe_price_id: {user_to_view.stripe_price_id}")
 
-    # Check if the current user has an active subscription to this profile
-    subscription = Subscription.query.filter_by(
-        subscriber_id=current_user.id,
-        subscribed_to_id=user_to_view.id,
-        status='active'
-    ).first()
+        # Check if the current user has an active subscription to this profile
+        try:
+            subscription = Subscription.query.filter_by(
+                subscriber_id=current_user.id,
+                subscribed_to_id=user_to_view.id,
+                status='active'
+            ).first()
+            app.logger.info(f"Subscription status: {'Active' if subscription else 'None'}")
+        except Exception as e:
+            app.logger.error(f"Error checking subscription: {str(e)}")
+            subscription = None
 
-    portfolio_data = None
-    if subscription:
-        # If subscribed, fetch portfolio data to display
-        stocks = Stock.query.filter_by(user_id=user_to_view.id).all()
-        total_value = 0
-        stock_details = []
-        for stock in stocks:
-            stock_data = get_stock_data(stock.ticker)
-            if stock_data and stock_data.get('price') is not None:
-                price = stock_data['price']
-                value = stock.quantity * price
-                total_value += value
-                stock_details.append({'ticker': stock.ticker, 'quantity': stock.quantity, 'price': price, 'value': value})
-        portfolio_data = {
-            'stocks': stock_details,
-            'total_value': total_value
-        }
+        portfolio_data = None
+        if subscription:
+            try:
+                # If subscribed, fetch portfolio data to display
+                app.logger.info(f"Fetching portfolio data for user {user_to_view.id}")
+                stocks = Stock.query.filter_by(user_id=user_to_view.id).all()
+                app.logger.info(f"Found {len(stocks)} stocks in portfolio")
+                
+                total_value = 0
+                stock_details = []
+                for stock in stocks:
+                    try:
+                        app.logger.info(f"Getting data for stock: {stock.ticker}")
+                        stock_data = get_stock_data(stock.ticker)
+                        if stock_data and stock_data.get('price') is not None:
+                            price = stock_data['price']
+                            value = stock.quantity * price
+                            total_value += value
+                            stock_details.append({'ticker': stock.ticker, 'quantity': stock.quantity, 'price': price, 'value': value})
+                            app.logger.info(f"Added stock {stock.ticker}: price=${price}, value=${value}")
+                        else:
+                            app.logger.warning(f"No price data for stock {stock.ticker}")
+                    except Exception as e:
+                        app.logger.error(f"Error processing stock {stock.ticker}: {str(e)}")
+                        # Continue with other stocks even if one fails
+                        continue
+                        
+                portfolio_data = {
+                    'stocks': stock_details,
+                    'total_value': total_value
+                }
+                app.logger.info(f"Portfolio total value: ${total_value}")
+            except Exception as e:
+                app.logger.error(f"Error building portfolio data: {str(e)}")
+                portfolio_data = {'stocks': [], 'total_value': 0}
 
-    return render_template(
-        'profile.html',
-        user_to_view=user_to_view,
-        subscription=subscription,
-        portfolio_data=portfolio_data,
-        price=user_to_view.subscription_price,
-        stripe_public_key=app.config['STRIPE_PUBLIC_KEY']
-    )
+        # Ensure subscription_price has a default value if None
+        price = user_to_view.subscription_price or 0
+        
+        # Get Stripe public key with error handling
+        try:
+            stripe_public_key = app.config['STRIPE_PUBLIC_KEY']
+            app.logger.info("Retrieved Stripe public key")
+        except KeyError:
+            app.logger.error("STRIPE_PUBLIC_KEY not found in app config")
+            stripe_public_key = ''
+
+        return render_template(
+            'profile.html',
+            user_to_view=user_to_view,
+            subscription=subscription,
+            portfolio_data=portfolio_data,
+            price=price,
+            stripe_public_key=stripe_public_key
+        )
+    except Exception as e:
+        app.logger.error(f"Unhandled exception in profile route: {str(e)}")
+        return render_template('error.html', error="An unexpected error occurred while loading this profile."), 500
 
 
 @app.route('/create-payment-intent', methods=['POST'])
 @login_required
 def create_payment_intent():
     """Creates a subscription and a Payment Intent for Stripe Elements."""
-    data = request.get_json()
-    user_id = data.get('user_id')
-    user_to_subscribe_to = User.query.get_or_404(user_id)
-
     try:
+        # Log the request data
+        app.logger.info(f"Payment intent request received")
+        
+        data = request.get_json()
+        if not data:
+            app.logger.error("No JSON data in request")
+            return jsonify({'error': 'No data provided'}), 400
+            
+        app.logger.info(f"Request data: {data}")
+        
+        user_id = data.get('user_id')
+        if not user_id:
+            app.logger.error("No user_id in request data")
+            return jsonify({'error': 'No user_id provided'}), 400
+            
+        app.logger.info(f"Looking up user with ID: {user_id}")
+        
+        try:
+            user_to_subscribe_to = User.query.get(user_id)
+            if not user_to_subscribe_to:
+                app.logger.error(f"User with ID {user_id} not found")
+                return jsonify({'error': f'User with ID {user_id} not found'}), 404
+        except Exception as e:
+            app.logger.error(f"Database error when looking up user: {str(e)}")
+            return jsonify({'error': 'Database error'}), 500
+        
+        app.logger.info(f"Found user: {user_to_subscribe_to.username}")
+        
         # Check if the user has a valid stripe_price_id
+        app.logger.info(f"User stripe_price_id: {user_to_subscribe_to.stripe_price_id}")
         if not user_to_subscribe_to.stripe_price_id:
+            app.logger.warning(f"User {user_to_subscribe_to.username} has no stripe_price_id")
             return jsonify({
                 'error': 'This user does not have subscription pricing set up.'
             }), 400
             
         # Get or create a Stripe customer for the current user
+        app.logger.info(f"Current user stripe_customer_id: {current_user.stripe_customer_id}")
         if not current_user.stripe_customer_id:
-            customer = stripe.Customer.create(
-                email=current_user.email,
-                name=current_user.username
-            )
-            current_user.stripe_customer_id = customer.id
-            db.session.commit()
+            try:
+                app.logger.info(f"Creating Stripe customer for {current_user.username}")
+                customer = stripe.Customer.create(
+                    email=current_user.email,
+                    name=current_user.username
+                )
+                current_user.stripe_customer_id = customer.id
+                db.session.commit()
+                app.logger.info(f"Created Stripe customer: {customer.id}")
+            except Exception as e:
+                app.logger.error(f"Stripe customer creation error: {str(e)}")
+                return jsonify({'error': 'Failed to create Stripe customer'}), 500
         
         customer_id = current_user.stripe_customer_id
 
         # Create a subscription with an incomplete payment
-        subscription = stripe.Subscription.create(
-            customer=customer_id,
-            items=[{'price': user_to_subscribe_to.stripe_price_id}],
-            payment_behavior='default_incomplete',
-            payment_settings={'save_default_payment_method': 'on_subscription'},
-            expand=['latest_invoice.payment_intent'],
-            metadata={
-                'subscriber_id': current_user.id,
-                'subscribed_to_id': user_to_subscribe_to.id
-            }
-        )
+        try:
+            app.logger.info(f"Creating Stripe subscription with price: {user_to_subscribe_to.stripe_price_id}")
+            subscription = stripe.Subscription.create(
+                customer=customer_id,
+                items=[{'price': user_to_subscribe_to.stripe_price_id}],
+                payment_behavior='default_incomplete',
+                payment_settings={'save_default_payment_method': 'on_subscription'},
+                expand=['latest_invoice.payment_intent'],
+                metadata={
+                    'subscriber_id': current_user.id,
+                    'subscribed_to_id': user_to_subscribe_to.id
+                }
+            )
+            app.logger.info(f"Created subscription: {subscription.id}")
+        except stripe.error.StripeError as e:
+            app.logger.error(f"Stripe subscription error: {str(e)}")
+            return jsonify({'error': f'Stripe error: {str(e)}'}), 400
+        except Exception as e:
+            app.logger.error(f"Unexpected error creating subscription: {str(e)}")
+            return jsonify({'error': 'Failed to create subscription'}), 500
 
         return jsonify({
             'clientSecret': subscription.latest_invoice.payment_intent.client_secret,
             'subscriptionId': subscription.id
         })
     except Exception as e:
-        return jsonify(error={'message': str(e)}), 400
+        app.logger.error(f"Unhandled exception in create_payment_intent: {str(e)}")
+        return jsonify({'error': 'An unexpected error occurred'}), 500
 
 
 @app.route('/stripe-webhook', methods=['POST'])
