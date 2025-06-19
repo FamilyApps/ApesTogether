@@ -29,13 +29,7 @@ database_url = os.environ.get('DATABASE_URL')
 if database_url:
     # Vercel/Neon uses postgres://, but SQLAlchemy needs postgresql://
     database_url = database_url.replace('postgres://', 'postgresql://')
-else:
-    # Use absolute path for SQLite database to ensure consistency across different ports
-    basedir = os.path.abspath(os.path.dirname(__file__))
-    db_path = os.path.join(basedir, 'instance', 'portfolio.db')
-    database_url = f'sqlite:///{db_path}'
-
-app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+app.config['SQLALCHEMY_DATABASE_URI'] = database_url or 'sqlite:///portfolio.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Stripe configuration
