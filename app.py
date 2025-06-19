@@ -254,54 +254,6 @@ def logout():
     logout_user()
     return redirect(url_for('index'))
 
-@app.route('/add-sample-portfolio-for-testing1-a9b3c8d7e6f5')
-@login_required
-def add_sample_portfolio():
-    # --- IMPORTANT: This is a temporary route for a one-time setup. --- 
-    # --- It should be removed after use for security. ---
-
-    if current_user.email != 'testing1@gmail.com':
-        return "This action is only for the user 'testing1@gmail.com'.", 403
-
-    user = User.query.filter_by(email='testing1@gmail.com').first()
-    if not user:
-        return "User not found.", 404
-
-    # Check if stocks already exist to prevent duplicates
-    if user.stocks.count() > 0:
-        flash('Sample portfolio has already been added.', 'info')
-        return redirect(url_for('dashboard'))
-
-    # A diversified sample portfolio of 10 stocks. This is not financial advice.
-    # Approximate allocation: $2000 per stock.
-    sample_portfolio = {
-        'TSLA': 2000, 'AAPL': 2000, 'MSFT': 2000, 'AMZN': 2000, 'GOOGL': 2000, 
-        'NVDA': 2000, 'JPM': 2000, 'V': 2000, 'JNJ': 2000, 'UNH': 2000
-    }
-
-    stocks_added = 0
-    for ticker, amount in sample_portfolio.items():
-        price = get_stock_price(ticker)
-        if price and price > 0:
-            quantity = amount / price
-            new_stock = Stock(
-                ticker=ticker,
-                quantity=quantity,
-                purchase_price=price,
-                owner=user
-            )
-            db.session.add(new_stock)
-            stocks_added += 1
-    
-    if stocks_added > 0:
-        db.session.commit()
-        flash(f'{stocks_added} sample stocks have been added to your portfolio.', 'success')
-    else:
-        flash('Could not add sample stocks. There might be an issue with the price fetching API.', 'danger')
-
-    return redirect(url_for('dashboard'))
-
-
 @app.route('/dashboard')
 @login_required
 def dashboard():
