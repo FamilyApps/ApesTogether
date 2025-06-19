@@ -834,6 +834,49 @@ def stripe_webhook():
     return 'Success', 200
 
 
+@app.route('/debug/check-user/<username>')
+@login_required
+def debug_check_user(username):
+    """Debug route to check user details safely."""
+    if not current_user.email == 'fordutilityapps@gmail.com':
+        abort(403)  # Only allow the admin to access this route
+        
+    try:
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': f'User {username} not found'}), 404
+            
+        # Safe user details (no sensitive info)
+        user_data = {
+            'id': user.id,
+            'username': user.username,
+            'has_stripe_price_id': bool(user.stripe_price_id),
+            'has_subscription_price': bool(user.subscription_price),
+            'subscription_price_value': user.subscription_price,
+            'has_stripe_customer_id': bool(user.stripe_customer_id),
+        }
+        
+        # Check for subscriptions
+        subscriptions = Subscription.query.filter_by(subscribed_to_id=user.id).all()
+        subscription_data = [{
+            'subscriber_id': sub.subscriber_id,
+            'status': sub.status,
+            'stripe_subscription_id': sub.stripe_subscription_id
+        } for sub in subscriptions]
+        
+        # Check for stocks
+        stocks = Stock.query.filter_by(user_id=user.id).count()
+        
+        return jsonify({
+            'user': user_data,
+            'subscriptions': subscription_data,
+            'stock_count': stocks
+        })
+    except Exception as e:
+        app.logger.error(f"Debug route error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     # In development, run with debug mode
     if os.environ.get('FLASK_ENV') == 'development':
