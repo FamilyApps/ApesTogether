@@ -12,7 +12,7 @@ import random
 import re
 import requests
 import stripe
-from datetime import datetime
+from datetime import datetime, date
 
 # App configuration
 app = Flask(__name__)
@@ -158,7 +158,9 @@ def authorize_google():
             email=user_info['email'],
             username=username,
             oauth_provider='google',
-            oauth_id=user_info['sub']  # OpenID Connect uses 'sub' for the user ID
+            oauth_id=user_info['sub'],  # OpenID Connect uses 'sub' for the user ID
+            stripe_price_id='price_1RbX0yQWUhVa3vgDB8vGzoFN',  # Default $4 price
+            subscription_price=4.00
         )
         db.session.add(user)
         db.session.commit()
@@ -197,7 +199,9 @@ def register():
             email=email,
             username=username,
             password_hash=generate_password_hash(password, method='pbkdf2:sha256'),
-            oauth_provider='local' # To distinguish from Google/Apple users
+            oauth_provider='local', # To distinguish from Google/Apple users
+            stripe_price_id='price_1RbX0yQWUhVa3vgDB8vGzoFN',  # Default $4 price
+            subscription_price=4.00
         )
         db.session.add(new_user)
         db.session.commit()
@@ -373,6 +377,22 @@ def add_stock():
     )
     db.session.add(stock)
     db.session.commit()
+
+    # --- Logic to update subscription price based on trade frequency ---
+    today_start = datetime.combine(date.today(), datetime.min.time())
+    trades_today = Stock.query.filter(
+        Stock.user_id == current_user.id,
+        Stock.purchase_date >= today_start
+    ).count()
+
+    # If this is the 5th trade of the day, and price is not already $8
+    if trades_today > 4 and current_user.subscription_price != 8.00:
+        current_user.stripe_price_id = 'price_1RbX1FQWUhVa3vgDoTuknCC6'  # $8 Price ID
+        current_user.subscription_price = 8.00
+        db.session.commit()
+        flash('Congratulations on your active trading! Your portfolio subscription price for new subscribers has been updated to $8/month.', 'info')
+    # --- End of subscription price logic ---
+
     flash(f'Successfully added {quantity} shares of {ticker} to your portfolio.', 'success')
     
     return redirect(url_for('dashboard'))
