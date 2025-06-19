@@ -656,9 +656,7 @@ def create_checkout_session(user_id):
     try:
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card', 'paypal'],
-            payment_method_options={
-                'paypal': {'preferred_network': 'paypal'}
-            },
+
             line_items=[
                 {
                     'price': user_to_subscribe_to.stripe_price_id,
