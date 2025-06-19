@@ -254,6 +254,62 @@ def logout():
     logout_user()
     return redirect(url_for('index'))
 
+@app.route('/seed-test-users-b7c4a1d8')
+def seed_test_users():
+    # --- IMPORTANT: This is a temporary route for a one-time setup. ---
+    # --- It should be removed after use for security. ---
+
+    users_to_create = {
+        'testing2@gmail.com': {
+            'password': 'password5k',
+            'portfolio_value': 5000,
+            'portfolio': {'VTI': 1000, 'SCHD': 1000, 'O': 1000, 'KO': 1000, 'PFE': 1000}
+        },
+        'testing3@gmail.com': {
+            'password': 'password200k',
+            'portfolio_value': 200000,
+            'portfolio': {
+                'AAPL': 20000, 'MSFT': 20000, 'GOOGL': 15000, 'AMZN': 15000, 'NVDA': 20000,
+                'TSLA': 10000, 'UNH': 15000, 'JPM': 15000, 'V': 15000, 'HD': 10000,
+                'COST': 10000, 'BRK-B': 15000, 'XOM': 5000, 'LLY': 5000, 'WMT': 5000
+            }
+        }
+    }
+
+    users_created_count = 0
+    for email, data in users_to_create.items():
+        if User.query.filter_by(email=email).first():
+            continue # Skip if user already exists
+
+        # Create user
+        new_user = User(
+            email=email,
+            username=email.split('@')[0], # e.g., 'testing2'
+            password_hash=generate_password_hash(data['password'], method='pbkdf2:sha256'),
+            oauth_provider='local'
+        )
+        db.session.add(new_user)
+        db.session.commit() # Commit user to get an ID for the stocks
+
+        # Create portfolio
+        for ticker, amount in data['portfolio'].items():
+            price = get_stock_price(ticker)
+            if price and price > 0:
+                quantity = amount / price
+                new_stock = Stock(ticker=ticker, quantity=quantity, purchase_price=price, owner=new_user)
+                db.session.add(new_stock)
+        
+        users_created_count += 1
+
+    if users_created_count > 0:
+        db.session.commit()
+        flash(f'{users_created_count} new test user(s) created successfully.', 'success')
+    else:
+        flash('Test users already exist.', 'info')
+
+    return redirect(url_for('login'))
+
+
 @app.route('/dashboard')
 @login_required
 def dashboard():
