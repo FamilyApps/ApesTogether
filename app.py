@@ -896,39 +896,35 @@ def admin_update_user(username):
         # Get the data from the request
         data = request.get_json()
         subscription_price = data.get('subscription_price')
+        stripe_price_id = data.get('stripe_price_id')
         
         if not subscription_price:
             return jsonify({'error': 'Subscription price is required'}), 400
             
-        app.logger.info(f"Admin updating user {username} with price {subscription_price}")
+        if not stripe_price_id:
+            return jsonify({'error': 'Stripe price ID is required'}), 400
+            
+        app.logger.info(f"Admin updating user {username} with price {subscription_price} and price ID {stripe_price_id}")
         
-        # Create a Stripe price for the user
         try:
-            # First create a product
-            product = stripe.Product.create(
-                name=f"Portfolio Subscription - {username}",
-                description=f"Monthly subscription to {username}'s stock portfolio"
-            )
+            # Verify the price ID exists in Stripe
+            try:
+                price = stripe.Price.retrieve(stripe_price_id)
+                app.logger.info(f"Found Stripe price: {price.id}")
+            except stripe.error.StripeError as e:
+                app.logger.error(f"Invalid Stripe price ID: {stripe_price_id}")
+                return jsonify({'error': f'Invalid Stripe price ID: {str(e)}'}), 400
             
-            # Then create a price for that product
-            price = stripe.Price.create(
-                unit_amount=int(float(subscription_price) * 100),  # Convert to cents
-                currency="usd",
-                recurring={"interval": "month"},
-                product=product.id,
-                nickname=f"{username} Monthly Subscription"
-            )
-            
-            # Update the user with the new price
+            # Update the user with the existing price
             user.subscription_price = float(subscription_price)
-            user.stripe_price_id = price.id
+            user.stripe_price_id = stripe_price_id
             db.session.commit()
             
-            app.logger.info(f"Successfully updated {username} with price ${subscription_price}/month and Stripe price ID {price.id}")
+            app.logger.info(f"Successfully updated {username} with price ${subscription_price}/month and Stripe price ID {stripe_price_id}")
             return jsonify({
                 'success': True, 
                 'message': f'User {username} updated successfully',
-                'stripe_price_id': price.id
+                'stripe_price_id': stripe_price_id
             })
             
         except stripe.error.StripeError as e:
