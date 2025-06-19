@@ -702,40 +702,5 @@ def stripe_webhook():
     return 'Success', 200
 
 
-@app.route('/migrate-user-prices-c8d5b2e1')
-def migrate_user_prices():
-    # --- IMPORTANT: This is a temporary route for a one-time data migration. ---
-    # --- It should be removed after use for security. ---
-    try:
-        # Add the new columns if they don't exist
-        with db.engine.connect() as connection:
-            with connection.begin():
-                try:
-                    connection.execute(text('ALTER TABLE "user" ADD COLUMN stripe_price_id VARCHAR(255)'))
-                except ProgrammingError: pass # Column already exists
-                try:
-                    connection.execute(text('ALTER TABLE "user" ADD COLUMN subscription_price FLOAT'))
-                except ProgrammingError: pass # Column already exists
-
-        # Assign prices to test users
-        user2 = User.query.filter_by(username='testing2').first()
-        if user2:
-            user2.stripe_price_id = 'price_1RbX0yQWUhVa3vgDB8vGzoFN'
-            user2.subscription_price = 4.00
-
-        user3 = User.query.filter_by(username='testing3').first()
-        if user3:
-            user3.stripe_price_id = 'price_1RbX1FQWUhVa3vgDoTuknCC6'
-            user3.subscription_price = 8.00
-
-        db.session.commit()
-        flash('User subscription prices have been migrated successfully.', 'success')
-    except Exception as e:
-        db.session.rollback()
-        flash(f'An error occurred during migration: {str(e)}', 'danger')
-    
-    return redirect(url_for('index'))
-
-
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
