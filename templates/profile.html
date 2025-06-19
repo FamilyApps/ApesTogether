@@ -24,16 +24,7 @@
                     <h3 class="mb-0">{{ user_to_view.username }}'s Portfolio</h3>
                 </div>
                 <div class="card-body">
-                    {% if is_problematic_user %}
-                        <!-- Special case for problematic users -->
-                        <div class="text-center p-4">
-                            <div class="alert alert-info">
-                                <h5>{{ user_to_view.username }}'s profile is currently being updated</h5>
-                                <p>This user's portfolio information is currently being updated.</p>
-                                <p>Please check back later to view or subscribe to this portfolio.</p>
-                            </div>
-                        </div>
-                    {% elif subscription %}
+                    {% if subscription %}
                         <!-- User is subscribed, show the portfolio -->
                         <h5 class="card-title">Portfolio Value: <span class="text-success">${{ "{:.2f}".format(portfolio_data.total_value) }}</span></h5>
                         <p>You are subscribed to this portfolio.</p>
@@ -118,7 +109,7 @@
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     // Pass the ID of the user being subscribed to
-                    body: JSON.stringify({ user_id: {{ user_to_view.id }} }),
+                    body: JSON.stringify({ "user_id": {{ user_to_view.id }} }),
                 });
                 
                 const data = await response.json();

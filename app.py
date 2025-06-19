@@ -608,29 +608,6 @@ def profile(username):
             app.logger.info(f"Redirecting to dashboard for self-view: {username}")
             return redirect(url_for('dashboard'))
 
-        # Special case for problematic users
-        if username in ['wild-bronco', 'wise-buffalo']:
-            app.logger.warning(f"Using fallback rendering for known problematic user: {username}")
-            # Get minimal user info
-            try:
-                user_to_view = User.query.filter_by(username=username).first()
-                if not user_to_view:
-                    return render_template('error.html', error=f"User {username} not found"), 404
-            except Exception as e:
-                app.logger.error(f"Database error for problematic user {username}: {str(e)}")
-                return render_template('error.html', error="Database error occurred"), 500
-                
-            # Return simplified template with minimal data
-            return render_template(
-                'profile.html',
-                user_to_view=user_to_view,
-                subscription=None,
-                portfolio_data=None,
-                price=0,  # Force price to 0
-                stripe_public_key='',
-                is_problematic_user=True  # Special flag for template
-            )
-
         # Normal flow for other users
         try:
             user_to_view = User.query.filter_by(username=username).first()
@@ -712,8 +689,7 @@ def profile(username):
             subscription=subscription,
             portfolio_data=portfolio_data,
             price=price,
-            stripe_public_key=stripe_public_key,
-            is_problematic_user=False
+            stripe_public_key=stripe_public_key
         )
     except Exception as e:
         app.logger.error(f"Unhandled exception in profile route: {str(e)}")
@@ -902,32 +878,66 @@ def debug_check_user(username):
         return jsonify({'error': str(e)}), 500
 
 
-# Test route to simulate problematic users
-@app.route('/test/problematic-user')
+# Admin route to update user subscription data
+@app.route('/admin/update-user/<username>', methods=['POST'])
 @login_required
-def test_problematic_user():
-    """Test route to simulate the fix for problematic users."""
-    # Create a mock user object that mimics the problematic users
-    class MockUser:
-        def __init__(self, username):
-            self.id = 9999
-            self.username = username
-            self.subscription_price = None
-            self.stripe_price_id = None
-    
-    # Create a mock problematic user
-    mock_user = MockUser('test-problematic-user')
-    
-    # Render the template with the special flag for problematic users
-    return render_template(
-        'profile.html',
-        user_to_view=mock_user,
-        subscription=None,
-        portfolio_data=None,
-        price=0,
-        stripe_public_key='',
-        is_problematic_user=True
-    )
+def admin_update_user(username):
+    """Admin-only route to update user subscription data."""
+    # Only allow admin user
+    if current_user.email != 'fordutilityapps@gmail.com':
+        return jsonify({'error': 'Unauthorized'}), 403
+        
+    try:
+        # Get the user to update
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': f'User {username} not found'}), 404
+            
+        # Get the data from the request
+        data = request.get_json()
+        subscription_price = data.get('subscription_price')
+        
+        if not subscription_price:
+            return jsonify({'error': 'Subscription price is required'}), 400
+            
+        app.logger.info(f"Admin updating user {username} with price {subscription_price}")
+        
+        # Create a Stripe price for the user
+        try:
+            # First create a product
+            product = stripe.Product.create(
+                name=f"Portfolio Subscription - {username}",
+                description=f"Monthly subscription to {username}'s stock portfolio"
+            )
+            
+            # Then create a price for that product
+            price = stripe.Price.create(
+                unit_amount=int(float(subscription_price) * 100),  # Convert to cents
+                currency="usd",
+                recurring={"interval": "month"},
+                product=product.id,
+                nickname=f"{username} Monthly Subscription"
+            )
+            
+            # Update the user with the new price
+            user.subscription_price = float(subscription_price)
+            user.stripe_price_id = price.id
+            db.session.commit()
+            
+            app.logger.info(f"Successfully updated {username} with price ${subscription_price}/month and Stripe price ID {price.id}")
+            return jsonify({
+                'success': True, 
+                'message': f'User {username} updated successfully',
+                'stripe_price_id': price.id
+            })
+            
+        except stripe.error.StripeError as e:
+            app.logger.error(f"Stripe error updating user {username}: {str(e)}")
+            return jsonify({'error': f'Stripe error: {str(e)}'}), 500
+            
+    except Exception as e:
+        app.logger.error(f"Error updating user {username}: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':
