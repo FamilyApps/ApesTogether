@@ -53,11 +53,22 @@
                     {% else %}
                         <!-- User is not subscribed, show subscribe button -->
                         <div class="text-center p-4">
-                            <h5 class="card-title">Subscribe to view this portfolio</h5>
-                            <p class="card-text">Gain access to {{ user_to_view.username }}'s real-time portfolio data and investment insights.</p>
-                                                        <a href="{{ url_for('create_checkout_session', user_id=user_to_view.id) }}" class="btn btn-primary btn-lg mt-3">
-                                Subscribe for ${{ "{:.2f}".format(price) }}/month
-                            </a>
+                            <h5 class="card-title">Subscribe to View Portfolio</h5>
+                            <p class="card-text">Unlock full access to {{ user_to_view.username }}'s portfolio for <strong>${{ "{:.2f}".format(price) }}/month</strong>.</p>
+                            
+                            <!-- Stripe Payment Form -->
+                            <div id="payment-container" class="mt-4 mx-auto" style="max-width: 500px;">
+                                <form id="payment-form">
+                                    <div id="payment-element">
+                                        <!-- A Stripe Element will be inserted here. -->
+                                    </div>
+                                    <button id="submit" class="btn btn-primary btn-lg w-100 mt-3">
+                                        <div class="spinner hidden" id="spinner"></div>
+                                        <span id="button-text">Subscribe Now</span>
+                                    </button>
+                                    <div id="payment-message" class="hidden mt-2"></div>
+                                </form>
+                            </div>
                         </div>
                     {% endif %}
                 </div>
@@ -65,4 +76,156 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script src="https://js.stripe.com/v3/"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', async () => {
+        const stripe = Stripe("{{ stripe_public_key }}");
+
+        let elements;
+
+        initialize();
+        checkStatus();
+
+        document
+            .querySelector("#payment-form")
+            .addEventListener("submit", handleSubmit);
+
+        // Fetches a payment intent and captures the client secret
+        async function initialize() {
+            try {
+                const response = await fetch("{{ url_for('create_payment_intent') }}", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    // Pass the ID of the user being subscribed to
+                    body: JSON.stringify({ user_id: {{ user_to_view.id }} }),
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    // Handle error response
+                    document.querySelector("#payment-form").style.display = "none";
+                    showMessage(data.error || "This user does not have subscription pricing set up.");
+                    return;
+                }
+                
+                const { clientSecret } = data;
+                
+                const appearance = {
+                  theme: 'stripe',
+                };
+                elements = stripe.elements({ appearance, clientSecret });
+
+                const paymentElement = elements.create("payment");
+                paymentElement.mount("#payment-element");
+            } catch (error) {
+                document.querySelector("#payment-form").style.display = "none";
+                showMessage("Failed to initialize payment. Please try again later.");
+                console.error("Payment initialization error:", error);
+            }
+        }
+
+        async function handleSubmit(e) {
+            e.preventDefault();
+            setLoading(true);
+
+            const { error } = await stripe.confirmPayment({
+                elements,
+                confirmParams: {
+                    // Make sure to change this to your payment completion page
+                    return_url: window.location.href.split('?')[0],
+                },
+            });
+
+            // This point will only be reached if there is an immediate error when
+            // confirming the payment. Otherwise, your customer will be redirected to
+            // your `return_url`. For some payment methods like iDEAL, your customer will
+            // be redirected to an intermediate site first to authorize the payment, then
+            // redirected to the `return_url`.
+            if (error.type === "card_error" || error.type === "validation_error") {
+                showMessage(error.message);
+            } else {
+                showMessage("An unexpected error occurred.");
+            }
+
+            setLoading(false);
+        }
+
+        // Fetches the payment intent status after payment submission
+        async function checkStatus() {
+            const clientSecret = new URLSearchParams(window.location.search).get(
+                "payment_intent_client_secret"
+            );
+
+            if (!clientSecret) {
+                return;
+            }
+
+            const { paymentIntent } = await stripe.retrievePaymentIntent(clientSecret);
+
+            switch (paymentIntent.status) {
+                case "succeeded":
+                    showMessage("Payment succeeded!");
+                    // Reload the page to show the subscribed content
+                    window.location.href = "{{ url_for('profile', username=user_to_view.username) }}?subscribed=true";
+                    break;
+                case "processing":
+                    showMessage("Your payment is processing.");
+                    break;
+                case "requires_payment_method":
+                    showMessage("Your payment was not successful, please try again.");
+                    break;
+                default:
+                    showMessage("Something went wrong.");
+                    break;
+            }
+        }
+
+        // ------- UI helpers -------
+
+        function showMessage(messageText) {
+            const messageContainer = document.querySelector("#payment-message");
+            messageContainer.classList.remove("hidden");
+            messageContainer.textContent = messageText;
+        }
+
+        function setLoading(isLoading) {
+            const submitButton = document.querySelector("#submit");
+            const spinner = document.querySelector("#spinner");
+            const buttonText = document.querySelector("#button-text");
+
+            submitButton.disabled = isLoading;
+            if (isLoading) {
+                spinner.classList.remove("hidden");
+                buttonText.classList.add("hidden");
+            } else {
+                spinner.classList.add("hidden");
+                buttonText.classList.remove("hidden");
+            }
+        }
+    });
+</script>
+<style>
+    .hidden {
+        display: none;
+    }
+    .spinner {
+        border: 4px solid rgba(255, 255, 255, 0.3);
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        border-left-color: #fff;
+        animation: spin 1s ease infinite;
+        display: inline-block;
+        vertical-align: middle;
+    }
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+</style>
 {% endblock %}

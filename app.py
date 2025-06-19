@@ -650,6 +650,12 @@ def create_payment_intent():
     user_to_subscribe_to = User.query.get_or_404(user_id)
 
     try:
+        # Check if the user has a valid stripe_price_id
+        if not user_to_subscribe_to.stripe_price_id:
+            return jsonify({
+                'error': 'This user does not have subscription pricing set up.'
+            }), 400
+            
         # Get or create a Stripe customer for the current user
         if not current_user.stripe_customer_id:
             customer = stripe.Customer.create(
