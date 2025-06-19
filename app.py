@@ -1,5 +1,5 @@
 import os
-import pandas as pd
+# pandas import removed for Vercel deployment size reduction
 from dotenv import load_dotenv
 from dotenv import load_dotenv
 load_dotenv()
@@ -535,26 +535,32 @@ def stock_comparison():
         return render_template('stock_comparison.html', dates=[], tsla_prices=[], sp500_prices=[])
 
     try:
-        ts = TimeSeries(key=api_key, output_format='pandas')
+        ts = TimeSeries(key=api_key, output_format='json')
         
         # Fetch data for TSLA and SPY (S&P 500 proxy)
         # Using 'compact' for the last 100 data points, which is enough for ~6 months of trading days
         tsla_data, _ = ts.get_daily_adjusted('TSLA', outputsize='compact')
         spy_data, _ = ts.get_daily_adjusted('SPY', outputsize='compact')
 
-        # Combine data on common dates
-        # We'll use the adjusted close price '5. adjusted close' for a better comparison
-        combined_data = pd.concat([tsla_data['5. adjusted close'], spy_data['5. adjusted close']], axis=1, keys=['tsla', 'spy']).dropna()
+        # Process the data without pandas
+        # The data is returned as a dict with 'Time Series (Daily)' as the key for the time series data
+        tsla_series = tsla_data['Time Series (Daily)']
+        spy_series = spy_data['Time Series (Daily)']
+        
+        # Find common dates between the two datasets
+        common_dates = sorted(set(tsla_series.keys()).intersection(set(spy_series.keys())))
         
         # Get last 180 days if more than that is returned
         end_date = datetime.now()
         start_date = end_date - timedelta(days=180)
-        combined_data = combined_data[combined_data.index >= start_date]
-
-        # Prepare data for Chart.js
-        common_dates = combined_data.index.strftime('%Y-%m-%d').tolist()
-        tsla_prices = combined_data['tsla'].tolist()
-        sp500_prices = combined_data['spy'].tolist()
+        start_date_str = start_date.strftime('%Y-%m-%d')
+        
+        # Filter dates to last 180 days
+        common_dates = [date for date in common_dates if date >= start_date_str]
+        
+        # Extract adjusted close prices for both stocks
+        tsla_prices = [float(tsla_series[date]['5. adjusted close']) for date in common_dates]
+        sp500_prices = [float(spy_series[date]['5. adjusted close']) for date in common_dates]
         
         # Reverse for chronological order in chart
         common_dates.reverse()
