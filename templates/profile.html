@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}{{ user_to_view.username }}'s Profile - ApesTogether{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-10">
+            
+            <!-- Flash Messages -->
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <div class="card shadow-sm">
+                <div class="card-header bg-dark text-white">
+                    <h3 class="mb-0">{{ user_to_view.username }}'s Portfolio</h3>
+                </div>
+                <div class="card-body">
+                    {% if subscription %}
+                        <!-- User is subscribed, show the portfolio -->
+                        <h5 class="card-title">Portfolio Value: <span class="text-success">${{ "{:.2f}".format(portfolio_data.total_value) }}</span></h5>
+                        <p>You are subscribed to this portfolio.</p>
+                        
+                        <table class="table table-hover mt-4">
+                            <thead>
+                                <tr>
+                                    <th>Ticker</th>
+                                    <th>Quantity</th>
+                                    <th>Current Price</th>
+                                    <th>Total Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for stock in portfolio_data.stocks %}
+                                <tr>
+                                    <td><strong>{{ stock.ticker }}</strong></td>
+                                    <td>{{ "{:.4f}".format(stock.quantity) }}</td>
+                                    <td>${{ "{:.2f}".format(stock.price) }}</td>
+                                    <td>${{ "{:.2f}".format(stock.value) }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+
+                    {% else %}
+                        <!-- User is not subscribed, show subscribe button -->
+                        <div class="text-center p-4">
+                            <h5 class="card-title">Subscribe to view this portfolio</h5>
+                            <p class="card-text">Gain access to {{ user_to_view.username }}'s real-time portfolio data and investment insights.</p>
+                            <a href="{{ url_for('create_checkout_session', user_id=user_to_view.id) }}" class="btn btn-primary btn-lg mt-3">
+                                Subscribe for $5/month
+                            </a>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

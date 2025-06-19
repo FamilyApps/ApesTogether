@@ -11,6 +11,7 @@ import json
 import random
 import re
 import requests
+import stripe
 from datetime import datetime
 
 # App configuration
@@ -24,6 +25,14 @@ if database_url:
     database_url = database_url.replace('postgres://', 'postgresql://')
 app.config['SQLALCHEMY_DATABASE_URI'] = database_url or 'sqlite:///portfolio.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Stripe configuration
+app.config['STRIPE_PUBLIC_KEY'] = os.environ.get('STRIPE_PUBLIC_KEY')
+app.config['STRIPE_SECRET_KEY'] = os.environ.get('STRIPE_SECRET_KEY')
+app.config['STRIPE_PRICE_ID'] = os.environ.get('STRIPE_PRICE_ID')
+app.config['STRIPE_WEBHOOK_SECRET'] = os.environ.get('STRIPE_WEBHOOK_SECRET')
+
+stripe.api_key = app.config['STRIPE_SECRET_KEY']
 
 
 # Initialize extensions
@@ -72,6 +81,21 @@ class Stock(db.Model):
     purchase_price = db.Column(db.Float)
     purchase_date = db.Column(db.DateTime, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+
+
+class Subscription(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    subscriber_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    subscribed_to_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    stripe_subscription_id = db.Column(db.String(255), unique=True, nullable=False)
+    status = db.Column(db.String(50), nullable=False, default='active')  # e.g., 'active', 'canceled'
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Define relationships to get User objects
+    # backref creates a 'subscriptions_made' collection on the User model (for the subscriber)
+    subscriber = db.relationship('User', foreign_keys=[subscriber_id], backref='subscriptions_made')
+    # backref creates a 'subscribers' collection on the User model (for the user being subscribed to)
+    subscribed_to = db.relationship('User', foreign_keys=[subscribed_to_id], backref='subscribers')
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -544,6 +568,135 @@ def stock_comparison():
 # Create database tables
 with app.app_context():
     db.create_all()
+
+
+# ====================================================================
+# == Subscription and Payment Routes
+# ====================================================================
+
+@app.route('/explore')
+@login_required
+def explore():
+    """Display a list of all other users to subscribe to."""
+    users = User.query.filter(User.id != current_user.id).order_by(User.username).all()
+    return render_template('explore.html', users=users)
+
+
+@app.route('/profile/<username>')
+@login_required
+def profile(username):
+    """Display a user's profile page."""
+    # Redirect to own dashboard if viewing self
+    if current_user.username == username:
+        return redirect(url_for('dashboard'))
+
+    user_to_view = User.query.filter_by(username=username).first_or_404()
+
+    # Check if the current user has an active subscription to this profile
+    subscription = Subscription.query.filter_by(
+        subscriber_id=current_user.id,
+        subscribed_to_id=user_to_view.id,
+        status='active'
+    ).first()
+
+    portfolio_data = None
+    if subscription:
+        # If subscribed, fetch portfolio data to display
+        stocks = Stock.query.filter_by(user_id=user_to_view.id).all()
+        total_value = 0
+        stock_details = []
+        for stock in stocks:
+            price = get_stock_price(stock.ticker)
+            if price:
+                value = stock.quantity * price
+                total_value += value
+                stock_details.append({'ticker': stock.ticker, 'quantity': stock.quantity, 'price': price, 'value': value})
+        portfolio_data = {
+            'stocks': stock_details,
+            'total_value': total_value
+        }
+
+    return render_template('profile.html', user_to_view=user_to_view, subscription=subscription, portfolio_data=portfolio_data)
+
+
+@app.route('/create-checkout-session/<int:user_id>')
+@login_required
+def create_checkout_session(user_id):
+    """Create a Stripe Checkout session for a subscription."""
+    user_to_subscribe_to = User.query.get_or_404(user_id)
+
+    # Prevent users from subscribing to themselves
+    if user_to_subscribe_to.id == current_user.id:
+        flash('You cannot subscribe to yourself.', 'error')
+        return redirect(url_for('profile', username=user_to_subscribe_to.username))
+
+    try:
+        checkout_session = stripe.checkout.Session.create(
+            payment_method_types=['card', 'paypal'],
+            payment_method_options={
+                'paypal': {'preferred_network': 'paypal'}
+            },
+            line_items=[
+                {
+                    'price': app.config['STRIPE_PRICE_ID'],
+                    'quantity': 1,
+                },
+            ],
+            mode='subscription',
+            success_url=url_for('profile', username=user_to_subscribe_to.username, _external=True) + '?session_id={CHECKOUT_SESSION_ID}',
+            cancel_url=url_for('profile', username=user_to_subscribe_to.username, _external=True),
+            metadata={
+                'subscriber_id': current_user.id,
+                'subscribed_to_id': user_to_subscribe_to.id
+            },
+            customer_email=current_user.email
+        )
+        return redirect(checkout_session.url, code=303)
+    except Exception as e:
+        flash(f'Error connecting to payment provider: {str(e)}', 'error')
+        return redirect(url_for('profile', username=user_to_subscribe_to.username))
+
+
+@app.route('/stripe-webhook', methods=['POST'])
+def stripe_webhook():
+    """Handle incoming webhooks from Stripe."""
+    payload = request.data
+    sig_header = request.headers.get('Stripe-Signature')
+    webhook_secret = app.config['STRIPE_WEBHOOK_SECRET']
+    event = None
+
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
+    except (ValueError, stripe.error.SignatureVerificationError) as e:
+        return 'Invalid request', 400
+
+    # Handle successful payment
+    if event['type'] == 'checkout.session.completed':
+        session = event['data']['object']
+        metadata = session.get('metadata')
+        stripe_subscription_id = session.get('subscription')
+        if metadata and stripe_subscription_id:
+            # Prevent duplicates from webhook retries
+            if not Subscription.query.filter_by(stripe_subscription_id=stripe_subscription_id).first():
+                new_subscription = Subscription(
+                    subscriber_id=metadata['subscriber_id'],
+                    subscribed_to_id=metadata['subscribed_to_id'],
+                    stripe_subscription_id=stripe_subscription_id,
+                    status='active'
+                )
+                db.session.add(new_subscription)
+                db.session.commit()
+
+    # Handle canceled subscription
+    if event['type'] == 'customer.subscription.deleted':
+        session = event['data']['object']
+        stripe_subscription_id = session.get('id')
+        subscription = Subscription.query.filter_by(stripe_subscription_id=stripe_subscription_id).first()
+        if subscription:
+            subscription.status = 'canceled'
+            db.session.commit()
+
+    return 'Success', 200
 
 
 if __name__ == '__main__':
