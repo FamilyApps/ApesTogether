@@ -902,6 +902,34 @@ def debug_check_user(username):
         return jsonify({'error': str(e)}), 500
 
 
+# Test route to simulate problematic users
+@app.route('/test/problematic-user')
+@login_required
+def test_problematic_user():
+    """Test route to simulate the fix for problematic users."""
+    # Create a mock user object that mimics the problematic users
+    class MockUser:
+        def __init__(self, username):
+            self.id = 9999
+            self.username = username
+            self.subscription_price = None
+            self.stripe_price_id = None
+    
+    # Create a mock problematic user
+    mock_user = MockUser('test-problematic-user')
+    
+    # Render the template with the special flag for problematic users
+    return render_template(
+        'profile.html',
+        user_to_view=mock_user,
+        subscription=None,
+        portfolio_data=None,
+        price=0,
+        stripe_public_key='',
+        is_problematic_user=True
+    )
+
+
 if __name__ == '__main__':
     # In development, run with debug mode
     if os.environ.get('FLASK_ENV') == 'development':
