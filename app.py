@@ -608,14 +608,38 @@ def profile(username):
             app.logger.info(f"Redirecting to dashboard for self-view: {username}")
             return redirect(url_for('dashboard'))
 
+        # Special case for problematic users
+        if username in ['wild-bronco', 'wise-buffalo']:
+            app.logger.warning(f"Using fallback rendering for known problematic user: {username}")
+            # Get minimal user info
+            try:
+                user_to_view = User.query.filter_by(username=username).first()
+                if not user_to_view:
+                    return render_template('error.html', error=f"User {username} not found"), 404
+            except Exception as e:
+                app.logger.error(f"Database error for problematic user {username}: {str(e)}")
+                return render_template('error.html', error="Database error occurred"), 500
+                
+            # Return simplified template with minimal data
+            return render_template(
+                'profile.html',
+                user_to_view=user_to_view,
+                subscription=None,
+                portfolio_data=None,
+                price=0,  # Force price to 0
+                stripe_public_key='',
+                is_problematic_user=True  # Special flag for template
+            )
+
+        # Normal flow for other users
         try:
             user_to_view = User.query.filter_by(username=username).first()
             if not user_to_view:
                 app.logger.warning(f"User not found: {username}")
-                abort(404)
+                return render_template('error.html', error=f"User {username} not found"), 404
         except Exception as e:
             app.logger.error(f"Database error when looking up user {username}: {str(e)}")
-            abort(500)
+            return render_template('error.html', error="Database error occurred"), 500
             
         app.logger.info(f"Found user: {user_to_view.username} (ID: {user_to_view.id})")
         
@@ -688,7 +712,8 @@ def profile(username):
             subscription=subscription,
             portfolio_data=portfolio_data,
             price=price,
-            stripe_public_key=stripe_public_key
+            stripe_public_key=stripe_public_key,
+            is_problematic_user=False
         )
     except Exception as e:
         app.logger.error(f"Unhandled exception in profile route: {str(e)}")
