@@ -1,0 +1,67 @@
+{% extends 'base.html' %}
+
+{% block title %}Admin - Edit User{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>Edit User: {{ user.username }}</h1>
+        <div>
+            <a href="{{ url_for('admin.user_detail', user_id=user.id) }}" class="btn btn-secondary">Back to User Details</a>
+        </div>
+    </div>
+    
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0">Edit User Information</h5>
+        </div>
+        <div class="card-body">
+            <form method="POST">
+                <div class="mb-3">
+                    <label for="username" class="form-label">Username</label>
+                    <input type="text" class="form-control" id="username" name="username" value="{{ user.username }}" required>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="email" class="form-label">Email</label>
+                    <input type="email" class="form-control" id="email" name="email" value="{{ user.email }}" required>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="subscription_price" class="form-label">Subscription Price ($)</label>
+                    <input type="number" step="0.01" class="form-control" id="subscription_price" name="subscription_price" value="{{ user.subscription_price or '' }}">
+                </div>
+                
+                <div class="mb-3">
+                    <label for="stripe_price_id" class="form-label">Stripe Price ID</label>
+                    <select class="form-select" id="stripe_price_id" name="stripe_price_id">
+                        <option value="">Select a Stripe Price</option>
+                        {% for price in stripe_prices %}
+                        <option value="{{ price.id }}" 
+                                {% if user.stripe_price_id == price.id %}selected{% endif %}
+                                data-amount="{{ price.amount }}">
+                            {{ price.product_name }} - ${{ price.amount }} {{ price.currency }}/{{ price.interval }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                
+                <button type="submit" class="btn btn-primary">Save Changes</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+{% block scripts %}
+<script>
+    // Auto-update subscription price when Stripe price is selected
+    document.getElementById('stripe_price_id').addEventListener('change', function() {
+        const selectedOption = this.options[this.selectedIndex];
+        if (selectedOption.value) {
+            const amount = selectedOption.getAttribute('data-amount');
+            document.getElementById('subscription_price').value = amount;
+        }
+    });
+</script>
+{% endblock %}
+{% endblock %}

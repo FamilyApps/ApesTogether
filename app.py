@@ -936,6 +936,14 @@ def admin_update_user(username):
         return jsonify({'error': str(e)}), 500
 
 
+# Register the admin blueprint
+try:
+    from admin_interface import admin_bp
+    app.register_blueprint(admin_bp)
+    app.logger.info("Admin interface blueprint registered successfully")
+except ImportError as e:
+    app.logger.warning(f"Could not register admin blueprint: {str(e)}")
+
 if __name__ == '__main__':
     # In development, run with debug mode
     if os.environ.get('FLASK_ENV') == 'development':
