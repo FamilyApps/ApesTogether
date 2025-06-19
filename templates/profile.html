@@ -55,8 +55,8 @@
                         <div class="text-center p-4">
                             <h5 class="card-title">Subscribe to view this portfolio</h5>
                             <p class="card-text">Gain access to {{ user_to_view.username }}'s real-time portfolio data and investment insights.</p>
-                            <a href="{{ url_for('create_checkout_session', user_id=user_to_view.id) }}" class="btn btn-primary btn-lg mt-3">
-                                Subscribe for $5/month
+                                                        <a href="{{ url_for('create_checkout_session', user_id=user_to_view.id) }}" class="btn btn-primary btn-lg mt-3">
+                                Subscribe for ${{ "{:.2f}".format(price) }}/month
                             </a>
                         </div>
                     {% endif %}

@@ -29,7 +29,7 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 # Stripe configuration
 app.config['STRIPE_PUBLIC_KEY'] = os.environ.get('STRIPE_PUBLIC_KEY')
 app.config['STRIPE_SECRET_KEY'] = os.environ.get('STRIPE_SECRET_KEY')
-app.config['STRIPE_PRICE_ID'] = os.environ.get('STRIPE_PRICE_ID')
+
 app.config['STRIPE_WEBHOOK_SECRET'] = os.environ.get('STRIPE_WEBHOOK_SECRET')
 
 stripe.api_key = app.config['STRIPE_SECRET_KEY']
@@ -73,6 +73,9 @@ class User(UserMixin, db.Model):
     oauth_provider = db.Column(db.String(20))
     oauth_id = db.Column(db.String(100))
     stocks = db.relationship('Stock', backref='owner', lazy='dynamic')
+    # Add fields for tiered subscriptions
+    stripe_price_id = db.Column(db.String(255), nullable=True)
+    subscription_price = db.Column(db.Float, nullable=True)
 
 class Stock(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -616,7 +619,7 @@ def profile(username):
             'total_value': total_value
         }
 
-    return render_template('profile.html', user_to_view=user_to_view, subscription=subscription, portfolio_data=portfolio_data)
+    return render_template('profile.html', user_to_view=user_to_view, subscription=subscription, portfolio_data=portfolio_data, price=user_to_view.subscription_price)
 
 
 @app.route('/create-checkout-session/<int:user_id>')
@@ -638,7 +641,7 @@ def create_checkout_session(user_id):
             },
             line_items=[
                 {
-                    'price': app.config['STRIPE_PRICE_ID'],
+                    'price': user_to_subscribe_to.stripe_price_id,
                     'quantity': 1,
                 },
             ],
@@ -697,6 +700,41 @@ def stripe_webhook():
             db.session.commit()
 
     return 'Success', 200
+
+
+@app.route('/migrate-user-prices-c8d5b2e1')
+def migrate_user_prices():
+    # --- IMPORTANT: This is a temporary route for a one-time data migration. ---
+    # --- It should be removed after use for security. ---
+    try:
+        # Add the new columns if they don't exist
+        with db.engine.connect() as connection:
+            with connection.begin():
+                try:
+                    connection.execute(text('ALTER TABLE "user" ADD COLUMN stripe_price_id VARCHAR(255)'))
+                except ProgrammingError: pass # Column already exists
+                try:
+                    connection.execute(text('ALTER TABLE "user" ADD COLUMN subscription_price FLOAT'))
+                except ProgrammingError: pass # Column already exists
+
+        # Assign prices to test users
+        user2 = User.query.filter_by(username='testing2').first()
+        if user2:
+            user2.stripe_price_id = 'price_1RbX0yQWUhVa3vgDB8vGzoFN'
+            user2.subscription_price = 4.00
+
+        user3 = User.query.filter_by(username='testing3').first()
+        if user3:
+            user3.stripe_price_id = 'price_1RbX1FQWUhVa3vgDoTuknCC6'
+            user3.subscription_price = 8.00
+
+        db.session.commit()
+        flash('User subscription prices have been migrated successfully.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'An error occurred during migration: {str(e)}', 'danger')
+    
+    return redirect(url_for('index'))
 
 
 if __name__ == '__main__':
