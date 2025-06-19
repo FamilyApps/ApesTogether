@@ -176,8 +176,8 @@ def register():
         db.session.commit()
 
         login_user(new_user)
-        flash('Registration successful! Welcome.', 'success')
-        return redirect(url_for('dashboard'))
+        flash('Registration successful! Welcome to the platform.', 'success')
+        return redirect(url_for('onboarding'))
 
     return render_template('register.html')
 
