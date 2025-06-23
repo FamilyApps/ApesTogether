@@ -1,10 +1,10 @@
 import os
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, current_app
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
 from flask_login import login_required, current_user
 from sqlalchemy import desc
 import stripe
 from datetime import datetime
-from models import db, User, Stock, Transaction, Subscription
+from app import db, User, Stock, Transaction, Subscription
 
 # Create a Blueprint for the admin routes
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
@@ -37,15 +37,8 @@ def add_datatables(response):
 
 # Admin authentication check
 def admin_required(f):
-    """Decorator to check if user is an admin (BYPASSED FOR LOCAL DEVELOPMENT)"""
+    """Decorator to check if user is an admin"""
     def decorated_function(*args, **kwargs):
-        # In development mode, allow any authenticated user
-        if os.environ.get('FLASK_ENV') == 'development':
-            if not current_user.is_authenticated:
-                flash('You must be logged in to access this page.', 'danger')
-                return redirect(url_for('login'))
-            return f(*args, **kwargs)
-        # In production, check for admin email
         if not current_user.is_authenticated or current_user.email != 'fordutilityapps@gmail.com':
             flash('You must be an admin to access this page.', 'danger')
             return redirect(url_for('index'))

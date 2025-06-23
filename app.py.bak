@@ -909,7 +909,7 @@ except ImportError as e:
     app.logger.warning(f"Could not register admin blueprint: {str(e)}")
 
 # Register the development admin access blueprint (only in development)
-if os.environ.get('FLASK_DEBUG') == 'development':
+if os.environ.get('FLASK_ENV') == 'development':
     try:
         from admin_dev_access import admin_dev_bp
         app.register_blueprint(admin_dev_bp)
@@ -918,9 +918,111 @@ if os.environ.get('FLASK_DEBUG') == 'development':
         app.logger.warning(f"Could not register development admin blueprint: {str(e)}")
 
 
+# Direct admin access route for development
+@app.route('/dev-admin')
+def direct_admin_access():
+    """Development-only route to access admin interface directly"""
+    if os.environ.get('FLASK_ENV') != 'development':
+        abort(404)  # Only available in development
+    
+    # Find the admin user
+    admin_user = User.query.filter_by(email='fordutilityapps@gmail.com').first()
+    if not admin_user:
+        flash('Admin user not found. Please run create_admin_direct.py first.', 'danger')
+        return redirect(url_for('index'))
+    
+    # Log in as admin
+    login_user(admin_user)
+    flash('Logged in as admin for development purposes', 'success')
+    
+    # Redirect to admin dashboard
+    return redirect(url_for('dev_admin_dashboard'))
+
+# Development admin routes
+# These routes provide admin functionality without relying on the admin blueprint
+
+# Simple admin dashboard for development
+@app.route('/dev-admin-dashboard')
+@login_required
+def dev_admin_dashboard():
+    """Simple admin dashboard for development"""
+    if os.environ.get('FLASK_ENV') != 'development' or current_user.email != 'fordutilityapps@gmail.com':
+        abort(403)  # Forbidden
+    
+    # Get all users
+    users = User.query.all()
+    user_count = len(users)
+    
+    # Get all stocks
+    stocks = Stock.query.all()
+    stock_count = len(stocks)
+    
+    # Check if StockTransaction table exists
+    transaction_count = 0
+    try:
+        # Check if the table exists by running a simple query
+        db.session.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='stock_transaction'")
+        # If no error, try to get transaction count
+        transaction_count = db.session.execute("SELECT COUNT(*) FROM stock_transaction").scalar()
+    except Exception as e:
+        app.logger.warning(f"StockTransaction table not available: {str(e)}")
+    
+    # Get all subscriptions
+    subscriptions = Subscription.query.all()
+    subscription_count = len(subscriptions)
+    
+    # Check for problematic users (no stocks, etc.)
+    problematic_users = [user for user in users if user.stocks.count() == 0]
+    
+    return render_template('admin/dashboard.html', 
+                           users=users,
+                           user_count=user_count,
+                           stock_count=stock_count,
+                           transaction_count=transaction_count,
+                           subscription_count=subscription_count,
+                           problematic_users=problematic_users)
+
+# User list page
+@app.route('/dev-admin/users')
+@login_required
+def dev_user_list():
+    """List all users for admin"""
+    if os.environ.get('FLASK_ENV') != 'development' or current_user.email != 'fordutilityapps@gmail.com':
+        abort(403)  # Forbidden
+    
+    users = User.query.all()
+    return render_template('admin/user_list.html', users=users)
+
+# User detail page
+@app.route('/dev-admin/users/<int:user_id>')
+@login_required
+def dev_user_detail(user_id):
+    """Show user details for admin"""
+    if os.environ.get('FLASK_ENV') != 'development' or current_user.email != 'fordutilityapps@gmail.com':
+        abort(403)  # Forbidden
+    
+    user = User.query.get_or_404(user_id)
+    stocks = user.stocks.all()
+    
+    # Check if StockTransaction table exists
+    transactions = []
+    try:
+        # Check if the table exists by running a simple query
+        db.session.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='stock_transaction'")
+        # If no error, try to get transactions
+        transactions = db.session.execute(
+            "SELECT * FROM stock_transaction WHERE user_id = :user_id ORDER BY date DESC", 
+            {"user_id": user.id}
+        ).fetchall()
+    except Exception as e:
+        app.logger.warning(f"StockTransaction table not available: {str(e)}")
+    
+    return render_template('admin/user_detail.html', user=user, stocks=stocks, transactions=transactions)
+
+
 if __name__ == '__main__':
     # In development, run with debug mode
-    if os.environ.get('FLASK_DEBUG') == 'development':
+    if os.environ.get('FLASK_ENV') == 'development':
         app.run(host='0.0.0.0', port=5006, debug=True)
     else:
         # In production, let the WSGI server handle it
