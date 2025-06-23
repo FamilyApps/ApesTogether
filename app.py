@@ -112,7 +112,8 @@ def login():
 @app.route('/login/google')
 def login_google():
     redirect_uri = url_for('authorize_google', _external=True)
-    return google.authorize_redirect(redirect_uri)
+    # Force account selection by adding prompt=select_account
+    return google.authorize_redirect(redirect_uri, prompt='select_account')
 
 @app.route('/login/google/authorize')
 def authorize_google():
