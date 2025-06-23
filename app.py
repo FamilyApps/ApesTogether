@@ -101,7 +101,6 @@ class Stock(db.Model):
     purchase_date = db.Column(db.DateTime, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
 
-
 class Subscription(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     subscriber_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
@@ -115,6 +114,22 @@ class Subscription(db.Model):
     subscriber = db.relationship('User', foreign_keys=[subscriber_id], backref='subscriptions_made')
     # backref creates a 'subscribers' collection on the User model (for the user being subscribed to)
     subscribed_to = db.relationship('User', foreign_keys=[subscribed_to_id], backref='subscribers')
+
+class Transaction(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    symbol = db.Column(db.String(10), nullable=False)
+    shares = db.Column(db.Float, nullable=False)
+    price = db.Column(db.Float, nullable=False)
+    transaction_type = db.Column(db.String(10), nullable=False)  # 'buy' or 'sell'
+    date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    notes = db.Column(db.String(255))
+    
+    # Relationship with User
+    user = db.relationship('User', backref=db.backref('transactions', lazy='dynamic'))
+    
+    def __repr__(self):
+        return f"<Transaction {self.transaction_type} {self.shares} {self.symbol} @ ${self.price}>"
 
 @login_manager.user_loader
 def load_user(user_id):

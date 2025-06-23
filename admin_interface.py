@@ -9,6 +9,32 @@ from app import db, User, Stock, Transaction, Subscription
 # Create a Blueprint for the admin routes
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
+# Add DataTables initialization for sortable tables
+@admin_bp.after_request
+def add_datatables(response):
+    """Add DataTables initialization script to appropriate pages"""
+    if response.content_type.startswith('text/html'):
+        # Only modify HTML responses
+        html = response.get_data(as_text=True)
+        if 'id="transactionsTable"' in html or 'id="usersTable"' in html:
+            # Add DataTables initialization script
+            script = '''
+            <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.11.5/css/dataTables.bootstrap5.min.css">
+            <script type="text/javascript" src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
+            <script type="text/javascript" src="https://cdn.datatables.net/1.11.5/js/dataTables.bootstrap5.min.js"></script>
+            <script>
+                $(document).ready(function() {
+                    $('.datatable').DataTable({
+                        "order": [[0, "desc"]],
+                        "pageLength": 25
+                    });
+                });
+            </script>
+            '''
+            html = html.replace('</body>', script + '</body>')
+            response.set_data(html)
+    return response
+
 # Admin authentication check
 def admin_required(f):
     """Decorator to check if user is an admin"""
@@ -176,6 +202,194 @@ def add_stock(user_id):
         return redirect(url_for('admin.user_detail', user_id=user.id))
     
     return render_template('admin/add_stock.html', user=user)
+
+@admin_bp.route('/users/<int:user_id>/transactions/add', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def add_transaction(user_id):
+    """Add a manual transaction with custom date and price"""
+    user = User.query.get_or_404(user_id)
+    
+    if request.method == 'POST':
+        symbol = request.form.get('symbol').upper()
+        shares = float(request.form.get('shares'))
+        price = float(request.form.get('price'))
+        transaction_type = request.form.get('transaction_type')
+        date_str = request.form.get('transaction_date')
+        notes = request.form.get('notes', '')
+        
+        # Parse the date string to a datetime object
+        try:
+            transaction_date = datetime.strptime(date_str, '%Y-%m-%d')
+        except ValueError:
+            flash('Invalid date format. Please use YYYY-MM-DD', 'danger')
+            return render_template('admin/add_transaction.html', user=user)
+        
+        # Create the transaction record
+        transaction = Transaction(
+            user_id=user.id,
+            symbol=symbol,
+            shares=shares,
+            price=price,
+            transaction_type=transaction_type,
+            date=transaction_date,
+            notes=notes
+        )
+        
+        # Update the stock position
+        existing_stock = Stock.query.filter_by(user_id=user.id, symbol=symbol).first()
+        
+        if transaction_type == 'buy':
+            if existing_stock:
+                existing_stock.shares += shares
+            else:
+                stock = Stock(
+                    user_id=user.id,
+                    symbol=symbol,
+                    shares=shares
+                )
+                db.session.add(stock)
+        elif transaction_type == 'sell':
+            if not existing_stock or existing_stock.shares < shares:
+                flash(f'Cannot sell {shares} shares of {symbol}. User only has {existing_stock.shares if existing_stock else 0} shares.', 'danger')
+                return render_template('admin/add_transaction.html', user=user)
+            
+            existing_stock.shares -= shares
+            
+            # If shares become zero, optionally remove the stock
+            if existing_stock.shares <= 0:
+                db.session.delete(existing_stock)
+        
+        db.session.add(transaction)
+        
+        try:
+            db.session.commit()
+            flash(f'Added {transaction_type} transaction of {shares} shares of {symbol} at ${price}/share on {date_str}', 'success')
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error adding transaction: {str(e)}', 'danger')
+        
+        return redirect(url_for('admin.user_detail', user_id=user.id))
+    
+    return render_template('admin/add_transaction.html', user=user)
+
+
+@admin_bp.route('/users/<int:user_id>/transactions/<int:transaction_id>/edit', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def edit_transaction(user_id, transaction_id):
+    """Edit an existing transaction with custom date and price"""
+    user = User.query.get_or_404(user_id)
+    transaction = Transaction.query.get_or_404(transaction_id)
+    
+    # Verify the transaction belongs to the user
+    if transaction.user_id != user.id:
+        flash('Transaction does not belong to this user', 'danger')
+        return redirect(url_for('admin.user_detail', user_id=user.id))
+    
+    if request.method == 'POST':
+        # Store original values to calculate position changes
+        original_symbol = transaction.symbol
+        original_shares = transaction.shares
+        original_type = transaction.transaction_type
+        
+        # Get form data
+        shares = float(request.form.get('shares'))
+        price = float(request.form.get('price'))
+        date_str = request.form.get('transaction_date')
+        notes = request.form.get('notes', '')
+        
+        # Parse the date
+        try:
+            transaction_date = datetime.strptime(date_str, '%Y-%m-%d')
+        except ValueError:
+            flash('Invalid date format. Please use YYYY-MM-DD', 'danger')
+            return render_template('admin/edit_transaction.html', user=user, transaction=transaction)
+        
+        # Update transaction record
+        transaction.shares = shares
+        transaction.price = price
+        transaction.date = transaction_date
+        transaction.notes = notes
+        
+        # Update stock position if shares changed
+        if shares != original_shares:
+            stock = Stock.query.filter_by(user_id=user.id, symbol=original_symbol).first()
+            
+            if original_type == 'buy':
+                # Reverse the original buy
+                stock.shares -= original_shares
+                # Apply the new buy
+                stock.shares += shares
+            elif original_type == 'sell':
+                # Reverse the original sell
+                stock.shares += original_shares
+                # Apply the new sell
+                stock.shares -= shares
+            
+            # Check if stock should be removed
+            if stock.shares <= 0:
+                db.session.delete(stock)
+        
+        try:
+            db.session.commit()
+            flash(f'Transaction updated successfully', 'success')
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error updating transaction: {str(e)}', 'danger')
+        
+        return redirect(url_for('admin.user_detail', user_id=user.id))
+    
+    return render_template('admin/edit_transaction.html', user=user, transaction=transaction)
+
+
+@admin_bp.route('/users/<int:user_id>/transactions/<int:transaction_id>/delete', methods=['POST'])
+@login_required
+@admin_required
+def delete_transaction(user_id, transaction_id):
+    """Delete a transaction and update stock position"""
+    user = User.query.get_or_404(user_id)
+    transaction = Transaction.query.get_or_404(transaction_id)
+    
+    # Verify the transaction belongs to the user
+    if transaction.user_id != user.id:
+        flash('Transaction does not belong to this user', 'danger')
+        return redirect(url_for('admin.user_detail', user_id=user.id))
+    
+    # Update stock position
+    stock = Stock.query.filter_by(user_id=user.id, symbol=transaction.symbol).first()
+    
+    if transaction.transaction_type == 'buy':
+        # Reverse the buy
+        if stock:
+            stock.shares -= transaction.shares
+            # If shares become zero or negative, remove the stock
+            if stock.shares <= 0:
+                db.session.delete(stock)
+    elif transaction.transaction_type == 'sell':
+        # Reverse the sell
+        if stock:
+            stock.shares += transaction.shares
+        else:
+            # Create a new stock position if it was fully sold before
+            new_stock = Stock(
+                user_id=user.id,
+                symbol=transaction.symbol,
+                shares=transaction.shares
+            )
+            db.session.add(new_stock)
+    
+    # Delete the transaction
+    db.session.delete(transaction)
+    
+    try:
+        db.session.commit()
+        flash(f'Transaction deleted and stock position updated', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error deleting transaction: {str(e)}', 'danger')
+    
+    return redirect(url_for('admin.user_detail', user_id=user.id))
 
 @admin_bp.route('/users/<int:user_id>/stocks/<int:stock_id>/edit', methods=['GET', 'POST'])
 @login_required

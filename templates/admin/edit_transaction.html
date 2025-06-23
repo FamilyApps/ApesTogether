@@ -1,0 +1,63 @@
+{% extends 'base.html' %}
+
+{% block title %}Admin - Edit Transaction{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>Edit Transaction</h1>
+        <div>
+            <a href="{{ url_for('admin.user_detail', user_id=user.id) }}" class="btn btn-secondary">Back to User Details</a>
+        </div>
+    </div>
+    
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0">Edit Transaction for {{ user.username }}</h5>
+        </div>
+        <div class="card-body">
+            <form method="POST">
+                <div class="mb-3">
+                    <label for="symbol" class="form-label">Stock Symbol</label>
+                    <input type="text" class="form-control" id="symbol" value="{{ transaction.symbol }}" disabled>
+                    <div class="form-text">Symbol cannot be changed. Create a new transaction if needed.</div>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="transaction_type" class="form-label">Transaction Type</label>
+                    <input type="text" class="form-control" id="transaction_type" value="{{ transaction.transaction_type }}" disabled>
+                    <div class="form-text">Transaction type cannot be changed. Create a new transaction if needed.</div>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="shares" class="form-label">Number of Shares</label>
+                    <input type="number" step="0.01" class="form-control" id="shares" name="shares" value="{{ transaction.shares }}" required>
+                    <div class="form-text">Changing this will update the user's stock position.</div>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="price" class="form-label">Price per Share ($)</label>
+                    <input type="number" step="0.01" class="form-control" id="price" name="price" value="{{ transaction.price }}" required>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="transaction_date" class="form-label">Transaction Date</label>
+                    <input type="date" class="form-control" id="transaction_date" name="transaction_date" value="{{ transaction.date.strftime('%Y-%m-%d') }}" required>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="notes" class="form-label">Notes (Optional)</label>
+                    <textarea class="form-control" id="notes" name="notes" rows="3">{{ transaction.notes or '' }}</textarea>
+                </div>
+                
+                <div class="d-flex justify-content-between">
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                    <form action="{{ url_for('admin.delete_transaction', user_id=user.id, transaction_id=transaction.id) }}" method="POST" onsubmit="return confirm('Are you sure you want to delete this transaction? This will update the stock position.');">
+                        <button type="submit" class="btn btn-danger">Delete Transaction</button>
+                    </form>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
