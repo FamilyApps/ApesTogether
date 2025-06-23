@@ -40,7 +40,7 @@ def admin_required(f):
     """Decorator to check if user is an admin (BYPASSED FOR LOCAL DEVELOPMENT)"""
     def decorated_function(*args, **kwargs):
         # In development mode, allow any authenticated user
-        if os.environ.get('FLASK_ENV') == 'development':
+        if os.environ.get('FLASK_DEBUG') == 'development':
             if not current_user.is_authenticated:
                 flash('You must be logged in to access this page.', 'danger')
                 return redirect(url_for('login'))
