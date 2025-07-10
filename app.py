@@ -99,6 +99,31 @@ def api_check():
         'environment': os.environ.get('FLASK_ENV', 'unknown')
     })
 
+# HTML-based debug page
+@app.route('/debug-admin')
+@login_required
+def debug_admin():
+    """Debug page for admin access"""
+    # Get environment info
+    env_info = {
+        'flask_env': os.environ.get('FLASK_ENV', 'Not set'),
+        'flask_debug': os.environ.get('FLASK_DEBUG', 'Not set'),
+        'admin_bp_registered': 'admin' in app.blueprints,
+        'debug_bp_registered': 'debug' in app.blueprints
+    }
+    
+    # Get admin routes
+    admin_routes = []
+    for rule in app.url_map.iter_rules():
+        if rule.endpoint.startswith('admin.'):
+            admin_routes.append({
+                'name': rule.endpoint,
+                'url': url_for(rule.endpoint),
+                'methods': ', '.join(rule.methods - {'HEAD', 'OPTIONS'})
+            })
+    
+    return render_template('admin_debug.html', env_info=env_info, admin_routes=admin_routes)
+
 # Routes
 @app.route('/')
 def index():
