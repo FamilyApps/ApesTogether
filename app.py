@@ -1033,10 +1033,37 @@ def admin_update_user(username):
 # Register the admin blueprint
 try:
     from admin_interface import admin_bp
-    app.register_blueprint(admin_bp)
+    app.register_blueprint(admin_bp, url_prefix='/admin')
     app.logger.info("Admin interface blueprint registered successfully")
 except ImportError as e:
     app.logger.warning(f"Could not register admin blueprint: {str(e)}")
+
+# Direct admin debug page route
+@app.route('/admin-debug')
+@login_required
+def admin_debug_page():
+    """Direct admin debug page to troubleshoot admin access"""
+    # Check if user is admin
+    is_admin = (current_user.email == 'fordutilityapps@gmail.com' and current_user.username == 'witty-raven')
+    admin_access_granted = 'Yes' if is_admin else 'No'
+    
+    # Get all registered routes
+    routes = []
+    for rule in app.url_map.iter_rules():
+        routes.append(f"{rule.endpoint}: {rule}")
+    
+    # Get environment information
+    flask_env = os.environ.get('FLASK_ENV', 'Not set')
+    debug_mode = os.environ.get('FLASK_DEBUG', 'Not set')
+    
+    return render_template('admin_debug_page.html',
+                          user_email=current_user.email,
+                          username=current_user.username,
+                          is_admin=is_admin,
+                          flask_env=flask_env,
+                          debug_mode=debug_mode,
+                          admin_access_granted=admin_access_granted,
+                          routes=routes)
 
 # Register the debug blueprint (temporary)
 try:

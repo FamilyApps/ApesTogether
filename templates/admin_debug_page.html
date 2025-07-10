@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Debug Page</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container mt-5">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h2>Admin Debug Information</h2>
+            </div>
+            <div class="card-body">
+                <h3>User Information</h3>
+                <ul>
+                    <li><strong>Email:</strong> {{ user_email }}</li>
+                    <li><strong>Username:</strong> {{ username }}</li>
+                    <li><strong>Is Admin:</strong> {{ is_admin }}</li>
+                </ul>
+                
+                <h3>Environment Information</h3>
+                <ul>
+                    <li><strong>Flask Environment:</strong> {{ flask_env }}</li>
+                    <li><strong>Debug Mode:</strong> {{ debug_mode }}</li>
+                </ul>
+                
+                <h3>Admin Access Check</h3>
+                <p>Admin access should be granted if:</p>
+                <ul>
+                    <li>Email is fordutilityapps@gmail.com AND</li>
+                    <li>Username is witty-raven</li>
+                </ul>
+                <p><strong>Result:</strong> {{ admin_access_granted }}</p>
+                
+                <h3>Available Routes</h3>
+                <ul>
+                {% for route in routes %}
+                    <li>{{ route }}</li>
+                {% endfor %}
+                </ul>
+                
+                <h3>Admin URL Test</h3>
+                <p>Try accessing the admin dashboard directly:</p>
+                <p><a href="/admin" class="btn btn-primary">Go to /admin</a></p>
+                
+                <h3>Return to Dashboard</h3>
+                <p><a href="/dashboard" class="btn btn-secondary">Back to Dashboard</a></p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
