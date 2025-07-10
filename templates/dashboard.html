@@ -18,6 +18,31 @@
 {% endblock %}
 
 {% block content %}
+
+{% if debug_info is defined %}
+<div class="container mt-3 mb-3">
+    <div class="card border-info">
+        <div class="card-header bg-info text-white">
+            <h4>Admin Debug Information</h4>
+        </div>
+        <div class="card-body">
+            <p><strong>Email:</strong> {{ debug_info.email }}</p>
+            <p><strong>Username:</strong> {{ debug_info.username }}</p>
+            <p><strong>Is Admin Check:</strong> {{ debug_info.is_admin_check }}</p>
+            <p><strong>Admin Parameter:</strong> {{ debug_info.admin_param }}</p>
+            <p><strong>Admin Requested:</strong> {{ debug_info.admin_requested }}</p>
+            <p><strong>Condition Met:</strong> {{ debug_info.condition_met }}</p>
+            {% if debug_info.error is defined %}
+            <div class="alert alert-danger">
+                <strong>Error:</strong> {{ debug_info.error }}
+            </div>
+            {% endif %}
+            <hr>
+            <p><a href="/dashboard" class="btn btn-secondary">Regular Dashboard</a></p>
+        </div>
+    </div>
+</div>
+{% endif %}
 <div class="row mb-4">
     <div class="col-md-8">
         <h2>Welcome, {{ current_user.username }}</h2>

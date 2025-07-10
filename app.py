@@ -153,7 +153,8 @@ def direct_admin():
                                transaction_count=transaction_count,
                                subscription_count=subscription_count,
                                latest_users=latest_users,
-                               latest_transactions=latest_transactions)
+                               latest_transactions=latest_transactions,
+                               debug_info={'email': current_user.email, 'username': current_user.username} if request.args.get('admin') == 'true' else None)
     else:
         flash('You must be an admin to access this page.', 'danger')
         return redirect(url_for('index'))
@@ -345,33 +346,54 @@ def logout():
 def dashboard():
     # Check if user is admin (fordutilityapps@gmail.com with username witty-raven)
     is_admin = (current_user.email == 'fordutilityapps@gmail.com' and current_user.username == 'witty-raven')
+    admin_requested = request.args.get('admin') == 'true'
+    
+    # Create a debug message to display at the top of the page
+    debug_info = {
+        'email': current_user.email,
+        'username': current_user.username,
+        'is_admin_check': is_admin,
+        'admin_param': request.args.get('admin'),
+        'admin_requested': admin_requested,
+        'condition_met': is_admin and admin_requested
+    }
     
     # If admin user and admin=true query parameter is present, show admin dashboard
-    if is_admin and request.args.get('admin') == 'true':
-        # Get counts for dashboard
-        user_count = User.query.count()
-        stock_count = Stock.query.count()
-        transaction_count = Transaction.query.count()
-        subscription_count = Subscription.query.count()
-        
-        # Get latest users
-        latest_users = User.query.order_by(desc(User.created_at)).limit(5).all()
-        
-        # Get latest transactions
-        latest_transactions = Transaction.query.order_by(desc(Transaction.date)).limit(5).all()
-        
-        return render_template('admin/dashboard.html', 
-                               user_count=user_count,
-                               stock_count=stock_count,
-                               transaction_count=transaction_count,
-                               subscription_count=subscription_count,
-                               latest_users=latest_users,
-                               latest_transactions=latest_transactions)
+    if is_admin and admin_requested:
+        try:
+            # Get counts for dashboard
+            user_count = User.query.count()
+            stock_count = Stock.query.count()
+            transaction_count = Transaction.query.count()
+            subscription_count = Subscription.query.count()
+            
+            # Get latest users
+            latest_users = User.query.order_by(desc(User.created_at)).limit(5).all()
+            
+            # Get latest transactions
+            latest_transactions = Transaction.query.order_by(desc(Transaction.date)).limit(5).all()
+            
+            # Try to render the admin template
+            return render_template('admin/dashboard.html', 
+                                debug_info=debug_info,
+                                user_count=user_count,
+                                stock_count=stock_count,
+                                transaction_count=transaction_count,
+                                subscription_count=subscription_count,
+                                latest_users=latest_users,
+                                latest_transactions=latest_transactions)
+        except Exception as e:
+            # If there's an error rendering the admin template, show the regular dashboard with error info
+            app.logger.error(f"Error rendering admin dashboard: {str(e)}")
+            flash(f"Admin dashboard error: {str(e)}", 'danger')
+            debug_info['error'] = str(e)
     
     # Regular dashboard functionality
     stocks = current_user.stocks.all()
     portfolio_data = []
     total_portfolio_value = 0
+    
+    # Pass the debug info to the regular dashboard template as well
 
     for stock in stocks:
         stock_data = get_stock_data(stock.ticker)
@@ -397,7 +419,14 @@ def dashboard():
             }
             portfolio_data.append(stock_info)
 
-    return render_template('dashboard.html', stocks=portfolio_data, total_portfolio_value=total_portfolio_value)
+    # Get subscription status
+    subscription = current_user.subscriptions.filter_by(status='active').first()
+    
+    return render_template('dashboard.html', 
+                           stocks=portfolio_data, 
+                           total_portfolio_value=total_portfolio_value,
+                           subscription=subscription,
+                           debug_info=debug_info)
 
 @app.route('/onboarding')
 @login_required
