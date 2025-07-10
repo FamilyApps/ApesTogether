@@ -84,6 +84,21 @@ apple = oauth.register(
 def load_user(user_id):
     return User.query.get(int(user_id))
 
+# Simple diagnostic route
+@app.route('/api/check')
+def api_check():
+    """Simple API route to check if the application is running properly"""
+    return jsonify({
+        'status': 'ok',
+        'message': 'API is working',
+        'timestamp': datetime.utcnow().isoformat(),
+        'user': current_user.email if current_user.is_authenticated else None,
+        'username': current_user.username if current_user.is_authenticated else None,
+        'admin_bp_registered': 'admin_bp' in app.blueprints,
+        'debug_bp_registered': 'debug_bp' in app.blueprints,
+        'environment': os.environ.get('FLASK_ENV', 'unknown')
+    })
+
 # Routes
 @app.route('/')
 def index():
