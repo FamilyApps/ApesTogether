@@ -37,21 +37,16 @@ def add_datatables(response):
 
 # Admin authentication check
 def admin_required(f):
-    """Decorator to check if user is an admin (BYPASSED FOR LOCAL DEVELOPMENT)"""
+    """Decorator to check if user is an admin"""
+    @wraps(f)
     def decorated_function(*args, **kwargs):
-        # In development mode, allow any authenticated user
-        if os.environ.get('FLASK_DEBUG') == 'development' or os.environ.get('FLASK_ENV') == 'development':
-            if not current_user.is_authenticated:
-                flash('You must be logged in to access this page.', 'danger')
-                return redirect(url_for('login'))
-            return f(*args, **kwargs)
-        # In production, check for admin email and username
+        # Check if user is authenticated
         if not current_user.is_authenticated:
             flash('You must be logged in to access this page.', 'danger')
             return redirect(url_for('login'))
             
-        # Allow access for fordutilityapps@gmail.com with username witty-raven
-        if current_user.email == 'fordutilityapps@gmail.com' and current_user.username == 'witty-raven':
+        # Allow access for fordutilityapps@gmail.com regardless of username
+        if current_user.email == "fordutilityapps@gmail.com":
             return f(*args, **kwargs)
             
         flash('You must be an admin to access this page.', 'danger')
