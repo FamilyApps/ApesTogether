@@ -909,6 +909,14 @@ try:
 except ImportError as e:
     app.logger.warning(f"Could not register admin blueprint: {str(e)}")
 
+# Register the debug blueprint (temporary)
+try:
+    from admin_route_debug import debug_bp
+    app.register_blueprint(debug_bp)
+    app.logger.info("Debug blueprint registered successfully")
+except ImportError as e:
+    app.logger.warning(f"Could not register debug blueprint: {str(e)}")
+
 # One-time admin username update in production
 # This will run once during app initialization and then be removed in the next deployment
 if os.environ.get('FLASK_DEBUG') != 'development' and os.environ.get('FLASK_ENV') != 'development':
