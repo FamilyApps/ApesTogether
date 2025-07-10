@@ -128,28 +128,16 @@ def index():
 @app.route('/admin-direct')
 @login_required
 def admin_direct():
-    """Direct admin access route that bypasses blueprints"""
+    """Simple admin access route"""
     # Check if user is admin
     if current_user.email != 'fordutilityapps@gmail.com':
         flash('You must be an admin to access this page.', 'danger')
         return redirect(url_for('index'))
     
-    # Get counts for dashboard
-    user_count = User.query.count()
-    stock_count = Stock.query.count()
-    transaction_count = 0  # Placeholder since Transaction model might not exist
-    subscription_count = Subscription.query.count()
-    
-    # Get latest users
-    latest_users = User.query.order_by(User.id.desc()).limit(5).all()
-    
-    # Return admin info as JSON since we might not have the admin template
+    # Return basic admin info
     admin_data = {
-        'user_count': user_count,
-        'stock_count': stock_count,
-        'transaction_count': transaction_count,
-        'subscription_count': subscription_count,
-        'latest_users': [{'id': user.id, 'email': user.email, 'username': user.username} for user in latest_users],
+        'status': 'success',
+        'message': 'Admin access granted',
         'admin_email': current_user.email,
         'admin_username': current_user.username
     }
