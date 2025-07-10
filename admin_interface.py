@@ -45,11 +45,17 @@ def admin_required(f):
                 flash('You must be logged in to access this page.', 'danger')
                 return redirect(url_for('login'))
             return f(*args, **kwargs)
-        # In production, check for admin email
-        if not current_user.is_authenticated or current_user.email != 'fordutilityapps@gmail.com':
-            flash('You must be an admin to access this page.', 'danger')
-            return redirect(url_for('index'))
-        return f(*args, **kwargs)
+        # In production, check for admin email and username
+        if not current_user.is_authenticated:
+            flash('You must be logged in to access this page.', 'danger')
+            return redirect(url_for('login'))
+            
+        # Allow access for fordutilityapps@gmail.com with username witty-raven
+        if current_user.email == 'fordutilityapps@gmail.com' and current_user.username == 'witty-raven':
+            return f(*args, **kwargs)
+            
+        flash('You must be an admin to access this page.', 'danger')
+        return redirect(url_for('index'))
     decorated_function.__name__ = f.__name__
     return decorated_function
 
