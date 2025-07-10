@@ -909,6 +909,32 @@ try:
 except ImportError as e:
     app.logger.warning(f"Could not register admin blueprint: {str(e)}")
 
+# One-time admin username update in production
+# This will run once during app initialization and then be removed in the next deployment
+if os.environ.get('FLASK_DEBUG') != 'development' and os.environ.get('FLASK_ENV') != 'development':
+    try:
+        app.logger.info("Running one-time admin username update in production...")
+        from flask_sqlalchemy import SQLAlchemy
+        
+        # Find the admin user
+        with app.app_context():
+            admin_email = 'fordutilityapps@gmail.com'
+            new_username = 'proud-river'  # The desired username
+            
+            # Find the admin user
+            admin_user = User.query.filter_by(email=admin_email).first()
+            
+            if admin_user:
+                old_username = admin_user.username
+                admin_user.username = new_username
+                db.session.commit()
+                app.logger.info(f"Updated username for {admin_email} from '{old_username}' to '{new_username}'")
+            else:
+                app.logger.error(f"No user found with email: {admin_email}")
+    except Exception as e:
+        app.logger.error(f"Error updating admin username: {str(e)}")
+
+
 # Register the development admin access blueprint (only in development)
 if os.environ.get('FLASK_DEBUG') == 'development':
     try:
