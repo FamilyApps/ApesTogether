@@ -124,6 +124,40 @@ def debug_admin():
     
     return render_template('admin_debug.html', env_info=env_info, admin_routes=admin_routes)
 
+# Direct admin access route
+@app.route('/direct-admin')
+@login_required
+def direct_admin():
+    """Direct admin access route that bypasses the blueprint"""
+    if not current_user.is_authenticated:
+        flash('You must be logged in to access this page.', 'danger')
+        return redirect(url_for('login'))
+        
+    # Check if user is admin
+    if current_user.email == 'fordutilityapps@gmail.com' and current_user.username == 'witty-raven':
+        # Get counts for dashboard
+        user_count = User.query.count()
+        stock_count = Stock.query.count()
+        transaction_count = Transaction.query.count()
+        subscription_count = Subscription.query.count()
+        
+        # Get latest users
+        latest_users = User.query.order_by(desc(User.created_at)).limit(5).all()
+        
+        # Get latest transactions
+        latest_transactions = Transaction.query.order_by(desc(Transaction.date)).limit(5).all()
+        
+        return render_template('admin/dashboard.html', 
+                               user_count=user_count,
+                               stock_count=stock_count,
+                               transaction_count=transaction_count,
+                               subscription_count=subscription_count,
+                               latest_users=latest_users,
+                               latest_transactions=latest_transactions)
+    else:
+        flash('You must be an admin to access this page.', 'danger')
+        return redirect(url_for('index'))
+
 # Routes
 @app.route('/')
 def index():
