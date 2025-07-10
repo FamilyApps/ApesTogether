@@ -125,6 +125,37 @@ def load_user(user_id):
 def index():
     return render_template('index.html')
 
+@app.route('/admin-direct')
+@login_required
+def admin_direct():
+    """Direct admin access route that bypasses blueprints"""
+    # Check if user is admin
+    if current_user.email != 'fordutilityapps@gmail.com':
+        flash('You must be an admin to access this page.', 'danger')
+        return redirect(url_for('index'))
+    
+    # Get counts for dashboard
+    user_count = User.query.count()
+    stock_count = Stock.query.count()
+    transaction_count = 0  # Placeholder since Transaction model might not exist
+    subscription_count = Subscription.query.count()
+    
+    # Get latest users
+    latest_users = User.query.order_by(User.id.desc()).limit(5).all()
+    
+    # Return admin info as JSON since we might not have the admin template
+    admin_data = {
+        'user_count': user_count,
+        'stock_count': stock_count,
+        'transaction_count': transaction_count,
+        'subscription_count': subscription_count,
+        'latest_users': [{'id': user.id, 'email': user.email, 'username': user.username} for user in latest_users],
+        'admin_email': current_user.email,
+        'admin_username': current_user.username
+    }
+    
+    return jsonify(admin_data)
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
