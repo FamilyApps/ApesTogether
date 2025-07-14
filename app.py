@@ -129,21 +129,50 @@ def index():
 @app.route('/admin-direct')
 @login_required
 def admin_direct():
-    """Simple admin access route"""
+    """Super simple admin access route"""
     # Check if user is admin
     if current_user.email != 'fordutilityapps@gmail.com':
         flash('You must be an admin to access this page.', 'danger')
         return redirect(url_for('index'))
     
-    # Return basic admin info
-    admin_data = {
-        'status': 'success',
-        'message': 'Admin access granted',
-        'admin_email': current_user.email,
-        'admin_username': current_user.username
-    }
+    # Return basic admin info as HTML to avoid any potential issues with jsonify
+    admin_html = f'''
+    <html>
+    <head>
+        <title>Admin Access</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 40px; }}
+            .container {{ max-width: 800px; margin: 0 auto; }}
+            .success {{ color: green; }}
+            .info {{ margin-top: 20px; background: #f5f5f5; padding: 15px; border-radius: 5px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Admin Access</h1>
+            <p class="success">✅ Admin access granted</p>
+            
+            <div class="info">
+                <h2>Admin User Info:</h2>
+                <p><strong>Email:</strong> {current_user.email}</p>
+                <p><strong>Username:</strong> {current_user.username}</p>
+            </div>
+            
+            <div class="info">
+                <h2>What now?</h2>
+                <p>This confirms you have admin access. The full admin dashboard is not available in this branch.</p>
+                <p>To access full admin functionality, you'll need to:</p>
+                <ol>
+                    <li>Merge the vercel-deploy branch into master</li>
+                    <li>Or configure Vercel to deploy from the vercel-deploy branch</li>
+                </ol>
+            </div>
+        </div>
+    </body>
+    </html>
+    '''
     
-    return jsonify(admin_data)
+    return admin_html
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
