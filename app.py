@@ -10,15 +10,16 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-from flask_migrate import Migrate
-from authlib.integrations.flask_client import OAuth
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
 import json
 import random
 import re
-import requests
-import stripe
+# Removed imports to reduce deployment size
+# from flask_migrate import Migrate
+# from authlib.integrations.flask_client import OAuth
+# import requests
+# import stripe
 from datetime import datetime, date, timedelta
 
 # App configuration

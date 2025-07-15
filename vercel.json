@@ -3,9 +3,17 @@
     {
       "src": "app.py",
       "use": "@vercel/python"
+    },
+    {
+      "src": "api/admin.py",
+      "use": "@vercel/python"
     }
   ],
   "routes": [
+    {
+      "src": "/admin-standalone",
+      "dest": "api/admin.py"
+    },
     {
       "src": "/(.*)",
       "dest": "app.py"
