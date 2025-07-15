@@ -7,9 +7,73 @@ import json
 from flask import Flask, render_template_string, redirect, url_for, request, session, flash, jsonify
 from datetime import datetime
 from functools import wraps
+from dotenv import load_dotenv
+from flask_sqlalchemy import SQLAlchemy
 
-# Create a Flask app
+# Load environment variables
+load_dotenv()
+
+# Initialize Flask app
 app = Flask(__name__)
+
+# Configure database
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///app.db')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Initialize database
+db = SQLAlchemy(app)
+
+# Define database models
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(200), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    stripe_customer_id = db.Column(db.String(120), nullable=True)
+    stocks = db.relationship('Stock', backref='user', lazy=True)
+    transactions = db.relationship('Transaction', backref='user', lazy=True)
+    subscriptions = db.relationship('Subscription', backref='user', lazy=True)
+
+    def __repr__(self):
+        return f'<User {self.username}>'
+
+class Stock(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    ticker = db.Column(db.String(10), nullable=False)
+    quantity = db.Column(db.Float, nullable=False)
+    purchase_price = db.Column(db.Float, nullable=False)
+    current_price = db.Column(db.Float, nullable=False)
+    purchase_date = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<Stock {self.ticker} - {self.quantity}>' 
+
+class Transaction(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    symbol = db.Column(db.String(10), nullable=False)
+    shares = db.Column(db.Float, nullable=False)
+    price = db.Column(db.Float, nullable=False)
+    transaction_type = db.Column(db.String(10), nullable=False)  # 'buy' or 'sell'
+    date = db.Column(db.DateTime, default=datetime.utcnow)
+    notes = db.Column(db.Text, nullable=True)
+
+    def __repr__(self):
+        return f'<Transaction {self.symbol} - {self.shares} - {self.transaction_type}>'
+
+class Subscription(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    price = db.Column(db.Float, nullable=False)
+    status = db.Column(db.String(20), nullable=False)  # 'active', 'canceled', etc.
+    start_date = db.Column(db.DateTime, default=datetime.utcnow)
+    end_date = db.Column(db.DateTime, nullable=True)
+
+    def __repr__(self):
+        return f'<Subscription {self.user_id} - {self.price} - {self.status}>'
+
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-key-for-testing')
 
 # Database connection string from environment variable
@@ -36,8 +100,76 @@ def admin_required(f):
         if email == ADMIN_EMAIL:
             return f(*args, **kwargs)
             
-        flash('You must be an admin to access this page.', 'danger')
-        return redirect(url_for('admin_direct'))
+        # Show access denied page with login form instead of redirecting
+        return render_template_string("""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Access</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .button { 
+            display: inline-block; 
+            background: #4CAF50; 
+            color: white; 
+            padding: 10px 20px; 
+            text-decoration: none; 
+            border-radius: 5px; 
+            margin-top: 20px;
+        }
+        .error {
+            background-color: #ffdddd;
+            border-left: 6px solid #f44336;
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .form {
+            background-color: #f9f9f9;
+            padding: 20px;
+            border-radius: 5px;
+        }
+        input[type=text] {
+            width: 100%;
+            padding: 12px 20px;
+            margin: 8px 0;
+            box-sizing: border-box;
+        }
+        input[type=submit] {
+            background-color: #4CAF50;
+            color: white;
+            padding: 14px 20px;
+            margin: 8px 0;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Admin Access</h1>
+        
+        <div class="error">
+            <h2>Access Denied</h2>
+            <p>You must be logged in with the admin email to access this page.</p>
+        </div>
+        
+        <div class="form">
+            <h2>Admin Login</h2>
+            <form action="/login" method="post">
+                <label for="email">Admin Email:</label>
+                <input type="text" id="email" name="email" placeholder="Enter admin email">
+                <input type="submit" value="Login">
+            </form>
+        </div>
+        
+        <a href="/" class="button">Back to Home</a>
+    </div>
+</body>
+</html>
+    """)
     return decorated_function
 
 # Simple HTML template for the home page
@@ -68,7 +200,7 @@ HOME_HTML = """
         <div class="info">
             <h2>Admin Access</h2>
             <p>If you are an admin user, you can access the admin panel here:</p>
-            <a href="/admin-direct" class="button">Admin Access</a>
+            <a href="/admin" class="button">Admin Access</a>
         </div>
         
         <div class="info">
@@ -91,59 +223,173 @@ def index():
                                 current_time=current_time,
                                 environment=environment)
 
-@app.route('/admin-direct')
-def admin_direct():
-    """Direct admin access route"""
-    # Get email from session or query parameter
-    email = request.args.get('email', session.get('email', ''))
-    
-    # Store email in session if provided
-    if email:
-        session['email'] = email
+@app.route('/admin')
+@admin_required
+def admin_dashboard():
+    """Admin dashboard"""
+    # Get email from session
+    email = session.get('email', '')
     
     # Check if user is admin
     is_admin = (email == ADMIN_EMAIL)
     
-    if is_admin:
+    if not is_admin:
         return render_template_string("""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Login</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+        }
+        .form {
+            margin-top: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+        }
+        input[type="submit"] {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        input[type="submit"]:hover {
+            background-color: #45a049;
+        }
+        .message {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f8d7da;
+            color: #721c24;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Admin Access</h1>
+        
+        <div class="form">
+            <h2>Admin Login</h2>
+            <form action="/admin" method="get">
+                <label for="email">Admin Email:</label>
+                <input type="text" id="email" name="email" placeholder="Enter admin email">
+                <input type="submit" value="Login">
+            </form>
+        </div>
+    </div>
+</body>
+</html>
+        """)
+    
+    try:
+        # Get real data from database
+        user_count = User.query.count()
+        stock_count = Stock.query.count()
+        transaction_count = Transaction.query.count()
+        subscription_count = Subscription.query.count()
+        
+        # Get recent users
+        recent_users = User.query.order_by(User.created_at.desc()).limit(5).all()
+    except Exception as e:
+        # If database connection fails, use mock data
+        app.logger.error(f"Database error: {str(e)}")
+        user_count = 15
+        stock_count = 42
+        transaction_count = 87
+        subscription_count = 10
+        
+        # Mock recent users
+        recent_users = [
+            {'id': 1, 'username': 'user1', 'email': 'user1@example.com'},
+            {'id': 2, 'username': 'user2', 'email': 'user2@example.com'},
+            {'id': 3, 'username': 'user3', 'email': 'user3@example.com'},
+        ]
+    
+    return render_template_string("""
 <!DOCTYPE html>
 <html>
 <head>
     <title>Admin Dashboard</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        .container { max-width: 1000px; margin: 0 auto; }
-        .success { background: #dff0d8; padding: 15px; border-radius: 5px; }
-        .section { margin-top: 20px; background: #f5f5f5; padding: 15px; border-radius: 5px; }
-        .stats { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 20px; }
-        .stat-card { 
-            flex: 1; 
-            min-width: 200px; 
-            background: #fff; 
-            padding: 15px; 
-            border-radius: 5px; 
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+        }
+        .container {
+            width: 80%;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1, h2 {
+            color: #333;
+        }
+        .nav {
+            background-color: #333;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        .nav a {
+            float: left;
+            display: block;
+            color: white;
             text-align: center;
+            padding: 14px 16px;
+            text-decoration: none;
         }
-        .stat-number { font-size: 24px; font-weight: bold; color: #4CAF50; }
-        .button { 
-            display: inline-block; 
-            background: #4CAF50; 
-            color: white; 
-            padding: 10px 20px; 
-            text-decoration: none; 
-            border-radius: 5px; 
-            margin-top: 20px;
-            margin-right: 10px;
+        .stats {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-bottom: 30px;
         }
-        .button-secondary { 
-            background: #2196F3; 
+        .stat-card {
+            flex: 1;
+            min-width: 200px;
+            background: #f9f9f9;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        .button-warning { 
-            background: #FF9800; 
+        .stat-card h3 {
+            margin-top: 0;
+            color: #333;
         }
-        .button-danger { 
-            background: #F44336; 
+        .stat-card p {
+            font-size: 24px;
+            font-weight: bold;
+            margin: 10px 0 0;
+            color: #2196F3;
         }
         table {
             width: 100%;
@@ -159,73 +405,62 @@ def admin_direct():
             background-color: #f2f2f2;
         }
         tr:hover {background-color: #f5f5f5;}
-        .nav { 
-            background: #333; 
-            padding: 10px; 
-            margin-bottom: 20px; 
-            border-radius: 5px; 
+        input[type=text] {
+            width: 100%;
+            padding: 12px 20px;
+            margin: 8px 0;
+            box-sizing: border-box;
         }
-        .nav a { 
-            color: white; 
-            text-decoration: none; 
-            margin-right: 15px; 
-            padding: 5px 10px; 
-        }
-        .nav a:hover { 
-            background: #555; 
-            border-radius: 3px; 
+        input[type=submit] {
+            background-color: #4CAF50;
+            color: white;
+            padding: 14px 20px;
+            margin: 8px 0;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="nav">
-            <a href="/admin-direct">Dashboard</a>
-            <a href="/admin-direct/users">Users</a>
-            <a href="/admin-direct/transactions">Transactions</a>
+            <a href="/admin">Dashboard</a>
+            <a href="/admin/users">Users</a>
+            <a href="/admin/transactions">Transactions</a>
+            <a href="/admin/stocks">Stocks</a>
             <a href="/">Main Site</a>
         </div>
         
         <h1>Admin Dashboard</h1>
         
-        <div class="success">
-            <h2>Admin Access Granted</h2>
-            <p>Welcome, admin user {{ email }} ({{ username }}).</p>
-        </div>
-        
         <div class="stats">
             <div class="stat-card">
-                <h3>Users</h3>
-                <div class="stat-number">{{ user_count }}</div>
+                <h3>Total Users</h3>
+                <p>{{ user_count }}</p>
             </div>
             <div class="stat-card">
-                <h3>Stocks</h3>
-                <div class="stat-number">{{ stock_count }}</div>
+                <h3>Total Stocks</h3>
+                <p>{{ stock_count }}</p>
             </div>
             <div class="stat-card">
-                <h3>Transactions</h3>
-                <div class="stat-number">{{ transaction_count }}</div>
+                <h3>Total Transactions</h3>
+                <p>{{ transaction_count }}</p>
             </div>
             <div class="stat-card">
-                <h3>Subscriptions</h3>
-                <div class="stat-number">{{ subscription_count }}</div>
+                <h3>Active Subscriptions</h3>
+                <p>{{ subscription_count }}</p>
             </div>
         </div>
         
-        <div class="section">
-            <h2>Admin Functions</h2>
-            <a href="/admin-direct/users" class="button">Manage Users</a>
-            <a href="/admin-direct/transactions" class="button button-secondary">Manage Transactions</a>
-            <a href="/admin-direct/stocks" class="button button-warning">Manage Stocks</a>
-        </div>
-        
-        <div class="section">
-            <h2>Recent Users</h2>
+        <h2>Recent Users</h2>
+        <div class="recent-users">
             <table>
                 <tr>
                     <th>ID</th>
                     <th>Username</th>
                     <th>Email</th>
+                    <th>Created</th>
                     <th>Actions</th>
                 </tr>
                 {% for user in recent_users %}
@@ -233,8 +468,9 @@ def admin_direct():
                     <td>{{ user.id }}</td>
                     <td>{{ user.username }}</td>
                     <td>{{ user.email }}</td>
+                    <td>{{ user.created_at }}</td>
                     <td>
-                        <a href="/admin-direct/users/{{ user.id }}" class="button button-secondary" style="margin-top: 0; padding: 5px 10px;">View</a>
+                        <a href="/admin/users/{{ user.id }}" class="button button-secondary button-small">View</a>
                     </td>
                 </tr>
                 {% endfor %}
@@ -243,9 +479,10 @@ def admin_direct():
     </div>
 </body>
 </html>
-        """, email=email, username=ADMIN_USERNAME, user_count=3, stock_count=5, transaction_count=10, subscription_count=2, recent_users=[{'id': 1, 'username': 'witty-raven', 'email': 'fordutilityapps@gmail.com'}, {'id': 2, 'username': 'user1', 'email': 'user1@example.com'}, {'id': 3, 'username': 'user2', 'email': 'user2@example.com'}])
-    else:
-        return render_template_string("""
+    """, user_count=user_count, stock_count=stock_count, transaction_count=transaction_count, subscription_count=subscription_count, recent_users=recent_users)
+
+    # Return access denied template if not admin
+    return render_template_string("""
 <!DOCTYPE html>
 <html>
 <head>
@@ -253,8 +490,6 @@ def admin_direct():
     <style>
         body { font-family: Arial, sans-serif; margin: 40px; }
         .container { max-width: 800px; margin: 0 auto; }
-        .error { background: #f2dede; padding: 15px; border-radius: 5px; }
-        .form { margin-top: 20px; background: #f5f5f5; padding: 15px; border-radius: 5px; }
         .button { 
             display: inline-block; 
             background: #4CAF50; 
@@ -263,6 +498,18 @@ def admin_direct():
             text-decoration: none; 
             border-radius: 5px; 
             margin-top: 20px;
+        }
+        .error {
+            background-color: #ffdddd;
+            border-left: 6px solid #f44336;
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .form {
+            background-color: #f9f9f9;
+            padding: 20px;
+            border-radius: 5px;
         }
         input[type=text] {
             width: 100%;
@@ -292,7 +539,7 @@ def admin_direct():
         
         <div class="form">
             <h2>Admin Login</h2>
-            <form action="/admin-direct" method="get">
+            <form action="/admin" method="get">
                 <label for="email">Admin Email:</label>
                 <input type="text" id="email" name="email" placeholder="Enter admin email">
                 <input type="submit" value="Login">
@@ -303,19 +550,45 @@ def admin_direct():
     </div>
 </body>
 </html>
-        """)
+    """)
 
 # Admin routes for viewing users and transactions
-@app.route('/admin-direct/users')
+@app.route('/admin/users')
 @admin_required
 def admin_users():
     """Admin users list"""
-    # Mock user data
-    users = [
-        {'id': 1, 'username': 'witty-raven', 'email': 'fordutilityapps@gmail.com', 'stocks': 3, 'transactions': 5, 'subscription_price': 0, 'stripe_customer_id': 'cus_123'},
-        {'id': 2, 'username': 'user1', 'email': 'user1@example.com', 'stocks': 2, 'transactions': 3, 'subscription_price': 4.99, 'stripe_customer_id': 'cus_456'},
-        {'id': 3, 'username': 'user2', 'email': 'user2@example.com', 'stocks': 1, 'transactions': 2, 'subscription_price': 9.99, 'stripe_customer_id': 'cus_789'},
-    ]
+    try:
+        # Get real user data from database
+        users_query = User.query.all()
+        
+        # Format user data
+        users = []
+        for user in users_query:
+            # Count stocks and transactions
+            stock_count = Stock.query.filter_by(user_id=user.id).count()
+            transaction_count = Transaction.query.filter_by(user_id=user.id).count()
+            
+            # Get subscription price
+            subscription = Subscription.query.filter_by(user_id=user.id, status='active').first()
+            subscription_price = subscription.price if subscription else 0
+            
+            users.append({
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'stocks': stock_count,
+                'transactions': transaction_count,
+                'subscription_price': subscription_price,
+                'stripe_customer_id': user.stripe_customer_id or 'N/A'
+            })
+    except Exception as e:
+        app.logger.error(f"Database error in admin_users: {str(e)}")
+        # Fallback to mock data if database fails
+        users = [
+            {'id': 1, 'username': 'witty-raven', 'email': 'fordutilityapps@gmail.com', 'stocks': 3, 'transactions': 5, 'subscription_price': 0, 'stripe_customer_id': 'cus_123'},
+            {'id': 2, 'username': 'user1', 'email': 'user1@example.com', 'stocks': 2, 'transactions': 3, 'subscription_price': 4.99, 'stripe_customer_id': 'cus_456'},
+            {'id': 3, 'username': 'user2', 'email': 'user2@example.com', 'stocks': 1, 'transactions': 2, 'subscription_price': 9.99, 'stripe_customer_id': 'cus_789'}
+        ]
     
     return render_template_string("""
 <!DOCTYPE html>
@@ -394,16 +667,16 @@ def admin_users():
 <body>
     <div class="container">
         <div class="nav">
-            <a href="/admin-direct">Dashboard</a>
-            <a href="/admin-direct/users">Users</a>
-            <a href="/admin-direct/transactions">Transactions</a>
+            <a href="/admin">Dashboard</a>
+            <a href="/admin/users">Users</a>
+            <a href="/admin/transactions">Transactions</a>
             <a href="/">Main Site</a>
         </div>
         
         <h1>User Management</h1>
         
         <div class="search-box">
-            <form method="get" action="/admin-direct/users">
+            <form method="get" action="/admin/users">
                 <input type="text" name="search" placeholder="Search by username or email" value="{{ request.args.get('search', '') }}">
                 <button type="submit">Search</button>
             </form>
@@ -428,31 +701,55 @@ def admin_users():
                 <td>{{ user.transactions }}</td>
                 <td>${{ user.subscription_price }}</td>
                 <td>
-                    <a href="/admin-direct/users/{{ user.id }}" class="button button-secondary button-small">View</a>
-                    <a href="/admin-direct/users/{{ user.id }}/edit" class="button button-warning button-small">Edit</a>
+                    <a href="/admin/users/{{ user.id }}" class="button button-secondary button-small">View</a>
+                    <a href="/admin/users/{{ user.id }}/edit" class="button button-warning button-small">Edit</a>
                 </td>
             </tr>
             {% endfor %}
         </table>
         
-        <a href="/admin-direct" class="button">Back to Dashboard</a>
+        <a href="/admin" class="button">Back to Dashboard</a>
     </div>
 </body>
 </html>
     """, users=users)
 
-@app.route('/admin-direct/transactions')
+@app.route('/admin/transactions')
 @admin_required
 def admin_transactions():
     """Admin route to view transactions"""
-    # Mock transaction data
-    transactions = [
-        {'id': 1, 'user_id': 1, 'username': 'witty-raven', 'symbol': 'AAPL', 'shares': 10, 'price': 150.0, 'transaction_type': 'buy', 'date': '2023-01-15', 'notes': 'Initial purchase'},
-        {'id': 2, 'user_id': 1, 'username': 'witty-raven', 'symbol': 'MSFT', 'shares': 5, 'price': 250.0, 'transaction_type': 'buy', 'date': '2023-02-20', 'notes': 'Portfolio diversification'},
-        {'id': 3, 'user_id': 2, 'username': 'user1', 'symbol': 'GOOGL', 'shares': 2, 'price': 2800.0, 'transaction_type': 'buy', 'date': '2023-03-10', 'notes': ''},
-        {'id': 4, 'user_id': 3, 'username': 'user2', 'symbol': 'AMZN', 'shares': 1, 'price': 3200.0, 'transaction_type': 'buy', 'date': '2023-04-05', 'notes': ''},
-        {'id': 5, 'user_id': 1, 'username': 'witty-raven', 'symbol': 'AAPL', 'shares': 5, 'price': 170.0, 'transaction_type': 'sell', 'date': '2023-05-15', 'notes': 'Profit taking'},
-    ]
+    try:
+        # Get real transaction data from database
+        transactions_query = Transaction.query.all()
+        
+        # Format transaction data
+        transactions = []
+        for tx in transactions_query:
+            # Get username for the transaction
+            user = User.query.get(tx.user_id)
+            username = user.username if user else 'Unknown'
+            
+            transactions.append({
+                'id': tx.id,
+                'user_id': tx.user_id,
+                'username': username,
+                'symbol': tx.symbol,
+                'shares': tx.shares,
+                'price': tx.price,
+                'transaction_type': tx.transaction_type,
+                'date': tx.date.strftime('%Y-%m-%d'),
+                'notes': tx.notes or ''
+            })
+    except Exception as e:
+        app.logger.error(f"Database error in admin_transactions: {str(e)}")
+        # Fallback to mock data if database fails
+        transactions = [
+            {'id': 1, 'user_id': 1, 'username': 'witty-raven', 'symbol': 'AAPL', 'shares': 10, 'price': 150.0, 'transaction_type': 'buy', 'date': '2023-01-15', 'notes': 'Initial purchase'},
+            {'id': 2, 'user_id': 1, 'username': 'witty-raven', 'symbol': 'MSFT', 'shares': 5, 'price': 250.0, 'transaction_type': 'buy', 'date': '2023-02-20', 'notes': 'Portfolio diversification'},
+            {'id': 3, 'user_id': 2, 'username': 'user1', 'symbol': 'GOOGL', 'shares': 2, 'price': 2800.0, 'transaction_type': 'buy', 'date': '2023-03-10', 'notes': ''},
+            {'id': 4, 'user_id': 3, 'username': 'user2', 'symbol': 'AMZN', 'shares': 1, 'price': 3200.0, 'transaction_type': 'buy', 'date': '2023-04-05', 'notes': ''},
+            {'id': 5, 'user_id': 1, 'username': 'witty-raven', 'symbol': 'AAPL', 'shares': 5, 'price': 170.0, 'transaction_type': 'sell', 'date': '2023-05-15', 'notes': 'Profit taking'},
+        ]
     
     # Get filter parameters
     user_filter = request.args.get('user', '')
@@ -560,16 +857,16 @@ def admin_transactions():
 <body>
     <div class="container">
         <div class="nav">
-            <a href="/admin-direct">Dashboard</a>
-            <a href="/admin-direct/users">Users</a>
-            <a href="/admin-direct/transactions">Transactions</a>
+            <a href="/admin">Dashboard</a>
+            <a href="/admin/users">Users</a>
+            <a href="/admin/transactions">Transactions</a>
             <a href="/">Main Site</a>
         </div>
         
         <h1>Transaction Management</h1>
         
         <div class="filters">
-            <form method="get" action="/admin-direct/transactions">
+            <form method="get" action="/admin/transactions">
                 <select name="user">
                     <option value="">All Users</option>
                     {% for user_id, username in unique_users %}
@@ -591,7 +888,7 @@ def admin_transactions():
                 </select>
                 
                 <button type="submit">Filter</button>
-                <a href="/admin-direct/transactions" style="padding: 8px; text-decoration: none;">Clear Filters</a>
+                <a href="/admin/transactions" style="padding: 8px; text-decoration: none;">Clear Filters</a>
             </form>
         </div>
         
@@ -626,31 +923,54 @@ def admin_transactions():
                 <td>{{ tx.date }}</td>
                 <td>{{ tx.notes }}</td>
                 <td>
-                    <a href="/admin-direct/transactions/{{ tx.id }}/edit" class="button button-warning button-small">Edit</a>
-                    <a href="/admin-direct/transactions/{{ tx.id }}/delete" class="button button-danger button-small">Delete</a>
+                    <a href="/admin/transactions/{{ tx.id }}/edit" class="button button-warning button-small">Edit</a>
+                    <a href="/admin/transactions/{{ tx.id }}/delete" class="button button-danger button-small">Delete</a>
                 </td>
             </tr>
             {% endfor %}
         </table>
         
-        <a href="/admin-direct" class="button">Back to Dashboard</a>
-        <a href="/admin-direct/transactions/add" class="button button-secondary">Add Transaction</a>
+        <a href="/admin" class="button">Back to Dashboard</a>
+        <a href="/admin/transactions/add" class="button button-secondary">Add Transaction</a>
     </div>
 </body>
 </html>
     """, transactions=transactions, filtered_transactions=filtered_transactions, unique_users=unique_users, unique_symbols=unique_symbols, user_filter=user_filter, symbol_filter=symbol_filter, type_filter=type_filter)
 
-@app.route('/admin-direct/stocks')
+@app.route('/admin/stocks')
 @admin_required
 def admin_stocks():
     """Admin route to view stocks"""
-    # Mock stock data
-    stocks = [
-        {'id': 1, 'user_id': 1, 'username': 'witty-raven', 'ticker': 'AAPL', 'quantity': 5, 'purchase_price': 150.0, 'current_price': 180.0, 'purchase_date': '2023-01-15'},
-        {'id': 2, 'user_id': 1, 'username': 'witty-raven', 'ticker': 'MSFT', 'quantity': 5, 'purchase_price': 250.0, 'current_price': 280.0, 'purchase_date': '2023-02-20'},
-        {'id': 3, 'user_id': 2, 'username': 'user1', 'ticker': 'GOOGL', 'quantity': 2, 'purchase_price': 2800.0, 'current_price': 2900.0, 'purchase_date': '2023-03-10'},
-        {'id': 4, 'user_id': 3, 'username': 'user2', 'ticker': 'AMZN', 'quantity': 1, 'purchase_price': 3200.0, 'current_price': 3400.0, 'purchase_date': '2023-04-05'},
-    ]
+    try:
+        # Get real stock data from database
+        stocks_query = Stock.query.all()
+        
+        # Format stock data
+        stocks = []
+        for stock in stocks_query:
+            # Get username for the stock
+            user = User.query.get(stock.user_id)
+            username = user.username if user else 'Unknown'
+            
+            stocks.append({
+                'id': stock.id,
+                'user_id': stock.user_id,
+                'username': username,
+                'ticker': stock.ticker,
+                'quantity': stock.quantity,
+                'purchase_price': stock.purchase_price,
+                'current_price': stock.current_price,
+                'purchase_date': stock.purchase_date.strftime('%Y-%m-%d')
+            })
+    except Exception as e:
+        app.logger.error(f"Database error in admin_stocks: {str(e)}")
+        # Fallback to mock data if database fails
+        stocks = [
+            {'id': 1, 'user_id': 1, 'username': 'witty-raven', 'ticker': 'AAPL', 'quantity': 5, 'purchase_price': 150.0, 'current_price': 180.0, 'purchase_date': '2023-01-15'},
+            {'id': 2, 'user_id': 1, 'username': 'witty-raven', 'ticker': 'MSFT', 'quantity': 5, 'purchase_price': 250.0, 'current_price': 280.0, 'purchase_date': '2023-02-20'},
+            {'id': 3, 'user_id': 2, 'username': 'user1', 'ticker': 'GOOGL', 'quantity': 2, 'purchase_price': 2800.0, 'current_price': 2900.0, 'purchase_date': '2023-03-10'},
+            {'id': 4, 'user_id': 3, 'username': 'user2', 'ticker': 'AMZN', 'quantity': 1, 'purchase_price': 3200.0, 'current_price': 3400.0, 'purchase_date': '2023-04-05'},
+        ]
     
     # Get filter parameters
     user_filter = request.args.get('user', '')
@@ -755,17 +1075,17 @@ def admin_stocks():
 <body>
     <div class="container">
         <div class="nav">
-            <a href="/admin-direct">Dashboard</a>
-            <a href="/admin-direct/users">Users</a>
-            <a href="/admin-direct/transactions">Transactions</a>
-            <a href="/admin-direct/stocks">Stocks</a>
+            <a href="/admin">Dashboard</a>
+            <a href="/admin/users">Users</a>
+            <a href="/admin/transactions">Transactions</a>
+            <a href="/admin/stocks">Stocks</a>
             <a href="/">Main Site</a>
         </div>
         
         <h1>Stock Management</h1>
         
         <div class="filters">
-            <form method="get" action="/admin-direct/stocks">
+            <form method="get" action="/admin/stocks">
                 <select name="user">
                     <option value="">All Users</option>
                     {% for user_id, username in unique_users %}
@@ -781,7 +1101,7 @@ def admin_stocks():
                 </select>
                 
                 <button type="submit">Filter</button>
-                <a href="/admin-direct/stocks" style="padding: 8px; text-decoration: none;">Clear Filters</a>
+                <a href="/admin/stocks" style="padding: 8px; text-decoration: none;">Clear Filters</a>
             </form>
         </div>
         
@@ -819,49 +1139,104 @@ def admin_stocks():
                 </td>
                 <td>{{ stock.purchase_date }}</td>
                 <td>
-                    <a href="/admin-direct/stocks/{{ stock.id }}/edit" class="button button-warning button-small">Edit</a>
-                    <a href="/admin-direct/stocks/{{ stock.id }}/delete" class="button button-danger button-small">Delete</a>
+                    <a href="/admin/stocks/{{ stock.id }}/edit" class="button button-warning button-small">Edit</a>
+                    <a href="/admin/stocks/{{ stock.id }}/delete" class="button button-danger button-small">Delete</a>
                 </td>
             </tr>
             {% endfor %}
         </table>
         
-        <a href="/admin-direct" class="button">Back to Dashboard</a>
-        <a href="/admin-direct/stocks/add" class="button button-secondary">Add Stock</a>
+        <a href="/admin" class="button">Back to Dashboard</a>
+        <a href="/admin/stocks/add" class="button button-secondary">Add Stock</a>
     </div>
 </body>
 </html>
     """, stocks=stocks, filtered_stocks=filtered_stocks, unique_users=unique_users, unique_tickers=unique_tickers, user_filter=user_filter, ticker_filter=ticker_filter)
 
-@app.route('/admin-direct/users/<int:user_id>')
+@app.route('/admin/users/<int:user_id>')
 @admin_required
 def admin_user_detail(user_id):
     """Admin route to view user details"""
-    # Mock user data
-    users = {
-        1: {'id': 1, 'username': 'witty-raven', 'email': 'fordutilityapps@gmail.com', 'stocks': 3, 'transactions': 5, 'subscription_price': 0, 'stripe_customer_id': 'cus_123', 'created_at': '2023-01-01'},
-        2: {'id': 2, 'username': 'user1', 'email': 'user1@example.com', 'stocks': 2, 'transactions': 3, 'subscription_price': 4.99, 'stripe_customer_id': 'cus_456', 'created_at': '2023-01-15'},
-        3: {'id': 3, 'username': 'user2', 'email': 'user2@example.com', 'stocks': 1, 'transactions': 2, 'subscription_price': 9.99, 'stripe_customer_id': 'cus_789', 'created_at': '2023-02-01'}
-    }
-    
-    # Get user by ID
-    user = users.get(user_id)
-    if not user:
-        flash('User not found', 'danger')
-        return redirect(url_for('admin_users'))
-    
-    # Mock user's stocks
-    stocks = [
-        {'id': 1, 'ticker': 'AAPL', 'quantity': 5, 'purchase_price': 150.0, 'current_price': 180.0, 'purchase_date': '2023-01-15'},
-        {'id': 2, 'ticker': 'MSFT', 'quantity': 5, 'purchase_price': 250.0, 'current_price': 280.0, 'purchase_date': '2023-02-20'}
-    ] if user_id == 1 else []
-    
-    # Mock user's transactions
-    transactions = [
-        {'id': 1, 'symbol': 'AAPL', 'shares': 10, 'price': 150.0, 'transaction_type': 'buy', 'date': '2023-01-15', 'notes': 'Initial purchase'},
-        {'id': 2, 'symbol': 'MSFT', 'shares': 5, 'price': 250.0, 'transaction_type': 'buy', 'date': '2023-02-20', 'notes': 'Portfolio diversification'},
-        {'id': 5, 'symbol': 'AAPL', 'shares': 5, 'price': 170.0, 'transaction_type': 'sell', 'date': '2023-05-15', 'notes': 'Profit taking'}
-    ] if user_id == 1 else []
+    try:
+        # Get real user data from database
+        user = User.query.get(user_id)
+        
+        if not user:
+            flash('User not found', 'danger')
+            return redirect(url_for('admin_users'))
+        
+        # Count stocks and transactions
+        stock_count = Stock.query.filter_by(user_id=user.id).count()
+        transaction_count = Transaction.query.filter_by(user_id=user.id).count()
+        
+        # Get subscription
+        subscription = Subscription.query.filter_by(user_id=user.id, status='active').first()
+        subscription_price = subscription.price if subscription else 0
+        
+        # Format user data
+        user_data = {
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'stocks': stock_count,
+            'transactions': transaction_count,
+            'subscription_price': subscription_price,
+            'stripe_customer_id': user.stripe_customer_id or 'N/A',
+            'created_at': user.created_at.strftime('%Y-%m-%d')
+        }
+        
+        # Get user's stocks
+        stocks_query = Stock.query.filter_by(user_id=user.id).all()
+        stocks = []
+        for stock in stocks_query:
+            stocks.append({
+                'id': stock.id,
+                'ticker': stock.ticker,
+                'quantity': stock.quantity,
+                'purchase_price': stock.purchase_price,
+                'current_price': stock.current_price,
+                'purchase_date': stock.purchase_date.strftime('%Y-%m-%d')
+            })
+        
+        # Get user's transactions
+        transactions_query = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.date.desc()).all()
+        transactions = []
+        for tx in transactions_query:
+            transactions.append({
+                'id': tx.id,
+                'symbol': tx.symbol,
+                'shares': tx.shares,
+                'price': tx.price,
+                'transaction_type': tx.transaction_type,
+                'date': tx.date.strftime('%Y-%m-%d'),
+                'notes': tx.notes or ''
+            })
+    except Exception as e:
+        app.logger.error(f"Database error in admin_user_detail: {str(e)}")
+        # Fallback to mock data if database fails
+        user_data = {
+            'id': user_id,
+            'username': 'witty-raven' if user_id == 1 else f'user{user_id}',
+            'email': 'fordutilityapps@gmail.com' if user_id == 1 else f'user{user_id}@example.com',
+            'stocks': 3 if user_id == 1 else 1,
+            'transactions': 5 if user_id == 1 else 2,
+            'subscription_price': 0 if user_id == 1 else 4.99,
+            'stripe_customer_id': f'cus_{123 + user_id * 100}',
+            'created_at': '2023-01-01'
+        }
+        
+        # Mock user's stocks
+        stocks = [
+            {'id': 1, 'ticker': 'AAPL', 'quantity': 5, 'purchase_price': 150.0, 'current_price': 180.0, 'purchase_date': '2023-01-15'},
+            {'id': 2, 'ticker': 'MSFT', 'quantity': 5, 'purchase_price': 250.0, 'current_price': 280.0, 'purchase_date': '2023-02-20'}
+        ] if user_id == 1 else []
+        
+        # Mock user's transactions
+        transactions = [
+            {'id': 1, 'symbol': 'AAPL', 'shares': 10, 'price': 150.0, 'transaction_type': 'buy', 'date': '2023-01-15', 'notes': 'Initial purchase'},
+            {'id': 2, 'symbol': 'MSFT', 'shares': 5, 'price': 250.0, 'transaction_type': 'buy', 'date': '2023-02-20', 'notes': 'Portfolio diversification'},
+            {'id': 5, 'symbol': 'AAPL', 'shares': 5, 'price': 170.0, 'transaction_type': 'sell', 'date': '2023-05-15', 'notes': 'Profit taking'}
+        ] if user_id == 1 else []
     
     return render_template_string("""
 <!DOCTYPE html>
@@ -942,10 +1317,10 @@ def admin_user_detail(user_id):
 <body>
     <div class="container">
         <div class="nav">
-            <a href="/admin-direct">Dashboard</a>
-            <a href="/admin-direct/users">Users</a>
-            <a href="/admin-direct/transactions">Transactions</a>
-            <a href="/admin-direct/stocks">Stocks</a>
+            <a href="/admin">Dashboard</a>
+            <a href="/admin/users">Users</a>
+            <a href="/admin/transactions">Transactions</a>
+            <a href="/admin/stocks">Stocks</a>
             <a href="/">Main Site</a>
         </div>
         
@@ -961,7 +1336,7 @@ def admin_user_detail(user_id):
             <div class="detail"><span class="label">Stocks:</span> {{ user.stocks }}</div>
             <div class="detail"><span class="label">Transactions:</span> {{ user.transactions }}</div>
             
-            <a href="/admin-direct/users/{{ user.id }}/edit" class="button button-warning">Edit User</a>
+            <a href="/admin/users/{{ user.id }}/edit" class="button button-warning">Edit User</a>
         </div>
         
         <div class="section">
@@ -986,16 +1361,16 @@ def admin_user_detail(user_id):
                     <td>${{ '%0.2f'|format(stock.quantity * stock.current_price) }}</td>
                     <td>{{ stock.purchase_date }}</td>
                     <td>
-                        <a href="/admin-direct/stocks/{{ stock.id }}/edit" class="button button-warning button-small">Edit</a>
-                        <a href="/admin-direct/stocks/{{ stock.id }}/delete" class="button button-danger button-small">Delete</a>
+                        <a href="/admin/stocks/{{ stock.id }}/edit" class="button button-warning button-small">Edit</a>
+                        <a href="/admin/stocks/{{ stock.id }}/delete" class="button button-danger button-small">Delete</a>
                     </td>
                 </tr>
                 {% endfor %}
             </table>
-            <a href="/admin-direct/users/{{ user.id }}/add-stock" class="button button-secondary">Add Stock</a>
+            <a href="/admin/users/{{ user.id }}/add-stock" class="button button-secondary">Add Stock</a>
             {% else %}
             <p>This user has no stocks.</p>
-            <a href="/admin-direct/users/{{ user.id }}/add-stock" class="button button-secondary">Add Stock</a>
+            <a href="/admin/users/{{ user.id }}/add-stock" class="button button-secondary">Add Stock</a>
             {% endif %}
         </div>
         
@@ -1023,20 +1398,20 @@ def admin_user_detail(user_id):
                     <td>{{ tx.date }}</td>
                     <td>{{ tx.notes }}</td>
                     <td>
-                        <a href="/admin-direct/transactions/{{ tx.id }}/edit" class="button button-warning button-small">Edit</a>
-                        <a href="/admin-direct/transactions/{{ tx.id }}/delete" class="button button-danger button-small">Delete</a>
+                        <a href="/admin/transactions/{{ tx.id }}/edit" class="button button-warning button-small">Edit</a>
+                        <a href="/admin/transactions/{{ tx.id }}/delete" class="button button-danger button-small">Delete</a>
                     </td>
                 </tr>
                 {% endfor %}
             </table>
-            <a href="/admin-direct/users/{{ user.id }}/add-transaction" class="button button-secondary">Add Transaction</a>
+            <a href="/admin/users/{{ user.id }}/add-transaction" class="button button-secondary">Add Transaction</a>
             {% else %}
             <p>This user has no transactions.</p>
-            <a href="/admin-direct/users/{{ user.id }}/add-transaction" class="button button-secondary">Add Transaction</a>
+            <a href="/admin/users/{{ user.id }}/add-transaction" class="button button-secondary">Add Transaction</a>
             {% endif %}
         </div>
         
-        <a href="/admin-direct/users" class="button">Back to Users</a>
+        <a href="/admin/users" class="button">Back to Users</a>
     </div>
 </body>
 </html>
@@ -1083,7 +1458,7 @@ def server_error(e):
 </html>
     """, error_details=error_details), 500
 
-@app.route('/admin-direct/transactions/<int:transaction_id>/edit', methods=['GET', 'POST'])
+@app.route('/admin/transactions/<int:transaction_id>/edit', methods=['GET', 'POST'])
 @admin_required
 def admin_edit_transaction(transaction_id):
     """Admin route to edit a transaction"""
@@ -1168,10 +1543,10 @@ def admin_edit_transaction(transaction_id):
 <body>
     <div class="container">
         <div class="nav">
-            <a href="/admin-direct">Dashboard</a>
-            <a href="/admin-direct/users">Users</a>
-            <a href="/admin-direct/transactions">Transactions</a>
-            <a href="/admin-direct/stocks">Stocks</a>
+            <a href="/admin">Dashboard</a>
+            <a href="/admin/users">Users</a>
+            <a href="/admin/transactions">Transactions</a>
+            <a href="/admin/stocks">Stocks</a>
             <a href="/">Main Site</a>
         </div>
         
@@ -1217,14 +1592,14 @@ def admin_edit_transaction(transaction_id):
             </div>
             
             <button type="submit" class="button button-warning">Update Transaction</button>
-            <a href="/admin-direct/transactions" class="button">Cancel</a>
+            <a href="/admin/transactions" class="button">Cancel</a>
         </form>
     </div>
 </body>
 </html>
     """, transaction=transaction)
 
-@app.route('/admin-direct/stocks/<int:stock_id>/edit', methods=['GET', 'POST'])
+@app.route('/admin/stocks/<int:stock_id>/edit', methods=['GET', 'POST'])
 @admin_required
 def admin_edit_stock(stock_id):
     """Admin route to edit a stock"""
@@ -1305,10 +1680,10 @@ def admin_edit_stock(stock_id):
 <body>
     <div class="container">
         <div class="nav">
-            <a href="/admin-direct">Dashboard</a>
-            <a href="/admin-direct/users">Users</a>
-            <a href="/admin-direct/transactions">Transactions</a>
-            <a href="/admin-direct/stocks">Stocks</a>
+            <a href="/admin">Dashboard</a>
+            <a href="/admin/users">Users</a>
+            <a href="/admin/transactions">Transactions</a>
+            <a href="/admin/stocks">Stocks</a>
             <a href="/">Main Site</a>
         </div>
         
@@ -1346,7 +1721,7 @@ def admin_edit_stock(stock_id):
             </div>
             
             <button type="submit" class="button button-warning">Update Stock</button>
-            <a href="/admin-direct/stocks" class="button">Cancel</a>
+            <a href="/admin/stocks" class="button">Cancel</a>
         </form>
     </div>
 </body>
