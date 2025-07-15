@@ -3,10 +3,8 @@ Vercel serverless function handler for the Flask app.
 This is a standalone version with admin access functionality.
 """
 import os
-from flask import Flask, render_template_string, redirect, url_for, request, session, flash, jsonify
+from flask import Flask, render_template_string, redirect, url_for, request, session, flash
 from datetime import datetime
-import requests
-import json
 
 # Create a Flask app
 app = Flask(__name__)
