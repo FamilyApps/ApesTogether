@@ -770,6 +770,23 @@ def stripe_webhook():
     return 'Success', 200
 
 
+# Register the admin blueprint
+try:
+    from admin_interface import admin_bp
+    app.register_blueprint(admin_bp)
+    print("Admin blueprint registered successfully")
+except ImportError as e:
+    print(f"Could not register admin blueprint: {e}")
+
+# Register the admin debug blueprint
+try:
+    from admin_route_debug import debug_bp
+    app.register_blueprint(debug_bp)
+    print("Admin debug blueprint registered successfully")
+except ImportError as e:
+    print(f"Could not register admin debug blueprint: {e}")
+
+
 if __name__ == '__main__':
     # In development, run with debug mode
     if os.environ.get('FLASK_ENV') == 'development':

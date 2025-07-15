@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+
+{% block title %}Admin - Add Stock{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>Add Stock for {{ user.username }}</h1>
+        <div>
+            <a href="{{ url_for('admin.user_detail', user_id=user.id) }}" class="btn btn-secondary">Back to User Details</a>
+        </div>
+    </div>
+    
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0">Add Stock to Portfolio</h5>
+        </div>
+        <div class="card-body">
+            <form method="POST">
+                <div class="mb-3">
+                    <label for="symbol" class="form-label">Stock Symbol</label>
+                    <input type="text" class="form-control" id="symbol" name="symbol" required>
+                    <div class="form-text">Enter the stock ticker symbol (e.g., AAPL, MSFT, GOOG)</div>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="shares" class="form-label">Number of Shares</label>
+                    <input type="number" step="0.01" class="form-control" id="shares" name="shares" required>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="price" class="form-label">Purchase Price per Share ($)</label>
+                    <input type="number" step="0.01" class="form-control" id="price" name="price" required>
+                </div>
+                
+                <button type="submit" class="btn btn-success">Add Stock</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

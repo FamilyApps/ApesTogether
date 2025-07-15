@@ -1,0 +1,59 @@
+{% extends 'base.html' %}
+
+{% block title %}Admin Debug{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1>Admin Debug Information</h1>
+    
+    <div class="card mb-4">
+        <div class="card-header">
+            <h3>User Information</h3>
+        </div>
+        <div class="card-body">
+            {% if current_user.is_authenticated %}
+                <p><strong>Logged in as:</strong> {{ current_user.email }}</p>
+                <p><strong>Username:</strong> {{ current_user.username }}</p>
+                <p><strong>User ID:</strong> {{ current_user.id }}</p>
+                <p><strong>Is Admin:</strong> 
+                    {% if current_user.email == 'fordutilityapps@gmail.com' and current_user.username == 'witty-raven' %}
+                        Yes
+                    {% else %}
+                        No
+                    {% endif %}
+                </p>
+            {% else %}
+                <p>Not logged in</p>
+            {% endif %}
+        </div>
+    </div>
+    
+    <div class="card mb-4">
+        <div class="card-header">
+            <h3>Environment Information</h3>
+        </div>
+        <div class="card-body">
+            <p><strong>FLASK_ENV:</strong> {{ env_info.flask_env }}</p>
+            <p><strong>FLASK_DEBUG:</strong> {{ env_info.flask_debug }}</p>
+            <p><strong>Admin Blueprint Registered:</strong> {{ env_info.admin_bp_registered }}</p>
+            <p><strong>Debug Blueprint Registered:</strong> {{ env_info.debug_bp_registered }}</p>
+        </div>
+    </div>
+    
+    <div class="card mb-4">
+        <div class="card-header">
+            <h3>Admin Routes</h3>
+        </div>
+        <div class="card-body">
+            <p>The following admin routes should be available:</p>
+            <ul>
+                {% for route in admin_routes %}
+                <li>
+                    <a href="{{ route.url }}">{{ route.name }}</a> - {{ route.methods }}
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}
