@@ -280,16 +280,48 @@ def debug_info():
 def run_migration():
     """Temporary endpoint to run the database migration"""
     try:
-        # Import the migration function
-        from migrations import run_migration as execute_migration
+        # Execute the migration directly
+        if not DATABASE_URL:
+            return jsonify({
+                'status': 'error',
+                'message': 'No database URL found in environment variables'
+            }), 500
         
-        # Run the migration
-        execute_migration()
+        # Connect to the database
+        from sqlalchemy import create_engine, text
         
-        return jsonify({
-            'status': 'success',
-            'message': 'Migration completed successfully'
-        })
+        # Make sure DATABASE_URL is properly formatted for SQLAlchemy
+        db_url = DATABASE_URL
+        if db_url.startswith('postgres://'):
+            db_url = db_url.replace('postgres://', 'postgresql://', 1)
+        
+        engine = create_engine(db_url)
+        conn = engine.connect()
+        
+        # Check if created_at column already exists
+        try:
+            # Try to select the created_at column to see if it exists
+            conn.execute(text('SELECT created_at FROM "user" LIMIT 1'))
+            conn.commit()
+            return jsonify({
+                'status': 'success',
+                'message': 'created_at column already exists in User table'
+            })
+        except Exception:
+            # Column doesn't exist, so add it
+            try:
+                # Add created_at column with current timestamp as default
+                conn.execute(text('ALTER TABLE "user" ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP'))
+                conn.commit()
+                return jsonify({
+                    'status': 'success',
+                    'message': 'Migration completed successfully: added created_at column to User table'
+                })
+            except Exception as e:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Failed to add created_at column: {str(e)}'
+                }), 500
     except Exception as e:
         return jsonify({
             'status': 'error',
