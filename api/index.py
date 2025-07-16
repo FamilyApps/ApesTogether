@@ -288,40 +288,67 @@ def run_migration():
             }), 500
         
         # Connect to the database
-        from sqlalchemy import create_engine, text
+        import sqlalchemy
+        from sqlalchemy import create_engine, text, inspect
+        import psycopg2
         
         # Make sure DATABASE_URL is properly formatted for SQLAlchemy
         db_url = DATABASE_URL
         if db_url.startswith('postgres://'):
             db_url = db_url.replace('postgres://', 'postgresql://', 1)
         
-        engine = create_engine(db_url)
-        conn = engine.connect()
+        # Direct connection with psycopg2 for more control
+        # Extract connection parameters from the URL
+        from urllib.parse import urlparse
+        parsed_url = urlparse(db_url)
+        dbname = parsed_url.path[1:]
+        user = parsed_url.username
+        password = parsed_url.password
+        host = parsed_url.hostname
+        port = parsed_url.port or 5432
         
-        # Check if created_at column already exists
+        # Connect with psycopg2
         try:
-            # Try to select the created_at column to see if it exists
-            conn.execute(text('SELECT created_at FROM "user" LIMIT 1'))
-            conn.commit()
-            return jsonify({
-                'status': 'success',
-                'message': 'created_at column already exists in User table'
-            })
-        except Exception:
-            # Column doesn't exist, so add it
-            try:
-                # Add created_at column with current timestamp as default
-                conn.execute(text('ALTER TABLE "user" ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP'))
-                conn.commit()
+            conn = psycopg2.connect(
+                dbname=dbname,
+                user=user,
+                password=password,
+                host=host,
+                port=port
+            )
+            conn.autocommit = True  # Important: set autocommit mode
+            cursor = conn.cursor()
+            
+            # Check if column exists
+            cursor.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'user' AND column_name = 'created_at'
+            """)
+            column_exists = cursor.fetchone() is not None
+            
+            if column_exists:
+                return jsonify({
+                    'status': 'success',
+                    'message': 'created_at column already exists in User table'
+                })
+            else:
+                # Add the column
+                cursor.execute('ALTER TABLE "user" ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
                 return jsonify({
                     'status': 'success',
                     'message': 'Migration completed successfully: added created_at column to User table'
                 })
-            except Exception as e:
-                return jsonify({
-                    'status': 'error',
-                    'message': f'Failed to add created_at column: {str(e)}'
-                }), 500
+        except Exception as e:
+            return jsonify({
+                'status': 'error',
+                'message': f'Database operation failed: {str(e)}'
+            }), 500
+        finally:
+            if 'cursor' in locals():
+                cursor.close()
+            if 'conn' in locals():
+                conn.close()
     except Exception as e:
         return jsonify({
             'status': 'error',
