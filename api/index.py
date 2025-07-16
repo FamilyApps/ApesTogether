@@ -22,13 +22,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Get environment variables with fallbacks
-DATABASE_URL = os.environ.get('DATABASE_URL')
+# Check for DATABASE_URL first, then fall back to POSTGRES_PRISMA_URL if available
+DATABASE_URL = os.environ.get('DATABASE_URL') or os.environ.get('POSTGRES_PRISMA_URL')
 SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-key-for-testing')
 VERCEL_ENV = os.environ.get('VERCEL_ENV')
 
 # Log environment information
 logger.info(f"Starting app with VERCEL_ENV: {VERCEL_ENV}")
 logger.info(f"DATABASE_URL present: {'Yes' if DATABASE_URL else 'No'}")
+logger.info(f"POSTGRES_PRISMA_URL present: {'Yes' if os.environ.get('POSTGRES_PRISMA_URL') else 'No'}")
 logger.info(f"SECRET_KEY present: {'Yes' if SECRET_KEY else 'No'}")
 
 # Configure database with error handling
@@ -247,6 +249,8 @@ def debug_info():
         debug_info = {
             'vercel_env': os.environ.get('VERCEL_ENV', 'Not set'),
             'database_url_exists': bool(os.environ.get('DATABASE_URL')),
+            'postgres_prisma_url_exists': bool(os.environ.get('POSTGRES_PRISMA_URL')),
+            'effective_database_url_exists': bool(DATABASE_URL),
             'secret_key_exists': bool(os.environ.get('SECRET_KEY')),
             'python_version': sys.version,
             'current_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -1490,7 +1494,9 @@ def server_error(e):
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'path': request.path,
             'environment': os.environ.get('VERCEL_ENV', 'development'),
-            'database_url_exists': bool(os.environ.get('DATABASE_URL'))
+            'database_url_exists': bool(os.environ.get('DATABASE_URL')),
+            'postgres_prisma_url_exists': bool(os.environ.get('POSTGRES_PRISMA_URL')),
+            'effective_database_url_exists': bool(DATABASE_URL)
         }), 500
     
     # Return a custom error page with details for HTML requests
