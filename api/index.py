@@ -276,103 +276,10 @@ def debug_info():
             'type': str(type(e))
         }), 500
 
-@app.route('/api/run-migration', methods=['GET'])
-def run_migration():
-    """Temporary endpoint to run the database migration"""
-    try:
-        # Execute the migration directly
-        if not DATABASE_URL:
-            return jsonify({
-                'status': 'error',
-                'message': 'No database URL found in environment variables'
-            }), 500
-        
-        # Connect to the database
-        import sqlalchemy
-        from sqlalchemy import create_engine, text, inspect
-        import psycopg2
-        
-        # Make sure DATABASE_URL is properly formatted for SQLAlchemy
-        db_url = DATABASE_URL
-        if db_url.startswith('postgres://'):
-            db_url = db_url.replace('postgres://', 'postgresql://', 1)
-        
-        # Direct connection with psycopg2 for more control
-        # Extract connection parameters from the URL
-        from urllib.parse import urlparse
-        parsed_url = urlparse(db_url)
-        dbname = parsed_url.path[1:]
-        user = parsed_url.username
-        password = parsed_url.password
-        host = parsed_url.hostname
-        port = parsed_url.port or 5432
-        
-        # Connect with psycopg2
-        try:
-            conn = psycopg2.connect(
-                dbname=dbname,
-                user=user,
-                password=password,
-                host=host,
-                port=port
-            )
-            conn.autocommit = True  # Important: set autocommit mode
-            cursor = conn.cursor()
-            
-            # Check if created_at column exists
-            cursor.execute("""
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_name = 'user' AND column_name = 'created_at'
-            """)
-            created_at_exists = cursor.fetchone() is not None
-            
-            # Check if stripe_customer_id column exists
-            cursor.execute("""
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_name = 'user' AND column_name = 'stripe_customer_id'
-            """)
-            stripe_customer_id_exists = cursor.fetchone() is not None
-            
-            # Track what columns we've added
-            added_columns = []
-            
-            # Add created_at if needed
-            if not created_at_exists:
-                cursor.execute('ALTER TABLE "user" ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
-                added_columns.append('created_at')
-            
-            # Add stripe_customer_id if needed
-            if not stripe_customer_id_exists:
-                cursor.execute('ALTER TABLE "user" ADD COLUMN stripe_customer_id VARCHAR(120)')
-                added_columns.append('stripe_customer_id')
-            
-            if added_columns:
-                return jsonify({
-                    'status': 'success',
-                    'message': f"Migration completed successfully: added {', '.join(added_columns)} column(s) to User table"
-                })
-            else:
-                return jsonify({
-                    'status': 'success',
-                    'message': 'All required columns already exist in User table'
-                })
-        except Exception as e:
-            return jsonify({
-                'status': 'error',
-                'message': f'Database operation failed: {str(e)}'
-            }), 500
-        finally:
-            if 'cursor' in locals():
-                cursor.close()
-            if 'conn' in locals():
-                conn.close()
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': f'Migration failed: {str(e)}'
-        }), 500
+# Migration endpoint has been removed for security reasons after successful database schema update
+# The migration added the following columns to the User table:
+# - created_at (TIMESTAMP DEFAULT CURRENT_TIMESTAMP)
+# - stripe_customer_id (VARCHAR(120))
 
 @app.route('/')
 def index():
