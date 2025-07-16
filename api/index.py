@@ -16,12 +16,36 @@ load_dotenv()
 # Initialize Flask app
 app = Flask(__name__)
 
-# Configure database
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///app.db')
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+# Set up error logging
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Initialize database
-db = SQLAlchemy(app)
+# Get environment variables with fallbacks
+DATABASE_URL = os.environ.get('DATABASE_URL')
+SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-key-for-testing')
+VERCEL_ENV = os.environ.get('VERCEL_ENV')
+
+# Log environment information
+logger.info(f"Starting app with VERCEL_ENV: {VERCEL_ENV}")
+logger.info(f"DATABASE_URL present: {'Yes' if DATABASE_URL else 'No'}")
+logger.info(f"SECRET_KEY present: {'Yes' if SECRET_KEY else 'No'}")
+
+# Configure database with error handling
+try:
+    # Make sure DATABASE_URL is properly formatted for SQLAlchemy
+    if DATABASE_URL and DATABASE_URL.startswith('postgres://'):
+        DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+    
+    app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL or 'sqlite:///app.db'
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    
+    # Initialize database
+    db = SQLAlchemy(app)
+    logger.info("Database initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize database: {str(e)}")
+    # Continue without database to allow basic functionality
 
 # Define database models
 class User(db.Model):
@@ -212,6 +236,38 @@ HOME_HTML = """
 </body>
 </html>
 """
+
+# Add diagnostic route for troubleshooting
+@app.route('/api/debug')
+def debug_info():
+    """Return debug information about the environment"""
+    import sys
+    try:
+        # Collect environment information
+        debug_info = {
+            'vercel_env': os.environ.get('VERCEL_ENV', 'Not set'),
+            'database_url_exists': bool(os.environ.get('DATABASE_URL')),
+            'secret_key_exists': bool(os.environ.get('SECRET_KEY')),
+            'python_version': sys.version,
+            'current_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        # Test database connection
+        try:
+            # Try to query the database
+            user_count = User.query.count()
+            debug_info['database_connection'] = 'Success'
+            debug_info['user_count'] = user_count
+        except Exception as e:
+            debug_info['database_connection'] = 'Failed'
+            debug_info['database_error'] = str(e)
+        
+        return jsonify(debug_info)
+    except Exception as e:
+        return jsonify({
+            'error': str(e),
+            'type': str(type(e))
+        }), 500
 
 @app.route('/')
 def index():
@@ -1423,8 +1479,21 @@ def server_error(e):
     """Handle 500 errors with detailed information"""
     # Get error details
     error_details = str(e)
+    logger.error(f"500 error: {error_details}")
     
-    # Return a custom error page with details
+    # Check if this is an API request
+    if request.path.startswith('/api/'):
+        return jsonify({
+            'error': 'Internal Server Error',
+            'details': error_details,
+            'status': 500,
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'path': request.path,
+            'environment': os.environ.get('VERCEL_ENV', 'development'),
+            'database_url_exists': bool(os.environ.get('DATABASE_URL'))
+        }), 500
+    
+    # Return a custom error page with details for HTML requests
     return render_template_string("""
 <!DOCTYPE html>
 <html>
