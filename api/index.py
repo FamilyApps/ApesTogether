@@ -55,7 +55,7 @@ class User(db.Model):
     username = db.Column(db.String(80), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(200), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # created_at column removed to match production schema
     stripe_customer_id = db.Column(db.String(120), nullable=True)
     stocks = db.relationship('Stock', backref='user', lazy=True)
     transactions = db.relationship('Transaction', backref='user', lazy=True)
