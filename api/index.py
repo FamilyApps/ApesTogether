@@ -9,6 +9,7 @@ from datetime import datetime
 from functools import wraps
 from dotenv import load_dotenv
 from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
 
 # Load environment variables
 load_dotenv()
@@ -44,7 +45,9 @@ try:
     
     # Initialize database
     db = SQLAlchemy(app)
-    logger.info("Database initialized successfully")
+    # Initialize Flask-Migrate
+    migrate = Migrate(app, db)
+    logger.info("Database and migrations initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize database: {str(e)}")
     # Continue without database to allow basic functionality
@@ -55,7 +58,7 @@ class User(db.Model):
     username = db.Column(db.String(80), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(200), nullable=False)
-    # created_at column removed to match production schema
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
     stripe_customer_id = db.Column(db.String(120), nullable=True)
     stocks = db.relationship('Stock', backref='user', lazy=True)
     transactions = db.relationship('Transaction', backref='user', lazy=True)
