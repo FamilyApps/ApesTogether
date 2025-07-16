@@ -276,6 +276,26 @@ def debug_info():
             'type': str(type(e))
         }), 500
 
+@app.route('/api/run-migration', methods=['GET'])
+def run_migration():
+    """Temporary endpoint to run the database migration"""
+    try:
+        # Import the migration function
+        from migrations import run_migration as execute_migration
+        
+        # Run the migration
+        execute_migration()
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Migration completed successfully'
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Migration failed: {str(e)}'
+        }), 500
+
 @app.route('/')
 def index():
     """Main landing page"""
