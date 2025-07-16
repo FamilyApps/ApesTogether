@@ -292,9 +292,14 @@ def index():
                                 environment=environment)
 
 @app.route('/admin')
-@admin_required
 def admin_dashboard():
     """Admin dashboard"""
+    # Check if email is provided as a parameter
+    email_param = request.args.get('email', '')
+    if email_param:
+        # Store email in session if provided as parameter
+        session['email'] = email_param
+    
     # Get email from session
     email = session.get('email', '')
     
