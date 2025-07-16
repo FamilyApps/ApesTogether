@@ -319,25 +319,44 @@ def run_migration():
             conn.autocommit = True  # Important: set autocommit mode
             cursor = conn.cursor()
             
-            # Check if column exists
+            # Check if created_at column exists
             cursor.execute("""
                 SELECT column_name 
                 FROM information_schema.columns 
                 WHERE table_name = 'user' AND column_name = 'created_at'
             """)
-            column_exists = cursor.fetchone() is not None
+            created_at_exists = cursor.fetchone() is not None
             
-            if column_exists:
+            # Check if stripe_customer_id column exists
+            cursor.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'user' AND column_name = 'stripe_customer_id'
+            """)
+            stripe_customer_id_exists = cursor.fetchone() is not None
+            
+            # Track what columns we've added
+            added_columns = []
+            
+            # Add created_at if needed
+            if not created_at_exists:
+                cursor.execute('ALTER TABLE "user" ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
+                added_columns.append('created_at')
+            
+            # Add stripe_customer_id if needed
+            if not stripe_customer_id_exists:
+                cursor.execute('ALTER TABLE "user" ADD COLUMN stripe_customer_id VARCHAR(120)')
+                added_columns.append('stripe_customer_id')
+            
+            if added_columns:
                 return jsonify({
                     'status': 'success',
-                    'message': 'created_at column already exists in User table'
+                    'message': f"Migration completed successfully: added {', '.join(added_columns)} column(s) to User table"
                 })
             else:
-                # Add the column
-                cursor.execute('ALTER TABLE "user" ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
                 return jsonify({
                     'status': 'success',
-                    'message': 'Migration completed successfully: added created_at column to User table'
+                    'message': 'All required columns already exist in User table'
                 })
         except Exception as e:
             return jsonify({
