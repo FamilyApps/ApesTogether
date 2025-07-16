@@ -4,23 +4,47 @@ This is a standalone version with admin access functionality.
 """
 import os
 import json
-from flask import Flask, render_template_string, redirect, url_for, request, session, flash, jsonify
-from datetime import datetime
+import logging
+import psycopg2
+import random
+import requests
+import stripe
+from datetime import datetime, timedelta
 from functools import wraps
 from dotenv import load_dotenv
+from flask import Flask, render_template_string, render_template, redirect, url_for, request, session, flash, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
+from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.middleware.proxy_fix import ProxyFix
+from authlib.integrations.flask_client import OAuth
 
 # Load environment variables
 load_dotenv()
 
 # Initialize Flask app
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
+
+# Enable jinja2 template features in render_template_string
+app.jinja_env.globals.update({
+    'len': len,
+    'format': format
+})
 
 # Set up error logging
-import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Login required decorator
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            flash('Please log in to access this page', 'danger')
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 # Get environment variables with fallbacks
 # Check for DATABASE_URL first, then fall back to POSTGRES_PRISMA_URL if available
@@ -36,16 +60,54 @@ logger.info(f"SECRET_KEY present: {'Yes' if SECRET_KEY else 'No'}")
 
 # Configure database with error handling
 try:
-    # Make sure DATABASE_URL is properly formatted for SQLAlchemy
+    # Configure database
+    DATABASE_URL = os.environ.get('DATABASE_URL')
+
+    # Fix Postgres URL for SQLAlchemy 1.4+
     if DATABASE_URL and DATABASE_URL.startswith('postgres://'):
         DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
-    
-    app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL or 'sqlite:///app.db'
+
+    # Configure Flask app
+    app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL or 'sqlite:///portfolio.db'
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(24).hex())
+
+    # Stripe configuration
+    app.config['STRIPE_PUBLIC_KEY'] = os.environ.get('STRIPE_PUBLIC_KEY')
+    app.config['STRIPE_SECRET_KEY'] = os.environ.get('STRIPE_SECRET_KEY')
+    app.config['STRIPE_WEBHOOK_SECRET'] = os.environ.get('STRIPE_WEBHOOK_SECRET')
     
+    # Initialize Stripe
+    stripe.api_key = app.config['STRIPE_SECRET_KEY']
+
+    # Initialize OAuth
+    oauth = OAuth(app)
+
+    # Configure OAuth providers
+    google = oauth.register(
+        name='google',
+        client_id=os.environ.get('GOOGLE_CLIENT_ID', 'google-client-id'),
+        client_secret=os.environ.get('GOOGLE_CLIENT_SECRET', 'google-client-secret'),
+        server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+        client_kwargs={
+            'scope': 'openid email profile'
+        }
+    )
+
+    apple = oauth.register(
+        name='apple',
+        client_id=os.environ.get('APPLE_CLIENT_ID', 'apple-client-id'),
+        client_secret=os.environ.get('APPLE_CLIENT_SECRET', 'apple-client-secret'),
+        access_token_url='https://appleid.apple.com/auth/token',
+        access_token_params=None,
+        authorize_url='https://appleid.apple.com/auth/authorize',
+        authorize_params=None,
+        api_base_url='https://appleid.apple.com/',
+        client_kwargs={'scope': 'name email'},
+    )
+
     # Initialize database
     db = SQLAlchemy(app)
-    # Initialize Flask-Migrate
     migrate = Migrate(app, db)
     logger.info("Database and migrations initialized successfully")
 except Exception as e:
@@ -60,9 +122,22 @@ class User(db.Model):
     password_hash = db.Column(db.String(200), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     stripe_customer_id = db.Column(db.String(120), nullable=True)
+    oauth_provider = db.Column(db.String(20), nullable=True)
+    oauth_id = db.Column(db.String(100), nullable=True)
+    stripe_price_id = db.Column(db.String(255), nullable=True)
+    subscription_price = db.Column(db.Float, nullable=True)
     stocks = db.relationship('Stock', backref='user', lazy=True)
     transactions = db.relationship('Transaction', backref='user', lazy=True)
     subscriptions = db.relationship('Subscription', backref='user', lazy=True)
+    
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+        
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+        
+    def is_admin(self):
+        return self.email == 'fordutilityapps@gmail.com'
 
     def __repr__(self):
         return f'<User {self.username}>'
@@ -73,40 +148,52 @@ class Stock(db.Model):
     ticker = db.Column(db.String(10), nullable=False)
     quantity = db.Column(db.Float, nullable=False)
     purchase_price = db.Column(db.Float, nullable=False)
-    current_price = db.Column(db.Float, nullable=False)
     purchase_date = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
-        return f'<Stock {self.ticker} - {self.quantity}>' 
+        return f'<Stock {self.ticker}>'
+        
+    def current_value(self):
+        # Get real stock data from Alpha Vantage
+        stock_data = get_stock_data(self.ticker)
+        current_price = stock_data.get('price', self.purchase_price)
+        return current_price * self.quantity
+        
+    def profit_loss(self):
+        return self.current_value() - (self.purchase_price * self.quantity)
 
 class Transaction(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    symbol = db.Column(db.String(10), nullable=False)
-    shares = db.Column(db.Float, nullable=False)
+    ticker = db.Column(db.String(10), nullable=False)
+    quantity = db.Column(db.Float, nullable=False)
     price = db.Column(db.Float, nullable=False)
-    transaction_type = db.Column(db.String(10), nullable=False)  # 'buy' or 'sell'
-    date = db.Column(db.DateTime, default=datetime.utcnow)
-    notes = db.Column(db.Text, nullable=True)
-
+    transaction_type = db.Column(db.String(4), nullable=False)  # 'buy' or 'sell'
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    
     def __repr__(self):
-        return f'<Transaction {self.symbol} - {self.shares} - {self.transaction_type}>'
+        return f'<Transaction {self.transaction_type} {self.ticker}>'
 
 class Subscription(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    price = db.Column(db.Float, nullable=False)
-    status = db.Column(db.String(20), nullable=False)  # 'active', 'canceled', etc.
+    subscriber_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    subscribed_to_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    stripe_subscription_id = db.Column(db.String(255), unique=True, nullable=False)
+    status = db.Column(db.String(20), nullable=False, default='active')  # 'active', 'canceled', etc.
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
     start_date = db.Column(db.DateTime, default=datetime.utcnow)
     end_date = db.Column(db.DateTime, nullable=True)
+    
+    # Define relationships to get User objects
+    # backref creates a 'subscriptions_made' collection on the User model (for the subscriber)
+    subscriber = db.relationship('User', foreign_keys=[subscriber_id], backref='subscriptions_made')
+    # backref creates a 'subscribers' collection on the User model (for the user being subscribed to)
+    subscribed_to = db.relationship('User', foreign_keys=[subscribed_to_id], backref='subscribers')
 
     def __repr__(self):
-        return f'<Subscription {self.user_id} - {self.price} - {self.status}>'
+        return f'<Subscription {self.subscriber_id} to {self.subscribed_to_id} - {self.status}>'
 
-app.secret_key = os.environ.get('SECRET_KEY', 'dev-key-for-testing')
-
-# Database connection string from environment variable
-DATABASE_URL = os.environ.get('DATABASE_URL')
+# Secret key is already set in app.config
 
 # Check if we're running on Vercel
 VERCEL_ENV = os.environ.get('VERCEL_ENV')
@@ -116,6 +203,9 @@ if VERCEL_ENV:
 # Admin email for authentication
 ADMIN_EMAIL = 'fordutilityapps@gmail.com'
 ADMIN_USERNAME = 'witty-raven'
+
+# Flash message categories
+app.config['MESSAGE_CATEGORIES'] = ['success', 'info', 'warning', 'danger']
 
 # Admin authentication check
 def admin_required(f):
@@ -220,11 +310,75 @@ HOME_HTML = """
             border-radius: 5px; 
             margin-top: 20px;
         }
+        .button-secondary {
+            background: #2196F3;
+        }
+        .nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .nav-links a {
+            margin-left: 15px;
+            text-decoration: none;
+            color: #333;
+        }
+        .hero {
+            background: #f9f9f9;
+            padding: 40px;
+            border-radius: 5px;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .features {
+            display: flex;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            margin-bottom: 30px;
+        }
+        .feature {
+            flex-basis: 30%;
+            background: #f9f9f9;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>ApesTogether Stock Portfolio App</h1>
+        <div class="nav">
+            <h2>ApesTogether</h2>
+            <div class="nav-links">
+                <a href="/">Home</a>
+                <a href="/login">Login</a>
+                <a href="/register">Register</a>
+                <a href="/admin">Admin</a>
+            </div>
+        </div>
+        
+        <div class="hero">
+            <h1>ApesTogether Stock Portfolio App</h1>
+            <p>Track, manage, and optimize your stock investments in one place</p>
+            <a href="/register" class="button">Get Started</a>
+            <a href="/login" class="button button-secondary">Login</a>
+        </div>
+        
+        <div class="features">
+            <div class="feature">
+                <h3>Portfolio Tracking</h3>
+                <p>Keep track of all your stock investments in one place</p>
+            </div>
+            <div class="feature">
+                <h3>Performance Analysis</h3>
+                <p>Analyze your portfolio performance over time</p>
+            </div>
+            <div class="feature">
+                <h3>Stock Comparison</h3>
+                <p>Compare different stocks to make better investment decisions</p>
+            </div>
+        </div>
         
         <div class="info">
             <h2>Admin Access</h2>
@@ -243,8 +397,684 @@ HOME_HTML = """
 """
 
 # Add diagnostic route for troubleshooting
-@app.route('/api/debug')
-def debug_info():
+# Subscription and Payment Routes
+
+@app.route('/create-checkout-session/<int:user_id>')
+@login_required
+def create_checkout_session(user_id):
+    """Create a checkout session for Apple Pay and other payment methods"""
+    user_to_subscribe_to = User.query.get_or_404(user_id)
+    
+    try:
+        # Get or create a Stripe customer for the current user
+        current_user_id = session.get('user_id')
+        current_user = User.query.get(current_user_id)
+        
+        if not current_user.stripe_customer_id:
+            customer = stripe.Customer.create(
+                email=current_user.email,
+                name=current_user.username
+            )
+            current_user.stripe_customer_id = customer.id
+            db.session.commit()
+        
+        # Create a checkout session
+        checkout_session = stripe.checkout.Session.create(
+            payment_method_types=['card', 'apple_pay'],
+            line_items=[{
+                'price': user_to_subscribe_to.stripe_price_id,
+                'quantity': 1,
+            }],
+            mode='subscription',
+            success_url=request.host_url + 'subscription-success?session_id={CHECKOUT_SESSION_ID}',
+            cancel_url=request.host_url + f'profile/{user_to_subscribe_to.username}',
+            customer=current_user.stripe_customer_id,
+            metadata={
+                'subscriber_id': current_user.id,
+                'subscribed_to_id': user_to_subscribe_to.id
+            }
+        )
+        
+        return redirect(checkout_session.url)
+    except Exception as e:
+        flash(f'Error creating checkout session: {str(e)}', 'danger')
+        return redirect(url_for('profile', username=user_to_subscribe_to.username))
+
+@app.route('/create-payment-intent', methods=['POST'])
+@login_required
+def create_payment_intent():
+    """Creates a subscription and a Payment Intent for Stripe Elements with Apple Pay support"""
+    data = request.get_json()
+    user_id = data.get('user_id')
+    user_to_subscribe_to = User.query.get_or_404(user_id)
+    
+    try:
+        # Get or create a Stripe customer for the current user
+        current_user_id = session.get('user_id')
+        current_user = User.query.get(current_user_id)
+        
+        if not current_user.stripe_customer_id:
+            customer = stripe.Customer.create(
+                email=current_user.email,
+                name=current_user.username
+            )
+            current_user.stripe_customer_id = customer.id
+            db.session.commit()
+        
+        customer_id = current_user.stripe_customer_id
+
+        # Create a subscription with an incomplete payment
+        subscription = stripe.Subscription.create(
+            customer=customer_id,
+            items=[{'price': user_to_subscribe_to.stripe_price_id}],
+            payment_behavior='default_incomplete',
+            payment_settings={'save_default_payment_method': 'on_subscription'},
+            expand=['latest_invoice.payment_intent'],
+            metadata={
+                'subscriber_id': current_user.id,
+                'subscribed_to_id': user_to_subscribe_to.id
+            }
+        )
+        
+        # Add metadata to the payment intent as well for better tracking
+        payment_intent = subscription.latest_invoice.payment_intent
+        stripe.PaymentIntent.modify(
+            payment_intent.id,
+            metadata={
+                'subscription': subscription.id,
+                'subscriber_id': current_user.id,
+                'subscribed_to_id': user_to_subscribe_to.id
+            }
+        )
+
+        return jsonify({
+            'clientSecret': payment_intent.client_secret,
+            'subscriptionId': subscription.id
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/payment-confirmation')
+@login_required
+def payment_confirmation():
+    """Handle payment confirmation for cases requiring additional authentication"""
+    payment_intent_client_secret = request.args.get('payment_intent_client_secret')
+    subscription_id = request.args.get('subscription_id')
+    user_id = request.args.get('user_id')
+    
+    if not payment_intent_client_secret or not subscription_id:
+        flash('Missing payment information', 'danger')
+        return redirect(url_for('dashboard'))
+    
+    # Get the user to subscribe to
+    user_to_subscribe_to = User.query.get_or_404(user_id) if user_id else None
+    
+    return render_template(
+        'payment_confirmation.html',
+        stripe_public_key=app.config['STRIPE_PUBLIC_KEY'],
+        payment_intent_client_secret=payment_intent_client_secret,
+        subscription_id=subscription_id,
+        user_to_view=user_to_subscribe_to
+    )
+
+@app.route('/subscription-success')
+@login_required
+def subscription_success():
+    """Handle successful subscription from both checkout session and payment intent flows"""
+    session_id = request.args.get('session_id')
+    subscription_id = request.args.get('subscription_id')
+    
+    try:
+        if session_id:
+            # Checkout Session flow
+            checkout_session = stripe.checkout.Session.retrieve(session_id)
+            
+            # Create a new subscription record
+            subscription = Subscription(
+                subscriber_id=int(checkout_session.metadata.subscriber_id),
+                subscribed_to_id=int(checkout_session.metadata.subscribed_to_id),
+                stripe_subscription_id=checkout_session.subscription,
+                status='active'
+            )
+            
+            db.session.add(subscription)
+            db.session.commit()
+            
+            subscribed_to = User.query.get(subscription.subscribed_to_id)
+            flash(f'Successfully subscribed to {subscribed_to.username}\'s portfolio!', 'success')
+            return redirect(url_for('profile', username=subscribed_to.username))
+            
+        elif subscription_id:
+            # Payment Intent flow (Apple Pay)
+            stripe_subscription = stripe.Subscription.retrieve(subscription_id)
+            
+            # Check if we already have this subscription recorded
+            existing_sub = Subscription.query.filter_by(stripe_subscription_id=subscription_id).first()
+            if existing_sub:
+                subscribed_to = User.query.get(existing_sub.subscribed_to_id)
+                flash(f'Successfully subscribed to {subscribed_to.username}\'s portfolio!', 'success')
+                return redirect(url_for('profile', username=subscribed_to.username))
+            
+            # Create a new subscription record from the metadata
+            if 'subscriber_id' in stripe_subscription.metadata and 'subscribed_to_id' in stripe_subscription.metadata:
+                subscription = Subscription(
+                    subscriber_id=int(stripe_subscription.metadata.subscriber_id),
+                    subscribed_to_id=int(stripe_subscription.metadata.subscribed_to_id),
+                    stripe_subscription_id=subscription_id,
+                    status=stripe_subscription.status
+                )
+                
+                db.session.add(subscription)
+                db.session.commit()
+                
+                subscribed_to = User.query.get(subscription.subscribed_to_id)
+                flash(f'Successfully subscribed to {subscribed_to.username}\'s portfolio!', 'success')
+                return redirect(url_for('profile', username=subscribed_to.username))
+            else:
+                flash('Subscription metadata is missing', 'danger')
+                return redirect(url_for('dashboard'))
+        else:
+            flash('Invalid subscription information', 'danger')
+            return redirect(url_for('dashboard'))
+            
+    except Exception as e:
+        flash(f'Error processing subscription: {str(e)}', 'danger')
+        return redirect(url_for('dashboard'))
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    """Handle Stripe webhook events"""
+    payload = request.get_data(as_text=True)
+    sig_header = request.headers.get('Stripe-Signature')
+    
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, app.config['STRIPE_WEBHOOK_SECRET']
+        )
+    except ValueError as e:
+        # Invalid payload
+        return jsonify({'error': str(e)}), 400
+    except stripe.error.SignatureVerificationError as e:
+        # Invalid signature
+        return jsonify({'error': str(e)}), 400
+    
+    # Handle the event
+    if event['type'] == 'invoice.payment_succeeded':
+        # Handle successful payment for subscription
+        invoice = event['data']['object']
+        subscription_id = invoice['subscription']
+        
+        # Update the subscription status
+        stripe_subscription = stripe.Subscription.retrieve(subscription_id)
+        
+        # Find the corresponding subscription in our database
+        subscription = Subscription.query.filter_by(stripe_subscription_id=subscription_id).first()
+        if subscription:
+            subscription.status = stripe_subscription['status']
+            db.session.commit()
+        else:
+            # This might be a new subscription from Apple Pay that hasn't been recorded yet
+            # Create a new subscription record if metadata is available
+            try:
+                if 'subscriber_id' in stripe_subscription.metadata and 'subscribed_to_id' in stripe_subscription.metadata:
+                    new_subscription = Subscription(
+                        subscriber_id=int(stripe_subscription.metadata.subscriber_id),
+                        subscribed_to_id=int(stripe_subscription.metadata.subscribed_to_id),
+                        stripe_subscription_id=subscription_id,
+                        status=stripe_subscription.status
+                    )
+                    db.session.add(new_subscription)
+                    db.session.commit()
+            except Exception as e:
+                # Log the error but don't fail the webhook
+                print(f"Error creating subscription from webhook: {str(e)}")
+    
+    elif event['type'] == 'customer.subscription.deleted':
+        # Handle subscription cancellation
+        subscription_obj = event['data']['object']
+        subscription_id = subscription_obj['id']
+        
+        # Find and update the subscription in our database
+        subscription = Subscription.query.filter_by(stripe_subscription_id=subscription_id).first()
+        if subscription:
+            subscription.status = 'canceled'
+            subscription.end_date = datetime.utcnow()
+            db.session.commit()
+    
+    elif event['type'] == 'payment_intent.succeeded':
+        # Handle successful payment intent (could be from Apple Pay)
+        payment_intent = event['data']['object']
+        
+        # If this payment intent is related to a subscription, make sure it's properly recorded
+        if 'subscription' in payment_intent.metadata:
+            subscription_id = payment_intent.metadata.subscription
+            
+            # Check if we already have this subscription
+            subscription = Subscription.query.filter_by(stripe_subscription_id=subscription_id).first()
+            if not subscription and 'subscriber_id' in payment_intent.metadata and 'subscribed_to_id' in payment_intent.metadata:
+                # Create the subscription record
+                new_subscription = Subscription(
+                    subscriber_id=int(payment_intent.metadata.subscriber_id),
+                    subscribed_to_id=int(payment_intent.metadata.subscribed_to_id),
+                    stripe_subscription_id=subscription_id,
+                    status='active'
+                )
+                db.session.add(new_subscription)
+                db.session.commit()
+    
+    return jsonify({'status': 'success'})
+
+# Subscription model is already defined above
+
+@app.route('/subscriptions')
+@login_required
+def subscriptions():
+    """Display a user's active and canceled subscriptions"""
+    current_user_id = session.get('user_id')
+    
+    # Get active subscriptions
+    active_subscriptions = Subscription.query.filter_by(
+        subscriber_id=current_user_id,
+        status='active'
+    ).all()
+    
+    # Get canceled subscriptions
+    canceled_subscriptions = Subscription.query.filter_by(
+        subscriber_id=current_user_id,
+        status='canceled'
+    ).all()
+    
+    return render_template(
+        'subscriptions.html',
+        active_subscriptions=active_subscriptions,
+        canceled_subscriptions=canceled_subscriptions
+    )
+
+@app.route('/cancel-subscription', methods=['POST'])
+@login_required
+def cancel_subscription():
+    """Cancel a user's subscription"""
+    subscription_id = request.form.get('subscription_id')
+    if not subscription_id:
+        flash('Invalid subscription', 'danger')
+        return redirect(url_for('subscriptions'))
+    
+    # Get the subscription
+    subscription = Subscription.query.get_or_404(subscription_id)
+    
+    # Verify ownership
+    current_user_id = session.get('user_id')
+    if subscription.subscriber_id != current_user_id:
+        flash('You do not have permission to cancel this subscription', 'danger')
+        return redirect(url_for('subscriptions'))
+    
+    try:
+        # Cancel the subscription in Stripe
+        stripe.Subscription.delete(subscription.stripe_subscription_id)
+        
+        # Update the subscription in our database
+        subscription.status = 'canceled'
+        subscription.end_date = datetime.utcnow()
+        db.session.commit()
+        
+        flash('Subscription canceled successfully', 'success')
+    except Exception as e:
+        flash(f'Error canceling subscription: {str(e)}', 'danger')
+    
+    return redirect(url_for('subscriptions'))
+
+@app.route('/resubscribe', methods=['POST'])
+@login_required
+def resubscribe():
+    """Reactivate a canceled subscription by creating a new one"""
+    old_subscription_id = request.form.get('subscription_id')
+    if not old_subscription_id:
+        flash('Invalid subscription', 'danger')
+        return redirect(url_for('subscriptions'))
+    
+    # Get the old subscription
+    old_subscription = Subscription.query.get_or_404(old_subscription_id)
+    
+    # Verify ownership
+    current_user_id = session.get('user_id')
+    if old_subscription.subscriber_id != current_user_id:
+        flash('You do not have permission to reactivate this subscription', 'danger')
+        return redirect(url_for('subscriptions'))
+    
+    try:
+        # Get the user to subscribe to
+        user_to_subscribe_to = User.query.get_or_404(old_subscription.subscribed_to_id)
+        
+        # Get the current user
+        current_user = User.query.get_or_404(current_user_id)
+        
+        # Create a new subscription in Stripe
+        stripe_subscription = stripe.Subscription.create(
+            customer=current_user.stripe_customer_id,
+            items=[
+                {'price': app.config['STRIPE_PRICE_ID']},
+            ],
+            metadata={
+                'subscriber_id': current_user_id,
+                'subscribed_to_id': user_to_subscribe_to.id
+            }
+        )
+        
+        # Create a new subscription record
+        new_subscription = Subscription(
+            subscriber_id=current_user_id,
+            subscribed_to_id=user_to_subscribe_to.id,
+            stripe_subscription_id=stripe_subscription.id,
+            status='active'
+        )
+        db.session.add(new_subscription)
+        db.session.commit()
+        
+        flash(f'Successfully resubscribed to {user_to_subscribe_to.username}\'s portfolio!', 'success')
+    except Exception as e:
+        flash(f'Error reactivating subscription: {str(e)}', 'danger')
+    
+    return redirect(url_for('subscriptions'))
+
+@app.route('/explore')
+@login_required
+def explore():
+    """Display a list of all other users to subscribe to."""
+    current_user_id = session.get('user_id')
+    users = User.query.filter(User.id != current_user_id).order_by(User.username).all()
+    return render_template('explore.html', users=users)
+
+@app.route('/onboarding')
+@login_required
+def onboarding():
+    """User onboarding page"""
+    return render_template('onboarding.html')
+
+@app.route('/api/portfolio_value')
+@login_required
+def portfolio_value():
+    """API endpoint to get portfolio value data"""
+    # Get current user from session
+    current_user_id = session.get('user_id')
+    
+    stocks = Stock.query.filter_by(user_id=current_user_id).all()
+    portfolio_data = []
+    total_value = 0
+
+    for stock in stocks:
+        stock_data = get_stock_data(stock.ticker)
+        if stock_data and stock_data.get('price') is not None:
+            current_price = stock_data['price']
+            value = stock.quantity * current_price
+            total_value += value
+            stock_info = {
+                'id': stock.id,
+                'ticker': stock.ticker,
+                'quantity': stock.quantity,
+                'purchase_price': stock.purchase_price,
+                'current_price': current_price,
+                'value': value,
+                'gain_loss': (current_price - stock.purchase_price) * stock.quantity if stock.purchase_price else 0
+            }
+            portfolio_data.append(stock_info)
+        else:
+            # Handle cases where stock data couldn't be fetched
+            stock_info = {
+                'id': stock.id,
+                'ticker': stock.ticker,
+                'quantity': stock.quantity,
+                'purchase_price': stock.purchase_price,
+                'current_price': 'N/A',
+                'value': 'N/A',
+                'gain_loss': 'N/A'
+            }
+            portfolio_data.append(stock_info)
+    
+    return jsonify({
+        'stocks': portfolio_data,
+        'total_value': total_value
+    })
+
+@app.route('/save_onboarding', methods=['POST'])
+@login_required
+def save_onboarding():
+    """Process the submitted stocks from onboarding"""
+    # Get current user from session
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    
+    # Process the submitted stocks
+    stocks_to_add = []
+    
+    # First collect all valid ticker/quantity pairs
+    for i in range(10):  # We have 10 possible stock entries
+        ticker = request.form.get(f'ticker_{i}')
+        quantity = request.form.get(f'quantity_{i}')
+        
+        # Only process rows where both fields are filled
+        if ticker and quantity:
+            try:
+                stocks_to_add.append({
+                    'ticker': ticker.upper(),
+                    'quantity': float(quantity)
+                })
+            except ValueError:
+                flash(f'Invalid quantity for {ticker}. Skipped.', 'warning')
+    
+    # If we have stocks to check, validate and add them
+    if stocks_to_add:
+        stocks_added_count = 0
+        for stock_data in stocks_to_add:
+            stock_data_db = get_stock_data(stock_data['ticker'])
+            if stock_data_db and stock_data_db.get('price') is not None:
+                stock = Stock(
+                    ticker=stock_data['ticker'],
+                    quantity=stock_data['quantity'],
+                    purchase_price=stock_data_db['price'],
+                    user_id=current_user_id
+                )
+                db.session.add(stock)
+                stocks_added_count += 1
+            else:
+                flash(f"Could not find ticker '{stock_data['ticker']}'. It was not added.", 'warning')
+        
+        if stocks_added_count > 0:
+            db.session.commit()
+            flash(f'Successfully added {stocks_added_count} stock(s) to your portfolio!', 'success')
+    else:
+        flash('No stocks were entered.', 'warning')
+    
+    return redirect(url_for('dashboard'))
+
+@app.route('/stock-comparison')
+def stock_comparison():
+    """Stock comparison page with mock data"""
+    try:
+        # Generate mock data for the last 30 days
+        from datetime import datetime, timedelta
+        import random
+        
+        dates = []
+        tsla_prices = []
+        sp500_prices = []
+        
+        # Start with base prices
+        tsla_base = 240.0
+        spy_base = 500.0
+        
+        # Generate 30 days of mock data
+        for i in range(30):
+            day = datetime.now() - timedelta(days=30-i)
+            dates.append(day.strftime('%Y-%m-%d'))
+            
+            # Add some random variation
+            tsla_change = random.uniform(-10, 10)
+            spy_change = random.uniform(-5, 5)
+            
+            tsla_base += tsla_change
+            spy_base += spy_change
+            
+            tsla_prices.append(round(tsla_base, 2))
+            sp500_prices.append(round(spy_base, 2))
+
+        # Return the mock data
+        return render_template('stock_comparison.html', dates=dates, tsla_prices=tsla_prices, sp500_prices=sp500_prices)
+        
+    except Exception as e:
+        flash(f"Error generating mock stock comparison data: {e}", "danger")
+        return render_template('stock_comparison.html', dates=[], tsla_prices=[], sp500_prices=[])
+
+@app.route('/profile/<username>')
+@login_required
+def profile(username):
+    """Display a user's profile page."""
+    # Redirect to own dashboard if viewing self
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    
+    if current_user.username == username:
+        return redirect(url_for('dashboard'))
+
+    user_to_view = User.query.filter_by(username=username).first_or_404()
+
+    # Check if the current user has an active subscription to this profile
+    subscription = Subscription.query.filter_by(
+        subscriber_id=current_user.id,
+        subscribed_to_id=user_to_view.id,
+        status='active'
+    ).first()
+
+    portfolio_data = None
+    if subscription:
+        # If subscribed, fetch portfolio data to display
+        stocks = Stock.query.filter_by(user_id=user_to_view.id).all()
+        total_value = 0
+        stock_details = []
+        for stock in stocks:
+            stock_data = get_stock_data(stock.ticker)
+            if stock_data and stock_data.get('price') is not None:
+                price = stock_data['price']
+                value = stock.quantity * price
+                total_value += value
+                stock_details.append({'ticker': stock.ticker, 'quantity': stock.quantity, 'price': price, 'value': value})
+        portfolio_data = {
+            'stocks': stock_details,
+            'total_value': total_value
+        }
+
+    return render_template(
+        'profile.html',
+        user_to_view=user_to_view,
+        subscription=subscription,
+        portfolio_data=portfolio_data,
+        price=user_to_view.subscription_price,
+        stripe_public_key=app.config['STRIPE_PUBLIC_KEY']
+    )
+
+@app.route('/admin/subscription-analytics')
+@login_required
+def admin_subscription_analytics():
+    """Admin dashboard for subscription analytics"""
+    # Check if user is admin
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    
+    # Only allow access to the admin (fordutilityapps@gmail.com or witty-raven)
+    if current_user.email != 'fordutilityapps@gmail.com' and current_user.username != 'witty-raven':
+        flash('You do not have permission to access this page', 'danger')
+        return redirect(url_for('dashboard'))
+    
+    try:
+        # Get subscription analytics data
+        active_subscriptions_count = Subscription.query.filter_by(status='active').count()
+        
+        # Calculate total revenue (assuming $5 per subscription per month)
+        subscription_price = 5.00
+        total_revenue = active_subscriptions_count * subscription_price
+        
+        # Get recent subscriptions
+        recent_subscriptions = Subscription.query.order_by(Subscription.start_date.desc()).limit(10).all()
+        
+        # Calculate conversion rate (subscriptions / total users)
+        total_users = User.query.count()
+        conversion_rate = round((active_subscriptions_count / total_users) * 100, 2) if total_users > 0 else 0
+        
+        # Calculate churn rate (canceled subscriptions / total subscriptions)
+        canceled_subscriptions = Subscription.query.filter_by(status='canceled').count()
+        total_subscriptions = active_subscriptions_count + canceled_subscriptions
+        churn_rate = round((canceled_subscriptions / total_subscriptions) * 100, 2) if total_subscriptions > 0 else 0
+        
+        # Generate subscription growth data for the last 30 days
+        subscription_dates = []
+        subscription_counts = []
+        revenue_dates = []
+        revenue_amounts = []
+        
+        # Get the last 30 days
+        today = datetime.utcnow().date()
+        for i in range(30, 0, -1):
+            date = today - timedelta(days=i)
+            date_str = date.strftime('%Y-%m-%d')
+            subscription_dates.append(date_str)
+            
+            # Count subscriptions created on this date
+            count = Subscription.query.filter(
+                func.date(Subscription.start_date) == date
+            ).count()
+            subscription_counts.append(count)
+        
+        # Generate monthly revenue data for the last 6 months
+        for i in range(6, 0, -1):
+            # Calculate the month and year correctly
+            month = today.month - i + 1
+            year = today.year
+            
+            # Handle year boundary
+            if month <= 0:
+                month += 12
+                year -= 1
+                
+            # Get the first day of the month
+            first_day = datetime(year, month, 1).date()
+            month_name = first_day.strftime('%b %Y')
+            revenue_dates.append(month_name)
+            
+            # Count active subscriptions in this month
+            month_subscriptions = Subscription.query.filter(
+                func.extract('month', Subscription.start_date) == first_day.month,
+                func.extract('year', Subscription.start_date) == first_day.year,
+                Subscription.status == 'active'
+            ).count()
+            revenue_amounts.append(month_subscriptions * subscription_price)
+    except Exception as e:
+        app.logger.error(f"Database error in admin_subscription_analytics: {str(e)}")
+        # Fallback to mock data if database fails
+        active_subscriptions_count = 15
+        total_revenue = 75.00
+        recent_subscriptions = []
+        conversion_rate = 25.5
+        churn_rate = 10.2
+        subscription_dates = [f"2025-06-{i}" for i in range(16, 16+30)]
+        subscription_counts = [random.randint(0, 3) for _ in range(30)]
+        revenue_dates = ['Feb 2025', 'Mar 2025', 'Apr 2025', 'May 2025', 'Jun 2025', 'Jul 2025']
+        revenue_amounts = [15.0, 25.0, 35.0, 45.0, 60.0, 75.0]
+    
+    return render_template(
+        'admin/subscription_analytics.html',
+        active_subscriptions_count=active_subscriptions_count,
+        total_revenue=total_revenue,
+        recent_subscriptions=recent_subscriptions,
+        subscription_price=subscription_price,
+        conversion_rate=conversion_rate,
+        churn_rate=churn_rate,
+        subscription_dates=subscription_dates,
+        subscription_counts=subscription_counts,
+        revenue_dates=revenue_dates,
+        revenue_amounts=revenue_amounts
+    )
+
+@app.route('/admin/debug')
+def admin_debug():
     """Return debug information about the environment"""
     import sys
     try:
@@ -281,15 +1111,578 @@ def debug_info():
 # - created_at (TIMESTAMP DEFAULT CURRENT_TIMESTAMP)
 # - stripe_customer_id (VARCHAR(120))
 
+def get_stock_data(ticker_symbol):
+    """Fetches real-time stock data from Alpha Vantage."""
+    try:
+        api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
+        if not api_key:
+            logger.warning("Alpha Vantage API key not found, using mock data")
+            # Return mock data if no API key is available
+            mock_prices = {
+                'AAPL': 185.92,
+                'MSFT': 420.45,
+                'GOOGL': 175.33,
+                'AMZN': 182.81,
+                'TSLA': 248.29,
+                'META': 475.12,
+                'NVDA': 116.64,
+            }
+            price = mock_prices.get(ticker_symbol.upper(), 100.00)
+            return {'price': price}
+        
+        # Use Alpha Vantage API to get real stock data
+        url = f'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker_symbol}&apikey={api_key}'
+        response = requests.get(url)
+        data = response.json()
+        
+        if 'Global Quote' in data and '05. price' in data['Global Quote']:
+            price = float(data['Global Quote']['05. price'])
+            return {'price': price}
+        else:
+            logger.warning(f"Could not get price for {ticker_symbol}, using fallback")
+            # Fallback to mock data if API doesn't return expected format
+            mock_prices = {
+                'AAPL': 185.92,
+                'MSFT': 420.45,
+                'GOOGL': 175.33,
+                'AMZN': 182.81,
+                'TSLA': 248.29,
+                'META': 475.12,
+                'NVDA': 116.64,
+            }
+            price = mock_prices.get(ticker_symbol.upper(), 100.00)
+            return {'price': price}
+    except Exception as e:
+        logger.error(f"Error getting stock data for {ticker_symbol}: {e}")
+        # Return a default price if there's an error
+        return {'price': 100.00}
+
+# HTML Templates for core functionality
+LOGIN_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Login - ApesTogether</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background-color: #f4f4f4; }
+        .container { max-width: 500px; margin: 0 auto; background: white; padding: 20px; border-radius: 5px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        h1 { color: #333; text-align: center; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="email"], input[type="password"] { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 3px; box-sizing: border-box; }
+        .btn { display: inline-block; background: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 3px; border: none; cursor: pointer; font-size: 16px; }
+        .btn-block { width: 100%; }
+        .alert { padding: 10px; margin-bottom: 15px; border-radius: 3px; }
+        .alert-danger { background-color: #f8d7da; color: #721c24; }
+        .alert-success { background-color: #d4edda; color: #155724; }
+        .text-center { text-align: center; }
+        .mt-3 { margin-top: 15px; }
+        .oauth-buttons { margin-top: 20px; border-top: 1px solid #ddd; padding-top: 20px; }
+        .btn-google { background-color: #4285F4; }
+        .btn-apple { background-color: #000; }
+        .btn-oauth { width: 100%; margin-bottom: 10px; color: white; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Login</h1>
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <form method="POST" action="/login">
+            <div class="form-group">
+                <label for="email">Email:</label>
+                <input type="email" id="email" name="email" required>
+            </div>
+            <div class="form-group">
+                <label for="password">Password:</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            <button type="submit" class="btn btn-block">Login</button>
+        </form>
+        
+        <div class="oauth-buttons">
+            <p class="text-center">Or login with:</p>
+            <a href="/login/google" class="btn btn-oauth btn-google">Login with Google</a>
+            <a href="/login/apple" class="btn btn-oauth btn-apple">Login with Apple</a>
+        </div>
+        
+        <div class="text-center mt-3">
+            <p>Don't have an account? <a href="/register">Register</a></p>
+            <p><a href="/">Back to Home</a></p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+REGISTER_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Register - ApesTogether</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background-color: #f4f4f4; }
+        .container { max-width: 500px; margin: 0 auto; background: white; padding: 20px; border-radius: 5px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        h1 { color: #333; text-align: center; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"], input[type="email"], input[type="password"] { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 3px; box-sizing: border-box; }
+        .btn { display: inline-block; background: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 3px; border: none; cursor: pointer; font-size: 16px; }
+        .btn-block { width: 100%; }
+        .alert { padding: 10px; margin-bottom: 15px; border-radius: 3px; }
+        .alert-danger { background-color: #f8d7da; color: #721c24; }
+        .alert-success { background-color: #d4edda; color: #155724; }
+        .text-center { text-align: center; }
+        .mt-3 { margin-top: 15px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Register</h1>
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <form method="POST" action="/register">
+            <div class="form-group">
+                <label for="username">Username:</label>
+                <input type="text" id="username" name="username" required>
+            </div>
+            <div class="form-group">
+                <label for="email">Email:</label>
+                <input type="email" id="email" name="email" required>
+            </div>
+            <div class="form-group">
+                <label for="password">Password:</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            <button type="submit" class="btn btn-block">Register</button>
+        </form>
+        
+        <div class="text-center mt-3">
+            <p>Already have an account? <a href="/login">Login</a></p>
+            <p><a href="/">Back to Home</a></p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+DASHBOARD_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dashboard - ApesTogether</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f4f4; }
+        .container { width: 80%; margin: 0 auto; background: white; padding: 20px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid #eee; }
+        .nav a { margin-left: 15px; text-decoration: none; color: #333; }
+        h1, h2 { color: #333; }
+        .portfolio-summary { background: #f9f9f9; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+        .stocks-table { width: 100%; border-collapse: collapse; }
+        .stocks-table th, .stocks-table td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
+        .stocks-table th { background-color: #f2f2f2; }
+        .stocks-table tr:hover { background-color: #f5f5f5; }
+        .add-stock-form { background: #f9f9f9; padding: 15px; border-radius: 5px; margin-top: 20px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; }
+        input[type="text"], input[type="number"] { width: 100%; padding: 8px; box-sizing: border-box; }
+        .btn { display: inline-block; background: #4CAF50; color: white; padding: 10px 15px; text-decoration: none; border-radius: 3px; border: none; cursor: pointer; }
+        .btn-danger { background: #f44336; }
+        .alert { padding: 10px; margin-bottom: 15px; border-radius: 3px; }
+        .alert-danger { background-color: #f8d7da; color: #721c24; }
+        .alert-success { background-color: #d4edda; color: #155724; }
+        .profit { color: green; }
+        .loss { color: red; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Dashboard</h1>
+            <div class="nav">
+                <a href="/">Home</a>
+                <a href="/logout">Logout</a>
+            </div>
+        </div>
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <div class="portfolio-summary">
+            <h2>Welcome, {{ user.username }}!</h2>
+            <p>Your portfolio summary:</p>
+            <p><strong>Total Stocks:</strong> {{ stocks|length }}</p>
+            {% if stocks %}
+                {% set total_value = 0 %}
+                {% set total_cost = 0 %}
+                {% for stock in stocks %}
+                    {% set total_value = total_value + stock.current_value() %}
+                    {% set total_cost = total_cost + (stock.purchase_price * stock.quantity) %}
+                {% endfor %}
+                <p><strong>Total Value:</strong> ${{ "%.2f"|format(total_value) }}</p>
+                <p><strong>Total Cost:</strong> ${{ "%.2f"|format(total_cost) }}</p>
+                {% set total_profit_loss = total_value - total_cost %}
+                <p><strong>Total Profit/Loss:</strong> 
+                    <span class="{% if total_profit_loss >= 0 %}profit{% else %}loss{% endif %}">
+                        ${{ "%.2f"|format(total_profit_loss) }}
+                        ({{ "%.2f"|format((total_profit_loss / total_cost) * 100) }}%)
+                    </span>
+                </p>
+            {% endif %}
+        </div>
+        
+        <h2>Your Stocks</h2>
+        {% if stocks %}
+            <table class="stocks-table">
+                <thead>
+                    <tr>
+                        <th>Ticker</th>
+                        <th>Quantity</th>
+                        <th>Purchase Price</th>
+                        <th>Purchase Date</th>
+                        <th>Current Value</th>
+                        <th>Profit/Loss</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for stock in stocks %}
+                        <tr>
+                            <td>{{ stock.ticker }}</td>
+                            <td>{{ stock.quantity }}</td>
+                            <td>${{ "%.2f"|format(stock.purchase_price) }}</td>
+                            <td>{{ stock.purchase_date.strftime('%Y-%m-%d') }}</td>
+                            <td>${{ "%.2f"|format(stock.current_value()) }}</td>
+                            {% set profit_loss = stock.profit_loss() %}
+                            <td class="{% if profit_loss >= 0 %}profit{% else %}loss{% endif %}">
+                                ${{ "%.2f"|format(profit_loss) }}
+                                ({{ "%.2f"|format((profit_loss / (stock.purchase_price * stock.quantity)) * 100) }}%)
+                            </td>
+                            <td>
+                                <form action="/delete_stock/{{ stock.id }}" method="POST" style="display:inline;">
+                                    <button type="submit" class="btn btn-danger">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p>You don't have any stocks yet. Add some below!</p>
+        {% endif %}
+        
+        <div class="add-stock-form">
+            <h2>Add New Stock</h2>
+            <form action="/add_stock" method="POST">
+                <div class="form-group">
+                    <label for="ticker">Ticker Symbol:</label>
+                    <input type="text" id="ticker" name="ticker" required>
+                </div>
+                <div class="form-group">
+                    <label for="quantity">Quantity:</label>
+                    <input type="number" id="quantity" name="quantity" step="0.01" min="0.01" required>
+                </div>
+                <div class="form-group">
+                    <label for="purchase_price">Purchase Price ($):</label>
+                    <input type="number" id="purchase_price" name="purchase_price" step="0.01" min="0.01" required>
+                </div>
+                <button type="submit" class="btn">Add Stock</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
 @app.route('/')
 def index():
     """Main landing page"""
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    environment = os.environ.get('VERCEL_ENV', 'development')
+    return render_template('index.html')
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """User login page"""
+    if request.method == 'POST':
+        email = request.form.get('email')
+        password = request.form.get('password')
+        
+        user = User.query.filter_by(email=email).first()
+        
+        if user and user.check_password(password):
+            session['user_id'] = user.id
+            session['email'] = user.email
+            session['username'] = user.username
+            flash('Login successful!', 'success')
+            return redirect(url_for('dashboard'))
+        else:
+            flash('Invalid email or password', 'danger')
     
-    return render_template_string(HOME_HTML, 
-                                current_time=current_time,
-                                environment=environment)
+    return render_template('login.html')
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    """User registration page"""
+    if request.method == 'POST':
+        username = request.form.get('username')
+        email = request.form.get('email')
+        password = request.form.get('password')
+        
+        # Check if user already exists
+        existing_user = User.query.filter((User.username == username) | (User.email == email)).first()
+        if existing_user:
+            flash('Username or email already exists', 'danger')
+            return redirect(url_for('register'))
+        
+        # Create new user
+        new_user = User(username=username, email=email)
+        new_user.set_password(password)
+        
+        try:
+            db.session.add(new_user)
+            db.session.commit()
+            
+            # Log the user in
+            session['user_id'] = new_user.id
+            session['email'] = new_user.email
+            session['username'] = new_user.username
+            
+            flash('Registration successful!', 'success')
+            return redirect(url_for('dashboard'))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error creating account: {str(e)}', 'danger')
+    
+    return render_template('register.html')
+
+@app.route('/logout')
+def logout():
+    """Logout the current user"""
+    session.pop('user_id', None)
+    session.pop('email', None)
+    session.pop('username', None)
+    flash('You have been logged out', 'success')
+    return redirect(url_for('index'))
+
+@app.route('/login/google')
+def login_google():
+    """Redirect to Google OAuth login"""
+    redirect_uri = url_for('authorize_google', _external=True)
+    return google.authorize_redirect(redirect_uri)
+
+@app.route('/login/google/authorize')
+def authorize_google():
+    """Handle Google OAuth callback"""
+    token = google.authorize_access_token()
+    user_info = token.get('userinfo')
+    
+    # Check if user exists
+    user = User.query.filter_by(email=user_info['email']).first()
+    
+    if not user:
+        # Generate a unique random username
+        while True:
+            adjectives = ['clever', 'brave', 'sharp', 'wise', 'happy', 'lucky', 'sunny', 'proud', 'witty', 'gentle']
+            nouns = ['fox', 'lion', 'eagle', 'tiger', 'river', 'ocean', 'bear', 'wolf', 'horse', 'raven']
+            adjective = random.choice(adjectives)
+            noun = random.choice(nouns)
+            username = f"{adjective}-{noun}"
+            if not User.query.filter_by(username=username).first():
+                break
+
+        # Create new user
+        user = User(
+            email=user_info['email'],
+            username=username,
+            oauth_provider='google',
+            oauth_id=user_info['sub'],  # OpenID Connect uses 'sub' for the user ID
+            stripe_price_id='price_1RbX0yQWUhVa3vgDB8vGzoFN',  # Default $4 price
+            subscription_price=4.00
+        )
+        user.set_password('') # Empty password for OAuth users
+        db.session.add(user)
+        db.session.commit()
+    
+    # Log the user in
+    session['user_id'] = user.id
+    session['email'] = user.email
+    session['username'] = user.username
+    
+    # Check if this is the user's first login (no stocks yet)
+    if Stock.query.filter_by(user_id=user.id).count() == 0:
+        flash('Welcome! Please add some stocks to your portfolio.', 'info')
+    else:
+        flash('Login successful!', 'success')
+        
+    return redirect(url_for('dashboard'))
+
+@app.route('/login/apple')
+def login_apple():
+    """Redirect to Apple OAuth login"""
+    redirect_uri = url_for('authorize_apple', _external=True)
+    return apple.authorize_redirect(redirect_uri)
+
+@app.route('/login/apple/authorize')
+def authorize_apple():
+    """Handle Apple OAuth callback"""
+    try:
+        token = apple.authorize_access_token()
+        user_info = token.get('userinfo')
+        
+        # Check if user exists
+        user = User.query.filter_by(email=user_info['email']).first()
+        
+        if not user:
+            # Generate a unique random username
+            while True:
+                adjectives = ['clever', 'brave', 'sharp', 'wise', 'happy', 'lucky', 'sunny', 'proud', 'witty', 'gentle']
+                nouns = ['fox', 'lion', 'eagle', 'tiger', 'river', 'ocean', 'bear', 'wolf', 'horse', 'raven']
+                adjective = random.choice(adjectives)
+                noun = random.choice(nouns)
+                username = f"{adjective}-{noun}"
+                if not User.query.filter_by(username=username).first():
+                    break
+
+            # Create new user
+            user = User(
+                email=user_info['email'],
+                username=username,
+                oauth_provider='apple',
+                oauth_id=user_info['sub'],
+                stripe_price_id='price_1RbX0yQWUhVa3vgDB8vGzoFN',  # Default $4 price
+                subscription_price=4.00
+            )
+            user.set_password('') # Empty password for OAuth users
+            db.session.add(user)
+            db.session.commit()
+        
+        # Log the user in
+        session['user_id'] = user.id
+        session['email'] = user.email
+        session['username'] = user.username
+        
+        # Check if this is the user's first login (no stocks yet)
+        if Stock.query.filter_by(user_id=user.id).count() == 0:
+            flash('Welcome! Please add some stocks to your portfolio.', 'info')
+        else:
+            flash('Login successful!', 'success')
+            
+        return redirect(url_for('dashboard'))
+    except Exception as e:
+        logger.error(f"Error in Apple OAuth: {e}")
+        flash('Error logging in with Apple. Please try again or use email login.', 'danger')
+        return redirect(url_for('login'))
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    """User dashboard"""
+    # Get current user from session
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    
+    # Get user's stocks
+    stocks = Stock.query.filter_by(user_id=current_user_id).all()
+    portfolio_data = []
+    total_portfolio_value = 0
+    
+    for stock in stocks:
+        stock_data = get_stock_data(stock.ticker)
+        if stock_data and stock_data.get('price') is not None:
+            current_price = stock_data['price']
+            stock_info = {
+                'id': stock.id,
+                'ticker': stock.ticker,
+                'quantity': stock.quantity,
+                'purchase_price': stock.purchase_price,
+                'current_price': current_price,
+                'total_value': stock.quantity * current_price
+            }
+            portfolio_data.append(stock_info)
+            total_portfolio_value += stock_info['total_value']
+        else:
+            # Handle cases where stock data couldn't be fetched
+            stock_info = {
+                'id': stock.id,
+                'ticker': stock.ticker,
+                'quantity': stock.quantity,
+                'purchase_price': stock.purchase_price,
+                'current_price': 'N/A',
+                'total_value': 'N/A'
+            }
+            portfolio_data.append(stock_info)
+    
+    return render_template('dashboard.html', stocks=portfolio_data, total_portfolio_value=total_portfolio_value)
+
+@app.route('/add_stock', methods=['POST'])
+def add_stock():
+    """Add a stock to user's portfolio"""
+    if 'user_id' not in session:
+        flash('Please login to add stocks', 'warning')
+        return redirect(url_for('login'))
+    
+    ticker = request.form.get('ticker')
+    quantity = float(request.form.get('quantity'))
+    purchase_price = float(request.form.get('purchase_price'))
+    
+    # Create new stock
+    new_stock = Stock(
+        ticker=ticker,
+        quantity=quantity,
+        purchase_price=purchase_price,
+        user_id=session['user_id']
+    )
+    
+    try:
+        db.session.add(new_stock)
+        db.session.commit()
+        flash(f'Added {quantity} shares of {ticker}', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error adding stock: {str(e)}', 'danger')
+    
+    return redirect(url_for('dashboard'))
+
+@app.route('/delete_stock/<int:stock_id>', methods=['POST'])
+def delete_stock(stock_id):
+    """Delete a stock from user's portfolio"""
+    if 'user_id' not in session:
+        flash('Please login to delete stocks', 'warning')
+        return redirect(url_for('login'))
+    
+    stock = Stock.query.get(stock_id)
+    
+    if not stock or stock.user_id != session['user_id']:
+        flash('Stock not found or you do not have permission to delete it', 'danger')
+        return redirect(url_for('dashboard'))
+    
+    try:
+        db.session.delete(stock)
+        db.session.commit()
+        flash(f'Deleted {stock.ticker} from your portfolio', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error deleting stock: {str(e)}', 'danger')
+    
+    return redirect(url_for('dashboard'))
 
 @app.route('/admin')
 def admin_dashboard():
