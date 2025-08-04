@@ -27,12 +27,47 @@ load_dotenv()
 # Initialize Flask app
 # Use absolute paths for templates and static files in production
 if os.environ.get('VERCEL_ENV') == 'production':
-    # In Vercel, the app is in /var/task/api/ and templates are in /var/task/templates
+    # In Vercel, the templates and static files are at the root level (/var/task/)
+    # Check if directories exist and create them if they don't
+    if not os.path.exists('/var/task/templates'):
+        print("Creating templates directory")
+        os.makedirs('/var/task/templates', exist_ok=True)
+        # Copy templates from the project directory
+        import shutil
+        try:
+            for item in os.listdir('/var/task/api/../templates'):
+                src = os.path.join('/var/task/api/../templates', item)
+                dst = os.path.join('/var/task/templates', item)
+                if os.path.isdir(src):
+                    shutil.copytree(src, dst, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(src, dst)
+            print("Templates copied successfully")
+        except Exception as e:
+            print(f"Error copying templates: {str(e)}")
+    
+    if not os.path.exists('/var/task/static'):
+        print("Creating static directory")
+        os.makedirs('/var/task/static', exist_ok=True)
+        # Copy static files from the project directory
+        import shutil
+        try:
+            for item in os.listdir('/var/task/api/../static'):
+                src = os.path.join('/var/task/api/../static', item)
+                dst = os.path.join('/var/task/static', item)
+                if os.path.isdir(src):
+                    shutil.copytree(src, dst, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(src, dst)
+            print("Static files copied successfully")
+        except Exception as e:
+            print(f"Error copying static files: {str(e)}")
+    
     app = Flask(__name__, 
-               template_folder=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'templates'),
-               static_folder=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static'))
-    print(f"Template folder set to: {os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'templates')}")
-    print(f"Static folder set to: {os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static')}")
+               template_folder='/var/task/templates',
+               static_folder='/var/task/static')
+    print(f"Template folder set to: /var/task/templates")
+    print(f"Static folder set to: /var/task/static")
 else:
     # For local development
     app = Flask(__name__, template_folder='../templates', static_folder='../static')
@@ -3220,6 +3255,21 @@ def admin_edit_stock(stock_id):
 @app.route('/debug')
 def debug_info():
     try:
+        # Check template and static directories
+        template_files = []
+        static_files = []
+        try:
+            if os.path.exists(app.template_folder):
+                template_files = os.listdir(app.template_folder)
+        except Exception as e:
+            template_files = [f"Error listing templates: {str(e)}"]
+            
+        try:
+            if os.path.exists(app.static_folder):
+                static_files = os.listdir(app.static_folder)
+        except Exception as e:
+            static_files = [f"Error listing static files: {str(e)}"]
+        
         # Collect environment information
         env_info = {
             'VERCEL_ENV': os.environ.get('VERCEL_ENV'),
@@ -3233,9 +3283,14 @@ def debug_info():
             'SQLALCHEMY_DATABASE_URI': app.config.get('SQLALCHEMY_DATABASE_URI', '').replace(os.environ.get('DATABASE_URL', ''), '[REDACTED]') if os.environ.get('DATABASE_URL') else app.config.get('SQLALCHEMY_DATABASE_URI', ''),
             'WORKING_DIRECTORY': os.getcwd(),
             'DIRECTORY_CONTENTS': os.listdir('.'),
-            'TEMPLATE_EXISTS': os.path.exists('../templates'),
-            'STATIC_EXISTS': os.path.exists('../static'),
-            'PYTHON_VERSION': sys.version
+            'TEMPLATE_EXISTS': os.path.exists(app.template_folder),
+            'STATIC_EXISTS': os.path.exists(app.static_folder),
+            'TEMPLATE_FILES': template_files[:10],  # Limit to first 10 files
+            'STATIC_FILES': static_files[:10],      # Limit to first 10 files
+            'PYTHON_VERSION': sys.version,
+            'APP_ROOT_PATH': os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'ABSOLUTE_TEMPLATE_PATH': os.path.abspath(app.template_folder),
+            'ABSOLUTE_STATIC_PATH': os.path.abspath(app.static_folder)
         }
         
         # Check if we can connect to the database
