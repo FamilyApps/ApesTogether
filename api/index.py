@@ -29,6 +29,14 @@ load_dotenv()
 # Use absolute paths for templates and static files in production
 import shutil
 
+# Helper function to add common template variables
+def render_template_with_defaults(*args, **kwargs):
+    """Wrapper for render_template that adds common variables"""
+    # Add the current date/time for use in templates (e.g., copyright year)
+    if 'now' not in kwargs:
+        kwargs['now'] = datetime.now()
+    return render_template(*args, **kwargs)
+
 # Create a Flask app with the appropriate template and static folders
 if os.environ.get('VERCEL_ENV') == 'production':
     # For Vercel production environment
@@ -602,7 +610,7 @@ def payment_confirmation():
     # Get the user to subscribe to
     user_to_subscribe_to = User.query.get_or_404(user_id) if user_id else None
     
-    return render_template(
+    return render_template_with_defaults(
         'payment_confirmation.html',
         stripe_public_key=app.config['STRIPE_PUBLIC_KEY'],
         payment_intent_client_secret=payment_intent_client_secret,
@@ -777,7 +785,7 @@ def subscriptions():
         status='canceled'
     ).all()
     
-    return render_template(
+    return render_template_with_defaults(
         'subscriptions.html',
         active_subscriptions=active_subscriptions,
         canceled_subscriptions=canceled_subscriptions
@@ -875,13 +883,13 @@ def explore():
     """Display a list of all other users to subscribe to."""
     current_user_id = session.get('user_id')
     users = User.query.filter(User.id != current_user_id).order_by(User.username).all()
-    return render_template('explore.html', users=users)
+    return render_template_with_defaults('explore.html', users=users)
 
 @app.route('/onboarding')
 @login_required
 def onboarding():
     """User onboarding page"""
-    return render_template('onboarding.html')
+    return render_template_with_defaults('onboarding.html')
 
 @app.route('/api/portfolio_value')
 @login_required
@@ -1011,11 +1019,11 @@ def stock_comparison():
             sp500_prices.append(round(spy_base, 2))
 
         # Return the mock data
-        return render_template('stock_comparison.html', dates=dates, tsla_prices=tsla_prices, sp500_prices=sp500_prices)
+        return render_template_with_defaults('stock_comparison.html', dates=dates, tsla_prices=tsla_prices, sp500_prices=sp500_prices)
         
     except Exception as e:
         flash(f"Error generating mock stock comparison data: {e}", "danger")
-        return render_template('stock_comparison.html', dates=[], tsla_prices=[], sp500_prices=[])
+        return render_template_with_defaults('stock_comparison.html', dates=[], tsla_prices=[], sp500_prices=[])
 
 @app.route('/profile/<username>')
 @login_required
@@ -1055,7 +1063,7 @@ def profile(username):
             'total_value': total_value
         }
 
-    return render_template(
+    return render_template_with_defaults(
         'profile.html',
         user_to_view=user_to_view,
         subscription=subscription,
@@ -1152,7 +1160,7 @@ def admin_subscription_analytics():
         revenue_dates = ['Feb 2025', 'Mar 2025', 'Apr 2025', 'May 2025', 'Jun 2025', 'Jul 2025']
         revenue_amounts = [15.0, 25.0, 35.0, 45.0, 60.0, 75.0]
     
-    return render_template(
+    return render_template_with_defaults(
         'admin/subscription_analytics.html',
         active_subscriptions_count=active_subscriptions_count,
         total_revenue=total_revenue,
@@ -1515,7 +1523,8 @@ def index():
         except Exception as e:
             logger.error(f"Error listing template files: {str(e)}")
         
-        return render_template('index.html')
+        # Use the helper function to ensure consistent template variables
+        return render_template_with_defaults('index.html')
     except Exception as e:
         logger.error(f"Error in index route: {str(e)}")
         logger.error(traceback.format_exc())
@@ -1546,7 +1555,7 @@ def login():
         else:
             flash('Invalid email or password', 'danger')
     
-    return render_template('login.html')
+    return render_template_with_defaults('login.html')
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -1581,7 +1590,7 @@ def register():
             db.session.rollback()
             flash(f'Error creating account: {str(e)}', 'danger')
     
-    return render_template('register.html')
+    return render_template_with_defaults('register.html')
 
 @app.route('/logout')
 def logout():
@@ -1745,7 +1754,7 @@ def dashboard():
             }
             portfolio_data.append(stock_info)
     
-    return render_template('dashboard.html', stocks=portfolio_data, total_portfolio_value=total_portfolio_value)
+    return render_template_with_defaults('dashboard.html', stocks=portfolio_data, total_portfolio_value=total_portfolio_value)
 
 @app.route('/add_stock', methods=['POST'])
 def add_stock():
