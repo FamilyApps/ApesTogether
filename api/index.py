@@ -9,6 +9,8 @@ import psycopg2
 import random
 import requests
 import stripe
+import sys
+import traceback
 from datetime import datetime, timedelta
 from functools import wraps
 from dotenv import load_dotenv
@@ -3202,6 +3204,42 @@ def admin_edit_stock(stock_id):
 </body>
 </html>
     """, stock=stock)
+
+# Debug endpoint to check environment and configuration
+@app.route('/debug')
+def debug_info():
+    try:
+        # Collect environment information
+        env_info = {
+            'VERCEL_ENV': os.environ.get('VERCEL_ENV'),
+            'DATABASE_URL_EXISTS': bool(os.environ.get('DATABASE_URL')),
+            'POSTGRES_PRISMA_URL_EXISTS': bool(os.environ.get('POSTGRES_PRISMA_URL')),
+            'SECRET_KEY_EXISTS': bool(os.environ.get('SECRET_KEY')),
+            'FLASK_APP': os.environ.get('FLASK_APP'),
+            'FLASK_ENV': os.environ.get('FLASK_ENV'),
+            'TEMPLATE_FOLDER': app.template_folder,
+            'STATIC_FOLDER': app.static_folder,
+            'SQLALCHEMY_DATABASE_URI': app.config.get('SQLALCHEMY_DATABASE_URI', '').replace(os.environ.get('DATABASE_URL', ''), '[REDACTED]') if os.environ.get('DATABASE_URL') else app.config.get('SQLALCHEMY_DATABASE_URI', ''),
+            'WORKING_DIRECTORY': os.getcwd(),
+            'DIRECTORY_CONTENTS': os.listdir('.'),
+            'TEMPLATE_EXISTS': os.path.exists('../templates'),
+            'STATIC_EXISTS': os.path.exists('../static'),
+            'PYTHON_VERSION': sys.version
+        }
+        
+        # Check if we can connect to the database
+        db_status = 'Unknown'
+        try:
+            db.session.execute('SELECT 1')
+            db_status = 'Connected'
+        except Exception as e:
+            db_status = f'Error: {str(e)}'
+            
+        env_info['DATABASE_STATUS'] = db_status
+        
+        return jsonify(env_info)
+    except Exception as e:
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()})
 
 # For local testing
 if __name__ == '__main__':
