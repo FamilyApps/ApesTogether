@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 from dotenv import load_dotenv
 from flask import Flask, render_template_string, render_template, redirect, url_for, request, session, flash, jsonify
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -111,14 +112,19 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Login required decorator
-def login_required(f):
+# Use Flask-Login's login_required decorator instead of our custom one
+# This is kept for backward compatibility with existing code
+def custom_login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if 'user_id' not in session:
+        if not current_user.is_authenticated:
             flash('Please log in to access this page', 'danger')
-            return redirect(url_for('login'))
+            return redirect(url_for('login', next=request.url))
         return f(*args, **kwargs)
     return decorated_function
+
+# For backward compatibility, keep the original name
+login_required = custom_login_required
 
 # Get environment variables with fallbacks
 # Check for DATABASE_URL first, then fall back to POSTGRES_PRISMA_URL if available
@@ -145,6 +151,19 @@ try:
     app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL or 'sqlite:///portfolio.db'
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-for-testing')  # Use consistent fallback
+
+    # Initialize Flask-Login
+    login_manager = LoginManager()
+    login_manager.init_app(app)
+    login_manager.login_view = 'login'
+
+    @login_manager.user_loader
+    def load_user(user_id):
+        try:
+            return User.query.get(int(user_id))
+        except Exception as e:
+            logger.error(f"Error loading user: {str(e)}")
+            return None
 
     # Stripe configuration
     app.config['STRIPE_PUBLIC_KEY'] = os.environ.get('STRIPE_PUBLIC_KEY')
@@ -189,7 +208,7 @@ except Exception as e:
     # Continue without database to allow basic functionality
 
 # Define database models
-class User(db.Model):
+class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
@@ -1512,11 +1531,18 @@ def login():
         user = User.query.filter_by(email=email).first()
         
         if user and user.check_password(password):
+            # Use Flask-Login to handle user session
+            login_user(user)
+            flash('Login successful!', 'success')
+            
+            # For backward compatibility, also set session variables
             session['user_id'] = user.id
             session['email'] = user.email
             session['username'] = user.username
-            flash('Login successful!', 'success')
-            return redirect(url_for('dashboard'))
+            
+            # Redirect to next page or dashboard
+            next_page = request.args.get('next')
+            return redirect(next_page or url_for('dashboard'))
         else:
             flash('Invalid email or password', 'danger')
     
@@ -1560,9 +1586,14 @@ def register():
 @app.route('/logout')
 def logout():
     """Logout the current user"""
+    # Use Flask-Login to handle logout
+    logout_user()
+    
+    # For backward compatibility, also clear session variables
     session.pop('user_id', None)
     session.pop('email', None)
     session.pop('username', None)
+    
     flash('You have been logged out', 'success')
     return redirect(url_for('index'))
 
