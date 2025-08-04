@@ -25,7 +25,18 @@ from authlib.integrations.flask_client import OAuth
 load_dotenv()
 
 # Initialize Flask app
-app = Flask(__name__, template_folder='../templates', static_folder='../static')
+# Use absolute paths for templates and static files in production
+if os.environ.get('VERCEL_ENV') == 'production':
+    # In Vercel, the app is in /var/task/api/ and templates are in /var/task/templates
+    app = Flask(__name__, 
+               template_folder=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'templates'),
+               static_folder=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static'))
+    print(f"Template folder set to: {os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'templates')}")
+    print(f"Static folder set to: {os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static')}")
+else:
+    # For local development
+    app = Flask(__name__, template_folder='../templates', static_folder='../static')
+
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
 # Enable jinja2 template features in render_template_string
@@ -3230,7 +3241,8 @@ def debug_info():
         # Check if we can connect to the database
         db_status = 'Unknown'
         try:
-            db.session.execute('SELECT 1')
+            from sqlalchemy import text
+            db.session.execute(text('SELECT 1'))
             db_status = 'Connected'
         except Exception as e:
             db_status = f'Error: {str(e)}'

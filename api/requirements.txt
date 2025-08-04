@@ -12,3 +12,4 @@ click==8.1.7
 stripe==7.5.0
 requests==2.31.0
 Authlib==1.2.1
+SQLAlchemy==1.4.49
