@@ -3241,7 +3241,8 @@ def debug_info():
         # Check if we can connect to the database
         db_status = 'Unknown'
         try:
-            from sqlalchemy import text
+            # Import text function at the top level to avoid import errors
+            from sqlalchemy.sql import text
             db.session.execute(text('SELECT 1'))
             db_status = 'Connected'
         except Exception as e:
