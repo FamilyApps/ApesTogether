@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}My Subscriptions - ApesTogether{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-10">
+            
+            <!-- Flash Messages -->
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <div class="card shadow-sm mb-4">
+                <div class="card-header bg-dark text-white">
+                    <h3 class="mb-0">My Subscriptions</h3>
+                </div>
+                <div class="card-body">
+                    {% if active_subscriptions %}
+                        <p>You are currently subscribed to the following portfolios:</p>
+                        
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Portfolio</th>
+                                        <th>Status</th>
+                                        <th>Start Date</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for subscription in active_subscriptions %}
+                                    <tr>
+                                        <td>
+                                            <a href="{{ url_for('profile', username=subscription.subscribed_to.username) }}">
+                                                {{ subscription.subscribed_to.username }}
+                                            </a>
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-success">{{ subscription.status }}</span>
+                                        </td>
+                                        <td>{{ subscription.start_date.strftime('%Y-%m-%d') }}</td>
+                                        <td>
+                                            <form action="{{ url_for('cancel_subscription') }}" method="post" class="d-inline">
+                                                <input type="hidden" name="subscription_id" value="{{ subscription.id }}">
+                                                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to cancel this subscription?')">
+                                                    Cancel
+                                                </button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="text-center p-4">
+                            <p>You don't have any active subscriptions.</p>
+                            <a href="{{ url_for('explore') }}" class="btn btn-primary mt-3">
+                                Explore Portfolios
+                            </a>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if canceled_subscriptions %}
+            <div class="card shadow-sm">
+                <div class="card-header bg-secondary text-white">
+                    <h4 class="mb-0">Past Subscriptions</h4>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Portfolio</th>
+                                    <th>Status</th>
+                                    <th>Start Date</th>
+                                    <th>End Date</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for subscription in canceled_subscriptions %}
+                                <tr>
+                                    <td>
+                                        <a href="{{ url_for('profile', username=subscription.subscribed_to.username) }}">
+                                            {{ subscription.subscribed_to.username }}
+                                        </a>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-secondary">{{ subscription.status }}</span>
+                                    </td>
+                                    <td>{{ subscription.start_date.strftime('%Y-%m-%d') }}</td>
+                                    <td>{{ subscription.end_date.strftime('%Y-%m-%d') if subscription.end_date else 'N/A' }}</td>
+                                    <td>
+                                        <form action="{{ url_for('resubscribe') }}" method="post" class="d-inline">
+                                            <input type="hidden" name="subscription_id" value="{{ subscription.id }}">
+                                            <button type="submit" class="btn btn-sm btn-primary">
+                                                <i class="fas fa-sync-alt me-1"></i> Resubscribe
+                                            </button>
+                                        </form>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

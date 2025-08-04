@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% block title %}Subscription Analytics - Admin Dashboard{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-md-2">
+            {% include "admin/sidebar.html" %}
+        </div>
+        <div class="col-md-10">
+            <h2>Subscription Analytics</h2>
+            <div class="row mb-4">
+                <div class="col-md-3">
+                    <div class="card bg-primary text-white">
+                        <div class="card-body">
+                            <h5 class="card-title">Active Subscriptions</h5>
+                            <h2 class="display-4">{{ active_subscriptions_count }}</h2>
+                            <p class="card-text">Price: ${{ subscription_price }}/month</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-success text-white">
+                        <div class="card-body">
+                            <h5 class="card-title">Monthly Revenue</h5>
+                            <h2 class="display-4">${{ '%.2f'|format(total_revenue) }}</h2>
+                            <p class="card-text">Projected Annual: ${{ '%.2f'|format(total_revenue * 12) }}</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-info text-white">
+                        <div class="card-body">
+                            <h5 class="card-title">Conversion Rate</h5>
+                            <h2 class="display-4">{{ conversion_rate }}%</h2>
+                            <p class="card-text">Subscribers/Total Users</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-warning text-dark">
+                        <div class="card-body">
+                            <h5 class="card-title">Churn Rate</h5>
+                            <h2 class="display-4">{{ churn_rate }}%</h2>
+                            <p class="card-text">Canceled/Total Subscriptions</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row mt-4">
+                <div class="col-md-6">
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h5>Subscription Growth</h5>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="subscriptionGrowthChart" height="300"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h5>Revenue Over Time</h5>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="revenueChart" height="300"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>Recent Subscriptions</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Subscriber</th>
+                                    <th>Subscribed To</th>
+                                    <th>Status</th>
+                                    <th>Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for sub in recent_subscriptions %}
+                                <tr>
+                                    <td>{{ sub.start_date.strftime('%Y-%m-%d') }}</td>
+                                    <td>{{ sub.subscriber.username }}</td>
+                                    <td>{{ sub.subscribed_to.username }}</td>
+                                    <td>
+                                        <span class="badge {% if sub.status == 'active' %}bg-success{% elif sub.status == 'canceled' %}bg-danger{% else %}bg-warning{% endif %}">
+                                            {{ sub.status }}
+                                        </span>
+                                    </td>
+                                    <td>${{ subscription_price }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Subscription Growth Chart
+        const growthCtx = document.getElementById('subscriptionGrowthChart').getContext('2d');
+        new Chart(growthCtx, {
+            type: 'line',
+            data: {
+                labels: JSON.parse('{{ subscription_dates|tojson }}'),
+                datasets: [{
+                    label: 'New Subscriptions',
+                    data: JSON.parse('{{ subscription_counts|tojson }}'),
+                    backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                    borderColor: 'rgba(54, 162, 235, 1)',
+                    borderWidth: 2,
+                    tension: 0.1
+                }]
+            },
+            options: {
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            precision: 0
+                        }
+                    }
+                }
+            }
+        });
+
+        // Revenue Chart
+        const revenueCtx = document.getElementById('revenueChart').getContext('2d');
+        new Chart(revenueCtx, {
+            type: 'bar',
+            data: {
+                labels: JSON.parse('{{ revenue_dates|tojson }}'),
+                datasets: [{
+                    label: 'Monthly Revenue ($)',
+                    data: JSON.parse('{{ revenue_amounts|tojson }}'),
+                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    });
+</script>
+{% endblock %}

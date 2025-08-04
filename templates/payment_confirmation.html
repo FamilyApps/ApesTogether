@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block title %}Payment Confirmation - ApesTogether{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="mb-0">Complete Your Subscription</h3>
+                </div>
+                <div class="card-body">
+                    <div id="payment-status" class="alert alert-info">
+                        <div class="d-flex align-items-center">
+                            <div class="spinner-border spinner-border-sm me-2" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <span>Processing your payment...</span>
+                        </div>
+                    </div>
+
+                    <div id="payment-element" class="mb-4">
+                        <!-- Stripe Elements will be inserted here -->
+                    </div>
+
+                    <div id="payment-message" class="hidden"></div>
+
+                    <div class="text-center">
+                        <button id="submit-button" class="btn btn-primary btn-lg">
+                            <div class="spinner-border spinner-border-sm d-none" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <span>Complete Payment</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Get client secret and subscription ID from URL params
+        const urlParams = new URLSearchParams(window.location.search);
+        const clientSecret = urlParams.get('payment_intent_client_secret');
+        const subscriptionId = urlParams.get('subscription_id');
+        const userId = urlParams.get('user_id');
+        
+        if (!clientSecret) {
+            updateStatus('Missing payment information', 'danger');
+            return;
+        }
+        
+        // Initialize Stripe
+        const stripe = Stripe('{{ stripe_public_key }}');
+        const elements = stripe.elements();
+        
+        // Create and mount the Payment Element
+        const paymentElement = elements.create('payment');
+        paymentElement.mount('#payment-element');
+        
+        // Handle form submission
+        const form = document.getElementById('submit-button');
+        form.addEventListener('click', async (e) => {
+            e.preventDefault();
+            
+            // Disable the submit button to prevent multiple clicks
+            setLoading(true);
+            
+            // Confirm the payment
+            const {error} = await stripe.confirmPayment({
+                elements,
+                confirmParams: {
+                    return_url: `${window.location.origin}/subscription-success?subscription_id=${subscriptionId}`
+                }
+            });
+            
+            if (error) {
+                // Show error message
+                updateStatus(error.message, 'danger');
+                setLoading(false);
+            }
+            // The payment is being processed or customer is being redirected
+        });
+        
+        // Check if we need to handle any automatic confirmation
+        if (clientSecret) {
+            stripe.retrievePaymentIntent(clientSecret).then(({paymentIntent}) => {
+                switch (paymentIntent.status) {
+                    case "succeeded":
+                        updateStatus("Payment succeeded!", "success");
+                        // Redirect to success page
+                        window.location.href = `/subscription-success?subscription_id=${subscriptionId}`;
+                        break;
+                    case "processing":
+                        updateStatus("Your payment is processing.", "info");
+                        break;
+                    case "requires_payment_method":
+                        updateStatus("Please provide your payment information.", "warning");
+                        break;
+                    default:
+                        updateStatus("Something went wrong.", "danger");
+                        break;
+                }
+            });
+        }
+        
+        // Helper functions
+        function updateStatus(message, type) {
+            const statusDiv = document.getElementById('payment-status');
+            statusDiv.className = `alert alert-${type}`;
+            statusDiv.innerHTML = message;
+        }
+        
+        function setLoading(isLoading) {
+            const submitButton = document.getElementById('submit-button');
+            const spinner = submitButton.querySelector('.spinner-border');
+            const buttonText = submitButton.querySelector('span');
+            
+            if (isLoading) {
+                submitButton.disabled = true;
+                spinner.classList.remove('d-none');
+                buttonText.textContent = 'Processing...';
+            } else {
+                submitButton.disabled = false;
+                spinner.classList.add('d-none');
+                buttonText.textContent = 'Complete Payment';
+            }
+        }
+    });
+</script>
+{% endblock %}

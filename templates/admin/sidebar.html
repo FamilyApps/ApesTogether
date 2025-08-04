@@ -1,0 +1,14 @@
+<div class="list-group mb-4">
+    <a href="/admin" class="list-group-item list-group-item-action {% if request.path == '/admin' %}active{% endif %}">
+        <i class="fas fa-tachometer-alt me-2"></i> Dashboard
+    </a>
+    <a href="/admin/users" class="list-group-item list-group-item-action {% if request.path == '/admin/users' %}active{% endif %}">
+        <i class="fas fa-users me-2"></i> Users
+    </a>
+    <a href="/admin/subscription-analytics" class="list-group-item list-group-item-action {% if request.path == '/admin/subscription-analytics' %}active{% endif %}">
+        <i class="fas fa-chart-line me-2"></i> Subscription Analytics
+    </a>
+    <a href="/admin/debug" class="list-group-item list-group-item-action {% if request.path == '/admin/debug' %}active{% endif %}">
+        <i class="fas fa-bug me-2"></i> Debug
+    </a>
+</div>
