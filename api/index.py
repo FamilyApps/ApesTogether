@@ -26,48 +26,74 @@ load_dotenv()
 
 # Initialize Flask app
 # Use absolute paths for templates and static files in production
+import shutil
+
+# Create a Flask app with the appropriate template and static folders
 if os.environ.get('VERCEL_ENV') == 'production':
-    # In Vercel, the templates and static files are at the root level (/var/task/)
-    # Check if directories exist and create them if they don't
-    if not os.path.exists('/var/task/templates'):
-        print("Creating templates directory")
-        os.makedirs('/var/task/templates', exist_ok=True)
-        # Copy templates from the project directory
-        import shutil
+    # For Vercel production environment
+    app = Flask(__name__)
+    
+    # Set absolute paths for templates and static files
+    app.template_folder = '/var/task/templates'
+    app.static_folder = '/var/task/static'
+    
+    # Ensure the directories exist
+    os.makedirs(app.template_folder, exist_ok=True)
+    os.makedirs(app.static_folder, exist_ok=True)
+    
+    # Copy templates if needed
+    source_templates = '/var/task/templates'
+    if not os.path.exists(os.path.join(source_templates, 'index.html')):
         try:
-            for item in os.listdir('/var/task/api/../templates'):
-                src = os.path.join('/var/task/api/../templates', item)
-                dst = os.path.join('/var/task/templates', item)
-                if os.path.isdir(src):
-                    shutil.copytree(src, dst, dirs_exist_ok=True)
-                else:
-                    shutil.copy2(src, dst)
-            print("Templates copied successfully")
+            # Try different source paths
+            potential_sources = [
+                '/var/task/api/../templates',
+                '/var/task/templates',
+                os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'templates')
+            ]
+            
+            for src_path in potential_sources:
+                if os.path.exists(src_path) and os.path.isdir(src_path):
+                    print(f"Found templates at: {src_path}")
+                    for item in os.listdir(src_path):
+                        src = os.path.join(src_path, item)
+                        dst = os.path.join(app.template_folder, item)
+                        if os.path.isdir(src):
+                            shutil.copytree(src, dst, dirs_exist_ok=True)
+                        else:
+                            shutil.copy2(src, dst)
+                    print(f"Templates copied from {src_path} to {app.template_folder}")
+                    break
         except Exception as e:
             print(f"Error copying templates: {str(e)}")
     
-    if not os.path.exists('/var/task/static'):
-        print("Creating static directory")
-        os.makedirs('/var/task/static', exist_ok=True)
-        # Copy static files from the project directory
-        import shutil
+    # Copy static files if needed
+    if not os.listdir(app.static_folder):
         try:
-            for item in os.listdir('/var/task/api/../static'):
-                src = os.path.join('/var/task/api/../static', item)
-                dst = os.path.join('/var/task/static', item)
-                if os.path.isdir(src):
-                    shutil.copytree(src, dst, dirs_exist_ok=True)
-                else:
-                    shutil.copy2(src, dst)
-            print("Static files copied successfully")
+            # Try different source paths
+            potential_sources = [
+                '/var/task/api/../static',
+                '/var/task/static',
+                os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static')
+            ]
+            
+            for src_path in potential_sources:
+                if os.path.exists(src_path) and os.path.isdir(src_path):
+                    print(f"Found static files at: {src_path}")
+                    for item in os.listdir(src_path):
+                        src = os.path.join(src_path, item)
+                        dst = os.path.join(app.static_folder, item)
+                        if os.path.isdir(src):
+                            shutil.copytree(src, dst, dirs_exist_ok=True)
+                        else:
+                            shutil.copy2(src, dst)
+                    print(f"Static files copied from {src_path} to {app.static_folder}")
+                    break
         except Exception as e:
             print(f"Error copying static files: {str(e)}")
     
-    app = Flask(__name__, 
-               template_folder='/var/task/templates',
-               static_folder='/var/task/static')
-    print(f"Template folder set to: /var/task/templates")
-    print(f"Static folder set to: /var/task/static")
+    print(f"Final template folder: {app.template_folder}")
+    print(f"Final static folder: {app.static_folder}")
 else:
     # For local development
     app = Flask(__name__, template_folder='../templates', static_folder='../static')
@@ -1458,7 +1484,23 @@ DASHBOARD_HTML = """
 @app.route('/')
 def index():
     """Main landing page"""
-    return render_template('index.html')
+    try:
+        logger.info("Rendering index page")
+        logger.info(f"Template folder: {app.template_folder}")
+        logger.info(f"Template exists: {os.path.exists(os.path.join(app.template_folder, 'index.html'))}")
+        
+        # Try to list template files
+        try:
+            template_files = os.listdir(app.template_folder)
+            logger.info(f"Template files: {template_files}")
+        except Exception as e:
+            logger.error(f"Error listing template files: {str(e)}")
+        
+        return render_template('index.html')
+    except Exception as e:
+        logger.error(f"Error in index route: {str(e)}")
+        logger.error(traceback.format_exc())
+        return render_template_string("""<html><body><h1>Error rendering index page</h1><p>{{ error }}</p></body></html>""", error=str(e))
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -2932,6 +2974,24 @@ def server_error(e):
     # Get error details
     error_details = str(e)
     logger.error(f"500 error: {error_details}")
+    logger.error(traceback.format_exc())
+    
+    # Log additional diagnostic information
+    logger.error(f"Request path: {request.path}")
+    logger.error(f"Request method: {request.method}")
+    logger.error(f"Request args: {request.args}")
+    logger.error(f"Template folder: {app.template_folder}")
+    logger.error(f"Static folder: {app.static_folder}")
+    
+    # Try to check if templates exist
+    try:
+        template_exists = os.path.exists(app.template_folder)
+        logger.error(f"Template folder exists: {template_exists}")
+        if template_exists:
+            template_files = os.listdir(app.template_folder)
+            logger.error(f"Template files: {template_files[:10]}")
+    except Exception as template_error:
+        logger.error(f"Error checking templates: {str(template_error)}")
     
     # Check if this is an API request
     if request.path.startswith('/api/'):
