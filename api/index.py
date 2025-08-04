@@ -23,7 +23,7 @@ from authlib.integrations.flask_client import OAuth
 load_dotenv()
 
 # Initialize Flask app
-app = Flask(__name__)
+app = Flask(__name__, template_folder='../templates', static_folder='../static')
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
 # Enable jinja2 template features in render_template_string
@@ -61,7 +61,7 @@ logger.info(f"SECRET_KEY present: {'Yes' if SECRET_KEY else 'No'}")
 # Configure database with error handling
 try:
     # Configure database
-    DATABASE_URL = os.environ.get('DATABASE_URL')
+    DATABASE_URL = os.environ.get('DATABASE_URL') or os.environ.get('POSTGRES_PRISMA_URL')
 
     # Fix Postgres URL for SQLAlchemy 1.4+
     if DATABASE_URL and DATABASE_URL.startswith('postgres://'):
@@ -70,7 +70,7 @@ try:
     # Configure Flask app
     app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL or 'sqlite:///portfolio.db'
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(24).hex())
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-for-testing')  # Use consistent fallback
 
     # Stripe configuration
     app.config['STRIPE_PUBLIC_KEY'] = os.environ.get('STRIPE_PUBLIC_KEY')
@@ -1113,26 +1113,28 @@ def admin_debug():
 
 def get_stock_data(ticker_symbol):
     """Fetches real-time stock data from Alpha Vantage."""
+    # Default mock prices for common stocks
+    mock_prices = {
+        'AAPL': 185.92,
+        'MSFT': 420.45,
+        'GOOGL': 175.33,
+        'AMZN': 182.81,
+        'TSLA': 248.29,
+        'META': 475.12,
+        'NVDA': 116.64,
+    }
+    
     try:
         api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
         if not api_key:
             logger.warning("Alpha Vantage API key not found, using mock data")
             # Return mock data if no API key is available
-            mock_prices = {
-                'AAPL': 185.92,
-                'MSFT': 420.45,
-                'GOOGL': 175.33,
-                'AMZN': 182.81,
-                'TSLA': 248.29,
-                'META': 475.12,
-                'NVDA': 116.64,
-            }
             price = mock_prices.get(ticker_symbol.upper(), 100.00)
             return {'price': price}
         
         # Use Alpha Vantage API to get real stock data
         url = f'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker_symbol}&apikey={api_key}'
-        response = requests.get(url)
+        response = requests.get(url, timeout=5)  # Add timeout to prevent hanging
         data = response.json()
         
         if 'Global Quote' in data and '05. price' in data['Global Quote']:
@@ -1141,21 +1143,13 @@ def get_stock_data(ticker_symbol):
         else:
             logger.warning(f"Could not get price for {ticker_symbol}, using fallback")
             # Fallback to mock data if API doesn't return expected format
-            mock_prices = {
-                'AAPL': 185.92,
-                'MSFT': 420.45,
-                'GOOGL': 175.33,
-                'AMZN': 182.81,
-                'TSLA': 248.29,
-                'META': 475.12,
-                'NVDA': 116.64,
-            }
             price = mock_prices.get(ticker_symbol.upper(), 100.00)
             return {'price': price}
     except Exception as e:
-        logger.error(f"Error getting stock data for {ticker_symbol}: {e}")
+        logger.error(f"Error getting stock data for {ticker_symbol}: {str(e)}")
         # Return a default price if there's an error
-        return {'price': 100.00}
+        price = mock_prices.get(ticker_symbol.upper(), 100.00)
+        return {'price': price}
 
 # HTML Templates for core functionality
 LOGIN_HTML = """
