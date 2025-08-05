@@ -1724,10 +1724,22 @@ def authorize_google():
         db.session.add(user)
         db.session.commit()
     
-    # Log the user in
-    session['user_id'] = user.id
-    session['email'] = user.email
-    session['username'] = user.username
+    # Log the user in using Flask-Login
+    try:
+        login_user(user)
+        logger.info(f"OAuth user logged in successfully: {user.username}")
+        
+        # For backward compatibility, also set session variables
+        session['user_id'] = user.id
+        session['email'] = user.email
+        session['username'] = user.username
+    except Exception as e:
+        logger.error(f"Error during OAuth login_user: {str(e)}")
+        logger.error(traceback.format_exc())
+        # Fall back to session-based auth if Flask-Login fails
+        session['user_id'] = user.id
+        session['email'] = user.email
+        session['username'] = user.username
     
     # Check if this is the user's first login (no stocks yet)
     if Stock.query.filter_by(user_id=user.id).count() == 0:
@@ -1777,10 +1789,22 @@ def authorize_apple():
             db.session.add(user)
             db.session.commit()
         
-        # Log the user in
-        session['user_id'] = user.id
-        session['email'] = user.email
-        session['username'] = user.username
+        # Log the user in using Flask-Login
+        try:
+            login_user(user)
+            logger.info(f"Apple OAuth user logged in successfully: {user.username}")
+            
+            # For backward compatibility, also set session variables
+            session['user_id'] = user.id
+            session['email'] = user.email
+            session['username'] = user.username
+        except Exception as e:
+            logger.error(f"Error during Apple OAuth login_user: {str(e)}")
+            logger.error(traceback.format_exc())
+            # Fall back to session-based auth if Flask-Login fails
+            session['user_id'] = user.id
+            session['email'] = user.email
+            session['username'] = user.username
         
         # Check if this is the user's first login (no stocks yet)
         if Stock.query.filter_by(user_id=user.id).count() == 0:
