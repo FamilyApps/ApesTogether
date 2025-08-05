@@ -232,7 +232,7 @@ class User(db.Model, UserMixin):
     subscription_price = db.Column(db.Float, nullable=True)
     stocks = db.relationship('Stock', backref='user', lazy=True)
     transactions = db.relationship('Transaction', backref='user', lazy=True)
-    subscriptions = db.relationship('Subscription', backref='user', lazy=True)
+    # We'll use subscriptions_made and subscribers relationships defined in the Subscription model
     
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -288,11 +288,22 @@ class Subscription(db.Model):
     start_date = db.Column(db.DateTime, default=datetime.utcnow)
     end_date = db.Column(db.DateTime, nullable=True)
     
-    # Define relationships to get User objects
+    # Define relationships to get User objects with explicit foreign keys
     # backref creates a 'subscriptions_made' collection on the User model (for the subscriber)
-    subscriber = db.relationship('User', foreign_keys=[subscriber_id], backref='subscriptions_made')
+    subscriber = db.relationship(
+        'User', 
+        foreign_keys=[subscriber_id], 
+        backref=db.backref('subscriptions_made', lazy=True),
+        lazy=True
+    )
+    
     # backref creates a 'subscribers' collection on the User model (for the user being subscribed to)
-    subscribed_to = db.relationship('User', foreign_keys=[subscribed_to_id], backref='subscribers')
+    subscribed_to = db.relationship(
+        'User', 
+        foreign_keys=[subscribed_to_id], 
+        backref=db.backref('subscribers', lazy=True),
+        lazy=True
+    )
 
     def __repr__(self):
         return f'<Subscription {self.subscriber_id} to {self.subscribed_to_id} - {self.status}>'
@@ -1257,10 +1268,45 @@ def admin_debug_database():
         except Exception as db_test_error:
             db_config['connection_test'] = f'Error: {str(db_test_error)}'
             logger.error(f"Database connection test failed: {str(db_test_error)}")
+            logger.error(traceback.format_exc())
         
         return jsonify(db_config)
     except Exception as e:
         logger.error(f"Error in debug database endpoint: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+        
+@app.route('/admin/debug/models')
+def admin_debug_models():
+    """Debug endpoint to check SQLAlchemy model relationships"""
+    try:
+        # Get model information
+        model_info = {
+            'user_model': {
+                'attributes': [attr for attr in dir(User) if not attr.startswith('_')],
+                'relationships': [
+                    {'name': 'stocks', 'target': 'Stock', 'type': 'one-to-many'},
+                    {'name': 'transactions', 'target': 'Transaction', 'type': 'one-to-many'},
+                    {'name': 'subscriptions_made', 'target': 'Subscription', 'type': 'one-to-many'},
+                    {'name': 'subscribers', 'target': 'Subscription', 'type': 'one-to-many'}
+                ]
+            },
+            'subscription_model': {
+                'attributes': [attr for attr in dir(Subscription) if not attr.startswith('_')],
+                'relationships': [
+                    {'name': 'subscriber', 'target': 'User', 'type': 'many-to-one'},
+                    {'name': 'subscribed_to', 'target': 'User', 'type': 'many-to-one'}
+                ],
+                'foreign_keys': [
+                    {'name': 'subscriber_id', 'references': 'user.id'},
+                    {'name': 'subscribed_to_id', 'references': 'user.id'}
+                ]
+            }
+        }
+        
+        return jsonify(model_info)
+    except Exception as e:
+        logger.error(f"Error in debug models endpoint: {str(e)}")
         logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
             
