@@ -1397,6 +1397,50 @@ def admin_debug_oauth_login():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/debug/oauth-session')
+def admin_debug_oauth_session():
+    """Debug endpoint to check Flask-Login session state"""
+    try:
+        # Get current user info
+        current_user_info = {
+            'is_authenticated': current_user.is_authenticated if hasattr(current_user, 'is_authenticated') else False,
+            'session_vars': {
+                'user_id': session.get('user_id'),
+                'email': session.get('email'),
+                'username': session.get('username')
+            },
+            'flask_login_user': str(current_user) if hasattr(current_user, 'id') else 'No current_user',
+            'request_cookies': dict(request.cookies)
+        }
+        
+        # Check if session is working
+        test_key = str(uuid.uuid4())
+        session['test_key'] = test_key
+        session_test = {'set': test_key, 'retrieved': session.get('test_key')}
+        
+        return jsonify({
+            'success': True,
+            'current_user': current_user_info,
+            'session_test': session_test,
+            'app_config': {
+                'secret_key_set': app.secret_key is not None,
+                'session_cookie_name': app.config.get('SESSION_COOKIE_NAME'),
+                'session_cookie_secure': app.config.get('SESSION_COOKIE_SECURE'),
+                'session_cookie_domain': app.config.get('SESSION_COOKIE_DOMAIN'),
+                'session_cookie_path': app.config.get('SESSION_COOKIE_PATH'),
+                'remember_cookie_duration': str(app.config.get('REMEMBER_COOKIE_DURATION')),
+                'login_view': login_manager._login_view if hasattr(login_manager, '_login_view') else None
+            }
+        })
+    except Exception as e:
+        logger.error(f"Error in debug OAuth session endpoint: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}',
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/debug/admin-check')
 def admin_debug_admin_check():
     """Debug endpoint to check if admin user exists"""
@@ -1912,6 +1956,77 @@ def login_google():
         logger.error(traceback.format_exc())
         flash('Error connecting to Google. Please try again.', 'danger')
         return redirect(url_for('login'))
+
+@app.route('/admin/debug/flask-login')
+def admin_debug_flask_login():
+    """Debug endpoint to check Flask-Login configuration"""
+    try:
+        # Test database connection
+        db_test_result = {}
+        try:
+            # Check if we can query users
+            user_count = User.query.count()
+            db_test_result['user_count'] = user_count
+            db_test_result['connection'] = 'Success'
+            
+            # Check if load_user works
+            if user_count > 0:
+                first_user = User.query.first()
+                if first_user:
+                    test_user = load_user(first_user.id)
+                    db_test_result['load_user'] = {
+                        'success': test_user is not None,
+                        'user_id': test_user.id if test_user else None
+                    }
+        except Exception as db_error:
+            db_test_result['connection'] = 'Failed'
+            db_test_result['error'] = str(db_error)
+        
+        # Check Flask-Login configuration
+        login_config = {
+            'login_manager': {
+                'login_view': login_manager._login_view if hasattr(login_manager, '_login_view') else None,
+                'login_message': login_manager._login_message if hasattr(login_manager, '_login_message') else None,
+                'session_protection': login_manager.session_protection,
+                'anonymous_user': str(login_manager.anonymous_user),
+                'user_callback': login_manager._user_callback.__name__ if login_manager._user_callback else None
+            },
+            'current_user': {
+                'is_authenticated': current_user.is_authenticated if hasattr(current_user, 'is_authenticated') else False,
+                'is_active': current_user.is_active if hasattr(current_user, 'is_active') else False,
+                'is_anonymous': current_user.is_anonymous if hasattr(current_user, 'is_anonymous') else True,
+                'get_id': current_user.get_id() if hasattr(current_user, 'get_id') else None
+            },
+            'session': {
+                'keys': list(session.keys()) if session else [],
+                'user_id': session.get('user_id'),
+                'email': session.get('email'),
+                'username': session.get('username'),
+                '_user_id': session.get('_user_id'),  # Flask-Login session key
+                '_id': session.get('_id'),  # Session ID
+                '_fresh': session.get('_fresh')  # Flask-Login session freshness
+            }
+        }
+        
+        return jsonify({
+            'success': True,
+            'db_test': db_test_result,
+            'flask_login_config': login_config,
+            'request_info': {
+                'cookies': dict(request.cookies),
+                'headers': dict(request.headers),
+                'is_secure': request.is_secure,
+                'host': request.host
+            }
+        })
+    except Exception as e:
+        logger.error(f"Error in debug Flask-Login endpoint: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}',
+            'traceback': traceback.format_exc()
+        }), 500
 
 @app.route('/login/google/authorize')
 def authorize_google():
