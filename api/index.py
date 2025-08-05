@@ -3,11 +3,13 @@ Vercel serverless function handler for the Flask app.
 This is a standalone version with admin access functionality.
 """
 import os
+import re
 import json
-import logging
-import psycopg2
 import random
+import logging
+import traceback
 import requests
+import uuid
 import stripe
 import sys
 import traceback
@@ -1723,9 +1725,17 @@ def logout():
 
 @app.route('/login/google')
 def login_google():
-    """Redirect to Google OAuth login"""
-    redirect_uri = url_for('authorize_google', _external=True)
-    return google.authorize_redirect(redirect_uri)
+    """Redirect to Google for OAuth login"""
+    try:
+        logger.info("Starting Google OAuth login")
+        redirect_uri = url_for('authorize_google', _external=True)
+        logger.info(f"Redirect URI: {redirect_uri}")
+        return google.authorize_redirect(redirect_uri)
+    except Exception as e:
+        logger.error(f"Error in Google OAuth redirect: {str(e)}")
+        logger.error(traceback.format_exc())
+        flash('Error connecting to Google. Please try again.', 'danger')
+        return redirect(url_for('login'))
 
 @app.route('/login/google/authorize')
 def authorize_google():
@@ -1735,38 +1745,111 @@ def authorize_google():
         token = google.authorize_access_token()
         logger.info(f"Google OAuth token received: {token is not None}")
         
+        # Authlib with Google OAuth2 sometimes returns a token that needs to be processed differently
+        # Make sure we have the token in the right format
+        if isinstance(token, dict) and 'access_token' in token:
+            logger.info("Using access_token to fetch user info directly from Google API")
+            # Use the access token to make a request directly to Google's userinfo endpoint
+            import requests
+            headers = {'Authorization': f'Bearer {token["access_token"]}'}  
+            userinfo_response = requests.get('https://www.googleapis.com/oauth2/v3/userinfo', headers=headers)
+            
+            if userinfo_response.status_code == 200:
+                # This is the most reliable way to get user info
+                direct_user_info = userinfo_response.json()
+                logger.info(f"Direct Google API user info: {direct_user_info.keys() if direct_user_info else 'Empty'}")
+                
+                # Store this in the token for later use
+                token['direct_userinfo'] = direct_user_info
+        
         # In some OAuth implementations, we need to make a separate request to get user info
         try:
-            # Different OAuth libraries handle this differently
-            # For Authlib with Google, we need to make a separate request
-            resp = google.get('userinfo')
-            user_info = resp.json()
+            # Log the token structure to help diagnose issues
+            logger.info(f"OAuth token keys: {token.keys() if token else 'None'}")
             
-            # If we couldn't get user info, try alternative methods
+            # Try different approaches to get user info, with detailed logging
+            user_info = {}
+            
+            # First priority: Use our directly fetched user info if available
+            if 'direct_userinfo' in token and token['direct_userinfo']:
+                logger.info("Using directly fetched user info from Google API")
+                user_info = token['direct_userinfo']
+                logger.info(f"Direct user info keys: {user_info.keys() if user_info else 'Empty'}")
+            
+            # Second priority: Try Authlib's built-in userinfo endpoint call
+            if not user_info or 'email' not in user_info:
+                try:
+                    logger.info("Attempting to get user info via Authlib userinfo endpoint")
+                    resp = google.get('userinfo')
+                    logger.info(f"Userinfo response status: {resp.status_code if resp else 'No response'}")
+                    if resp and resp.status_code == 200:
+                        user_info = resp.json()
+                        logger.info(f"Got user info from endpoint: {user_info.keys() if user_info else 'Empty'}")
+                except Exception as e1:
+                    logger.error(f"Error getting userinfo from endpoint: {str(e1)}")
+            
+            # Approach 2: Check if userinfo is directly in token
             if not user_info or 'email' not in user_info:
                 if 'userinfo' in token:
+                    logger.info("Found userinfo in token")
                     user_info = token.get('userinfo')
-                elif 'id_token' in token:
-                    # Try to decode the ID token
+                    logger.info(f"Token userinfo keys: {user_info.keys() if user_info else 'Empty'}")
+            
+            # Approach 3: Try to decode the ID token
+            if not user_info or 'email' not in user_info:
+                if 'id_token' in token:
+                    logger.info("Found id_token, attempting to decode")
                     import jwt
                     try:
-                        # This is a simplified approach - in production you'd verify the token
                         id_token = token.get('id_token')
                         decoded = jwt.decode(id_token, options={"verify_signature": False})
                         user_info = decoded
+                        logger.info(f"Decoded ID token: {user_info.keys() if user_info else 'Empty'}")
                     except Exception as jwt_error:
                         logger.error(f"Error decoding ID token: {str(jwt_error)}")
-                        user_info = {}
-                else:
-                    user_info = {}
+            
+            # Approach 4: Look for user info in other common locations
+            if not user_info or 'email' not in user_info:
+                for key in ['user', 'profile', 'info']:
+                    if key in token and isinstance(token[key], dict):
+                        logger.info(f"Found potential user info in token[{key}]")
+                        user_info = token[key]
+                        break
             
             logger.info(f"Google OAuth user info received: {user_info is not None}")
             
             # Validate that we have the required user information
             if not user_info or 'email' not in user_info:
                 logger.error(f"Missing email in user_info: {user_info}")
-                flash('Could not retrieve your email from Google. Please try again or use another login method.', 'danger')
-                return redirect(url_for('login'))
+                # Try one more direct approach as a last resort
+                try:
+                    logger.info("Last resort: Trying direct Google API call with access token")
+                    if 'access_token' in token:
+                        import requests
+                        headers = {'Authorization': f'Bearer {token["access_token"]}'}  
+                        userinfo_response = requests.get('https://www.googleapis.com/oauth2/v3/userinfo', headers=headers)
+                        
+                        if userinfo_response.status_code == 200:
+                            user_info = userinfo_response.json()
+                            logger.info(f"Last resort user info: {user_info.keys() if user_info else 'Empty'}")
+                            
+                            # If we still don't have an email, give up
+                            if not user_info or 'email' not in user_info:
+                                logger.error("Still missing email after last resort attempt")
+                                flash('Could not retrieve your email from Google. Please try again or use another login method.', 'danger')
+                                return redirect(url_for('login'))
+                        else:
+                            logger.error(f"Last resort API call failed with status {userinfo_response.status_code}")
+                            flash('Could not retrieve your email from Google. Please try again or use another login method.', 'danger')
+                            return redirect(url_for('login'))
+                    else:
+                        logger.error("No access token available for last resort attempt")
+                        flash('Could not retrieve your email from Google. Please try again or use another login method.', 'danger')
+                        return redirect(url_for('login'))
+                except Exception as last_error:
+                    logger.error(f"Error in last resort attempt: {str(last_error)}")
+                    flash('Could not retrieve your email from Google. Please try again or use another login method.', 'danger')
+                    return redirect(url_for('login'))
                 
             logger.info(f"User email: {user_info.get('email')}")
         except Exception as e:
@@ -1777,7 +1860,16 @@ def authorize_google():
         
         # Check if user exists
         try:
-            user = User.query.filter_by(email=user_info['email']).first()
+            # Normalize the email field name - Google API might use 'email' or 'sub'
+            email = user_info.get('email')
+            if not email and 'sub' in user_info:
+                # If we don't have an email but have a subject ID, log this unusual case
+                logger.warning(f"No email in user_info, but found 'sub': {user_info.get('sub')}")
+                # We still need an email for our database
+                flash('Could not retrieve a valid email from Google. Please try again or use another login method.', 'danger')
+                return redirect(url_for('login'))
+                
+            user = User.query.filter_by(email=email).first()
             logger.info(f"User exists in database: {user is not None}")
         except Exception as db_error:
             logger.error(f"Database error checking for user: {str(db_error)}")
@@ -1806,7 +1898,7 @@ def authorize_google():
             email=user_info['email'],
             username=username,
             oauth_provider='google',
-            oauth_id=user_info['sub'],  # OpenID Connect uses 'sub' for the user ID
+            oauth_id=user_info.get('sub', user_info.get('id', str(uuid.uuid4()))),  # Use sub, id, or generate UUID as fallback
             stripe_price_id='price_1RbX0yQWUhVa3vgDB8vGzoFN',  # Default $4 price
             subscription_price=4.00
         )
