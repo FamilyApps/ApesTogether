@@ -1309,7 +1309,98 @@ def admin_debug_models():
         logger.error(f"Error in debug models endpoint: {str(e)}")
         logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
+        
+@app.route('/admin/debug/oauth-login')
+def admin_debug_oauth_login():
+    """Debug endpoint to test Google OAuth login without going through the full flow"""
+    try:
+        # Create a mock user for testing
+        test_email = 'test@example.com'
+        
+        # Check if test user exists
+        test_user = User.query.filter_by(email=test_email).first()
+        
+        if not test_user:
+            # Create test user
+            test_user = User(
+                email=test_email,
+                username='test-user',
+                oauth_provider='google',
+                oauth_id='test123',
+                stripe_price_id='price_1RbX0yQWUhVa3vgDB8vGzoFN',
+                subscription_price=4.00
+            )
+            test_user.set_password('')  # Empty password for OAuth users
             
+            # Make sure we have a valid database session
+            if not db.session.is_active:
+                logger.warning("Database session is not active during test user creation, creating new session")
+                db.session = db.create_scoped_session()
+                
+            db.session.add(test_user)
+            db.session.commit()
+            logger.info(f"Created test user with ID: {test_user.id}")
+        
+        # Try to log in the test user
+        try:
+            # Make sure the user object is attached to the current session
+            if hasattr(test_user, '_sa_instance_state') and test_user._sa_instance_state.session is not db.session:
+                logger.warning("Test user object is not attached to the current session, merging")
+                test_user = db.session.merge(test_user)
+                
+            # Try to log in the user
+            login_success = login_user(test_user)
+            logger.info(f"Test user login_user result: {login_success}")
+            
+            if login_success:
+                # For backward compatibility, also set session variables
+                session['user_id'] = test_user.id
+                session['email'] = test_user.email
+                session['username'] = test_user.username
+                
+                return jsonify({
+                    'success': True,
+                    'message': 'Test user logged in successfully',
+                    'user_id': test_user.id,
+                    'email': test_user.email,
+                    'username': test_user.username,
+                    'session_variables': {
+                        'user_id': session.get('user_id'),
+                        'email': session.get('email'),
+                        'username': session.get('username')
+                    }
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'message': 'login_user() returned False',
+                    'user_details': {
+                        'id': test_user.id,
+                        'email': test_user.email,
+                        'username': test_user.username
+                    }
+                }), 500
+        except Exception as login_error:
+            logger.error(f"Error during test user login: {str(login_error)}")
+            logger.error(traceback.format_exc())
+            return jsonify({
+                'success': False,
+                'message': f'Error during login: {str(login_error)}',
+                'traceback': traceback.format_exc()
+            }), 500
+    except Exception as e:
+        logger.error(f"Error in debug OAuth login endpoint: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}',
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/debug/admin-check')
+def admin_debug_admin_check():
+    """Debug endpoint to check if admin user exists"""
+    try:
         admin_user = User.query.filter_by(email='fordutilityapps@gmail.com').first()
         if admin_user:
             # Don't return the actual password hash for security reasons
@@ -1824,11 +1915,21 @@ def login_google():
 
 @app.route('/login/google/authorize')
 def authorize_google():
-    """Handle Google OAuth callback"""
+    """Handle the callback from Google OAuth"""
+    # Log all request details for debugging
+    logger.info(f"Google OAuth callback received - URL: {request.url}")
+    logger.info(f"Google OAuth callback headers: {dict(request.headers)}")
+    logger.info(f"Google OAuth callback args: {request.args}")
+    
     try:
-        logger.info("Google OAuth callback started")
+        logger.info("Attempting to authorize access token from Google")
         token = google.authorize_access_token()
         logger.info(f"Google OAuth token received: {token is not None}")
+        if token:
+            logger.info(f"Token keys: {token.keys()}")
+        else:
+            logger.error("Token is None from google.authorize_access_token()")
+            return redirect(url_for('login'))
         
         # Authlib with Google OAuth2 sometimes returns a token that needs to be processed differently
         # Make sure we have the token in the right format
@@ -1863,43 +1964,51 @@ def authorize_google():
             
             # Second priority: Try Authlib's built-in userinfo endpoint call
             if not user_info or 'email' not in user_info:
-                try:
-                    logger.info("Attempting to get user info via Authlib userinfo endpoint")
-                    resp = google.get('userinfo')
-                    logger.info(f"Userinfo response status: {resp.status_code if resp else 'No response'}")
-                    if resp and resp.status_code == 200:
-                        user_info = resp.json()
-                        logger.info(f"Got user info from endpoint: {user_info.keys() if user_info else 'Empty'}")
-                except Exception as e1:
-                    logger.error(f"Error getting userinfo from endpoint: {str(e1)}")
-            
-            # Approach 2: Check if userinfo is directly in token
-            if not user_info or 'email' not in user_info:
+                logger.info("Attempting to get user info via Authlib userinfo endpoint")
                 if 'userinfo' in token:
-                    logger.info("Found userinfo in token")
-                    user_info = token.get('userinfo')
-                    logger.info(f"Token userinfo keys: {user_info.keys() if user_info else 'Empty'}")
-            
-            # Approach 3: Try to decode the ID token
-            if not user_info or 'email' not in user_info:
-                if 'id_token' in token:
-                    logger.info("Found id_token, attempting to decode")
-                    import jwt
+                    user_info = token['userinfo']
+                    logger.info(f"Found user_info in token['userinfo']: {user_info.keys() if user_info else 'Empty'}")
+                    if user_info and 'email' in user_info:
+                        logger.info(f"Found email in token['userinfo']: {user_info['email']}")
+                
+                # If not, try to get it from Google API
+                if not user_info or 'email' not in user_info:
                     try:
-                        id_token = token.get('id_token')
-                        decoded = jwt.decode(id_token, options={"verify_signature": False})
-                        user_info = decoded
-                        logger.info(f"Decoded ID token: {user_info.keys() if user_info else 'Empty'}")
+                        logger.info("Attempting to get userinfo from google.get('userinfo')")
+                        user_info = google.get('userinfo')
+                        logger.info(f"Got user_info from google.get('userinfo'): {user_info.keys() if user_info else 'Empty'}")
+                        if user_info and 'email' in user_info:
+                            logger.info(f"Found email in google.get('userinfo'): {user_info['email']}")
+                    except Exception as api_error:
+                        logger.error(f"Error getting user_info from google.get('userinfo'): {str(api_error)}")
+                        logger.error(traceback.format_exc())
+                
+                # If we have an id_token, try to decode it
+                if (not user_info or 'email' not in user_info) and 'id_token' in token:
+                    try:
+                        import jwt
+                        logger.info("Attempting to decode id_token")
+                        # Note: We're not verifying the signature here, just decoding the payload
+                        # This is for debugging purposes only
+                        id_token_payload = jwt.decode(token['id_token'], options={"verify_signature": False})
+                        logger.info(f"Decoded id_token payload: {id_token_payload.keys() if id_token_payload else 'Empty'}")
+                        if id_token_payload and 'email' in id_token_payload:
+                            logger.info(f"Found email in id_token: {id_token_payload['email']}")
+                            user_info = id_token_payload
                     except Exception as jwt_error:
-                        logger.error(f"Error decoding ID token: {str(jwt_error)}")
-            
-            # Approach 4: Look for user info in other common locations
-            if not user_info or 'email' not in user_info:
-                for key in ['user', 'profile', 'info']:
-                    if key in token and isinstance(token[key], dict):
-                        logger.info(f"Found potential user info in token[{key}]")
-                        user_info = token[key]
-                        break
+                        logger.error(f"Error decoding id_token: {str(jwt_error)}")
+                        logger.error(traceback.format_exc())
+                
+                # Check other common token keys
+                if not user_info or 'email' not in user_info:
+                    for key in ['user', 'profile', 'info']:
+                        if key in token and isinstance(token[key], dict):
+                            logger.info(f"Checking token['{key}']: {token[key].keys() if token[key] else 'Empty'}")
+                            if 'email' in token[key]:
+                                logger.info(f"Found email in token['{key}']: {token[key]['email']}")
+                                user_info = token[key]
+                                break
+
             
             logger.info(f"Google OAuth user info received: {user_info is not None}")
             
