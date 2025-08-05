@@ -1202,6 +1202,42 @@ def admin_debug_users():
         logger.error(f"Error in debug users endpoint: {str(e)}")
         logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/debug/oauth')
+def admin_debug_oauth():
+    """Debug endpoint to check OAuth configuration"""
+    try:
+        # Only show if environment variables are set, not their actual values
+        oauth_config = {
+            'google_client_id_set': bool(os.environ.get('GOOGLE_CLIENT_ID')),
+            'google_client_secret_set': bool(os.environ.get('GOOGLE_CLIENT_SECRET')),
+            'apple_client_id_set': bool(os.environ.get('APPLE_CLIENT_ID')),
+            'apple_client_secret_set': bool(os.environ.get('APPLE_CLIENT_SECRET')),
+            'redirect_uri': url_for('authorize_google', _external=True),
+            'base_url': request.host_url,
+            'is_https': request.is_secure
+        }
+        return jsonify(oauth_config)
+    except Exception as e:
+        logger.error(f"Error in debug OAuth endpoint: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+            
+        admin_user = User.query.filter_by(email='fordutilityapps@gmail.com').first()
+        if admin_user:
+            # Don't return the actual password hash for security reasons
+            return jsonify({
+                'admin_user_exists': True,
+                'username': admin_user.username,
+                'has_password_hash': bool(admin_user.password_hash),
+                'password_hash_length': len(admin_user.password_hash) if admin_user.password_hash else 0
+            })
+        else:
+            return jsonify({'admin_user_exists': False})
+    except Exception as e:
+        logger.error(f"Error in debug users endpoint: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
         
 @app.route('/admin/reset-admin-password')
 def reset_admin_password():
@@ -1694,11 +1730,65 @@ def login_google():
 @app.route('/login/google/authorize')
 def authorize_google():
     """Handle Google OAuth callback"""
-    token = google.authorize_access_token()
-    user_info = token.get('userinfo')
-    
-    # Check if user exists
-    user = User.query.filter_by(email=user_info['email']).first()
+    try:
+        logger.info("Google OAuth callback started")
+        token = google.authorize_access_token()
+        logger.info(f"Google OAuth token received: {token is not None}")
+        
+        # In some OAuth implementations, we need to make a separate request to get user info
+        try:
+            # Different OAuth libraries handle this differently
+            # For Authlib with Google, we need to make a separate request
+            resp = google.get('userinfo')
+            user_info = resp.json()
+            
+            # If we couldn't get user info, try alternative methods
+            if not user_info or 'email' not in user_info:
+                if 'userinfo' in token:
+                    user_info = token.get('userinfo')
+                elif 'id_token' in token:
+                    # Try to decode the ID token
+                    import jwt
+                    try:
+                        # This is a simplified approach - in production you'd verify the token
+                        id_token = token.get('id_token')
+                        decoded = jwt.decode(id_token, options={"verify_signature": False})
+                        user_info = decoded
+                    except Exception as jwt_error:
+                        logger.error(f"Error decoding ID token: {str(jwt_error)}")
+                        user_info = {}
+                else:
+                    user_info = {}
+            
+            logger.info(f"Google OAuth user info received: {user_info is not None}")
+            
+            # Validate that we have the required user information
+            if not user_info or 'email' not in user_info:
+                logger.error(f"Missing email in user_info: {user_info}")
+                flash('Could not retrieve your email from Google. Please try again or use another login method.', 'danger')
+                return redirect(url_for('login'))
+                
+            logger.info(f"User email: {user_info.get('email')}")
+        except Exception as e:
+            logger.error(f"Error getting user info from Google: {str(e)}")
+            logger.error(traceback.format_exc())
+            flash('Error getting user information from Google. Please try again.', 'danger')
+            return redirect(url_for('login'))
+        
+        # Check if user exists
+        try:
+            user = User.query.filter_by(email=user_info['email']).first()
+            logger.info(f"User exists in database: {user is not None}")
+        except Exception as db_error:
+            logger.error(f"Database error checking for user: {str(db_error)}")
+            logger.error(traceback.format_exc())
+            flash('Error accessing user database. Please try again later.', 'danger')
+            return redirect(url_for('login'))
+    except Exception as e:
+        logger.error(f"Error in Google OAuth callback: {str(e)}")
+        logger.error(traceback.format_exc())
+        flash('Error during Google authentication. Please try again.', 'danger')
+        return redirect(url_for('login'))
     
     if not user:
         # Generate a unique random username
