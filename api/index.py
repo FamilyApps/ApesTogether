@@ -713,7 +713,15 @@ def subscription_success():
                 
                 subscribed_to = User.query.get(subscription.subscribed_to_id)
                 flash(f'Successfully subscribed to {subscribed_to.username}\'s portfolio!', 'success')
-                return redirect(url_for('profile', username=subscribed_to.username))
+                logger.info(f"Login successful for user {subscribed_to.username}, redirecting to dashboard")
+                try:
+                    # Use a simple redirect to avoid potential template rendering issues
+                    return redirect('/')
+                except Exception as redirect_error:
+                    logger.error(f"Error during redirect after successful login: {str(redirect_error)}")
+                    logger.error(traceback.format_exc())
+                    # Even if redirect fails, user is already logged in
+                    return redirect(url_for('index'))
             else:
                 flash('Subscription metadata is missing', 'danger')
                 return redirect(url_for('dashboard'))
@@ -2327,7 +2335,15 @@ def authorize_google():
     else:
         flash('Login successful!', 'success')
         
-    return redirect(url_for('dashboard'))
+    try:
+        logger.info("Attempting final redirect after successful OAuth login")
+        # Use a direct URL redirect instead of url_for to avoid potential template rendering issues
+        return redirect('/')
+    except Exception as redirect_error:
+        logger.error(f"Error during final redirect after OAuth login: {str(redirect_error)}")
+        logger.error(traceback.format_exc())
+        # Even if redirect fails, user is already logged in, so redirect to root
+        return redirect('/')
 
 @app.route('/login/apple')
 def login_apple():
