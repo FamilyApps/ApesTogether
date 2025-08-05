@@ -168,6 +168,35 @@ try:
     login_manager.init_app(app)
     login_manager.login_view = 'login'
 
+    # Add a before_request handler to ensure session and current_user are properly initialized
+    @app.before_request
+    def handle_before_request():
+        try:
+            # Ensure session is initialized
+            if '_user_id' in session and not hasattr(current_user, 'is_authenticated'):
+                # Force reload user from session
+                user_id = session.get('_user_id')
+                if user_id:
+                    user = load_user(user_id)
+                    if user:
+                        login_user(user)
+            
+            # For backward compatibility - ensure session variables are set if user is logged in
+            if hasattr(current_user, 'is_authenticated') and current_user.is_authenticated:
+                if 'user_id' not in session:
+                    session['user_id'] = current_user.id
+                if 'email' not in session and hasattr(current_user, 'email'):
+                    session['email'] = current_user.email
+                if 'username' not in session and hasattr(current_user, 'username'):
+                    session['username'] = current_user.username
+        except Exception as e:
+            # Log but don't fail the request
+            logger.error(f"Error in before_request handler: {str(e)}")
+            logger.error(traceback.format_exc())
+            # Clear problematic session data if there's an error
+            if '_user_id' in session:
+                session.pop('_user_id', None)
+
     @login_manager.user_loader
     def load_user(user_id):
         try:
@@ -2038,8 +2067,14 @@ def authorize_google():
     
     try:
         logger.info("Attempting to authorize access token from Google")
-        token = google.authorize_access_token()
-        logger.info(f"Google OAuth token received: {token is not None}")
+        try:
+            token = google.authorize_access_token()
+            logger.info(f"Google OAuth token received: {token is not None}")
+        except Exception as token_error:
+            logger.error(f"Error getting OAuth token: {str(token_error)}")
+            logger.error(traceback.format_exc())
+            flash('Error connecting to Google. Please try again.', 'danger')
+            return redirect(url_for('login'))
         if token:
             logger.info(f"Token keys: {token.keys()}")
         else:
@@ -2367,12 +2402,25 @@ def authorize_apple():
 @login_required
 def dashboard():
     """User dashboard"""
-    # Get current user from session
-    current_user_id = session.get('user_id')
-    current_user = User.query.get(current_user_id)
+    try:
+        # Use Flask-Login's current_user instead of session
+        if not current_user.is_authenticated:
+            flash('Please log in to access your dashboard.', 'warning')
+            return redirect(url_for('login'))
+            
+        # For backward compatibility, ensure session is in sync with Flask-Login
+        if session.get('user_id') != current_user.id:
+            session['user_id'] = current_user.id
+            session['email'] = current_user.email
+            session['username'] = current_user.username
+    except Exception as e:
+        logger.error(f"Error in dashboard authentication: {str(e)}")
+        logger.error(traceback.format_exc())
+        flash('An error occurred. Please try logging in again.', 'danger')
+        return redirect(url_for('login'))
     
     # Get user's stocks
-    stocks = Stock.query.filter_by(user_id=current_user_id).all()
+    stocks = Stock.query.filter_by(user_id=current_user.id).all()
     portfolio_data = []
     total_portfolio_value = 0
     
