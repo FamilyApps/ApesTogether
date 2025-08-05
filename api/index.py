@@ -1178,6 +1178,62 @@ def admin_subscription_analytics():
 def admin_debug():
     """Return debug information about the environment"""
     import sys
+    
+@app.route('/admin/debug/users')
+def admin_debug_users():
+    """Debug endpoint to check user credentials"""
+    try:
+        # Only allow access from localhost or if user is admin
+        if request.remote_addr != '127.0.0.1' and not (current_user.is_authenticated and current_user.is_admin()):
+            return jsonify({'error': 'Unauthorized'}), 403
+            
+        admin_user = User.query.filter_by(email='fordutilityapps@gmail.com').first()
+        if admin_user:
+            # Don't return the actual password hash for security reasons
+            return jsonify({
+                'admin_user_exists': True,
+                'username': admin_user.username,
+                'has_password_hash': bool(admin_user.password_hash),
+                'password_hash_length': len(admin_user.password_hash) if admin_user.password_hash else 0
+            })
+        else:
+            return jsonify({'admin_user_exists': False})
+    except Exception as e:
+        logger.error(f"Error in debug users endpoint: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+        
+@app.route('/admin/reset-admin-password')
+def reset_admin_password():
+    """Reset the admin password - only accessible from localhost"""
+    try:
+        # Only allow access from localhost for security
+        if request.remote_addr != '127.0.0.1':
+            return jsonify({'error': 'This endpoint can only be accessed from localhost'}), 403
+            
+        # Find admin user or create if doesn't exist
+        admin_user = User.query.filter_by(email='fordutilityapps@gmail.com').first()
+        
+        if not admin_user:
+            # Create admin user if it doesn't exist
+            admin_user = User(username='witty-raven', email='fordutilityapps@gmail.com')
+            db.session.add(admin_user)
+            
+        # Set a new password
+        new_password = 'admin123'
+        admin_user.set_password(new_password)
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f"Admin password reset successfully. Username: witty-raven, Password: {new_password}"
+        })
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error resetting admin password: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
     try:
         # Collect environment information
         debug_info = {
@@ -1533,27 +1589,50 @@ def index():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     """User login page"""
-    if request.method == 'POST':
-        email = request.form.get('email')
-        password = request.form.get('password')
-        
-        user = User.query.filter_by(email=email).first()
-        
-        if user and user.check_password(password):
-            # Use Flask-Login to handle user session
-            login_user(user)
-            flash('Login successful!', 'success')
+    try:
+        if request.method == 'POST':
+            email = request.form.get('email')
+            password = request.form.get('password')
             
-            # For backward compatibility, also set session variables
-            session['user_id'] = user.id
-            session['email'] = user.email
-            session['username'] = user.username
+            logger.info(f"Login attempt for email: {email}")
             
-            # Redirect to next page or dashboard
-            next_page = request.args.get('next')
-            return redirect(next_page or url_for('dashboard'))
-        else:
-            flash('Invalid email or password', 'danger')
+            try:
+                user = User.query.filter_by(email=email).first()
+                logger.info(f"User found: {user is not None}")
+                
+                if user:
+                    password_check = user.check_password(password)
+                    logger.info(f"Password check result: {password_check}")
+                    
+                    if password_check:
+                        # Use Flask-Login to handle user session
+                        login_user(user)
+                        logger.info(f"User logged in successfully: {user.username}")
+                        flash('Login successful!', 'success')
+                        
+                        # For backward compatibility, also set session variables
+                        session['user_id'] = user.id
+                        session['email'] = user.email
+                        session['username'] = user.username
+                        
+                        # Redirect to next page or dashboard
+                        next_page = request.args.get('next')
+                        return redirect(next_page or url_for('dashboard'))
+                    else:
+                        logger.warning(f"Invalid password for user: {email}")
+                        flash('Invalid email or password', 'danger')
+                else:
+                    logger.warning(f"User not found with email: {email}")
+                    flash('Invalid email or password', 'danger')
+            except Exception as e:
+                logger.error(f"Error during user lookup or password check: {str(e)}")
+                logger.error(traceback.format_exc())
+                flash('An error occurred during login. Please try again.', 'danger')
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in login route: {str(e)}")
+        logger.error(traceback.format_exc())
+        flash('An unexpected error occurred. Please try again later.', 'danger')
     
     return render_template_with_defaults('login.html')
 
