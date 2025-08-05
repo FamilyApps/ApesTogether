@@ -10,6 +10,7 @@ import logging
 import traceback
 import requests
 import uuid
+import time
 import stripe
 import sys
 import traceback
@@ -1224,6 +1225,44 @@ def admin_debug_oauth():
         logger.error(f"Error in debug OAuth endpoint: {str(e)}")
         logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
+        
+@app.route('/admin/debug/database')
+def admin_debug_database():
+    """Debug endpoint to check database connection"""
+    try:
+        # Check database connection
+        db_config = {
+            'database_url_exists': bool(os.environ.get('DATABASE_URL')),
+            'postgres_prisma_url_exists': bool(os.environ.get('POSTGRES_PRISMA_URL')),
+            'effective_database_url_exists': bool(DATABASE_URL),
+            'sqlalchemy_database_uri_set': bool(app.config.get('SQLALCHEMY_DATABASE_URI')),
+            'db_initialized': bool(db),
+            'db_engine_initialized': bool(db.engine)
+        }
+        
+        # Test database connection
+        try:
+            # Try to execute a simple query
+            test_result = db.session.execute("SELECT 1").scalar()
+            db_config['connection_test'] = 'Success' if test_result == 1 else f'Failed: {test_result}'
+            
+            # Count users in database
+            user_count = User.query.count()
+            db_config['user_count'] = user_count
+            
+            # Check if admin user exists
+            admin_exists = User.query.filter_by(email='fordutilityapps@gmail.com').first() is not None
+            db_config['admin_user_exists'] = admin_exists
+            
+        except Exception as db_test_error:
+            db_config['connection_test'] = f'Error: {str(db_test_error)}'
+            logger.error(f"Database connection test failed: {str(db_test_error)}")
+        
+        return jsonify(db_config)
+    except Exception as e:
+        logger.error(f"Error in debug database endpoint: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
             
         admin_user = User.query.filter_by(email='fordutilityapps@gmail.com').first()
         if admin_user:
@@ -1868,9 +1907,27 @@ def authorize_google():
                 # We still need an email for our database
                 flash('Could not retrieve a valid email from Google. Please try again or use another login method.', 'danger')
                 return redirect(url_for('login'))
+            
+            # Log the email we're looking for
+            logger.info(f"Looking for user with email: {email}")
+            
+            # Make sure we have a valid database session
+            if not db.session.is_active:
+                logger.warning("Database session is not active, creating new session")
+                db.session = db.create_scoped_session()
                 
-            user = User.query.filter_by(email=email).first()
-            logger.info(f"User exists in database: {user is not None}")
+            # Try to find the user
+            try:
+                user = User.query.filter_by(email=email).first()
+                logger.info(f"User exists in database: {user is not None}")
+            except Exception as user_query_error:
+                logger.error(f"Error querying user: {str(user_query_error)}")
+                # Try to reconnect to the database
+                db.session.remove()
+                db.session = db.create_scoped_session()
+                # Try one more time
+                user = User.query.filter_by(email=email).first()
+                logger.info(f"User exists in database (after reconnect): {user is not None}")
         except Exception as db_error:
             logger.error(f"Database error checking for user: {str(db_error)}")
             logger.error(traceback.format_exc())
@@ -1883,38 +1940,74 @@ def authorize_google():
         return redirect(url_for('login'))
     
     if not user:
-        # Generate a unique random username
-        while True:
-            adjectives = ['clever', 'brave', 'sharp', 'wise', 'happy', 'lucky', 'sunny', 'proud', 'witty', 'gentle']
-            nouns = ['fox', 'lion', 'eagle', 'tiger', 'river', 'ocean', 'bear', 'wolf', 'horse', 'raven']
-            adjective = random.choice(adjectives)
-            noun = random.choice(nouns)
-            username = f"{adjective}-{noun}"
-            if not User.query.filter_by(username=username).first():
-                break
+        try:
+            # Generate a unique random username
+            while True:
+                adjectives = ['clever', 'brave', 'sharp', 'wise', 'happy', 'lucky', 'sunny', 'proud', 'witty', 'gentle']
+                nouns = ['fox', 'lion', 'eagle', 'tiger', 'river', 'ocean', 'bear', 'wolf', 'horse', 'raven']
+                adjective = random.choice(adjectives)
+                noun = random.choice(nouns)
+                username = f"{adjective}-{noun}"
+                try:
+                    if not User.query.filter_by(username=username).first():
+                        break
+                except Exception as username_error:
+                    logger.error(f"Error checking username uniqueness: {str(username_error)}")
+                    # Use a timestamp-based username as a fallback
+                    username = f"user-{int(time.time())}"
+                    break
 
-        # Create new user
-        user = User(
-            email=user_info['email'],
-            username=username,
-            oauth_provider='google',
-            oauth_id=user_info.get('sub', user_info.get('id', str(uuid.uuid4()))),  # Use sub, id, or generate UUID as fallback
-            stripe_price_id='price_1RbX0yQWUhVa3vgDB8vGzoFN',  # Default $4 price
-            subscription_price=4.00
-        )
-        user.set_password('') # Empty password for OAuth users
-        db.session.add(user)
-        db.session.commit()
+            # Create new user
+            logger.info(f"Creating new OAuth user with email: {user_info['email']} and username: {username}")
+            user = User(
+                email=user_info['email'],
+                username=username,
+                oauth_provider='google',
+                oauth_id=user_info.get('sub', user_info.get('id', str(uuid.uuid4()))),  # Use sub, id, or generate UUID as fallback
+                stripe_price_id='price_1RbX0yQWUhVa3vgDB8vGzoFN',  # Default $4 price
+                subscription_price=4.00
+            )
+            user.set_password('') # Empty password for OAuth users
+            
+            # Make sure we have a valid database session
+            if not db.session.is_active:
+                logger.warning("Database session is not active during user creation, creating new session")
+                db.session = db.create_scoped_session()
+                
+            db.session.add(user)
+            db.session.commit()
+            logger.info(f"Successfully created new OAuth user with ID: {user.id}")
+        except Exception as user_creation_error:
+            logger.error(f"Error creating new OAuth user: {str(user_creation_error)}")
+            logger.error(traceback.format_exc())
+            db.session.rollback()
+            flash('Error creating new user account. Please try again later.', 'danger')
+            return redirect(url_for('login'))
     
     # Log the user in using Flask-Login
     try:
-        login_user(user)
-        logger.info(f"OAuth user logged in successfully: {user.username}")
+        # Make sure the user object is attached to the current session
+        if hasattr(user, '_sa_instance_state') and user._sa_instance_state.session is not db.session:
+            logger.warning("User object is not attached to the current session, merging")
+            user = db.session.merge(user)
+            
+        # Try to log in the user
+        login_success = login_user(user)
+        logger.info(f"OAuth user login_user result: {login_success}")
         
-        # For backward compatibility, also set session variables
-        session['user_id'] = user.id
-        session['email'] = user.email
-        session['username'] = user.username
+        if login_success:
+            logger.info(f"OAuth user logged in successfully: {user.username}")
+            
+            # For backward compatibility, also set session variables
+            session['user_id'] = user.id
+            session['email'] = user.email
+            session['username'] = user.username
+        else:
+            logger.error("login_user returned False, falling back to session-based auth")
+            # Fall back to session-based auth if Flask-Login fails
+            session['user_id'] = user.id
+            session['email'] = user.email
+            session['username'] = user.username
     except Exception as e:
         logger.error(f"Error during OAuth login_user: {str(e)}")
         logger.error(traceback.format_exc())
