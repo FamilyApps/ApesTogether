@@ -822,25 +822,55 @@ def webhook():
 @login_required
 def subscriptions():
     """Display a user's active and canceled subscriptions"""
-    current_user_id = session.get('user_id')
+    try:
+        # Use Flask-Login's current_user instead of session
+        if not current_user.is_authenticated:
+            flash('Please log in to access your subscriptions.', 'warning')
+            return redirect(url_for('login'))
+            
+        # For backward compatibility, ensure session is in sync with Flask-Login
+        if session.get('user_id') != current_user.id:
+            session['user_id'] = current_user.id
+            session['email'] = current_user.email
+            session['username'] = current_user.username
+            
+        current_user_id = current_user.id
+        
+        # Get active subscriptions
+        try:
+            active_subscriptions = Subscription.query.filter_by(
+                subscriber_id=current_user_id,
+                status='active'
+            ).all()
+            
+            # Get canceled subscriptions
+            canceled_subscriptions = Subscription.query.filter_by(
+                subscriber_id=current_user_id,
+                status='canceled'
+            ).all()
+            
+            return render_template_with_defaults(
+                'subscriptions.html',
+                active_subscriptions=active_subscriptions,
+                canceled_subscriptions=canceled_subscriptions,
+                current_user=current_user
+            )
+        except Exception as e:
+            logger.error(f"Error querying subscriptions: {str(e)}")
+            logger.error(traceback.format_exc())
+            flash('An error occurred while loading your subscriptions. Please try again.', 'warning')
+            return render_template_with_defaults(
+                'subscriptions.html',
+                active_subscriptions=[],
+                canceled_subscriptions=[],
+                current_user=current_user
+            )
+    except Exception as e:
+        logger.error(f"Error in subscriptions route: {str(e)}")
+        logger.error(traceback.format_exc())
+        flash('An error occurred while loading your subscriptions. Please try again.', 'danger')
+        return redirect(url_for('index'))
     
-    # Get active subscriptions
-    active_subscriptions = Subscription.query.filter_by(
-        subscriber_id=current_user_id,
-        status='active'
-    ).all()
-    
-    # Get canceled subscriptions
-    canceled_subscriptions = Subscription.query.filter_by(
-        subscriber_id=current_user_id,
-        status='canceled'
-    ).all()
-    
-    return render_template_with_defaults(
-        'subscriptions.html',
-        active_subscriptions=active_subscriptions,
-        canceled_subscriptions=canceled_subscriptions
-    )
 
 @app.route('/cancel-subscription', methods=['POST'])
 @login_required
@@ -2436,37 +2466,59 @@ def dashboard():
         return redirect(url_for('login'))
     
     # Get user's stocks
-    stocks = Stock.query.filter_by(user_id=current_user.id).all()
-    portfolio_data = []
-    total_portfolio_value = 0
+    try:
+        stocks = Stock.query.filter_by(user_id=current_user.id).all()
+        portfolio_data = []
+        total_portfolio_value = 0
+        
+        for stock in stocks:
+            try:
+                stock_data = get_stock_data(stock.ticker)
+                if stock_data and stock_data.get('price') is not None:
+                    current_price = stock_data['price']
+                    stock_info = {
+                        'id': stock.id,
+                        'ticker': stock.ticker,
+                        'quantity': stock.quantity,
+                        'purchase_price': stock.purchase_price,
+                        'current_price': current_price,
+                        'total_value': stock.quantity * current_price
+                    }
+                    portfolio_data.append(stock_info)
+                    total_portfolio_value += stock_info['total_value']
+                else:
+                    # Handle cases where stock data couldn't be fetched
+                    stock_info = {
+                        'id': stock.id,
+                        'ticker': stock.ticker,
+                        'quantity': stock.quantity,
+                        'purchase_price': stock.purchase_price,
+                        'current_price': stock.purchase_price,  # Fallback to purchase price
+                        'total_value': stock.quantity * stock.purchase_price
+                    }
+                    portfolio_data.append(stock_info)
+                    total_portfolio_value += stock_info['total_value']
+            except Exception as e:
+                logger.error(f"Error processing stock {stock.ticker}: {str(e)}")
+                # Still include the stock with fallback values
+                stock_info = {
+                    'id': stock.id,
+                    'ticker': stock.ticker,
+                    'quantity': stock.quantity,
+                    'purchase_price': stock.purchase_price,
+                    'current_price': stock.purchase_price,  # Fallback to purchase price
+                    'total_value': stock.quantity * stock.purchase_price
+                }
+                portfolio_data.append(stock_info)
+                total_portfolio_value += stock_info['total_value']
+    except Exception as e:
+        logger.error(f"Error fetching stocks: {str(e)}")
+        logger.error(traceback.format_exc())
+        portfolio_data = []
+        total_portfolio_value = 0
+        flash('There was an error loading your portfolio data.', 'warning')
     
-    for stock in stocks:
-        stock_data = get_stock_data(stock.ticker)
-        if stock_data and stock_data.get('price') is not None:
-            current_price = stock_data['price']
-            stock_info = {
-                'id': stock.id,
-                'ticker': stock.ticker,
-                'quantity': stock.quantity,
-                'purchase_price': stock.purchase_price,
-                'current_price': current_price,
-                'total_value': stock.quantity * current_price
-            }
-            portfolio_data.append(stock_info)
-            total_portfolio_value += stock_info['total_value']
-        else:
-            # Handle cases where stock data couldn't be fetched
-            stock_info = {
-                'id': stock.id,
-                'ticker': stock.ticker,
-                'quantity': stock.quantity,
-                'purchase_price': stock.purchase_price,
-                'current_price': 'N/A',
-                'total_value': 'N/A'
-            }
-            portfolio_data.append(stock_info)
-    
-    return render_template_with_defaults('dashboard.html', stocks=portfolio_data, total_portfolio_value=total_portfolio_value)
+    return render_template_with_defaults('dashboard.html', stocks=portfolio_data, total_portfolio_value=total_portfolio_value, current_user=current_user)
 
 @app.route('/add_stock', methods=['POST'])
 def add_stock():
