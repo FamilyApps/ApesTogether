@@ -22,7 +22,6 @@ from flask import Flask, render_template_string, render_template, redirect, url_
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
-from flask_session import Session
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
 from authlib.integrations.flask_client import OAuth
@@ -180,7 +179,6 @@ try:
     app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-for-testing')
     app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    app.config['SESSION_TYPE'] = 'sqlalchemy'  # Use SQLAlchemy for session storage in serverless
     app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
     app.config['SESSION_COOKIE_SECURE'] = True
     app.config['SESSION_COOKIE_HTTPONLY'] = True
@@ -276,10 +274,6 @@ try:
     # Initialize SQLAlchemy
     db = SQLAlchemy(app)
     migrate = Migrate(app, db)
-    
-    # Initialize Flask-Session with SQLAlchemy backend
-    app.config['SESSION_SQLALCHEMY'] = db
-    Session(app)
     logger.info("Database and migrations initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize database: {str(e)}")
