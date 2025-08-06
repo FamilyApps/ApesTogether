@@ -17,6 +17,7 @@ import traceback
 from datetime import datetime, timedelta
 from functools import wraps
 from dotenv import load_dotenv
+from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime, Boolean, func, text
 from flask import Flask, render_template_string, render_template, redirect, url_for, request, session, flash, jsonify
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from flask_sqlalchemy import SQLAlchemy
@@ -159,9 +160,14 @@ try:
         DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
 
     # Configure Flask app
-    app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL or 'sqlite:///portfolio.db'
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-for-testing')
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-for-testing')  # Use consistent fallback
+    app.config['SESSION_TYPE'] = 'filesystem'
+    app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
+    app.config['SESSION_COOKIE_SECURE'] = True
+    app.config['SESSION_COOKIE_HTTPONLY'] = True
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
     # Initialize Flask-Login
     login_manager = LoginManager()
@@ -172,29 +178,40 @@ try:
     @app.before_request
     def handle_before_request():
         try:
+            # Make session permanent to extend lifetime in serverless environment
+            session.permanent = True
+            
             # Ensure session is initialized
             if '_user_id' in session and not hasattr(current_user, 'is_authenticated'):
                 # Force reload user from session
                 user_id = session.get('_user_id')
                 if user_id:
-                    user = load_user(user_id)
-                    if user:
-                        login_user(user)
+                    try:
+                        user = load_user(user_id)
+                        if user:
+                            login_user(user)
+                    except Exception as user_load_error:
+                        logger.error(f"Error loading user in before_request: {str(user_load_error)}")
+                        # Don't clear session yet, just log the error
             
             # For backward compatibility - ensure session variables are set if user is logged in
             if hasattr(current_user, 'is_authenticated') and current_user.is_authenticated:
-                if 'user_id' not in session:
+                if 'user_id' not in session or session.get('user_id') != current_user.id:
                     session['user_id'] = current_user.id
                 if 'email' not in session and hasattr(current_user, 'email'):
                     session['email'] = current_user.email
                 if 'username' not in session and hasattr(current_user, 'username'):
                     session['username'] = current_user.username
+                    
+                # Refresh the session to keep it alive
+                session.modified = True
         except Exception as e:
             # Log but don't fail the request
             logger.error(f"Error in before_request handler: {str(e)}")
             logger.error(traceback.format_exc())
-            # Clear problematic session data if there's an error
-            if '_user_id' in session:
+            # Only clear problematic session data if there's a critical error
+            # that would prevent proper authentication
+            if '_user_id' in session and str(e).startswith('Critical'):
                 session.pop('_user_id', None)
 
     @login_manager.user_loader
@@ -823,36 +840,44 @@ def webhook():
 def subscriptions():
     """Display a user's active and canceled subscriptions"""
     try:
-        # Use Flask-Login's current_user instead of session
+        # Verify user is authenticated - this should be redundant with @login_required
+        # but we're being extra cautious in the serverless environment
         if not current_user.is_authenticated:
+            logger.warning("User not authenticated despite @login_required decorator")
             flash('Please log in to access your subscriptions.', 'warning')
             return redirect(url_for('login'))
             
         # For backward compatibility, ensure session is in sync with Flask-Login
+        # and refresh the session to keep it alive in the serverless environment
         if session.get('user_id') != current_user.id:
             session['user_id'] = current_user.id
             session['email'] = current_user.email
             session['username'] = current_user.username
+            session.modified = True
+            
+        # Log successful access for debugging
+        logger.info(f"Subscriptions accessed by user: {current_user.username} (ID: {current_user.id})")
             
         current_user_id = current_user.id
         
         # Get active subscriptions
         try:
-            active_subscriptions = Subscription.query.filter_by(
-                subscriber_id=current_user_id,
-                status='active'
-            ).all()
+            # Use a direct SQL query instead of ORM to minimize potential issues
+            active_subscriptions_query = "SELECT * FROM subscription WHERE subscriber_id = :user_id AND status = 'active'"
+            active_subscriptions = db.session.execute(text(active_subscriptions_query), {"user_id": current_user_id}).fetchall()
             
             # Get canceled subscriptions
-            canceled_subscriptions = Subscription.query.filter_by(
-                subscriber_id=current_user_id,
-                status='canceled'
-            ).all()
+            canceled_subscriptions_query = "SELECT * FROM subscription WHERE subscriber_id = :user_id AND status = 'canceled'"
+            canceled_subscriptions = db.session.execute(text(canceled_subscriptions_query), {"user_id": current_user_id}).fetchall()
+            
+            # Convert to list of dictionaries for template rendering
+            active_subs = [dict(sub) for sub in active_subscriptions] if active_subscriptions else []
+            canceled_subs = [dict(sub) for sub in canceled_subscriptions] if canceled_subscriptions else []
             
             return render_template_with_defaults(
                 'subscriptions.html',
-                active_subscriptions=active_subscriptions,
-                canceled_subscriptions=canceled_subscriptions,
+                active_subscriptions=active_subs,
+                canceled_subscriptions=canceled_subs,
                 current_user=current_user
             )
         except Exception as e:
@@ -2449,16 +2474,23 @@ def authorize_apple():
 def dashboard():
     """User dashboard"""
     try:
-        # Use Flask-Login's current_user instead of session
+        # Verify user is authenticated - this should be redundant with @login_required
+        # but we're being extra cautious in the serverless environment
         if not current_user.is_authenticated:
+            logger.warning("User not authenticated despite @login_required decorator")
             flash('Please log in to access your dashboard.', 'warning')
             return redirect(url_for('login'))
             
         # For backward compatibility, ensure session is in sync with Flask-Login
+        # and refresh the session to keep it alive in the serverless environment
         if session.get('user_id') != current_user.id:
             session['user_id'] = current_user.id
             session['email'] = current_user.email
             session['username'] = current_user.username
+            session.modified = True
+            
+        # Log successful access for debugging
+        logger.info(f"Dashboard accessed by user: {current_user.username} (ID: {current_user.id})")
     except Exception as e:
         logger.error(f"Error in dashboard authentication: {str(e)}")
         logger.error(traceback.format_exc())
