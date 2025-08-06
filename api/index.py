@@ -181,12 +181,16 @@ try:
     app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     
-    # Configure Flask-Session with SQLAlchemy backend
+    # Configure Flask-Session with SQLAlchemy backend for serverless environment
     app.config['SESSION_TYPE'] = 'sqlalchemy'
     app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
     app.config['SESSION_COOKIE_SECURE'] = True
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+    
+    # Debug logging for session configuration
+    logger.info(f"Session configuration: TYPE={app.config.get('SESSION_TYPE')}, LIFETIME={app.config.get('PERMANENT_SESSION_LIFETIME')}")
+    logger.info(f"Database URL for sessions: {DATABASE_URL[:20]}...")
 
     # Initialize Flask-Login
     login_manager = LoginManager()
@@ -280,8 +284,34 @@ try:
     migrate = Migrate(app, db)
     
     # Initialize Flask-Session with SQLAlchemy backend
-    app.config['SESSION_SQLALCHEMY'] = db
-    Session(app)
+    try:
+        # Make sure the session table exists
+        if not db.engine.dialect.has_table(db.engine.connect(), 'sessions'):
+            logger.info("Creating sessions table for Flask-Session")
+            class FlaskSession(db.Model):
+                __tablename__ = 'sessions'
+                id = db.Column(db.String(255), primary_key=True)
+                session_data = db.Column(db.LargeBinary)
+                expiry = db.Column(db.DateTime)
+                
+                def __init__(self, id, session_data, expiry):
+                    self.id = id
+                    self.session_data = session_data
+                    self.expiry = expiry
+            
+            # Create the sessions table
+            db.create_all()
+            logger.info("Sessions table created successfully")
+        
+        # Configure and initialize Flask-Session
+        app.config['SESSION_SQLALCHEMY'] = db
+        logger.info("Initializing Flask-Session with SQLAlchemy backend")
+        Session(app)
+        logger.info("Flask-Session initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize Flask-Session: {str(e)}")
+        logger.error("Falling back to standard Flask sessions")
+        # If Flask-Session fails, we'll use standard Flask sessions
     logger.info("Database and migrations initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize database: {str(e)}")
