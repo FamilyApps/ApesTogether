@@ -200,34 +200,26 @@ try:
     # Add a before_request handler to ensure session and current_user are properly initialized
     @app.before_request
     def handle_before_request():
+        # Skip session processing for static files and favicon
+        if request.path.startswith('/static/') or request.path == '/favicon.png':
+            return  # Skip session processing for static files
+        
         try:
-            # Make session permanent to extend lifetime in serverless environment
             session.permanent = True
             
-            # Ensure session is initialized
             if '_user_id' in session and not hasattr(current_user, 'is_authenticated'):
-                # Force reload user from session
                 user_id = session.get('_user_id')
                 if user_id:
-                    try:
-                        user = load_user(user_id)
-                        if user:
-                            login_user(user)
-                    except Exception as user_load_error:
-                        logger.error(f"Error loading user in before_request: {str(user_load_error)}")
-                        # Don't clear session yet, just log the error
+                    user = load_user(user_id)
+                    if user:
+                        login_user(user)
+                        logger.info(f"User {user_id} loaded from session")
             
-            # For backward compatibility - ensure session variables are set if user is logged in
-            if hasattr(current_user, 'is_authenticated') and current_user.is_authenticated:
-                if 'user_id' not in session or session.get('user_id') != current_user.id:
-                    session['user_id'] = current_user.id
-                if 'email' not in session and hasattr(current_user, 'email'):
-                    session['email'] = current_user.email
-                if 'username' not in session and hasattr(current_user, 'username'):
-                    session['username'] = current_user.username
-                    
-                # Refresh the session to keep it alive
-                session.modified = True
+            if current_user.is_authenticated:
+                session['user_id'] = current_user.id
+                session['email'] = getattr(current_user, 'email', None)
+                session['username'] = getattr(current_user, 'username', None)
+                session.modified = True  # Refresh the session to keep it alive
         except Exception as e:
             # Log but don't fail the request
             logger.error(f"Error in before_request handler: {str(e)}")
@@ -285,33 +277,35 @@ try:
     
     # Initialize Flask-Session with SQLAlchemy backend
     try:
-        # Make sure the session table exists
-        if not db.engine.dialect.has_table(db.engine.connect(), 'sessions'):
-            logger.info("Creating sessions table for Flask-Session")
-            class FlaskSession(db.Model):
-                __tablename__ = 'sessions'
-                id = db.Column(db.String(255), primary_key=True)
-                session_data = db.Column(db.LargeBinary)
-                expiry = db.Column(db.DateTime)
-                
-                def __init__(self, id, session_data, expiry):
-                    self.id = id
-                    self.session_data = session_data
-                    self.expiry = expiry
+        # Define FlaskSession model with correct schema for Flask-Session
+        class FlaskSession(db.Model):
+            __tablename__ = 'sessions'
+            session_id = db.Column(db.String(255), primary_key=True)
+            data = db.Column(db.LargeBinary)
+            expiry = db.Column(db.DateTime)
             
-            # Create the sessions table
+            def __init__(self, session_id, data, expiry):
+                self.session_id = session_id
+                self.data = data
+                self.expiry = expiry
+        
+        # Create all tables, including sessions
+        with app.app_context():
+            # Drop existing sessions table to avoid schema conflicts
+            db.engine.execute("DROP TABLE IF EXISTS sessions")
             db.create_all()
-            logger.info("Sessions table created successfully")
+            logger.info("Database tables created successfully, including sessions table")
         
         # Configure and initialize Flask-Session
         app.config['SESSION_SQLALCHEMY'] = db
-        logger.info("Initializing Flask-Session with SQLAlchemy backend")
         Session(app)
         logger.info("Flask-Session initialized successfully")
     except Exception as e:
-        logger.error(f"Failed to initialize Flask-Session: {str(e)}")
-        logger.error("Falling back to standard Flask sessions")
-        # If Flask-Session fails, we'll use standard Flask sessions
+        logger.error(f"Failed to initialize database or Flask-Session: {str(e)}", extra={'traceback': traceback.format_exc()})
+        # Fall back to filesystem sessions as a last resort
+        app.config['SESSION_TYPE'] = 'filesystem'
+        Session(app)
+        logger.warning("Falling back to filesystem sessions")
     logger.info("Database and migrations initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize database: {str(e)}")
@@ -1967,6 +1961,11 @@ DASHBOARD_HTML = """
 </body>
 </html>
 """
+
+# Serve favicon directly to avoid session issues
+@app.route('/favicon.png')
+def serve_favicon():
+    return send_from_directory(app.static_folder, 'favicon.png')
 
 # Health check endpoint
 @app.route('/api/health')
@@ -3888,36 +3887,30 @@ def admin_user_detail(user_id):
 # Error handler
 @app.errorhandler(500)
 def internal_error(error):
-    logger.error(f"500 error: {error}")
-    # Sanitize API responses in production
-    logger.error(f"Request path: {request.path}")
-    logger.error(f"Request method: {request.method}")
-    logger.error(f"Request args: {request.args}")
-    logger.error(f"Template folder: {app.template_folder}")
-    logger.error(f"Static folder: {app.static_folder}")
-    
-    # Try to check if templates exist
-    try:
-        template_exists = os.path.exists(app.template_folder)
-        logger.error(f"Template folder exists: {template_exists}")
-        if template_exists:
-            template_files = os.listdir(app.template_folder)
-            logger.error(f"Template files: {template_files[:10]}")
-    except Exception as template_error:
-        logger.error(f"Error checking templates: {str(template_error)}")
+    error_details = {
+        'error': str(error),
+        'traceback': traceback.format_exc(),
+        'request_path': request.path,
+        'request_method': request.method,
+        'request_args': dict(request.args),
+        'template_folder': app.template_folder,
+        'static_folder': app.static_folder,
+        'template_exists': os.path.exists(app.template_folder),
+        'template_files': os.listdir(app.template_folder) if os.path.exists(app.template_folder) else [],
+        'static_exists': os.path.exists(app.static_folder),
+        'static_files': os.listdir(app.static_folder) if os.path.exists(app.static_folder) else []
+    }
+    logger.error(f"500 error: {str(error)}", extra=error_details)
     
     # Check if this is an API request
     if request.path.startswith('/api/'):
         return jsonify({
             'error': 'Internal Server Error',
-            'details': error_details,
             'status': 500,
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'path': request.path,
             'environment': os.environ.get('VERCEL_ENV', 'development'),
-            'database_url_exists': bool(os.environ.get('DATABASE_URL')),
-            'postgres_prisma_url_exists': bool(os.environ.get('POSTGRES_PRISMA_URL')),
-            'effective_database_url_exists': bool(DATABASE_URL)
+            'request_id': os.environ.get('AWS_LAMBDA_REQUEST_ID', 'local')
         }), 500
     
     # Return a custom error page with details for HTML requests
@@ -3945,7 +3938,7 @@ def internal_error(error):
         
         <div class="details">
             <h3>Error Details</h3>
-            <pre>{{ error_details }}</pre>
+            <pre>{{ error_details | tojson(indent=2) }}</pre>
         </div>
         
         <p><a href="/">Return to Home</a></p>
