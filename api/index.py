@@ -22,12 +22,17 @@ from flask import Flask, render_template_string, render_template, redirect, url_
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
+from flask_session import Session
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
 from authlib.integrations.flask_client import OAuth
 
 # Load environment variables
 load_dotenv()
+
+# Admin credentials from environment variables
+ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
+ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
 
 # Initialize Flask app
 # Use absolute paths for templates and static files in production
@@ -119,9 +124,17 @@ app.jinja_env.globals.update({
     'format': format
 })
 
-# Set up error logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
+# Get Vercel environment information
+VERCEL_ENV = os.environ.get('VERCEL_ENV', 'development')
+VERCEL_REGION = os.environ.get('VERCEL_REGION', 'local')
+VERCEL_URL = os.environ.get('VERCEL_URL', 'localhost')
 
 # Login required decorator
 # Use Flask-Login's login_required decorator instead of our custom one
@@ -153,17 +166,21 @@ logger.info(f"SECRET_KEY present: {'Yes' if SECRET_KEY else 'No'}")
 # Configure database with error handling
 try:
     # Configure database
-    DATABASE_URL = os.environ.get('DATABASE_URL') or os.environ.get('POSTGRES_PRISMA_URL')
-
-    # Fix Postgres URL for SQLAlchemy 1.4+
-    if DATABASE_URL and DATABASE_URL.startswith('postgres://'):
+    DATABASE_URL = os.environ.get('DATABASE_URL', os.environ.get('POSTGRES_PRISMA_URL'))
+    if not DATABASE_URL:
+        logger.error("No database URL provided - using SQLite fallback")
+        DATABASE_URL = 'sqlite:///portfolio.db'
+    elif DATABASE_URL.startswith('postgres://'):
+        # Heroku-style postgres:// URL needs to be converted for SQLAlchemy
         DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+    
+    logger.info(f"Using database type: {DATABASE_URL.split('://')[0]}")
 
     # Configure Flask app
     app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-for-testing')
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
+    app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    app.config['SESSION_TYPE'] = 'filesystem'
+    app.config['SESSION_TYPE'] = 'sqlalchemy'  # Use SQLAlchemy for session storage in serverless
     app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
     app.config['SESSION_COOKIE_SECURE'] = True
     app.config['SESSION_COOKIE_HTTPONLY'] = True
@@ -256,9 +273,13 @@ try:
         client_kwargs={'scope': 'name email'},
     )
 
-    # Initialize database
+    # Initialize SQLAlchemy
     db = SQLAlchemy(app)
     migrate = Migrate(app, db)
+    
+    # Initialize Flask-Session with SQLAlchemy backend
+    app.config['SESSION_SQLALCHEMY'] = db
+    Session(app)
     logger.info("Database and migrations initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize database: {str(e)}")
@@ -286,8 +307,9 @@ class User(db.Model, UserMixin):
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
         
+    @property
     def is_admin(self):
-        return self.email == 'fordutilityapps@gmail.com'
+        return self.email == ADMIN_EMAIL or self.username == ADMIN_USERNAME
 
     def __repr__(self):
         return f'<User {self.username}>'
@@ -1913,6 +1935,34 @@ DASHBOARD_HTML = """
 </body>
 </html>
 """
+
+# Health check endpoint
+@app.route('/api/health')
+def health_check():
+    try:
+        # Check database connectivity
+        db_status = False
+        version = None
+        try:
+            result = db.session.execute(text('SELECT version()'))
+            version = result.scalar()
+            db_status = True
+        except Exception as e:
+            logger.error(f"Database health check failed: {str(e)}")
+        
+        # Return health status
+        return jsonify({
+            'status': 'ok',
+            'timestamp': datetime.now().isoformat(),
+            'database': {
+                'connected': db_status,
+                'version': version
+            },
+            'environment': os.environ.get('VERCEL_ENV', 'development')
+        })
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        return jsonify({'status': 'error', 'message': 'Health check failed'}), 500
 
 @app.route('/')
 def index():
@@ -3803,16 +3853,11 @@ def admin_user_detail(user_id):
 </html>
     """, user=user, stocks=stocks, transactions=transactions)
 
-# Add an error handler to provide more information on 500 errors
+# Error handler
 @app.errorhandler(500)
-def server_error(e):
-    """Handle 500 errors with detailed information"""
-    # Get error details
-    error_details = str(e)
-    logger.error(f"500 error: {error_details}")
-    logger.error(traceback.format_exc())
-    
-    # Log additional diagnostic information
+def internal_error(error):
+    logger.error(f"500 error: {error}")
+    # Sanitize API responses in production
     logger.error(f"Request path: {request.path}")
     logger.error(f"Request method: {request.method}")
     logger.error(f"Request args: {request.args}")
@@ -4207,4 +4252,12 @@ def debug_info():
 
 # For local testing
 if __name__ == '__main__':
+    # Log app startup with structured information
+    logger.info("App starting", extra={
+        'vercel_env': os.environ.get('VERCEL_ENV'),
+        'vercel_region': os.environ.get('VERCEL_REGION'),
+        'template_folder': app.template_folder,
+        'static_folder': app.static_folder,
+        'database_type': app.config['SQLALCHEMY_DATABASE_URI'].split('://')[0] if app.config.get('SQLALCHEMY_DATABASE_URI') else 'none'
+    })
     app.run(debug=True, port=5000)
