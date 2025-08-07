@@ -299,30 +299,24 @@ try:
     
     # Initialize Flask-Session with SQLAlchemy backend
     try:
-        # Define FlaskSession model with correct schema for Flask-Session
-        class FlaskSession(db.Model):
-            __tablename__ = 'sessions'
-            
-            # Use the exact column names expected by Flask-Session
-            session_id = db.Column(db.String(255), primary_key=True)
-            data = db.Column(db.LargeBinary)
-            expiry = db.Column(db.DateTime)
-            
-            def __init__(self, session_id, data, expiry):
-                self.session_id = session_id
-                self.data = data
-                self.expiry = expiry
+        # Skip defining our own FlaskSession model - let Flask-Session handle it
+        # Configure Flask-Session to use SQLAlchemy
+        app.config['SESSION_SQLALCHEMY'] = db
+        app.config['SESSION_SQLALCHEMY_TABLE'] = 'sessions'
         
-        # Create all tables, including sessions
+        # Create all tables except sessions (Flask-Session will create it)
         with app.app_context():
             # Drop existing sessions table to avoid schema conflicts
             db.session.execute(text("DROP TABLE IF EXISTS sessions"))
             db.session.commit()
-            db.create_all()
-            logger.info("Database tables created successfully, including sessions table")
+            
+            # Create all other tables
+            tables_to_create = [table for table in db.metadata.tables.values() 
+                               if table.name != 'sessions']
+            db.metadata.create_all(bind=db.engine, tables=tables_to_create)
+            logger.info("Database tables created successfully, sessions table will be created by Flask-Session")
         
-        # Configure and initialize Flask-Session
-        app.config['SESSION_SQLALCHEMY'] = db
+        # Initialize Flask-Session after dropping the sessions table
         Session(app)
         logger.info("Flask-Session initialized successfully")
     except Exception as e:
