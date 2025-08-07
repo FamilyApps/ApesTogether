@@ -7,9 +7,23 @@
       "config": { 
         "maxLambdaSize": "50mb"
       }
+    },
+    {
+      "src": "static/**",
+      "use": "@vercel/static"
     }
   ],
   "routes": [
+    {
+      "src": "/favicon.png",
+      "dest": "/static/favicon.png",
+      "headers": { "cache-control": "public, max-age=86400" }
+    },
+    {
+      "src": "/static/(.*)",
+      "dest": "/static/$1",
+      "headers": { "cache-control": "public, max-age=86400" }
+    },
     {
       "src": "/(.*)",
       "dest": "api/index.py"

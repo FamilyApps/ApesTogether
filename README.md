@@ -36,7 +36,7 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 3. Install the required dependencies:
 ```
-pip install -r requirements.txt
+pip install -r api/requirements.txt
 ```
 
 4. Set up environment variables (for production):

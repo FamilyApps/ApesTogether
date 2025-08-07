@@ -212,7 +212,7 @@ try:
     
     # Debug logging for session configuration
     logger.info(f"Session configuration: TYPE={app.config.get('SESSION_TYPE')}, LIFETIME={app.config.get('PERMANENT_SESSION_LIFETIME')}")
-    logger.info(f"Database URL for sessions: {DATABASE_URL[:20]}...")
+    logger.info(f"Database URL for sessions: [REDACTED]")
 
     # Initialize Flask-Login
     login_manager = LoginManager()
@@ -302,6 +302,8 @@ try:
         # Define FlaskSession model with correct schema for Flask-Session
         class FlaskSession(db.Model):
             __tablename__ = 'sessions'
+            
+            # Use the exact column names expected by Flask-Session
             session_id = db.Column(db.String(255), primary_key=True)
             data = db.Column(db.LargeBinary)
             expiry = db.Column(db.DateTime)
@@ -314,7 +316,8 @@ try:
         # Create all tables, including sessions
         with app.app_context():
             # Drop existing sessions table to avoid schema conflicts
-            db.engine.execute("DROP TABLE IF EXISTS sessions")
+            db.session.execute(text("DROP TABLE IF EXISTS sessions"))
+            db.session.commit()
             db.create_all()
             logger.info("Database tables created successfully, including sessions table")
         
@@ -1987,9 +1990,13 @@ DASHBOARD_HTML = """
 # Serve favicon directly to avoid session issues
 @app.route('/favicon.png')
 def serve_favicon():
-    return send_from_directory(app.static_folder, 'favicon.png')
+    try:
+        return send_from_directory(app.static_folder, 'favicon.png')
+    except Exception as e:
+        logger.error(f"Error serving favicon: {str(e)}")
+        return '', 404
 
-# Health check endpoint
+# Health check endpoints
 @app.route('/api/health')
 def health_check():
     try:
@@ -2015,6 +2022,20 @@ def health_check():
         })
     except Exception as e:
         logger.error(f"Health check failed: {str(e)}")
+        return jsonify({'status': 'error', 'message': 'Health check failed'}), 500
+
+# Root health check endpoint
+@app.route('/health')
+def root_health_check():
+    try:
+        # Simple health check that doesn't access the database
+        return jsonify({
+            'status': 'ok',
+            'timestamp': datetime.now().isoformat(),
+            'environment': os.environ.get('VERCEL_ENV', 'development')
+        })
+    except Exception as e:
+        logger.error(f"Root health check failed: {str(e)}")
         return jsonify({'status': 'error', 'message': 'Health check failed'}), 500
 
 @app.route('/')
@@ -2241,11 +2262,12 @@ def authorize_google():
             logger.error(traceback.format_exc())
             flash('Error connecting to Google. Please try again.', 'danger')
             return redirect(url_for('login'))
-        if token:
-            logger.info(f"Token keys: {token.keys()}")
-        else:
+            
+        if not token:
             logger.error("Token is None from google.authorize_access_token()")
             return redirect(url_for('login'))
+            
+        logger.info(f"Token keys present: {', '.join(token.keys()) if token else 'None'}")
         
         # Authlib with Google OAuth2 sometimes returns a token that needs to be processed differently
         # Make sure we have the token in the right format
@@ -2253,7 +2275,8 @@ def authorize_google():
             logger.info("Using access_token to fetch user info directly from Google API")
             # Use the access token to make a request directly to Google's userinfo endpoint
             import requests
-            headers = {'Authorization': f'Bearer {token["access_token"]}'}  
+            headers = {'Authorization': f'Bearer {token["access_token"]}'}
+            
             userinfo_response = requests.get('https://www.googleapis.com/oauth2/v3/userinfo', headers=headers)
             
             if userinfo_response.status_code == 200:
@@ -2263,11 +2286,16 @@ def authorize_google():
                 
                 # Store this in the token for later use
                 token['direct_userinfo'] = direct_user_info
+    except Exception as e:
+        logger.error(f"Error in Google OAuth authorization: {str(e)}")
+        logger.error(traceback.format_exc())
+        flash('Error during Google authentication. Please try again.', 'danger')
+        return redirect(url_for('login'))
         
         # In some OAuth implementations, we need to make a separate request to get user info
         try:
             # Log the token structure to help diagnose issues
-            logger.info(f"OAuth token keys: {token.keys() if token else 'None'}")
+            logger.info(f"OAuth token keys present: {', '.join(token.keys()) if token else 'None'}")
             
             # Try different approaches to get user info, with detailed logging
             user_info = {}
@@ -2283,9 +2311,9 @@ def authorize_google():
                 logger.info("Attempting to get user info via Authlib userinfo endpoint")
                 if 'userinfo' in token:
                     user_info = token['userinfo']
-                    logger.info(f"Found user_info in token['userinfo']: {user_info.keys() if user_info else 'Empty'}")
+                    logger.info(f"Found user_info in token['userinfo']: {', '.join(user_info.keys()) if user_info else 'Empty'}")
                     if user_info and 'email' in user_info:
-                        logger.info(f"Found email in token['userinfo']: {user_info['email']}")
+                        logger.info(f"Found email in token['userinfo']: {user_info['email'].split('@')[0]}[REDACTED]")
                 
                 # If not, try to get it from Google API
                 if not user_info or 'email' not in user_info:
@@ -2307,9 +2335,9 @@ def authorize_google():
                         # Note: We're not verifying the signature here, just decoding the payload
                         # This is for debugging purposes only
                         id_token_payload = jwt.decode(token['id_token'], options={"verify_signature": False})
-                        logger.info(f"Decoded id_token payload: {id_token_payload.keys() if id_token_payload else 'Empty'}")
+                        logger.info(f"Decoded id_token payload keys: {', '.join(id_token_payload.keys()) if id_token_payload else 'Empty'}")
                         if id_token_payload and 'email' in id_token_payload:
-                            logger.info(f"Found email in id_token: {id_token_payload['email']}")
+                            logger.info(f"Found email in id_token: {id_token_payload['email'].split('@')[0]}[REDACTED]")
                             user_info = id_token_payload
                     except Exception as jwt_error:
                         logger.error(f"Error decoding id_token: {str(jwt_error)}")
@@ -2319,9 +2347,9 @@ def authorize_google():
                 if not user_info or 'email' not in user_info:
                     for key in ['user', 'profile', 'info']:
                         if key in token and isinstance(token[key], dict):
-                            logger.info(f"Checking token['{key}']: {token[key].keys() if token[key] else 'Empty'}")
+                            logger.info(f"Checking token['{key}']: {', '.join(token[key].keys()) if token[key] else 'Empty'}")
                             if 'email' in token[key]:
-                                logger.info(f"Found email in token['{key}']: {token[key]['email']}")
+                                logger.info(f"Found email in token['{key}']: {token[key]['email'].split('@')[0]}[REDACTED]")
                                 user_info = token[key]
                                 break
 
@@ -2404,11 +2432,6 @@ def authorize_google():
             logger.error(traceback.format_exc())
             flash('Error accessing user database. Please try again later.', 'danger')
             return redirect(url_for('login'))
-    except Exception as e:
-        logger.error(f"Error in Google OAuth callback: {str(e)}")
-        logger.error(traceback.format_exc())
-        flash('Error during Google authentication. Please try again.', 'danger')
-        return redirect(url_for('login'))
     
     if not user:
         try:
@@ -2886,7 +2909,7 @@ def admin_dashboard():
             margin-top: 20px;
         }
         th, td {
-            padding: 8px;
+            padding: 10px;
             text-align: left;
             border-bottom: 1px solid #ddd;
         }
@@ -4328,7 +4351,7 @@ def debug_info():
             'FLASK_ENV': os.environ.get('FLASK_ENV'),
             'TEMPLATE_FOLDER': app.template_folder,
             'STATIC_FOLDER': app.static_folder,
-            'SQLALCHEMY_DATABASE_URI': app.config.get('SQLALCHEMY_DATABASE_URI', '').replace(os.environ.get('DATABASE_URL', ''), '[REDACTED]') if os.environ.get('DATABASE_URL') else app.config.get('SQLALCHEMY_DATABASE_URI', ''),
+            'SQLALCHEMY_DATABASE_URI': '[REDACTED]',
             'WORKING_DIRECTORY': os.getcwd(),
             'DIRECTORY_CONTENTS': os.listdir('.'),
             'TEMPLATE_EXISTS': os.path.exists(app.template_folder),
