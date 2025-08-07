@@ -30,6 +30,28 @@ from authlib.integrations.flask_client import OAuth
 # Load environment variables
 load_dotenv()
 
+# Configure structured logging
+log_level = os.environ.get('LOG_LEVEL', 'INFO').upper()
+log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+logging.basicConfig(
+    level=getattr(logging, log_level),
+    format=log_format
+)
+
+# Create logger
+logger = logging.getLogger('apestogether')
+
+# Add handler for Vercel environment
+if os.environ.get('VERCEL_ENV') == 'production':
+    # In production, log to stderr which Vercel captures
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter(log_format))
+    logger.addHandler(handler)
+    logger.info("Configured logging for Vercel production environment")
+else:
+    # In development, log to console
+    logger.info("Configured logging for development environment")
+
 # Admin credentials from environment variables
 ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
 ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
@@ -3951,26 +3973,60 @@ def internal_error(error):
 @admin_required
 def admin_edit_transaction(transaction_id):
     """Admin route to edit a transaction"""
-    # Mock transaction data
-    transactions = {
-        1: {'id': 1, 'user_id': 1, 'username': 'witty-raven', 'symbol': 'AAPL', 'shares': 10, 'price': 150.0, 'transaction_type': 'buy', 'date': '2023-01-15', 'notes': 'Initial purchase'},
-        2: {'id': 2, 'user_id': 1, 'username': 'witty-raven', 'symbol': 'MSFT', 'shares': 5, 'price': 250.0, 'transaction_type': 'buy', 'date': '2023-02-20', 'notes': 'Portfolio diversification'},
-        3: {'id': 3, 'user_id': 2, 'username': 'user1', 'symbol': 'GOOGL', 'shares': 2, 'price': 2800.0, 'transaction_type': 'buy', 'date': '2023-03-10', 'notes': ''},
-        4: {'id': 4, 'user_id': 3, 'username': 'user2', 'symbol': 'AMZN', 'shares': 1, 'price': 3200.0, 'transaction_type': 'buy', 'date': '2023-04-05', 'notes': ''},
-        5: {'id': 5, 'user_id': 1, 'username': 'witty-raven', 'symbol': 'AAPL', 'shares': 5, 'price': 170.0, 'transaction_type': 'sell', 'date': '2023-05-15', 'notes': 'Profit taking'}
-    }
-    
-    # Get transaction by ID
-    transaction = transactions.get(transaction_id)
+    # Get transaction by ID from database
+    transaction = Transaction.query.get(transaction_id)
     if not transaction:
         flash('Transaction not found', 'danger')
         return redirect(url_for('admin_transactions'))
     
-    if request.method == 'POST':
-        # In a real app, we would update the transaction in the database
-        # For now, just show a success message
-        flash('Transaction updated successfully!', 'success')
+    # Get the user associated with this transaction
+    user = User.query.get(transaction.user_id)
+    if not user:
+        flash('User not found for this transaction', 'danger')
         return redirect(url_for('admin_transactions'))
+    
+    if request.method == 'POST':
+        try:
+            # Update transaction with form data
+            transaction.ticker = request.form['ticker']
+            transaction.quantity = float(request.form['quantity'])
+            transaction.price = float(request.form['price'])
+            transaction.transaction_type = request.form['transaction_type']
+            
+            # Parse transaction date if provided
+            transaction_date = request.form.get('date')
+            if transaction_date:
+                transaction.timestamp = datetime.strptime(transaction_date, '%Y-%m-%d')
+            
+            # Update notes if provided
+            if 'notes' in request.form:
+                # Store notes as an attribute if the Transaction model supports it
+                # This assumes there's a notes field in the Transaction model
+                # If not, you might need to modify the model or skip this part
+                transaction.notes = request.form['notes']
+            
+            # Save changes to database
+            db.session.commit()
+            
+            flash('Transaction updated successfully!', 'success')
+            return redirect(url_for('admin_transactions'))
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error updating transaction: {str(e)}")
+            flash(f'Error updating transaction: {str(e)}', 'danger')
+    
+    # Prepare transaction data for template
+    transaction_data = {
+        'id': transaction.id,
+        'user_id': transaction.user_id,
+        'username': user.username,
+        'symbol': transaction.ticker,
+        'shares': transaction.quantity,
+        'price': transaction.price,
+        'transaction_type': transaction.transaction_type,
+        'date': transaction.timestamp.strftime('%Y-%m-%d') if transaction.timestamp else '',
+        'notes': getattr(transaction, 'notes', '')
+    }
     
     return render_template_string("""
 <!DOCTYPE html>
@@ -4044,40 +4100,40 @@ def admin_edit_transaction(transaction_id):
         <form method="post">
             <div class="form-group">
                 <label for="user">User</label>
-                <input type="text" id="user" name="user" value="{{ transaction.username }}" readonly>
+                <input type="text" id="user" name="user" value="{{ transaction_data.username }}" readonly>
             </div>
             
             <div class="form-group">
-                <label for="symbol">Symbol</label>
-                <input type="text" id="symbol" name="symbol" value="{{ transaction.symbol }}" required>
+                <label for="ticker">Symbol</label>
+                <input type="text" id="ticker" name="ticker" value="{{ transaction_data.symbol }}" required>
             </div>
             
             <div class="form-group">
-                <label for="shares">Shares</label>
-                <input type="number" id="shares" name="shares" value="{{ transaction.shares }}" step="0.01" required>
+                <label for="quantity">Shares</label>
+                <input type="number" id="quantity" name="quantity" value="{{ transaction_data.shares }}" step="0.01" required>
             </div>
             
             <div class="form-group">
                 <label for="price">Price</label>
-                <input type="number" id="price" name="price" value="{{ transaction.price }}" step="0.01" required>
+                <input type="number" id="price" name="price" value="{{ transaction_data.price }}" step="0.01" required>
             </div>
             
             <div class="form-group">
                 <label for="transaction_type">Transaction Type</label>
                 <select id="transaction_type" name="transaction_type" required>
-                    <option value="buy" {% if transaction.transaction_type == 'buy' %}selected{% endif %}>Buy</option>
-                    <option value="sell" {% if transaction.transaction_type == 'sell' %}selected{% endif %}>Sell</option>
+                    <option value="buy" {% if transaction_data.transaction_type == 'buy' %}selected{% endif %}>Buy</option>
+                    <option value="sell" {% if transaction_data.transaction_type == 'sell' %}selected{% endif %}>Sell</option>
                 </select>
             </div>
             
             <div class="form-group">
                 <label for="date">Date</label>
-                <input type="date" id="date" name="date" value="{{ transaction.date }}" required>
+                <input type="date" id="date" name="date" value="{{ transaction_data.date }}" required>
             </div>
             
             <div class="form-group">
                 <label for="notes">Notes</label>
-                <textarea id="notes" name="notes">{{ transaction.notes }}</textarea>
+                <textarea id="notes" name="notes">{{ transaction_data.notes }}</textarea>
             </div>
             
             <button type="submit" class="button button-warning">Update Transaction</button>
@@ -4092,25 +4148,51 @@ def admin_edit_transaction(transaction_id):
 @admin_required
 def admin_edit_stock(stock_id):
     """Admin route to edit a stock"""
-    # Mock stock data
-    stocks = {
-        1: {'id': 1, 'user_id': 1, 'username': 'witty-raven', 'ticker': 'AAPL', 'quantity': 5, 'purchase_price': 150.0, 'current_price': 180.0, 'purchase_date': '2023-01-15'},
-        2: {'id': 2, 'user_id': 1, 'username': 'witty-raven', 'ticker': 'MSFT', 'quantity': 5, 'purchase_price': 250.0, 'current_price': 280.0, 'purchase_date': '2023-02-20'},
-        3: {'id': 3, 'user_id': 2, 'username': 'user1', 'ticker': 'GOOGL', 'quantity': 2, 'purchase_price': 2800.0, 'current_price': 2900.0, 'purchase_date': '2023-03-10'},
-        4: {'id': 4, 'user_id': 3, 'username': 'user2', 'ticker': 'AMZN', 'quantity': 1, 'purchase_price': 3200.0, 'current_price': 3400.0, 'purchase_date': '2023-04-05'}
-    }
-    
-    # Get stock by ID
-    stock = stocks.get(stock_id)
+    # Get stock by ID from database
+    stock = Stock.query.get(stock_id)
     if not stock:
         flash('Stock not found', 'danger')
         return redirect(url_for('admin_stocks'))
     
-    if request.method == 'POST':
-        # In a real app, we would update the stock in the database
-        # For now, just show a success message
-        flash('Stock updated successfully!', 'success')
+    # Get the user associated with this stock
+    user = User.query.get(stock.user_id)
+    if not user:
+        flash('User not found for this stock', 'danger')
         return redirect(url_for('admin_stocks'))
+    
+    if request.method == 'POST':
+        try:
+            # Update stock with form data
+            stock.ticker = request.form['ticker']
+            stock.quantity = float(request.form['quantity'])
+            stock.purchase_price = float(request.form['purchase_price'])
+            
+            # Parse purchase date if provided
+            purchase_date = request.form.get('purchase_date')
+            if purchase_date:
+                stock.purchase_date = datetime.strptime(purchase_date, '%Y-%m-%d')
+            
+            # Save changes to database
+            db.session.commit()
+            
+            flash('Stock updated successfully!', 'success')
+            return redirect(url_for('admin_stocks'))
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error updating stock: {str(e)}")
+            flash(f'Error updating stock: {str(e)}', 'danger')
+    
+    # Prepare stock data for template
+    stock_data = {
+        'id': stock.id,
+        'user_id': stock.user_id,
+        'username': user.username,
+        'ticker': stock.ticker,
+        'quantity': stock.quantity,
+        'purchase_price': stock.purchase_price,
+        'current_price': stock.current_value() / stock.quantity if stock.quantity > 0 else 0,
+        'purchase_date': stock.purchase_date.strftime('%Y-%m-%d') if stock.purchase_date else ''
+    }
     
     return render_template_string("""
 <!DOCTYPE html>
