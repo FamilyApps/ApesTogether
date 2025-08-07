@@ -4385,3 +4385,7 @@ if __name__ == '__main__':
         'database_type': app.config['SQLALCHEMY_DATABASE_URI'].split('://')[0] if app.config.get('SQLALCHEMY_DATABASE_URI') else 'none'
     })
     app.run(debug=True, port=5000)
+
+# Export the Flask app for Vercel serverless function
+# This is required for Vercel's Python runtime
+app.debug = False
