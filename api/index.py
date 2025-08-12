@@ -297,34 +297,54 @@ try:
     db = SQLAlchemy(app)
     migrate = Migrate(app, db)
     
-    # Initialize Flask-Session with SQLAlchemy backend
+    # Initialize Flask-Session with appropriate backend based on environment
     try:
-        # Skip defining our own FlaskSession model - let Flask-Session handle it
-        # Configure Flask-Session to use SQLAlchemy
-        app.config['SESSION_SQLALCHEMY'] = db
-        app.config['SESSION_SQLALCHEMY_TABLE'] = 'sessions'
-        
-        # Create all tables except sessions (Flask-Session will create it)
-        with app.app_context():
-            # Drop existing sessions table to avoid schema conflicts
-            db.session.execute(text("DROP TABLE IF EXISTS sessions"))
-            db.session.commit()
+        # For Vercel serverless environment, use filesystem sessions by default
+        # This is more reliable in a serverless environment where database connections may be limited
+        if os.environ.get('VERCEL_ENV') == 'production':
+            logger.info("Vercel production environment detected, using filesystem session storage")
+            app.config['SESSION_TYPE'] = 'filesystem'
+            # Create a sessions directory if it doesn't exist
+            os.makedirs('/tmp/flask_session', exist_ok=True)
+            app.config['SESSION_FILE_DIR'] = '/tmp/flask_session'
+            Session(app)
+            logger.info("Flask-Session initialized with filesystem backend")
+        else:
+            # For non-Vercel environments, try SQLAlchemy backend first
+            logger.info("Using SQLAlchemy session backend")
+            app.config['SESSION_SQLALCHEMY'] = db
+            app.config['SESSION_SQLALCHEMY_TABLE'] = 'sessions'
             
-            # Create all other tables
-            tables_to_create = [table for table in db.metadata.tables.values() 
-                               if table.name != 'sessions']
-            db.metadata.create_all(bind=db.engine, tables=tables_to_create)
-            logger.info("Database tables created successfully, sessions table will be created by Flask-Session")
-        
-        # Initialize Flask-Session after dropping the sessions table
-        Session(app)
-        logger.info("Flask-Session initialized successfully")
+            # Create all tables including sessions
+            with app.app_context():
+                # First create all other tables
+                tables_to_create = [table for table in db.metadata.tables.values() 
+                                if table.name != 'sessions']
+                db.metadata.create_all(bind=db.engine, tables=tables_to_create)
+                
+                # Explicitly create sessions table with proper schema
+                # This ensures the table exists before Flask-Session tries to use it
+                db.session.execute(text("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id VARCHAR(255) NOT NULL PRIMARY KEY,
+                    session_data BYTEA NOT NULL,
+                    expiry TIMESTAMP(6) NOT NULL
+                )
+                """))
+                db.session.commit()
+                logger.info("Database tables created successfully, including sessions table")
+            
+            # Initialize Flask-Session after creating the sessions table
+            Session(app)
+            logger.info("Flask-Session initialized successfully with SQLAlchemy backend")
     except Exception as e:
         logger.error(f"Failed to initialize database or Flask-Session: {str(e)}", extra={'traceback': traceback.format_exc()})
         # Fall back to filesystem sessions as a last resort
         app.config['SESSION_TYPE'] = 'filesystem'
+        os.makedirs('/tmp/flask_session', exist_ok=True)
+        app.config['SESSION_FILE_DIR'] = '/tmp/flask_session'
         Session(app)
-        logger.warning("Falling back to filesystem sessions")
+        logger.warning("Falling back to filesystem sessions due to error")
     logger.info("Database and migrations initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize database: {str(e)}")
