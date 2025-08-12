@@ -1,3 +1,4 @@
+# Use absolute import for the index module in the same directory
 from index import app
 
 # This file is specifically for Vercel's Python runtime
