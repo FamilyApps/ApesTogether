@@ -1084,6 +1084,69 @@ def onboarding():
     """User onboarding page"""
     return render_template_with_defaults('onboarding.html')
 
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    """Display the user's dashboard."""
+    # Get user's portfolio
+    portfolio_data = []
+    total_portfolio_value = 0
+    
+    if current_user.is_authenticated:
+        # Get user's stocks from database
+        stocks = Stock.query.filter_by(user_id=current_user.id).all()
+        
+        for stock in stocks:
+            # In a real app, you would fetch current prices from an API
+            # For now, we'll use a simple mock price
+            current_price = stock.purchase_price * (1 + (random.random() - 0.5) * 0.1)  # +/- 5% from purchase price
+            value = stock.quantity * current_price
+            gain_loss = value - (stock.quantity * stock.purchase_price)
+            gain_loss_percent = (gain_loss / (stock.quantity * stock.purchase_price)) * 100
+            
+            portfolio_data.append({
+                'ticker': stock.ticker,
+                'quantity': stock.quantity,
+                'purchase_price': stock.purchase_price,
+                'current_price': current_price,
+                'value': value,
+                'gain_loss': gain_loss,
+                'gain_loss_percent': gain_loss_percent
+            })
+            
+            total_portfolio_value += value
+    
+    return render_template_with_defaults('dashboard.html', stocks=portfolio_data, total_portfolio_value=total_portfolio_value, current_user=current_user)
+
+@app.route('/update_username', methods=['POST'])
+@login_required
+def update_username():
+    """Update the user's username."""
+    new_username = request.form.get('username')
+    if not new_username or len(new_username) < 3:
+        flash('Username must be at least 3 characters long', 'danger')
+        return redirect(url_for('dashboard'))
+    
+    # Check if username already exists (except for current user)
+    existing_user = User.query.filter(User.username == new_username, User.id != current_user.id).first()
+    if existing_user:
+        flash('Username already taken', 'danger')
+        return redirect(url_for('dashboard'))
+    
+    try:
+        current_user.username = new_username
+        db.session.commit()
+        flash('Username updated successfully', 'success')
+        # Update session if using session-based auth
+        if 'username' in session:
+            session['username'] = new_username
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"Error updating username: {str(e)}")
+        flash('An error occurred while updating your username', 'danger')
+    
+    return redirect(url_for('dashboard'))
+
 @app.route('/api/portfolio_value')
 @login_required
 def portfolio_value():
