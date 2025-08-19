@@ -3837,6 +3837,90 @@ def create_portfolio_snapshot():
         logger.error(f"Snapshot creation error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/create-initial-snapshots')
+def create_initial_snapshots():
+    """Admin endpoint to create initial portfolio snapshots for all users"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        # Import here to avoid circular imports
+        import sys
+        import os
+        from datetime import date, timedelta
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from portfolio_performance import performance_calculator
+        
+        # Get all users with stocks
+        users_with_stocks = db.session.query(User.id).join(Stock).distinct().all()
+        
+        snapshots_created = 0
+        errors = []
+        
+        for (user_id,) in users_with_stocks:
+            try:
+                # Create snapshots for the last 7 days
+                for i in range(7, 0, -1):
+                    snapshot_date = date.today() - timedelta(days=i)
+                    
+                    # Skip if snapshot already exists
+                    existing = PortfolioSnapshot.query.filter_by(
+                        user_id=user_id, 
+                        date=snapshot_date
+                    ).first()
+                    if existing:
+                        continue
+                    
+                    # Get user's stocks
+                    stocks = Stock.query.filter_by(user_id=user_id).all()
+                    total_value = 0.0
+                    
+                    for stock in stocks:
+                        try:
+                            # Use current stock value as approximation for historical data
+                            total_value += stock.current_value()
+                        except Exception as e:
+                            logger.error(f"Error calculating stock value for {stock.ticker}: {e}")
+                    
+                    # Create snapshot
+                    snapshot = PortfolioSnapshot(
+                        user_id=user_id,
+                        date=snapshot_date,
+                        total_value=total_value,
+                        cash_flow=0.0
+                    )
+                    
+                    db.session.add(snapshot)
+                    snapshots_created += 1
+                
+                # Also create today's snapshot
+                performance_calculator.create_daily_snapshot(user_id)
+                snapshots_created += 1
+                
+            except Exception as e:
+                error_msg = f"Error for user {user_id}: {str(e)}"
+                errors.append(error_msg)
+                logger.error(error_msg)
+        
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': f'Database commit failed: {str(e)}'}), 500
+        
+        return jsonify({
+            'success': True,
+            'snapshots_created': snapshots_created,
+            'users_processed': len(users_with_stocks),
+            'errors': errors
+        })
+        
+    except Exception as e:
+        logger.error(f"Initial snapshots creation error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 # For local testing
 if __name__ == '__main__':
     # Log app startup with structured information
