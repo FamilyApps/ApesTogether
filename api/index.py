@@ -1710,11 +1710,11 @@ def reset_admin_password():
             return jsonify({'error': 'This endpoint can only be accessed from localhost'}), 403
             
         # Find admin user or create if doesn't exist
-        admin_user = User.query.filter_by(email='fordutilityapps@gmail.com').first()
+        admin_user = User.query.filter_by(email=ADMIN_EMAIL).first()
         
         if not admin_user:
             # Create admin user if it doesn't exist
-            admin_user = User(username='witty-raven', email='fordutilityapps@gmail.com')
+            admin_user = User(username=ADMIN_USERNAME, email=ADMIN_EMAIL)
             db.session.add(admin_user)
             
         # Set a new password
