@@ -2,6 +2,8 @@
 
 A web application that allows users to log in with Apple or Google authentication (with FaceID and Face Unlock support), and manage their stock portfolio by inputting the quantity of shares and ticker symbols for each stock they own.
 
+<!-- Deployment: Redeploying working version for cleanup process -->
+
 ## Features
 
 - **Secure Authentication**: Sign in with Apple or Google accounts with biometric authentication support (FaceID/Face Unlock)
