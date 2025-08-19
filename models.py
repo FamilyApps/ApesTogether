@@ -59,3 +59,39 @@ class Transaction(db.Model):
     
     def __repr__(self):
         return f"<Transaction {self.transaction_type} {self.quantity} {self.ticker} @ ${self.price}>"
+
+class PortfolioSnapshot(db.Model):
+    """Daily portfolio value snapshots for performance tracking"""
+    __tablename__ = 'portfolio_snapshot'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    date = db.Column(db.Date, nullable=False)
+    total_value = db.Column(db.Float, nullable=False)
+    cash_flow = db.Column(db.Float, default=0.0)  # Net cash flow for the day (deposits - withdrawals)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationship with User
+    user = db.relationship('User', backref=db.backref('portfolio_snapshots', lazy='dynamic'))
+    
+    # Ensure one snapshot per user per day
+    __table_args__ = (db.UniqueConstraint('user_id', 'date', name='unique_user_date_snapshot'),)
+    
+    def __repr__(self):
+        return f"<PortfolioSnapshot {self.user_id} {self.date} ${self.total_value}>"
+
+class MarketData(db.Model):
+    """Cache for market data (S&P 500, etc.)"""
+    __tablename__ = 'market_data'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    symbol = db.Column(db.String(10), nullable=False)  # 'SPY', '^GSPC', etc.
+    date = db.Column(db.Date, nullable=False)
+    close_price = db.Column(db.Float, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Ensure one entry per symbol per date
+    __table_args__ = (db.UniqueConstraint('symbol', 'date', name='unique_symbol_date'),)
+    
+    def __repr__(self):
+        return f"<MarketData {self.symbol} {self.date} ${self.close_price}>"

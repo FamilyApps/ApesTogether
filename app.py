@@ -791,6 +791,29 @@ try:
 except ImportError as e:
     print(f"Could not register admin debug blueprint: {e}")
 
+# Portfolio performance API endpoints
+@app.route('/api/portfolio/performance/<period>')
+@login_required
+def get_portfolio_performance(period):
+    """Get portfolio performance data for a specific time period"""
+    try:
+        from portfolio_performance import performance_calculator
+        performance_data = performance_calculator.get_performance_data(current_user.id, period.upper())
+        return jsonify(performance_data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/portfolio/snapshot')
+@login_required
+def create_portfolio_snapshot():
+    """Create a portfolio snapshot for today"""
+    try:
+        from portfolio_performance import performance_calculator
+        performance_calculator.create_daily_snapshot(current_user.id)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 if __name__ == '__main__':
     # In development, run with debug mode
