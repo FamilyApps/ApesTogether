@@ -448,9 +448,7 @@ VERCEL_ENV = os.environ.get('VERCEL_ENV')
 if VERCEL_ENV:
     print(f"Running in Vercel environment: {VERCEL_ENV}")
 
-# Admin email for authentication
-ADMIN_EMAIL = 'fordutilityapps@gmail.com'
-ADMIN_USERNAME = 'witty-raven'
+# Admin email for authentication - using environment variables defined above
 
 # Flash message categories
 app.config['MESSAGE_CATEGORIES'] = ['success', 'info', 'warning', 'danger']
