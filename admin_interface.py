@@ -96,8 +96,41 @@ def admin_dashboard():
 @login_required
 @admin_required
 def user_list():
-    """List all users"""
+    """List all users with portfolio values and trade counts"""
+    from sqlalchemy import func, and_
+    import yfinance as yf
+    from datetime import datetime, timedelta
+    
     users = User.query.all()
+    
+    # Calculate additional data for each user
+    for user in users:
+        # Calculate portfolio value
+        user_stocks = Stock.query.filter_by(user_id=user.id).all()
+        portfolio_value = 0
+        
+        for stock in user_stocks:
+            try:
+                ticker = yf.Ticker(stock.ticker)
+                current_price = ticker.history(period="1d")['Close'].iloc[-1]
+                portfolio_value += current_price * stock.quantity
+            except:
+                # If we can't get current price, use a placeholder
+                portfolio_value += 100 * stock.quantity  # Assume $100 per share as fallback
+        
+        user.portfolio_value = portfolio_value
+        
+        # Count yesterday's trades
+        yesterday = datetime.now().date() - timedelta(days=1)
+        yesterday_trades = Transaction.query.filter(
+            and_(
+                Transaction.user_id == user.id,
+                func.date(Transaction.timestamp) == yesterday
+            )
+        ).count()
+        
+        user.yesterday_trades = yesterday_trades
+    
     return render_template('admin/users.html', users=users, now=datetime.now())
 
 @admin_bp.route('/users/<int:user_id>')

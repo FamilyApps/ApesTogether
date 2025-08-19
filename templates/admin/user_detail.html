@@ -42,12 +42,13 @@
                             </td>
                         </tr>
                         <tr>
-                            <th>Stripe Price ID:</th>
+                            <th>Subscribers:</th>
                             <td>
-                                {% if user.stripe_price_id %}
-                                    <code>{{ user.stripe_price_id }}</code>
-                                {% else %}
-                                    <span class="text-danger">Not set</span>
+                                <span class="badge bg-info">{{ subscriptions|length }}</span>
+                                {% if subscriptions %}
+                                    <small class="text-muted d-block mt-1">
+                                        Users subscribed to {{ user.username }}'s portfolio
+                                    </small>
                                 {% endif %}
                             </td>
                         </tr>
