@@ -16,7 +16,7 @@
                 <p><strong>Username:</strong> {{ current_user.username }}</p>
                 <p><strong>User ID:</strong> {{ current_user.id }}</p>
                 <p><strong>Is Admin:</strong> 
-                    {% if current_user.email == 'fordutilityapps@gmail.com' and current_user.username == 'witty-raven' %}
+                    {% if current_user.email == admin_email and current_user.username == admin_username %}
                         Yes
                     {% else %}
                         No
