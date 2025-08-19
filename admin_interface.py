@@ -167,20 +167,20 @@ def add_stock(user_id):
     user = User.query.get_or_404(user_id)
     
     if request.method == 'POST':
-        symbol = request.form.get('symbol').upper()
-        shares = float(request.form.get('shares'))
+        ticker = request.form.get('ticker').upper()
+        quantity = float(request.form.get('quantity'))
         price = float(request.form.get('price'))
         
         # Check if stock already exists
-        existing_stock = Stock.query.filter_by(user_id=user.id, symbol=symbol).first()
+        existing_stock = Stock.query.filter_by(user_id=user.id, ticker=ticker).first()
         if existing_stock:
             # Update existing stock
-            existing_stock.shares += shares
+            existing_stock.quantity += quantity
             # Create a transaction record
             transaction = Transaction(
                 user_id=user.id,
-                symbol=symbol,
-                shares=shares,
+                symbol=ticker,
+                shares=quantity,
                 price=price,
                 transaction_type='buy',
                 date=datetime.now()
@@ -190,14 +190,14 @@ def add_stock(user_id):
             # Create new stock
             stock = Stock(
                 user_id=user.id,
-                symbol=symbol,
-                shares=shares
+                ticker=ticker,
+                quantity=quantity
             )
             # Create a transaction record
             transaction = Transaction(
                 user_id=user.id,
-                symbol=symbol,
-                shares=shares,
+                symbol=ticker,
+                shares=quantity,
                 price=price,
                 transaction_type='buy',
                 date=datetime.now()
@@ -207,7 +207,7 @@ def add_stock(user_id):
         
         try:
             db.session.commit()
-            flash(f'Added {shares} shares of {symbol} at ${price}/share', 'success')
+            flash(f'Added {quantity} shares of {ticker} at ${price}/share', 'success')
         except Exception as e:
             db.session.rollback()
             flash(f'Error adding stock: {str(e)}', 'danger')
@@ -224,8 +224,8 @@ def add_transaction(user_id):
     user = User.query.get_or_404(user_id)
     
     if request.method == 'POST':
-        symbol = request.form.get('symbol').upper()
-        shares = float(request.form.get('shares'))
+        ticker = request.form.get('ticker').upper()
+        quantity = float(request.form.get('quantity'))
         price = float(request.form.get('price'))
         transaction_type = request.form.get('transaction_type')
         date_str = request.form.get('transaction_date')
@@ -241,8 +241,8 @@ def add_transaction(user_id):
         # Create the transaction record
         transaction = Transaction(
             user_id=user.id,
-            symbol=symbol,
-            shares=shares,
+            symbol=ticker,
+            shares=quantity,
             price=price,
             transaction_type=transaction_type,
             date=transaction_date,
@@ -250,34 +250,34 @@ def add_transaction(user_id):
         )
         
         # Update the stock position
-        existing_stock = Stock.query.filter_by(user_id=user.id, symbol=symbol).first()
+        existing_stock = Stock.query.filter_by(user_id=user.id, ticker=ticker).first()
         
         if transaction_type == 'buy':
             if existing_stock:
-                existing_stock.shares += shares
+                existing_stock.quantity += quantity
             else:
                 stock = Stock(
                     user_id=user.id,
-                    symbol=symbol,
-                    shares=shares
+                    ticker=ticker,
+                    quantity=quantity
                 )
                 db.session.add(stock)
         elif transaction_type == 'sell':
-            if not existing_stock or existing_stock.shares < shares:
-                flash(f'Cannot sell {shares} shares of {symbol}. User only has {existing_stock.shares if existing_stock else 0} shares.', 'danger')
+            if not existing_stock or existing_stock.quantity < quantity:
+                flash(f'Cannot sell {quantity} shares of {ticker}. User only has {existing_stock.quantity if existing_stock else 0} shares.', 'danger')
                 return render_template('admin/add_transaction.html', user=user)
             
-            existing_stock.shares -= shares
+            existing_stock.quantity -= quantity
             
             # If shares become zero, optionally remove the stock
-            if existing_stock.shares <= 0:
+            if existing_stock.quantity <= 0:
                 db.session.delete(existing_stock)
         
         db.session.add(transaction)
         
         try:
             db.session.commit()
-            flash(f'Added {transaction_type} transaction of {shares} shares of {symbol} at ${price}/share on {date_str}', 'success')
+            flash(f'Added {transaction_type} transaction of {quantity} shares of {ticker} at ${price}/share on {date_str}', 'success')
         except Exception as e:
             db.session.rollback()
             flash(f'Error adding transaction: {str(e)}', 'danger')
@@ -302,12 +302,12 @@ def edit_transaction(user_id, transaction_id):
     
     if request.method == 'POST':
         # Store original values to calculate position changes
-        original_symbol = transaction.symbol
-        original_shares = transaction.shares
+        original_ticker = transaction.symbol
+        original_quantity = transaction.shares
         original_type = transaction.transaction_type
         
         # Get form data
-        shares = float(request.form.get('shares'))
+        quantity = float(request.form.get('quantity'))
         price = float(request.form.get('price'))
         date_str = request.form.get('transaction_date')
         notes = request.form.get('notes', '')
@@ -320,28 +320,28 @@ def edit_transaction(user_id, transaction_id):
             return render_template('admin/edit_transaction.html', user=user, transaction=transaction)
         
         # Update transaction record
-        transaction.shares = shares
+        transaction.shares = quantity
         transaction.price = price
         transaction.date = transaction_date
         transaction.notes = notes
         
-        # Update stock position if shares changed
-        if shares != original_shares:
-            stock = Stock.query.filter_by(user_id=user.id, symbol=original_symbol).first()
+        # Update stock position if quantity changed
+        if quantity != original_quantity:
+            stock = Stock.query.filter_by(user_id=user.id, ticker=original_ticker).first()
             
             if original_type == 'buy':
                 # Reverse the original buy
-                stock.shares -= original_shares
+                stock.quantity -= original_quantity
                 # Apply the new buy
-                stock.shares += shares
+                stock.quantity += quantity
             elif original_type == 'sell':
                 # Reverse the original sell
-                stock.shares += original_shares
+                stock.quantity += original_quantity
                 # Apply the new sell
-                stock.shares -= shares
+                stock.quantity -= quantity
             
             # Check if stock should be removed
-            if stock.shares <= 0:
+            if stock.quantity <= 0:
                 db.session.delete(stock)
         
         try:
@@ -370,25 +370,25 @@ def delete_transaction(user_id, transaction_id):
         return redirect(url_for('admin.user_detail', user_id=user.id))
     
     # Update stock position
-    stock = Stock.query.filter_by(user_id=user.id, symbol=transaction.symbol).first()
+    stock = Stock.query.filter_by(user_id=user.id, ticker=transaction.symbol).first()
     
     if transaction.transaction_type == 'buy':
         # Reverse the buy
         if stock:
-            stock.shares -= transaction.shares
-            # If shares become zero or negative, remove the stock
-            if stock.shares <= 0:
+            stock.quantity -= transaction.shares
+            # If quantity becomes zero or negative, remove the stock
+            if stock.quantity <= 0:
                 db.session.delete(stock)
     elif transaction.transaction_type == 'sell':
         # Reverse the sell
         if stock:
-            stock.shares += transaction.shares
+            stock.quantity += transaction.shares
         else:
             # Create a new stock position if it was fully sold before
             new_stock = Stock(
                 user_id=user.id,
-                symbol=transaction.symbol,
-                shares=transaction.shares
+                ticker=transaction.symbol,
+                quantity=transaction.shares
             )
             db.session.add(new_stock)
     
@@ -417,21 +417,21 @@ def edit_stock(user_id, stock_id):
         return redirect(url_for('admin.user_detail', user_id=user.id))
     
     if request.method == 'POST':
-        old_shares = stock.shares
-        new_shares = float(request.form.get('shares'))
+        old_quantity = stock.quantity
+        new_quantity = float(request.form.get('quantity'))
         price = float(request.form.get('price'))
         
-        # Update stock shares
-        stock.shares = new_shares
+        # Update stock quantity
+        stock.quantity = new_quantity
         
         # Create a transaction record for the adjustment
-        shares_diff = new_shares - old_shares
-        if shares_diff != 0:
-            transaction_type = 'buy' if shares_diff > 0 else 'sell'
+        quantity_diff = new_quantity - old_quantity
+        if quantity_diff != 0:
+            transaction_type = 'buy' if quantity_diff > 0 else 'sell'
             transaction = Transaction(
                 user_id=user.id,
-                symbol=stock.symbol,
-                shares=abs(shares_diff),
+                symbol=stock.ticker,
+                shares=abs(quantity_diff),
                 price=price,
                 transaction_type=transaction_type,
                 date=datetime.now()
@@ -440,7 +440,7 @@ def edit_stock(user_id, stock_id):
         
         try:
             db.session.commit()
-            flash(f'Updated {stock.symbol} to {new_shares} shares', 'success')
+            flash(f'Updated {stock.ticker} to {new_quantity} shares', 'success')
         except Exception as e:
             db.session.rollback()
             flash(f'Error updating stock: {str(e)}', 'danger')
@@ -465,8 +465,8 @@ def delete_stock(user_id, stock_id):
         # Create a sell transaction record
         transaction = Transaction(
             user_id=user.id,
-            symbol=stock.symbol,
-            shares=stock.shares,
+            symbol=stock.ticker,
+            shares=stock.quantity,
             price=0,  # Admin deletion doesn't have a price
             transaction_type='sell',
             date=datetime.now()
@@ -476,7 +476,7 @@ def delete_stock(user_id, stock_id):
         # Delete the stock
         db.session.delete(stock)
         db.session.commit()
-        flash(f'Deleted {stock.symbol} from portfolio', 'success')
+        flash(f'Deleted {stock.ticker} from portfolio', 'success')
     except Exception as e:
         db.session.rollback()
         flash(f'Error deleting stock: {str(e)}', 'danger')
