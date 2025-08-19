@@ -1502,7 +1502,7 @@ def admin_debug_database():
             db_config['user_count'] = user_count
             
             # Check if admin user exists
-            admin_exists = User.query.filter_by(email='fordutilityapps@gmail.com').first() is not None
+            admin_exists = User.query.filter_by(email=ADMIN_EMAIL).first() is not None
             db_config['admin_user_exists'] = admin_exists
             
         except Exception as db_test_error:
