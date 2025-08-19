@@ -2502,8 +2502,12 @@ def authorize_google():
             logger.error(f"Error checking user's stocks: {str(stock_check_error)}")
             flash('Login successful!', 'success')
             
-        # Step 6: Final redirect
-        return redirect(url_for('dashboard'))
+        # Step 6: Final redirect - check if user is admin
+        if user.is_admin:
+            logger.info(f"Admin user {user.email} logged in, redirecting to admin dashboard")
+            return redirect(url_for('admin_dashboard'))
+        else:
+            return redirect(url_for('dashboard'))
             
     except Exception as general_error:
         # Catch-all error handler
