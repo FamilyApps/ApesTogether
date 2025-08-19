@@ -2645,8 +2645,8 @@ def admin_dashboard():
         flash('You must be logged in to access the admin dashboard.', 'warning')
         return redirect(url_for('login'))
     
-    # Check if user is admin using the secure is_admin() method
-    if not current_user.is_admin():
+    # Check if user is admin using the secure is_admin property
+    if not current_user.is_admin:
         flash('You do not have permission to access the admin dashboard.', 'danger')
         return redirect(url_for('dashboard'))
     
