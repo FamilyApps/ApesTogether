@@ -10,6 +10,10 @@ from datetime import datetime
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-key-for-testing')
 
+# Admin credentials from environment variables
+ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
+ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
+
 # Simple HTML template
 ADMIN_HTML = """
 <!DOCTYPE html>
@@ -42,7 +46,7 @@ ADMIN_HTML = """
             </div>
         {% else %}
             <p class="error">❌ Admin access denied</p>
-            <p>You must be logged in with the admin email (fordutilityapps@gmail.com).</p>
+            <p>You must be logged in with the admin email ({{ admin_email }}).</p>
             <p><a href="/">Return to home page</a></p>
         {% endif %}
     </div>
@@ -57,7 +61,7 @@ def admin_standalone():
     email = request.args.get('email', '')
     
     # Check if user is admin
-    admin_access = (email == 'fordutilityapps@gmail.com')
+    admin_access = (email == ADMIN_EMAIL)
     
     # Get environment info
     environment = os.environ.get('FLASK_ENV', 'production')
@@ -69,7 +73,8 @@ def admin_standalone():
         admin_access=admin_access,
         email=email,
         current_time=current_time,
-        environment=environment
+        environment=environment,
+        admin_email=ADMIN_EMAIL
     )
 
 # For local testing
