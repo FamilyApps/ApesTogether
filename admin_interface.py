@@ -302,8 +302,8 @@ def edit_transaction(user_id, transaction_id):
     
     if request.method == 'POST':
         # Store original values to calculate position changes
-        original_ticker = transaction.symbol
-        original_quantity = transaction.shares
+        original_ticker = transaction.ticker
+        original_quantity = transaction.quantity
         original_type = transaction.transaction_type
         
         # Get form data
@@ -320,9 +320,9 @@ def edit_transaction(user_id, transaction_id):
             return render_template('admin/edit_transaction.html', user=user, transaction=transaction)
         
         # Update transaction record
-        transaction.shares = quantity
+        transaction.quantity = quantity
         transaction.price = price
-        transaction.date = transaction_date
+        transaction.timestamp = transaction_date
         transaction.notes = notes
         
         # Update stock position if quantity changed
@@ -370,25 +370,25 @@ def delete_transaction(user_id, transaction_id):
         return redirect(url_for('admin.user_detail', user_id=user.id))
     
     # Update stock position
-    stock = Stock.query.filter_by(user_id=user.id, ticker=transaction.symbol).first()
+    stock = Stock.query.filter_by(user_id=user.id, ticker=transaction.ticker).first()
     
     if transaction.transaction_type == 'buy':
         # Reverse the buy
         if stock:
-            stock.quantity -= transaction.shares
+            stock.quantity -= transaction.quantity
             # If quantity becomes zero or negative, remove the stock
             if stock.quantity <= 0:
                 db.session.delete(stock)
     elif transaction.transaction_type == 'sell':
         # Reverse the sell
         if stock:
-            stock.quantity += transaction.shares
+            stock.quantity += transaction.quantity
         else:
             # Create a new stock position if it was fully sold before
             new_stock = Stock(
                 user_id=user.id,
-                ticker=transaction.symbol,
-                quantity=transaction.shares
+                ticker=transaction.ticker,
+                quantity=transaction.quantity
             )
             db.session.add(new_stock)
     

@@ -48,15 +48,15 @@ class Transaction(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    symbol = db.Column(db.String(10), nullable=False)
-    shares = db.Column(db.Float, nullable=False)
+    ticker = db.Column(db.String(10), nullable=False)
+    quantity = db.Column(db.Float, nullable=False)
     price = db.Column(db.Float, nullable=False)
     transaction_type = db.Column(db.String(10), nullable=False)  # 'buy' or 'sell'
-    date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     notes = db.Column(db.String(255))
     
     # Relationship with User
     user = db.relationship('User', backref=db.backref('transactions', lazy='dynamic'))
     
     def __repr__(self):
-        return f"<Transaction {self.transaction_type} {self.shares} {self.symbol} @ ${self.price}>"
+        return f"<Transaction {self.transaction_type} {self.quantity} {self.ticker} @ ${self.price}>"
