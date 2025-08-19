@@ -3,10 +3,41 @@
 {% block title %}Admin - User Management{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1>User Management</h1>
-        <a href="{{ url_for('admin.admin_dashboard') }}" class="btn btn-secondary">Back to Dashboard</a>
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <h1>User Management</h1>
+            
+            <!-- Summary Statistics Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Platform Overview</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="text-center">
+                                <h3 class="text-primary">${{ "%.2f"|format(total_portfolio_value) }}</h3>
+                                <p class="text-muted mb-0">Total Portfolio Value</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="text-center">
+                                <h3 class="text-warning">{{ total_yesterday_trades }}</h3>
+                                <p class="text-muted mb-0">Yesterday's Trades</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="text-center">
+                                <h3 class="text-success">{{ total_subscriptions }}</h3>
+                                <p class="text-muted mb-0">Total Subscriptions</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <a href="{{ url_for('admin.admin_dashboard') }}" class="btn btn-secondary">Back to Dashboard</a>
+        </div>
     </div>
     
     <div class="card">

@@ -103,6 +103,11 @@ def user_list():
     
     users = User.query.all()
     
+    # Calculate summary statistics for all users
+    total_portfolio_value = 0
+    total_yesterday_trades = 0
+    total_subscriptions = Subscription.query.count()
+    
     # Calculate additional data for each user
     for user in users:
         # Calculate portfolio value using simple estimation
@@ -120,6 +125,7 @@ def user_list():
                 portfolio_value += 150 * stock.quantity
         
         user.portfolio_value = portfolio_value
+        total_portfolio_value += portfolio_value
         
         # Count yesterday's trades
         yesterday = datetime.now().date() - timedelta(days=1)
@@ -129,14 +135,19 @@ def user_list():
                 func.date(Transaction.timestamp) == yesterday
             )
         ).count()
-        
         user.yesterday_trades = yesterday_trades
+        total_yesterday_trades += yesterday_trades
         
-        # Count subscribers (users subscribed to this user's portfolio)
-        subscriber_count = Subscription.query.filter_by(subscribed_to_id=user.id).count()
+        # Count subscriber count (how many people subscribe to this user's portfolio)
+        subscriber_count = Subscription.query.filter_by(portfolio_owner_id=user.id).count()
         user.subscriber_count = subscriber_count
     
-    return render_template('admin/users.html', users=users, now=datetime.now())
+    return render_template('admin/users.html', 
+                         users=users, 
+                         total_portfolio_value=total_portfolio_value,
+                         total_yesterday_trades=total_yesterday_trades,
+                         total_subscriptions=total_subscriptions,
+                         now=datetime.now())
 
 @admin_bp.route('/users/<int:user_id>')
 @login_required

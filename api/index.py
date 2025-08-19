@@ -1770,7 +1770,7 @@ def reset_admin_password():
 
 # Cache for stock prices to avoid excessive API calls
 stock_price_cache = {}
-cache_duration = 300  # 5 minutes in seconds
+cache_duration = 90  # 90 seconds
 
 def get_stock_data(ticker_symbol):
     """Fetches real-time stock data from Alpha Vantage with caching."""
