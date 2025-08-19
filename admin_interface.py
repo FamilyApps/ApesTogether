@@ -6,6 +6,7 @@ from sqlalchemy import desc
 import stripe
 from datetime import datetime
 from models import db, User, Stock, Transaction, Subscription
+from api.index import get_stock_data
 
 # Admin credentials from environment variables
 ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
@@ -110,22 +111,13 @@ def user_list():
         
         for stock in user_stocks:
             try:
-                # Try to import yfinance for real-time prices
-                import yfinance as yf
-                ticker = yf.Ticker(stock.ticker)
-                current_price = ticker.history(period="1d")['Close'].iloc[-1]
+                # Use existing AlphaVantage function
+                stock_data = get_stock_data(stock.ticker)
+                current_price = stock_data.get('price', 150.0)
                 portfolio_value += current_price * stock.quantity
-            except ImportError:
-                # Fallback: use estimated price based on stock ticker
-                estimated_price = 150.0  # Default estimate
-                if stock.ticker in ['AAPL', 'MSFT', 'GOOGL']:
-                    estimated_price = 200.0
-                elif stock.ticker in ['TSLA', 'NVDA']:
-                    estimated_price = 250.0
-                portfolio_value += estimated_price * stock.quantity
             except:
-                # If we can't get current price, use a placeholder
-                portfolio_value += 150 * stock.quantity  # Assume $150 per share as fallback
+                # Fallback to estimated price
+                portfolio_value += 150 * stock.quantity
         
         user.portfolio_value = portfolio_value
         
