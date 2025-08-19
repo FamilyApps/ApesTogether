@@ -920,8 +920,6 @@ def webhook():
     
     return jsonify({'status': 'success'})
 
-# Subscription model is already defined above
-
 @app.route('/subscriptions')
 @login_required
 def subscriptions():
