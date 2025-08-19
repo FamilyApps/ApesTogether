@@ -3901,6 +3901,21 @@ if __name__ == '__main__':
     })
     app.run(debug=True, port=5000)
 
+# Register the admin blueprint for Vercel deployment
+try:
+    import sys
+    import os
+    # Add root directory to path for Vercel deployment
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, root_dir)
+    from admin_interface import admin_bp
+    app.register_blueprint(admin_bp)
+    print("Admin blueprint registered successfully in Vercel")
+except ImportError as e:
+    print(f"Could not register admin blueprint in Vercel: {e}")
+except Exception as e:
+    print(f"Error registering admin blueprint: {e}")
+
 # Export the Flask app for Vercel serverless function
 # This is required for Vercel's Python runtime
 app.debug = False
