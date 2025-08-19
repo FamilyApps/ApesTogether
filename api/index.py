@@ -2763,6 +2763,100 @@ def admin_dashboard():
 </html>
     """
 
+@app.route('/admin/db-debug')
+@login_required
+def debug_database():
+    """Temporary diagnostic endpoint to check database connectivity and schema"""
+    if not current_user.is_admin:
+        return "Access denied", 403
+    
+    results = []
+    
+    # Test database connection
+    try:
+        db.session.execute(text("SELECT 1"))
+        results.append("✅ Database connection: OK")
+    except Exception as e:
+        results.append(f"❌ Database connection failed: {str(e)}")
+    
+    # Check if tables exist
+    tables_to_check = ['user', 'stock', 'stock_transaction', 'subscription']
+    for table in tables_to_check:
+        try:
+            result = db.session.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar()
+            results.append(f"✅ Table '{table}': {result} rows")
+        except Exception as e:
+            results.append(f"❌ Table '{table}': {str(e)}")
+    
+    # Test model queries
+    try:
+        user_count = User.query.count()
+        results.append(f"✅ User.query.count(): {user_count}")
+    except Exception as e:
+        results.append(f"❌ User.query.count(): {str(e)}")
+    
+    try:
+        stock_count = Stock.query.count()
+        results.append(f"✅ Stock.query.count(): {stock_count}")
+    except Exception as e:
+        results.append(f"❌ Stock.query.count(): {str(e)}")
+    
+    try:
+        transaction_count = Transaction.query.count()
+        results.append(f"✅ Transaction.query.count(): {transaction_count}")
+    except Exception as e:
+        results.append(f"❌ Transaction.query.count(): {str(e)}")
+    
+    try:
+        subscription_count = Subscription.query.count()
+        results.append(f"✅ Subscription.query.count(): {subscription_count}")
+    except Exception as e:
+        results.append(f"❌ Subscription.query.count(): {str(e)}")
+    
+    # Test recent users query
+    try:
+        recent_users = User.query.order_by(User.created_at.desc()).limit(5).all()
+        results.append(f"✅ Recent users query: {len(recent_users)} users found")
+        for user in recent_users:
+            results.append(f"   - {user.username} ({user.email})")
+    except Exception as e:
+        results.append(f"❌ Recent users query: {str(e)}")
+    
+    html_results = "<br>".join(results)
+    return f"""
+    <h1>Database Diagnostics</h1>
+    <p>{html_results}</p>
+    <hr>
+    <p><a href="/admin">Back to Admin Dashboard</a></p>
+    """
+
+@app.route('/admin/init-db')
+@login_required
+def init_database():
+    """Initialize database tables - ADMIN ONLY"""
+    if not current_user.is_admin:
+        return "Access denied", 403
+    
+    try:
+        # Create all database tables
+        with app.app_context():
+            db.create_all()
+        
+        return """
+        <h1>Database Initialization</h1>
+        <p>✅ Database tables created successfully!</p>
+        <p>All missing tables have been created in the production database.</p>
+        <hr>
+        <p><a href="/admin">Back to Admin Dashboard</a></p>
+        """
+    except Exception as e:
+        return f"""
+        <h1>Database Initialization Failed</h1>
+        <p>❌ Error creating database tables: {str(e)}</p>
+        <hr>
+        <p><a href="/admin">Back to Admin Dashboard</a></p>
+        """
+
 # Admin routes for viewing users and transactions
 @app.route('/admin/users')
 @admin_required
