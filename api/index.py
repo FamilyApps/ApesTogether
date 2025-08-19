@@ -1335,7 +1335,7 @@ def admin_subscription_analytics():
     current_user = User.query.get(current_user_id)
     
     # Only allow access to the admin (fordutilityapps@gmail.com or witty-raven)
-    if current_user.email != 'fordutilityapps@gmail.com' and current_user.username != 'witty-raven':
+    if current_user.email != ADMIN_EMAIL and current_user.username != ADMIN_USERNAME:
         flash('You do not have permission to access this page', 'danger')
         return redirect(url_for('dashboard'))
     
