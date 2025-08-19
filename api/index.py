@@ -2637,94 +2637,18 @@ def delete_stock(stock_id):
     return redirect(url_for('dashboard'))
 
 @app.route('/admin')
+@login_required
 def admin_dashboard():
-    """Admin dashboard"""
-    # Check if email is provided as a parameter
-    email_param = request.args.get('email', '')
-    if email_param:
-        # Store email in session if provided as parameter
-        session['email'] = email_param
+    """Secure admin dashboard - requires Google OAuth authentication"""
+    # Verify user is authenticated
+    if not current_user.is_authenticated:
+        flash('You must be logged in to access the admin dashboard.', 'warning')
+        return redirect(url_for('login'))
     
-    # Get email from session
-    email = session.get('email', '')
-    
-    # Check if user is admin
-    is_admin = (email == ADMIN_EMAIL)
-    
-    if not is_admin:
-        return render_template_string("""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Admin Login</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: #f4f4f4;
-        }
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-            background: white;
-            padding: 20px;
-            border-radius: 5px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-        }
-        h1 {
-            color: #333;
-        }
-        .form {
-            margin-top: 20px;
-        }
-        label {
-            display: block;
-            margin-bottom: 5px;
-        }
-        input[type="text"] {
-            width: 100%;
-            padding: 8px;
-            margin-bottom: 10px;
-            border: 1px solid #ddd;
-            border-radius: 3px;
-        }
-        input[type="submit"] {
-            background-color: #4CAF50;
-            color: white;
-            padding: 10px 15px;
-            border: none;
-            border-radius: 3px;
-            cursor: pointer;
-        }
-        input[type="submit"]:hover {
-            background-color: #45a049;
-        }
-        .message {
-            margin-top: 20px;
-            padding: 10px;
-            background-color: #f8d7da;
-            color: #721c24;
-            border-radius: 3px;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Admin Access</h1>
-        
-        <div class="form">
-            <h2>Admin Login</h2>
-            <form action="/admin" method="get">
-                <label for="email">Admin Email:</label>
-                <input type="text" id="email" name="email" placeholder="Enter admin email">
-                <input type="submit" value="Login">
-            </form>
-        </div>
-    </div>
-</body>
-</html>
-        """)
+    # Check if user is admin using the secure is_admin() method
+    if not current_user.is_admin():
+        flash('You do not have permission to access the admin dashboard.', 'danger')
+        return redirect(url_for('dashboard'))
     
     try:
         # Get real data from database
@@ -2756,153 +2680,6 @@ def admin_dashboard():
 <head>
     <title>Admin Dashboard</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: #f4f4f4;
-        }
-        .container {
-            width: 80%;
-            margin: 0 auto;
-            background: white;
-            padding: 20px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-        }
-        h1, h2 {
-            color: #333;
-        }
-        .nav {
-            background-color: #333;
-            overflow: hidden;
-            margin-bottom: 20px;
-        }
-        .nav a {
-            float: left;
-            display: block;
-            color: white;
-            text-align: center;
-            padding: 14px 16px;
-            text-decoration: none;
-        }
-        .stats {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-        .stat-card {
-            flex: 1;
-            min-width: 200px;
-            background: #f9f9f9;
-            padding: 20px;
-            border-radius: 5px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .stat-card h3 {
-            margin-top: 0;
-            color: #333;
-        }
-        .stat-card p {
-            font-size: 24px;
-            font-weight: bold;
-            margin: 10px 0 0;
-            color: #2196F3;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-        }
-        th, td {
-            padding: 10px;
-            text-align: left;
-            border-bottom: 1px solid #ddd;
-        }
-        th {
-            background-color: #f2f2f2;
-        }
-        tr:hover {background-color: #f5f5f5;}
-        input[type=text] {
-            width: 100%;
-            padding: 12px 20px;
-            margin: 8px 0;
-            box-sizing: border-box;
-        }
-        input[type=submit] {
-            background-color: #4CAF50;
-            color: white;
-            padding: 14px 20px;
-            margin: 8px 0;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="nav">
-            <a href="/admin">Dashboard</a>
-            <a href="/admin/users">Users</a>
-            <a href="/admin/transactions">Transactions</a>
-            <a href="/admin/stocks">Stocks</a>
-            <a href="/">Main Site</a>
-        </div>
-        
-        <h1>Admin Dashboard</h1>
-        
-        <div class="stats">
-            <div class="stat-card">
-                <h3>Total Users</h3>
-                <p>{{ user_count }}</p>
-            </div>
-            <div class="stat-card">
-                <h3>Total Stocks</h3>
-                <p>{{ stock_count }}</p>
-            </div>
-            <div class="stat-card">
-                <h3>Total Transactions</h3>
-                <p>{{ transaction_count }}</p>
-            </div>
-            <div class="stat-card">
-                <h3>Active Subscriptions</h3>
-                <p>{{ subscription_count }}</p>
-            </div>
-        </div>
-        
-        <h2>Recent Users</h2>
-        <div class="recent-users">
-            <table>
-                <tr>
-                    <th>ID</th>
-                    <th>Username</th>
-                    <th>Email</th>
-                    <th>Created</th>
-                    <th>Actions</th>
-                </tr>
-                {% for user in recent_users %}
-                <tr>
-                    <td>{{ user.id }}</td>
-                    <td>{{ user.username }}</td>
-                    <td>{{ user.email }}</td>
-                    <td>{{ user.created_at }}</td>
-                    <td>
-                        <a href="/admin/users/{{ user.id }}" class="button button-secondary button-small">View</a>
-                    </td>
-                </tr>
-                {% endfor %}
-            </table>
-        </div>
-    </div>
-</body>
-</html>
-    """, user_count=user_count, stock_count=stock_count, transaction_count=transaction_count, subscription_count=subscription_count, recent_users=recent_users)
-
-    # Return access denied template if not admin
-    return render_template_string("""
-<!DOCTYPE html>
-<html>
 <head>
     <title>Admin Access</title>
     <style>
