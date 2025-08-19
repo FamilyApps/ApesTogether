@@ -87,7 +87,8 @@ def admin_dashboard():
         transaction_count=transaction_count,
         subscription_count=subscription_count,
         recent_users=recent_users,
-        problematic_users=problematic_users
+        problematic_users=problematic_users,
+        now=datetime.now()
     )
 
 # User management
@@ -97,7 +98,7 @@ def admin_dashboard():
 def user_list():
     """List all users"""
     users = User.query.all()
-    return render_template('admin/users.html', users=users)
+    return render_template('admin/users.html', users=users, now=datetime.now())
 
 @admin_bp.route('/users/<int:user_id>')
 @login_required
@@ -114,7 +115,8 @@ def user_detail(user_id):
         user=user,
         stocks=stocks,
         transactions=transactions,
-        subscriptions=subscriptions
+        subscriptions=subscriptions,
+        now=datetime.now()
     )
 
 @admin_bp.route('/users/<int:user_id>/edit', methods=['GET', 'POST'])
@@ -156,7 +158,7 @@ def user_edit(user_id):
     except Exception as e:
         flash(f'Error fetching Stripe prices: {str(e)}', 'warning')
     
-    return render_template('admin/user_edit.html', user=user, stripe_prices=stripe_prices)
+    return render_template('admin/user_edit.html', user=user, stripe_prices=stripe_prices, now=datetime.now())
 
 # Stock management
 @admin_bp.route('/users/<int:user_id>/stocks/add', methods=['GET', 'POST'])
@@ -179,11 +181,11 @@ def add_stock(user_id):
             # Create a transaction record
             transaction = Transaction(
                 user_id=user.id,
-                symbol=ticker,
-                shares=quantity,
+                ticker=ticker,
+                quantity=quantity,
                 price=price,
                 transaction_type='buy',
-                date=datetime.now()
+                timestamp=datetime.now()
             )
             db.session.add(transaction)
         else:
@@ -196,11 +198,11 @@ def add_stock(user_id):
             # Create a transaction record
             transaction = Transaction(
                 user_id=user.id,
-                symbol=ticker,
-                shares=quantity,
+                ticker=ticker,
+                quantity=quantity,
                 price=price,
                 transaction_type='buy',
-                date=datetime.now()
+                timestamp=datetime.now()
             )
             db.session.add(stock)
             db.session.add(transaction)
@@ -214,7 +216,7 @@ def add_stock(user_id):
         
         return redirect(url_for('admin.user_detail', user_id=user.id))
     
-    return render_template('admin/add_stock.html', user=user)
+    return render_template('admin/add_stock.html', user=user, now=datetime.now())
 
 @admin_bp.route('/users/<int:user_id>/transactions/add', methods=['GET', 'POST'])
 @login_required
@@ -236,16 +238,16 @@ def add_transaction(user_id):
             transaction_date = datetime.strptime(date_str, '%Y-%m-%d')
         except ValueError:
             flash('Invalid date format. Please use YYYY-MM-DD', 'danger')
-            return render_template('admin/add_transaction.html', user=user)
+            return render_template('admin/add_transaction.html', user=user, now=datetime.now())
         
         # Create the transaction record
         transaction = Transaction(
             user_id=user.id,
-            symbol=ticker,
-            shares=quantity,
+            ticker=ticker,
+            quantity=quantity,
             price=price,
             transaction_type=transaction_type,
-            date=transaction_date,
+            timestamp=transaction_date,
             notes=notes
         )
         
@@ -265,7 +267,7 @@ def add_transaction(user_id):
         elif transaction_type == 'sell':
             if not existing_stock or existing_stock.quantity < quantity:
                 flash(f'Cannot sell {quantity} shares of {ticker}. User only has {existing_stock.quantity if existing_stock else 0} shares.', 'danger')
-                return render_template('admin/add_transaction.html', user=user)
+                return render_template('admin/add_transaction.html', user=user, now=datetime.now())
             
             existing_stock.quantity -= quantity
             
@@ -284,7 +286,7 @@ def add_transaction(user_id):
         
         return redirect(url_for('admin.user_detail', user_id=user.id))
     
-    return render_template('admin/add_transaction.html', user=user)
+    return render_template('admin/add_transaction.html', user=user, now=datetime.now())
 
 
 @admin_bp.route('/users/<int:user_id>/transactions/<int:transaction_id>/edit', methods=['GET', 'POST'])
@@ -317,7 +319,7 @@ def edit_transaction(user_id, transaction_id):
             transaction_date = datetime.strptime(date_str, '%Y-%m-%d')
         except ValueError:
             flash('Invalid date format. Please use YYYY-MM-DD', 'danger')
-            return render_template('admin/edit_transaction.html', user=user, transaction=transaction)
+            return render_template('admin/edit_transaction.html', user=user, transaction=transaction, now=datetime.now())
         
         # Update transaction record
         transaction.quantity = quantity
@@ -353,7 +355,7 @@ def edit_transaction(user_id, transaction_id):
         
         return redirect(url_for('admin.user_detail', user_id=user.id))
     
-    return render_template('admin/edit_transaction.html', user=user, transaction=transaction)
+    return render_template('admin/edit_transaction.html', user=user, transaction=transaction, now=datetime.now())
 
 
 @admin_bp.route('/users/<int:user_id>/transactions/<int:transaction_id>/delete', methods=['POST'])
@@ -430,11 +432,11 @@ def edit_stock(user_id, stock_id):
             transaction_type = 'buy' if quantity_diff > 0 else 'sell'
             transaction = Transaction(
                 user_id=user.id,
-                symbol=stock.ticker,
-                shares=abs(quantity_diff),
+                ticker=stock.ticker,
+                quantity=abs(quantity_diff),
                 price=price,
                 transaction_type=transaction_type,
-                date=datetime.now()
+                timestamp=datetime.now()
             )
             db.session.add(transaction)
         
@@ -447,7 +449,7 @@ def edit_stock(user_id, stock_id):
         
         return redirect(url_for('admin.user_detail', user_id=user.id))
     
-    return render_template('admin/edit_stock.html', user=user, stock=stock)
+    return render_template('admin/edit_stock.html', user=user, stock=stock, now=datetime.now())
 
 @admin_bp.route('/users/<int:user_id>/stocks/<int:stock_id>/delete', methods=['POST'])
 @login_required
@@ -465,11 +467,11 @@ def delete_stock(user_id, stock_id):
         # Create a sell transaction record
         transaction = Transaction(
             user_id=user.id,
-            symbol=stock.ticker,
-            shares=stock.quantity,
+            ticker=stock.ticker,
+            quantity=stock.quantity,
             price=0,  # Admin deletion doesn't have a price
             transaction_type='sell',
-            date=datetime.now()
+            timestamp=datetime.now()
         )
         db.session.add(transaction)
         
