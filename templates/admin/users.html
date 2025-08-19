@@ -17,14 +17,14 @@
             <table class="table table-striped" id="usersTable">
                 <thead>
                     <tr>
-                        <th>ID</th>
-                        <th>Username</th>
-                        <th>Email</th>
-                        <th>Portfolio Value</th>
-                        <th>Yesterday's Trades</th>
-                        <th>Subscription Price</th>
-                        <th>Subscribers</th>
-                        <th>Actions</th>
+                        <th data-sort="int">ID</th>
+                        <th data-sort="string">Username</th>
+                        <th data-sort="string">Email</th>
+                        <th data-sort="float">Portfolio Value</th>
+                        <th data-sort="int">Yesterday's Trades</th>
+                        <th data-sort="float">Subscription Price</th>
+                        <th data-sort="int">Subscribers</th>
+                        <th data-sort="false">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -33,7 +33,7 @@
                         <td>{{ user.id }}</td>
                         <td>{{ user.username }}</td>
                         <td>{{ user.email }}</td>
-                        <td>
+                        <td data-sort="{{ user.portfolio_value or 0 }}">
                             {% if user.portfolio_value %}
                                 ${{ "%.2f"|format(user.portfolio_value) }}
                             {% else %}
@@ -52,8 +52,8 @@
                                 <span class="text-danger">Not set</span>
                             {% endif %}
                         </td>
-                        <td>
-                            <span class="badge bg-primary">0</span>
+                        <td data-sort="{{ user.subscriber_count }}">
+                            <span class="badge bg-primary">{{ user.subscriber_count }}</span>
                         </td>
                         <td>
                             <a href="{{ url_for('admin.user_detail', user_id=user.id) }}" class="btn btn-sm btn-info">View</a>
@@ -71,7 +71,27 @@
 <script>
     $(document).ready(function() {
         $('#usersTable').DataTable({
-            "order": [[ 0, "desc" ]]
+            "order": [[ 3, "desc" ]], // Default sort by Portfolio Value descending
+            "columnDefs": [
+                { 
+                    "targets": [3], // Portfolio Value column
+                    "type": "num-fmt",
+                    "render": function(data, type, row) {
+                        if (type === 'sort' || type === 'type') {
+                            return parseFloat($(data).attr('data-sort')) || 0;
+                        }
+                        return data;
+                    }
+                },
+                { 
+                    "targets": [6], // Subscribers column
+                    "type": "num"
+                },
+                { 
+                    "targets": [7], // Actions column
+                    "orderable": false
+                }
+            ]
         });
     });
 </script>
