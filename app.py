@@ -3,6 +3,11 @@ import os
 # import pandas as pd
 from dotenv import load_dotenv
 load_dotenv()
+
+# Admin credentials from environment variables
+ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
+ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
+
 # Removed alpha_vantage import to reduce deployment size
 # from alpha_vantage.timeseries import TimeSeries
 from flask import Flask, render_template, redirect, url_for, flash, request, session, jsonify
@@ -132,7 +137,7 @@ def index():
 def admin_direct():
     """Super simple admin access route"""
     # Check if user is admin
-    if current_user.email != 'fordutilityapps@gmail.com':
+    if current_user.email != ADMIN_EMAIL:
         flash('You must be an admin to access this page.', 'danger')
         return redirect(url_for('index'))
     
