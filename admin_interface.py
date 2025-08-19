@@ -139,7 +139,7 @@ def user_list():
         total_yesterday_trades += yesterday_trades
         
         # Count subscriber count (how many people subscribe to this user's portfolio)
-        subscriber_count = Subscription.query.filter_by(portfolio_owner_id=user.id).count()
+        subscriber_count = Subscription.query.filter_by(subscribed_to_id=user.id).count()
         user.subscriber_count = subscriber_count
     
     return render_template('admin/users.html', 
