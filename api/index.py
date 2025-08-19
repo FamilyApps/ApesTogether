@@ -2830,89 +2830,6 @@ def debug_database():
     <p><a href="/admin">Back to Admin Dashboard</a></p>
     """
 
-@app.route('/admin/init-db')
-@login_required
-def init_database():
-    """Initialize database tables - ADMIN ONLY"""
-    if not current_user.is_admin:
-        return "Access denied", 403
-    
-    try:
-        # Create all database tables
-        with app.app_context():
-            db.create_all()
-        
-        return """
-        <h1>Database Initialization</h1>
-        <p>✅ Database tables created successfully!</p>
-        <p>All missing tables have been created in the production database.</p>
-        <hr>
-        <p><a href="/admin">Back to Admin Dashboard</a></p>
-        """
-    except Exception as e:
-        return f"""
-        <h1>Database Initialization Failed</h1>
-        <p>❌ Error creating database tables: {str(e)}</p>
-        <hr>
-        <p><a href="/admin">Back to Admin Dashboard</a></p>
-        """
-
-@app.route('/admin/migrate-db')
-@login_required
-def migrate_database():
-    """Add missing columns to existing tables - ADMIN ONLY"""
-    if not current_user.is_admin:
-        return "Access denied", 403
-    
-    results = []
-    
-    try:
-        # Add missing columns to subscription table
-        try:
-            db.session.execute(text("ALTER TABLE subscription ADD COLUMN start_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP"))
-            results.append("✅ Added start_date column to subscription table")
-        except Exception as e:
-            if "already exists" in str(e) or "duplicate column" in str(e).lower():
-                results.append("ℹ️ start_date column already exists in subscription table")
-            else:
-                results.append(f"❌ Failed to add start_date column: {str(e)}")
-        
-        try:
-            db.session.execute(text("ALTER TABLE subscription ADD COLUMN end_date TIMESTAMP"))
-            results.append("✅ Added end_date column to subscription table")
-        except Exception as e:
-            if "already exists" in str(e) or "duplicate column" in str(e).lower():
-                results.append("ℹ️ end_date column already exists in subscription table")
-            else:
-                results.append(f"❌ Failed to add end_date column: {str(e)}")
-        
-        # Modify status column size if needed
-        try:
-            db.session.execute(text("ALTER TABLE subscription ALTER COLUMN status TYPE VARCHAR(20)"))
-            results.append("✅ Updated status column size in subscription table")
-        except Exception as e:
-            results.append(f"ℹ️ Status column update: {str(e)}")
-        
-        # Commit all changes
-        db.session.commit()
-        results.append("✅ All database migrations committed successfully")
-        
-        html_results = "<br>".join(results)
-        return f"""
-        <h1>Database Migration</h1>
-        <p>{html_results}</p>
-        <hr>
-        <p><a href="/admin">Back to Admin Dashboard</a></p>
-        """
-        
-    except Exception as e:
-        db.session.rollback()
-        return f"""
-        <h1>Database Migration Failed</h1>
-        <p>❌ Error during database migration: {str(e)}</p>
-        <hr>
-        <p><a href="/admin">Back to Admin Dashboard</a></p>
-        """
 
 # Admin routes for viewing users and transactions
 @app.route('/admin/users')
@@ -2930,9 +2847,13 @@ def admin_users():
             stock_count = Stock.query.filter_by(user_id=user.id).count()
             transaction_count = Transaction.query.filter_by(user_id=user.id).count()
             
-            # Get subscription price
-            subscription = Subscription.query.filter_by(user_id=user.id, status='active').first()
-            subscription_price = subscription.price if subscription else 0
+            # Get subscription info (user can be either subscriber or subscribed_to)
+            subscription = Subscription.query.filter(
+                (Subscription.subscriber_id == user.id) | (Subscription.subscribed_to_id == user.id),
+                Subscription.status == 'active'
+            ).first()
+            # Note: Subscription model doesn't have price field, using placeholder
+            subscription_price = 9.99 if subscription else 0
             
             users.append({
                 'id': user.id,
