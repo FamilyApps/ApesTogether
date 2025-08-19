@@ -2680,72 +2680,83 @@ def admin_dashboard():
 <head>
     <title>Admin Dashboard</title>
     <style>
-<head>
-    <title>Admin Access</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        .container { max-width: 800px; margin: 0 auto; }
-        .button { 
-            display: inline-block; 
-            background: #4CAF50; 
-            color: white; 
-            padding: 10px 20px; 
-            text-decoration: none; 
-            border-radius: 5px; 
-            margin-top: 20px;
-        }
-        .error {
-            background-color: #ffdddd;
-            border-left: 6px solid #f44336;
-            margin-bottom: 15px;
-            padding: 10px;
-            border-radius: 5px;
-        }
-        .form {
-            background-color: #f9f9f9;
-            padding: 20px;
-            border-radius: 5px;
-        }
-        input[type=text] {
-            width: 100%;
-            padding: 12px 20px;
-            margin: 8px 0;
-            box-sizing: border-box;
-        }
-        input[type=submit] {
-            background-color: #4CAF50;
-            color: white;
-            padding: 14px 20px;
-            margin: 8px 0;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
+        body { font-family: Arial, sans-serif; margin: 40px; background-color: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .header { border-bottom: 2px solid #4CAF50; padding-bottom: 20px; margin-bottom: 30px; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .stat-card { background: linear-gradient(135deg, #4CAF50, #45a049); color: white; padding: 20px; border-radius: 8px; text-align: center; }
+        .stat-number { font-size: 2em; font-weight: bold; margin-bottom: 5px; }
+        .stat-label { font-size: 0.9em; opacity: 0.9; }
+        .section { margin-bottom: 30px; }
+        .section h3 { color: #333; border-bottom: 1px solid #ddd; padding-bottom: 10px; }
+        .user-list { background: #f9f9f9; padding: 15px; border-radius: 5px; }
+        .user-item { padding: 8px 0; border-bottom: 1px solid #eee; }
+        .user-item:last-child { border-bottom: none; }
+        .button { display: inline-block; background: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin: 5px; }
+        .button:hover { background: #45a049; }
+        .nav-buttons { margin-top: 20px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Admin Access</h1>
-        
-        <div class="error">
-            <h2>Access Denied</h2>
-            <p>You must be logged in with the admin email to access this page.</p>
+        <div class="header">
+            <h1>🚀 Admin Dashboard</h1>
+            <p>Welcome, {current_user.email}! You have admin access to ApesTogether.</p>
         </div>
         
-        <div class="form">
-            <h2>Admin Login</h2>
-            <form action="/admin" method="get">
-                <label for="email">Admin Email:</label>
-                <input type="text" id="email" name="email" placeholder="Enter admin email">
-                <input type="submit" value="Login">
-            </form>
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-number">{user_count}</div>
+                <div class="stat-label">Total Users</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">{stock_count}</div>
+                <div class="stat-label">Tracked Stocks</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">{transaction_count}</div>
+                <div class="stat-label">Transactions</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">{subscription_count}</div>
+                <div class="stat-label">Subscriptions</div>
+            </div>
         </div>
         
-        <a href="/" class="button">Back to Home</a>
+        <div class="section">
+            <h3>📊 Quick Actions</h3>
+            <a href="/admin/users" class="button">👥 Manage Users</a>
+            <a href="/admin/transactions" class="button">💰 View Transactions</a>
+            <a href="/admin/debug-auth" class="button">🔍 Debug Auth</a>
+        </div>
+        
+        <div class="section">
+            <h3>👥 Recent Users</h3>
+            <div class="user-list">
+                {% for user in recent_users %}
+                <div class="user-item">
+                    <strong>{{ user.username if user.username else 'N/A' }}</strong> - {{ user.email if user.email else 'N/A' }}
+                    <small>(ID: {{ user.id if user.id else 'N/A' }})</small>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        
+        <div class="nav-buttons">
+            <a href="/dashboard" class="button">📈 Back to Dashboard</a>
+            <a href="/logout" class="button">🚪 Logout</a>
+        </div>
     </div>
 </body>
 </html>
-    """)
+    """.format(
+        current_user=current_user,
+        user_count=user_count,
+        stock_count=stock_count,
+        transaction_count=transaction_count,
+        subscription_count=subscription_count,
+        recent_users=recent_users
+    ))
 
 @app.route('/admin/debug-auth')
 @login_required
