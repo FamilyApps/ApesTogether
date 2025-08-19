@@ -7,6 +7,10 @@ import stripe
 from datetime import datetime
 from models import db, User, Stock, Transaction, Subscription
 
+# Admin credentials from environment variables
+ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
+ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
+
 # Create a Blueprint for the admin routes
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
@@ -46,8 +50,8 @@ def admin_required(f):
             flash('You must be logged in to access this page.', 'danger')
             return redirect(url_for('login'))
             
-        # Allow access for fordutilityapps@gmail.com regardless of username
-        if current_user.email == "fordutilityapps@gmail.com":
+        # Allow access for admin email regardless of username
+        if current_user.email == ADMIN_EMAIL:
             return f(*args, **kwargs)
             
         flash('You must be an admin to access this page.', 'danger')
