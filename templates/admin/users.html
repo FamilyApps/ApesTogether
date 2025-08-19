@@ -21,6 +21,7 @@
                         <th>Username</th>
                         <th>Email</th>
                         <th>Subscription Price</th>
+                        <th>Subscribers</th>
                         <th>Stripe Price ID</th>
                         <th>Actions</th>
                     </tr>
@@ -37,6 +38,9 @@
                             {% else %}
                                 <span class="text-danger">Not set</span>
                             {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge bg-primary">{{ user.subscribers.count() }}</span>
                         </td>
                         <td>
                             {% if user.stripe_price_id %}
