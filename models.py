@@ -53,7 +53,6 @@ class Transaction(db.Model):
     price = db.Column(db.Float, nullable=False)
     transaction_type = db.Column(db.String(10), nullable=False)  # 'buy' or 'sell'
     timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    notes = db.Column(db.String(255))
     
     # Relationship with User
     user = db.relationship('User', backref=db.backref('transactions', lazy='dynamic'))

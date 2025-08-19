@@ -231,7 +231,7 @@ def add_transaction(user_id):
         price = float(request.form.get('price'))
         transaction_type = request.form.get('transaction_type')
         date_str = request.form.get('transaction_date')
-        notes = request.form.get('notes', '')
+        # notes = request.form.get('notes', '')  # Notes column doesn't exist in database
         
         # Parse the date string to a datetime object
         try:
@@ -248,7 +248,7 @@ def add_transaction(user_id):
             price=price,
             transaction_type=transaction_type,
             timestamp=transaction_date,
-            notes=notes
+            # notes=notes  # Notes column doesn't exist in database
         )
         
         # Update the stock position
@@ -312,7 +312,7 @@ def edit_transaction(user_id, transaction_id):
         quantity = float(request.form.get('quantity'))
         price = float(request.form.get('price'))
         date_str = request.form.get('transaction_date')
-        notes = request.form.get('notes', '')
+        # notes = request.form.get('notes', '')  # Notes column doesn't exist in database
         
         # Parse the date
         try:
@@ -325,7 +325,7 @@ def edit_transaction(user_id, transaction_id):
         transaction.quantity = quantity
         transaction.price = price
         transaction.timestamp = transaction_date
-        transaction.notes = notes
+        # transaction.notes = notes  # Notes column doesn't exist in database
         
         # Update stock position if quantity changed
         if quantity != original_quantity:
