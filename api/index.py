@@ -3748,6 +3748,95 @@ def debug_info():
     except Exception as e:
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()})
 
+@app.route('/admin/run-migration')
+def run_migration():
+    """One-time migration endpoint - remove after use"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        # Create the new tables manually since we don't have Flask-Migrate in Vercel
+        with app.app_context():
+            # Create portfolio_snapshot table
+            db.session.execute(text("""
+                CREATE TABLE IF NOT EXISTS portfolio_snapshot (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES "user"(id),
+                    date DATE NOT NULL,
+                    total_value FLOAT NOT NULL,
+                    cash_flow FLOAT DEFAULT 0.0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, date)
+                )
+            """))
+            
+            # Create market_data table
+            db.session.execute(text("""
+                CREATE TABLE IF NOT EXISTS market_data (
+                    id SERIAL PRIMARY KEY,
+                    symbol VARCHAR(10) NOT NULL,
+                    date DATE NOT NULL,
+                    close_price FLOAT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(symbol, date)
+                )
+            """))
+            
+            db.session.commit()
+        
+        return jsonify({
+            'success': True, 
+            'message': 'Migration completed successfully. New tables created.'
+        })
+    except Exception as e:
+        logger.error(f"Migration error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# Portfolio performance API endpoints
+@app.route('/api/portfolio/performance/<period>')
+@login_required
+def get_portfolio_performance(period):
+    """Get portfolio performance data for a specific time period"""
+    try:
+        # Import here to avoid circular imports
+        import sys
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from portfolio_performance import performance_calculator
+        
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'User not authenticated'}), 401
+            
+        performance_data = performance_calculator.get_performance_data(user_id, period.upper())
+        return jsonify(performance_data)
+    except Exception as e:
+        logger.error(f"Performance calculation error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/portfolio/snapshot')
+@login_required
+def create_portfolio_snapshot():
+    """Create a portfolio snapshot for today"""
+    try:
+        # Import here to avoid circular imports
+        import sys
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from portfolio_performance import performance_calculator
+        
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'User not authenticated'}), 401
+            
+        performance_calculator.create_daily_snapshot(user_id)
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f"Snapshot creation error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 # For local testing
 if __name__ == '__main__':
     # Log app startup with structured information
