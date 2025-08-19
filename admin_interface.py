@@ -451,6 +451,74 @@ def edit_stock(user_id, stock_id):
     
     return render_template('admin/edit_stock.html', user=user, stock=stock, now=datetime.now())
 
+@admin_bp.route('/fix-subscription-prices', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def fix_subscription_prices():
+    """Fix missing subscription prices for users via web interface"""
+    if request.method == 'POST':
+        # Find users without subscription prices
+        users_without_prices = User.query.filter(
+            (User.subscription_price == None) | (User.stripe_price_id == None)
+        ).all()
+        
+        updated_count = 0
+        for user in users_without_prices:
+            if user.subscription_price is None:
+                user.subscription_price = 4.00
+                updated_count += 1
+                
+            if user.stripe_price_id is None:
+                user.stripe_price_id = 'price_1RbX0yQWUhVa3vgDB8vGzoFN'  # Default $4 price
+        
+        try:
+            db.session.commit()
+            flash(f'Successfully updated {updated_count} users with default $4.00 subscription pricing.', 'success')
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error updating users: {str(e)}', 'danger')
+        
+        return redirect(url_for('admin.user_list'))
+    
+    # GET request - show users that need fixing
+    users_without_prices = User.query.filter(
+        (User.subscription_price == None) | (User.stripe_price_id == None)
+    ).all()
+    
+    return render_template_string("""
+    {% extends 'base.html' %}
+    {% block title %}Fix Subscription Prices{% endblock %}
+    {% block content %}
+    <div class="container mt-4">
+        <h1>Fix Subscription Prices</h1>
+        
+        {% if users_without_prices %}
+        <div class="alert alert-warning">
+            <h5>Found {{ users_without_prices|length }} users without subscription pricing:</h5>
+            <ul>
+            {% for user in users_without_prices %}
+                <li><strong>{{ user.username }}</strong> - 
+                    Price: {{ user.subscription_price or 'Not Set' }}, 
+                    Stripe ID: {{ user.stripe_price_id or 'Not Set' }}
+                </li>
+            {% endfor %}
+            </ul>
+        </div>
+        
+        <form method="post">
+            <button type="submit" class="btn btn-primary">Fix All Users ($4.00 default)</button>
+            <a href="{{ url_for('admin.user_list') }}" class="btn btn-secondary">Cancel</a>
+        </form>
+        {% else %}
+        <div class="alert alert-success">
+            <h5>All users have subscription pricing configured!</h5>
+        </div>
+        <a href="{{ url_for('admin.user_list') }}" class="btn btn-primary">Back to Users</a>
+        {% endif %}
+    </div>
+    {% endblock %}
+    """, users_without_prices=users_without_prices, now=datetime.now())
+
 @admin_bp.route('/users/<int:user_id>/stocks/<int:stock_id>/delete', methods=['POST'])
 @login_required
 @admin_required
