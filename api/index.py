@@ -2747,6 +2747,25 @@ def admin_dashboard():
 </html>
     """)
 
+@app.route('/admin/debug-auth')
+@login_required
+def debug_admin_auth():
+    """Debug endpoint to check admin authentication values"""
+    return f"""
+    <h1>Admin Authentication Debug</h1>
+    <p><strong>Current User Email:</strong> '{current_user.email}'</p>
+    <p><strong>Current User Username:</strong> '{current_user.username}'</p>
+    <p><strong>ADMIN_EMAIL from env:</strong> '{ADMIN_EMAIL}'</p>
+    <p><strong>ADMIN_USERNAME from env:</strong> '{ADMIN_USERNAME}'</p>
+    <p><strong>Email Match:</strong> {current_user.email == ADMIN_EMAIL}</p>
+    <p><strong>Username Match:</strong> {current_user.username == ADMIN_USERNAME}</p>
+    <p><strong>is_admin result:</strong> {current_user.is_admin}</p>
+    <p><strong>Email comparison:</strong> '{current_user.email}' == '{ADMIN_EMAIL}'</p>
+    <p><strong>Username comparison:</strong> '{current_user.username}' == '{ADMIN_USERNAME}'</p>
+    <hr>
+    <p><a href="/admin">Try Admin Dashboard</a> | <a href="/dashboard">Back to Dashboard</a></p>
+    """
+
 # Admin routes for viewing users and transactions
 @app.route('/admin/users')
 @admin_required
