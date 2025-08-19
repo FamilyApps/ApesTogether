@@ -400,6 +400,8 @@ class Stock(db.Model):
         return self.current_value() - (self.purchase_price * self.quantity)
 
 class Transaction(db.Model):
+    __tablename__ = 'stock_transaction'  # Use same table name as models.py to avoid conflicts
+    
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     ticker = db.Column(db.String(10), nullable=False)
