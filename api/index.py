@@ -1768,8 +1768,14 @@ def reset_admin_password():
 # - created_at (TIMESTAMP DEFAULT CURRENT_TIMESTAMP)
 # - stripe_customer_id (VARCHAR(120))
 
+# Cache for stock prices to avoid excessive API calls
+stock_price_cache = {}
+cache_duration = 300  # 5 minutes in seconds
+
 def get_stock_data(ticker_symbol):
-    """Fetches real-time stock data from Alpha Vantage."""
+    """Fetches real-time stock data from Alpha Vantage with caching."""
+    from datetime import datetime, timedelta
+    
     # Default mock prices for common stocks
     mock_prices = {
         'AAPL': 185.92,
@@ -1781,12 +1787,24 @@ def get_stock_data(ticker_symbol):
         'NVDA': 116.64,
     }
     
+    # Check cache first
+    ticker_upper = ticker_symbol.upper()
+    current_time = datetime.now()
+    
+    if ticker_upper in stock_price_cache:
+        cached_data = stock_price_cache[ticker_upper]
+        cache_time = cached_data.get('timestamp')
+        if cache_time and (current_time - cache_time).total_seconds() < cache_duration:
+            return {'price': cached_data['price']}
+    
     try:
         api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
         if not api_key:
             logger.warning("Alpha Vantage API key not found, using mock data")
             # Return mock data if no API key is available
-            price = mock_prices.get(ticker_symbol.upper(), 100.00)
+            price = mock_prices.get(ticker_upper, 100.00)
+            # Cache the mock price
+            stock_price_cache[ticker_upper] = {'price': price, 'timestamp': current_time}
             return {'price': price}
         
         # Use Alpha Vantage API to get real stock data
@@ -1796,16 +1814,22 @@ def get_stock_data(ticker_symbol):
         
         if 'Global Quote' in data and '05. price' in data['Global Quote']:
             price = float(data['Global Quote']['05. price'])
+            # Cache the real price
+            stock_price_cache[ticker_upper] = {'price': price, 'timestamp': current_time}
             return {'price': price}
         else:
             logger.warning(f"Could not get price for {ticker_symbol}, using fallback")
             # Fallback to mock data if API doesn't return expected format
-            price = mock_prices.get(ticker_symbol.upper(), 100.00)
+            price = mock_prices.get(ticker_upper, 100.00)
+            # Cache the fallback price
+            stock_price_cache[ticker_upper] = {'price': price, 'timestamp': current_time}
             return {'price': price}
     except Exception as e:
         logger.error(f"Error getting stock data for {ticker_symbol}: {str(e)}")
         # Return a default price if there's an error
-        price = mock_prices.get(ticker_symbol.upper(), 100.00)
+        price = mock_prices.get(ticker_upper, 100.00)
+        # Cache the error fallback price
+        stock_price_cache[ticker_upper] = {'price': price, 'timestamp': current_time}
         return {'price': price}
 
 # HTML Templates for core functionality
