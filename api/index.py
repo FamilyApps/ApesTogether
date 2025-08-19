@@ -1441,7 +1441,7 @@ def admin_debug_users():
         if request.remote_addr != '127.0.0.1' and not (current_user.is_authenticated and current_user.is_admin()):
             return jsonify({'error': 'Unauthorized'}), 403
             
-        admin_user = User.query.filter_by(email='fordutilityapps@gmail.com').first()
+        admin_user = User.query.filter_by(email=ADMIN_EMAIL).first()
         if admin_user:
             # Don't return the actual password hash for security reasons
             return jsonify({
