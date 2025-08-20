@@ -3953,6 +3953,32 @@ def populate_sp500_data():
         logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/debug-env', methods=['GET'])
+@login_required
+def debug_env():
+    """Debug environment variables"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    import os
+    
+    # Check for AlphaVantage API key in different ways
+    alpha_key_direct = os.environ.get('ALPHA_VANTAGE_API_KEY')
+    alpha_key_getenv = os.getenv('ALPHA_VANTAGE_API_KEY')
+    
+    # Check all environment variables that contain 'ALPHA'
+    alpha_vars = {k: v[:10] + '...' if v and len(v) > 10 else v 
+                  for k, v in os.environ.items() if 'ALPHA' in k.upper()}
+    
+    return jsonify({
+        'alpha_vantage_direct': alpha_key_direct[:10] + '...' if alpha_key_direct else None,
+        'alpha_vantage_getenv': alpha_key_getenv[:10] + '...' if alpha_key_getenv else None,
+        'all_alpha_vars': alpha_vars,
+        'env_var_count': len(os.environ),
+        'has_flask_env': 'FLASK_ENV' in os.environ,
+        'flask_env_value': os.environ.get('FLASK_ENV')
+    })
+
 @app.route('/admin/test-alphavantage', methods=['GET'])
 @login_required
 def test_alphavantage():
@@ -4007,6 +4033,83 @@ def test_alphavantage():
             'success': False,
             'error': str(e)
         })
+
+@app.route('/admin/populate-sp500-tiny', methods=['GET'])
+@login_required
+def populate_sp500_tiny():
+    """Populate S&P 500 data in tiny batches to avoid timeout"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from portfolio_performance import PortfolioPerformanceCalculator
+        from models import MarketData
+        import requests
+        from datetime import date, timedelta
+        
+        calculator = PortfolioPerformanceCalculator()
+        
+        # Get just 30 days of data to avoid timeout
+        end_date = date.today()
+        start_date = end_date - timedelta(days=30)
+        
+        # Make direct AlphaVantage call for recent data only
+        url = "https://www.alphavantage.co/query"
+        params = {
+            'function': 'TIME_SERIES_DAILY',
+            'symbol': 'SPY',
+            'outputsize': 'compact',  # Only recent 100 days
+            'apikey': calculator.alpha_vantage_api_key
+        }
+        
+        response = requests.get(url, params=params, timeout=15)
+        data = response.json()
+        
+        if 'Time Series (Daily)' not in data:
+            return jsonify({'error': 'Invalid AlphaVantage response', 'response': data})
+        
+        time_series = data['Time Series (Daily)']
+        data_points = 0
+        
+        # Process only last 30 days
+        for date_str, daily_data in time_series.items():
+            try:
+                data_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                
+                if start_date <= data_date <= end_date:
+                    spy_price = float(daily_data['4. close'])
+                    sp500_value = spy_price * 10  # Convert to S&P 500 index
+                    
+                    # Check if exists
+                    existing = MarketData.query.filter_by(
+                        symbol='SPY_SP500',
+                        date=data_date
+                    ).first()
+                    
+                    if not existing:
+                        market_data = MarketData(
+                            symbol='SPY_SP500',
+                            date=data_date,
+                            close_price=sp500_value
+                        )
+                        db.session.add(market_data)
+                        data_points += 1
+            
+            except (ValueError, KeyError) as e:
+                continue
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Added {data_points} recent S&P 500 data points',
+            'data_points': data_points,
+            'date_range': f'{start_date} to {end_date}',
+            'note': 'Use multiple times to build historical data gradually'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/sp500-data-status', methods=['GET'])
 @login_required
