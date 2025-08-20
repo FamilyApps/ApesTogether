@@ -4484,6 +4484,137 @@ def debug_chart_data(period):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/find-duplicate-sp500-values', methods=['GET'])
+@login_required
+def find_duplicate_sp500_values():
+    """Find duplicate S&P 500 values that create chart spikes"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import MarketData
+        from collections import defaultdict
+        
+        # Get all S&P 500 data points
+        all_data = MarketData.query.filter_by(symbol='SPY_SP500').order_by(MarketData.date).all()
+        
+        if not all_data:
+            return jsonify({'error': 'No S&P 500 data found'})
+        
+        # Group by value to find duplicates
+        value_groups = defaultdict(list)
+        for data_point in all_data:
+            # Round to avoid floating point precision issues
+            rounded_value = round(data_point.close_price, 2)
+            value_groups[rounded_value].append({
+                'date': data_point.date.isoformat(),
+                'exact_value': data_point.close_price,
+                'id': data_point.id
+            })
+        
+        # Find values that appear on multiple dates
+        duplicates = {}
+        for value, occurrences in value_groups.items():
+            if len(occurrences) > 1:
+                # Check if dates are far apart (suspicious)
+                dates = [occ['date'] for occ in occurrences]
+                dates.sort()
+                
+                duplicates[value] = {
+                    'occurrences': occurrences,
+                    'count': len(occurrences),
+                    'date_range': f"{dates[0]} to {dates[-1]}",
+                    'suspicious': len(occurrences) > 2 or (len(occurrences) == 2 and 
+                        (datetime.fromisoformat(dates[1]) - datetime.fromisoformat(dates[0])).days > 7)
+                }
+        
+        # Find the problematic 6398.1 value specifically
+        problem_value = None
+        for value, info in duplicates.items():
+            if 6390 <= value <= 6405:  # Around the problematic value
+                problem_value = {
+                    'value': value,
+                    'info': info
+                }
+                break
+        
+        return jsonify({
+            'success': True,
+            'total_data_points': len(all_data),
+            'duplicate_values_found': len(duplicates),
+            'duplicates': dict(list(duplicates.items())[:10]),  # First 10
+            'problem_value_6398': problem_value,
+            'note': 'Duplicate values on different dates create artificial chart spikes'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/fix-duplicate-sp500-values', methods=['GET'])
+@login_required
+def fix_duplicate_sp500_values():
+    """Fix duplicate S&P 500 values by interpolating between neighbors"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import MarketData, db
+        from collections import defaultdict
+        
+        # Get all S&P 500 data points
+        all_data = MarketData.query.filter_by(symbol='SPY_SP500').order_by(MarketData.date).all()
+        
+        if not all_data:
+            return jsonify({'error': 'No S&P 500 data found'})
+        
+        fixes_applied = []
+        
+        # Find and fix the specific problematic value around 6398
+        for i in range(1, len(all_data) - 1):
+            current = all_data[i]
+            prev_val = all_data[i-1].close_price
+            next_val = all_data[i+1].close_price
+            curr_val = current.close_price
+            
+            # Check if current value is identical to a distant value (suspicious)
+            if 6390 <= curr_val <= 6405:  # Focus on the problematic range
+                # Look for other occurrences of this exact value
+                for j, other in enumerate(all_data):
+                    if (j != i and 
+                        abs(other.close_price - curr_val) < 0.1 and  # Same value
+                        abs((other.date - current.date).days) > 5):  # Different dates, far apart
+                        
+                        # This is likely a duplicate - interpolate
+                        interpolated_value = (prev_val + next_val) / 2
+                        
+                        fixes_applied.append({
+                            'date': current.date.isoformat(),
+                            'original_value': curr_val,
+                            'interpolated_value': interpolated_value,
+                            'prev_value': prev_val,
+                            'next_value': next_val,
+                            'duplicate_date': other.date.isoformat(),
+                            'reason': 'duplicate_value_interpolated'
+                        })
+                        
+                        current.close_price = interpolated_value
+                        break
+        
+        # Commit changes
+        if fixes_applied:
+            db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'fixes_applied': len(fixes_applied),
+            'details': fixes_applied,
+            'message': f'Fixed {len(fixes_applied)} duplicate S&P 500 values'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/fix-sp500-anomalies', methods=['GET'])
 @login_required
 def fix_sp500_anomalies():
