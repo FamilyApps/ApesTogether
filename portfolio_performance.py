@@ -266,6 +266,25 @@ class PortfolioPerformanceCalculator:
         
         return cached_dates
     
+    def _sample_dates_for_period(self, dates: List[date], period: str) -> List[date]:
+        """Sample data points based on period to reduce chart density"""
+        if period in ['1D', '5D']:
+            return dates  # Show all points for short periods
+        elif period == '1M':
+            # Show every other day for 1 month
+            return dates[::2]
+        elif period == '3M':
+            # Show weekly points for 3 months
+            return dates[::5]
+        elif period in ['YTD', '1Y']:
+            # Show weekly points for year periods
+            return dates[::7]
+        elif period == '5Y':
+            # Show monthly points for 5 years
+            return dates[::20]
+        else:
+            return dates
+    
     def calculate_sp500_return(self, start_date: date, end_date: date) -> float:
         """Calculate S&P 500 return for a period"""
         sp500_data = self.get_sp500_data(start_date, end_date)
@@ -375,14 +394,18 @@ class PortfolioPerformanceCalculator:
             if sp500_dates:
                 start_sp500_value = sp500_data[sp500_dates[0]]
                 
-                for date_key in sp500_dates:
-                    sp500_pct = ((sp500_data[date_key] - start_sp500_value) / start_sp500_value) * 100
-                    
-                    chart_data.append({
-                        'date': date_key.isoformat(),
-                        'portfolio': 0,  # No portfolio data yet
-                        'sp500': round(sp500_pct, 2)
-                    })
+                # Sample data points for longer periods to reduce chart density
+                sampled_dates = self._sample_dates_for_period(sp500_dates, period)
+                
+                for date_key in sampled_dates:
+                    if date_key in sp500_data:
+                        sp500_pct = ((sp500_data[date_key] - start_sp500_value) / start_sp500_value) * 100
+                        
+                        chart_data.append({
+                            'date': date_key.isoformat(),
+                            'portfolio': 0,  # No portfolio data yet
+                            'sp500': round(sp500_pct, 2)
+                        })
         
         return {
             'period': period,
