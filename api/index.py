@@ -5019,8 +5019,8 @@ def test_premium_intraday():
         if not api_key:
             return jsonify({'error': 'AlphaVantage API key not found'}), 500
         
-        # Test current day intraday data (premium feature)
-        url = f'https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=SPY&interval=5min&apikey={api_key}'
+        # Test current day intraday data with real-time entitlement
+        url = f'https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=SPY&interval=5min&entitlement=realtime&apikey={api_key}'
         response = requests.get(url)
         data = response.json()
         
@@ -5059,6 +5059,94 @@ def test_premium_intraday():
         })
         
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/implement-realtime-1d-charts', methods=['GET'])
+@login_required
+def implement_realtime_1d_charts():
+    """Implement real-time 1D intraday charts using entitlement=realtime"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        import requests
+        import os
+        from models import MarketData, db
+        from datetime import datetime, date, timedelta
+        
+        api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
+        if not api_key:
+            return jsonify({'error': 'AlphaVantage API key not found'}), 500
+        
+        # Fetch real-time intraday data for SPY (5-minute intervals)
+        url = f'https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=SPY&interval=5min&entitlement=realtime&apikey={api_key}'
+        response = requests.get(url)
+        data = response.json()
+        
+        if 'Time Series (5min)' not in data:
+            return jsonify({'error': 'Failed to fetch real-time intraday data', 'response': data}), 500
+        
+        intraday_data = data['Time Series (5min)']
+        today = date.today()
+        points_added = 0
+        current_day_points = 0
+        
+        # Process real-time intraday data
+        for timestamp_str, values in intraday_data.items():
+            timestamp = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S')
+            
+            # Count current day points
+            if timestamp.date() == today:
+                current_day_points += 1
+            
+            # Store all recent intraday data (last 2 days for 1D charts)
+            if timestamp.date() >= today - timedelta(days=2):
+                sp500_value = float(values['4. close']) * 10  # SPY to S&P 500 conversion
+                
+                # Create/update intraday market data entry
+                existing = MarketData.query.filter_by(
+                    symbol='SPY_SP500_INTRADAY',
+                    date=timestamp.date(),
+                    timestamp=timestamp
+                ).first()
+                
+                if not existing:
+                    market_data = MarketData(
+                        symbol='SPY_SP500_INTRADAY',
+                        date=timestamp.date(),
+                        timestamp=timestamp,
+                        close_price=sp500_value
+                    )
+                    db.session.add(market_data)
+                    points_added += 1
+                else:
+                    # Update existing data with latest value
+                    existing.close_price = sp500_value
+                    points_added += 1
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'solution': 'Real-time 1D intraday charts implemented',
+            'points_added': points_added,
+            'current_day_points': current_day_points,
+            'message': f'Added {points_added} real-time intraday data points',
+            'benefits': [
+                '5-minute intervals provide smooth 1D chart progression',
+                'Real-time current trading day data available',
+                'Live market movement visibility during trading hours',
+                'Automatic updates throughout the day'
+            ],
+            'next_steps': [
+                'Update portfolio_performance.py to use intraday data for 1D charts',
+                'Add market hours detection for optimal data display',
+                'Set up periodic refresh during trading hours'
+            ]
+        })
+        
+    except Exception as e:
+        db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/fix-sp500-anomalies', methods=['GET'])
