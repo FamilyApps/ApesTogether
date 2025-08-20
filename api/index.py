@@ -5149,6 +5149,52 @@ def implement_realtime_1d_charts():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/run-intraday-migration', methods=['GET'])
+@login_required
+def run_intraday_migration():
+    """Run the intraday migration to add timestamp column"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import db
+        
+        # Add timestamp column and update constraints
+        db.engine.execute("""
+            ALTER TABLE market_data ADD COLUMN IF NOT EXISTS timestamp TIMESTAMP;
+        """)
+        
+        # Update symbol column size
+        db.engine.execute("""
+            ALTER TABLE market_data ALTER COLUMN symbol TYPE VARCHAR(20);
+        """)
+        
+        # Drop old constraint if exists and add new one
+        try:
+            db.engine.execute("""
+                ALTER TABLE market_data DROP CONSTRAINT IF EXISTS unique_symbol_date;
+            """)
+        except:
+            pass  # Constraint might not exist
+        
+        db.engine.execute("""
+            ALTER TABLE market_data ADD CONSTRAINT unique_symbol_date_timestamp 
+            UNIQUE (symbol, date, timestamp);
+        """)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Intraday migration completed successfully',
+            'changes': [
+                'Added timestamp column to market_data table',
+                'Increased symbol column size to VARCHAR(20)',
+                'Updated unique constraint to include timestamp'
+            ]
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/fix-sp500-anomalies', methods=['GET'])
 @login_required
 def fix_sp500_anomalies():
