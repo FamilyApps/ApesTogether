@@ -3881,6 +3881,80 @@ def create_todays_snapshots():
         logger.error(f"Today's snapshots creation error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/populate-sp500-data')
+def populate_sp500_data():
+    """Admin endpoint to populate S&P 500 historical data for immediate chart display"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        # Import here to avoid circular imports
+        import sys
+        import os
+        from datetime import date, timedelta
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from portfolio_performance import performance_calculator
+        
+        # Populate S&P 500 data for the last 30 days
+        end_date = date.today()
+        start_date = end_date - timedelta(days=30)
+        
+        sp500_data = performance_calculator.get_sp500_data(start_date, end_date)
+        
+        return jsonify({
+            'success': True,
+            'data_points': len(sp500_data),
+            'start_date': start_date.isoformat(),
+            'end_date': end_date.isoformat(),
+            'message': 'S&P 500 historical data populated. Charts will now show market benchmark even for new portfolios.'
+        })
+        
+    except Exception as e:
+        logger.error(f"S&P 500 data population error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/cron/daily-snapshots')
+def cron_daily_snapshots():
+    """Cron endpoint for automated daily snapshot creation (call this daily at market close)"""
+    try:
+        # This endpoint can be called by external cron services or Vercel cron
+        # No auth required for cron endpoints, but you could add a secret token
+        
+        # Import here to avoid circular imports
+        import sys
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from portfolio_performance import performance_calculator
+        
+        # Get all users with stocks
+        users_with_stocks = db.session.query(User.id).join(Stock).distinct().all()
+        
+        snapshots_created = 0
+        errors = []
+        
+        for (user_id,) in users_with_stocks:
+            try:
+                performance_calculator.create_daily_snapshot(user_id)
+                snapshots_created += 1
+            except Exception as e:
+                error_msg = f"Error for user {user_id}: {str(e)}"
+                errors.append(error_msg)
+                logger.error(error_msg)
+        
+        return jsonify({
+            'success': True,
+            'snapshots_created': snapshots_created,
+            'users_processed': len(users_with_stocks),
+            'errors': errors,
+            'timestamp': date.today().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Cron daily snapshots error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 # For local testing
 if __name__ == '__main__':
     # Log app startup with structured information

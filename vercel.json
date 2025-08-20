@@ -28,5 +28,11 @@
       "src": "/(.*)",
       "dest": "api/vercel.py"
     }
+  ],
+  "crons": [
+    {
+      "path": "/cron/daily-snapshots",
+      "schedule": "0 21 * * 1-5"
+    }
   ]
 }
