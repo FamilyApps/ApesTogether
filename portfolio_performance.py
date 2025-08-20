@@ -19,13 +19,13 @@ class PortfolioPerformanceCalculator:
     """Calculate portfolio performance using Modified Dietz method"""
     
     def __init__(self):
-        self.sp500_symbol = "SPY_SP500"  # S&P 500 proxy using SPY
+        self.sp500_ticker = "SPY_SP500"  # S&P 500 proxy using SPY
         self.alpha_vantage_api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
     
-    def get_stock_data(self, ticker_symbol: str) -> Dict:
+    def get_stock_data(self, ticker_ticker: str) -> Dict:
         """Fetches stock data using AlphaVantage API with caching (same as existing system)"""
         # Check cache first
-        ticker_upper = ticker_symbol.upper()
+        ticker_upper = ticker_ticker.upper()
         current_time = datetime.now()
         
         if ticker_upper in stock_price_cache:
@@ -48,7 +48,7 @@ class PortfolioPerformanceCalculator:
                 return {'price': price}
             
             # Use Alpha Vantage API
-            url = f'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker_symbol}&apikey={api_key}'
+            url = f'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker_ticker}&apikey={api_key}'
             response = requests.get(url, timeout=5)
             data = response.json()
             
@@ -57,7 +57,7 @@ class PortfolioPerformanceCalculator:
                 stock_price_cache[ticker_upper] = {'price': price, 'timestamp': current_time}
                 return {'price': price}
             else:
-                logger.warning(f"Could not get price for {ticker_symbol}, using fallback")
+                logger.warning(f"Could not get price for {ticker_ticker}, using fallback")
                 # Fallback to cached price or mock data
                 mock_prices = {
                     'AAPL': 185.92, 'MSFT': 420.45, 'GOOGL': 175.33, 'AMZN': 182.81,
@@ -68,7 +68,7 @@ class PortfolioPerformanceCalculator:
                 return {'price': price}
                 
         except Exception as e:
-            logger.error(f"Error fetching data for {ticker_symbol}: {e}")
+            logger.error(f"Error fetching data for {ticker_ticker}: {e}")
             # Return cached data if available, otherwise mock data
             if ticker_upper in stock_price_cache:
                 return {'price': stock_price_cache[ticker_upper]['price']}
@@ -279,13 +279,13 @@ class PortfolioPerformanceCalculator:
                     try:
                         # Check for existing data
                         existing = MarketData.query.filter_by(
-                            symbol='SPY_SP500',
+                            ticker='SPY_SP500',
                             date=data_date
                         ).first()
                         
                         if not existing:
                             market_data = MarketData(
-                                symbol='SPY_SP500',
+                                ticker='SPY_SP500',
                                 date=data_date,
                                 close_price=sp500_value
                             )
@@ -329,7 +329,7 @@ class PortfolioPerformanceCalculator:
         # Check cache first
         cached_data = MarketData.query.filter(
             and_(
-                MarketData.symbol == self.sp500_symbol,
+                MarketData.ticker == self.sp500_ticker,
                 MarketData.date >= start_date,
                 MarketData.date <= end_date
             )
@@ -356,7 +356,7 @@ class PortfolioPerformanceCalculator:
                     # Apply to all missing dates (efficient for daily updates)
                     for missing_date in missing_dates:
                         market_data = MarketData(
-                            symbol=self.sp500_symbol,
+                            ticker=self.sp500_ticker,
                             date=missing_date,
                             close_price=sp500_price
                         )

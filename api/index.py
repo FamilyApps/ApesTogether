@@ -4082,13 +4082,13 @@ def populate_sp500_tiny():
                     
                     # Check if exists
                     existing = MarketData.query.filter_by(
-                        symbol='SPY_SP500',
+                        ticker='SPY_SP500',
                         date=data_date
                     ).first()
                     
                     if not existing:
                         market_data = MarketData(
-                            symbol='SPY_SP500',
+                            ticker='SPY_SP500',
                             date=data_date,
                             close_price=sp500_value
                         )
@@ -4151,7 +4151,7 @@ def test_sp500_accuracy():
                 
                 # Get our SPY-based data for same date
                 our_data = MarketData.query.filter_by(
-                    symbol='SPY_SP500',
+                    ticker='SPY_SP500',
                     date=data_date
                 ).first()
                 
@@ -4193,7 +4193,7 @@ def check_sp500_anomalies():
         from datetime import datetime
         
         # Get all S&P 500 data points
-        all_data = MarketData.query.filter_by(symbol='SPY_SP500').order_by(MarketData.date).all()
+        all_data = MarketData.query.filter_by(ticker='SPY_SP500').order_by(MarketData.date).all()
         
         if not all_data:
             return jsonify({'error': 'No S&P 500 data found'})
@@ -4206,7 +4206,7 @@ def check_sp500_anomalies():
             try:
                 check_date = datetime.strptime(date_str, '%Y-%m-%d').date()
                 data_point = MarketData.query.filter_by(
-                    symbol='SPY_SP500',
+                    ticker='SPY_SP500',
                     date=check_date
                 ).first()
                 
@@ -4287,7 +4287,7 @@ def investigate_alphavantage_spikes():
             for days_offset in range(-5, 6):  # 5 days before and after
                 check_date = spike_date + timedelta(days=days_offset)
                 data_point = MarketData.query.filter_by(
-                    symbol='SPY_SP500',
+                    ticker='SPY_SP500',
                     date=check_date
                 ).first()
                 
@@ -4496,7 +4496,7 @@ def find_duplicate_sp500_values():
         from collections import defaultdict
         
         # Get all S&P 500 data points
-        all_data = MarketData.query.filter_by(symbol='SPY_SP500').order_by(MarketData.date).all()
+        all_data = MarketData.query.filter_by(ticker='SPY_SP500').order_by(MarketData.date).all()
         
         if not all_data:
             return jsonify({'error': 'No S&P 500 data found'})
@@ -4562,7 +4562,7 @@ def fix_duplicate_sp500_values():
         from collections import defaultdict
         
         # Get all S&P 500 data points
-        all_data = MarketData.query.filter_by(symbol='SPY_SP500').order_by(MarketData.date).all()
+        all_data = MarketData.query.filter_by(ticker='SPY_SP500').order_by(MarketData.date).all()
         
         if not all_data:
             return jsonify({'error': 'No S&P 500 data found'})
@@ -4662,7 +4662,7 @@ def fix_duplicates_with_alphavantage():
         calculator = PortfolioPerformanceCalculator()
         
         # Get all S&P 500 data points
-        all_data = MarketData.query.filter_by(symbol='SPY_SP500').order_by(MarketData.date).all()
+        all_data = MarketData.query.filter_by(ticker='SPY_SP500').order_by(MarketData.date).all()
         
         if not all_data:
             return jsonify({'error': 'No S&P 500 data found'})
@@ -4868,14 +4868,14 @@ def implement_intraday_solution():
                 
                 # Create intraday market data entry with timestamp
                 existing = MarketData.query.filter_by(
-                    symbol='SPY_SP500_INTRADAY',
+                    ticker='SPY_SP500_INTRADAY',
                     date=timestamp.date(),
                     timestamp=timestamp
                 ).first()
                 
                 if not existing:
                     market_data = MarketData(
-                        symbol='SPY_SP500_INTRADAY',
+                        ticker='SPY_SP500_INTRADAY',
                         date=timestamp.date(),
                         timestamp=timestamp,
                         close_price=sp500_value
@@ -5105,14 +5105,14 @@ def implement_realtime_1d_charts():
                 
                 # Create/update intraday market data entry
                 existing = MarketData.query.filter_by(
-                    symbol='SPY_SP500_INTRADAY',
+                    ticker='SPY_SP500_INTRADAY',
                     date=timestamp.date(),
                     timestamp=timestamp
                 ).first()
                 
                 if not existing:
                     market_data = MarketData(
-                        symbol='SPY_SP500_INTRADAY',
+                        ticker='SPY_SP500_INTRADAY',
                         date=timestamp.date(),
                         timestamp=timestamp,
                         close_price=sp500_value
@@ -5164,22 +5164,37 @@ def run_intraday_migration():
             ALTER TABLE market_data ADD COLUMN IF NOT EXISTS timestamp TIMESTAMP;
         """)
         
-        # Update symbol column size
+        # Rename symbol column to ticker for consistency
+        try:
+            db.engine.execute("""
+                ALTER TABLE market_data RENAME COLUMN symbol TO ticker;
+            """)
+        except:
+            pass  # Column might already be renamed
+        
+        # Update ticker column size
         db.engine.execute("""
-            ALTER TABLE market_data ALTER COLUMN symbol TYPE VARCHAR(20);
+            ALTER TABLE market_data ALTER COLUMN ticker TYPE VARCHAR(20);
         """)
         
-        # Drop old constraint if exists and add new one
+        # Drop old constraints if they exist and add new one
         try:
             db.engine.execute("""
                 ALTER TABLE market_data DROP CONSTRAINT IF EXISTS unique_symbol_date;
             """)
         except:
-            pass  # Constraint might not exist
+            pass
+        
+        try:
+            db.engine.execute("""
+                ALTER TABLE market_data DROP CONSTRAINT IF EXISTS unique_symbol_date_timestamp;
+            """)
+        except:
+            pass
         
         db.engine.execute("""
-            ALTER TABLE market_data ADD CONSTRAINT unique_symbol_date_timestamp 
-            UNIQUE (symbol, date, timestamp);
+            ALTER TABLE market_data ADD CONSTRAINT unique_ticker_date_timestamp 
+            UNIQUE (ticker, date, timestamp);
         """)
         
         return jsonify({
@@ -5187,7 +5202,8 @@ def run_intraday_migration():
             'message': 'Intraday migration completed successfully',
             'changes': [
                 'Added timestamp column to market_data table',
-                'Increased symbol column size to VARCHAR(20)',
+                'Renamed symbol column to ticker for consistency',
+                'Increased ticker column size to VARCHAR(20)',
                 'Updated unique constraint to include timestamp'
             ]
         })
@@ -5207,7 +5223,7 @@ def fix_sp500_anomalies():
         from datetime import datetime, timedelta
         
         # Get all S&P 500 data points
-        all_data = MarketData.query.filter_by(symbol='SPY_SP500').order_by(MarketData.date).all()
+        all_data = MarketData.query.filter_by(ticker='SPY_SP500').order_by(MarketData.date).all()
         
         if not all_data:
             return jsonify({'error': 'No S&P 500 data found'})
@@ -5297,12 +5313,12 @@ def sp500_data_status():
         from models import MarketData
         
         # Count existing S&P 500 data points
-        data_count = MarketData.query.filter_by(symbol='SPY_SP500').count()
+        data_count = MarketData.query.filter_by(ticker='SPY_SP500').count()
         
         if data_count > 0:
             # Get date range of existing data
-            oldest = MarketData.query.filter_by(symbol='SPY_SP500').order_by(MarketData.date.asc()).first()
-            newest = MarketData.query.filter_by(symbol='SPY_SP500').order_by(MarketData.date.desc()).first()
+            oldest = MarketData.query.filter_by(ticker='SPY_SP500').order_by(MarketData.date.asc()).first()
+            newest = MarketData.query.filter_by(ticker='SPY_SP500').order_by(MarketData.date.desc()).first()
             
             return jsonify({
                 'success': True,
@@ -5337,7 +5353,7 @@ def verify_sp500_data():
         from models import MarketData
         
         # Get some sample data points
-        sample_data = MarketData.query.filter_by(symbol='SPY_SP500').order_by(MarketData.date.desc()).limit(10).all()
+        sample_data = MarketData.query.filter_by(ticker='SPY_SP500').order_by(MarketData.date.desc()).limit(10).all()
         
         if not sample_data:
             return jsonify({
@@ -5352,29 +5368,29 @@ def verify_sp500_data():
                 'date': data_point.date.isoformat(),
                 'sp500_value': data_point.close_price,
                 'spy_equivalent': round(data_point.close_price / 10, 2) if data_point.close_price > 100 else data_point.close_price,
-                'symbol': data_point.symbol
+                'ticker': data_point.ticker
             })
         
         # Get some historical significant dates to verify real data
-        covid_crash = MarketData.query.filter_by(symbol='SPY_SP500').filter(
+        covid_crash = MarketData.query.filter_by(ticker='SPY_SP500').filter(
             MarketData.date >= '2020-03-01'
         ).filter(MarketData.date <= '2020-04-30').first()
         
         # Also check what's the actual oldest date we have
-        oldest_record = MarketData.query.filter_by(symbol='SPY_SP500').order_by(MarketData.date.asc()).first()
-        newest_record = MarketData.query.filter_by(symbol='SPY_SP500').order_by(MarketData.date.desc()).first()
+        oldest_record = MarketData.query.filter_by(ticker='SPY_SP500').order_by(MarketData.date.asc()).first()
+        newest_record = MarketData.query.filter_by(ticker='SPY_SP500').order_by(MarketData.date.desc()).first()
         
         # Check what symbols we actually have
-        all_symbols = db.session.query(MarketData.symbol).distinct().all()
+        all_symbols = db.session.query(MarketData.ticker).distinct().all()
         symbol_counts = {}
         for symbol_tuple in all_symbols:
             symbol = symbol_tuple[0]
-            count = MarketData.query.filter_by(symbol=symbol).count()
+            count = MarketData.query.filter_by(ticker=symbol).count()
             symbol_counts[symbol] = count
         
         return jsonify({
             'success': True,
-            'total_data_points': len(MarketData.query.filter_by(symbol='SPY_SP500').all()),
+            'total_data_points': len(MarketData.query.filter_by(ticker='SPY_SP500').all()),
             'all_symbols': symbol_counts,
             'date_range_actual': {
                 'oldest': oldest_record.date.isoformat() if oldest_record else None,
