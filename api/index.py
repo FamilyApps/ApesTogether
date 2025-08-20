@@ -5177,21 +5177,24 @@ def run_intraday_migration():
             ALTER TABLE market_data ALTER COLUMN ticker TYPE VARCHAR(20);
         """)
         
-        # Drop old constraints if they exist and add new one
-        try:
-            db.engine.execute("""
-                ALTER TABLE market_data DROP CONSTRAINT IF EXISTS unique_symbol_date;
-            """)
-        except:
-            pass
+        # Drop ALL old constraints that might conflict
+        constraints_to_drop = [
+            'unique_symbol_date',
+            'unique_symbol_date_timestamp', 
+            'market_data_symbol_date_key',
+            'market_data_ticker_date_key',
+            'unique_ticker_date_timestamp'
+        ]
         
-        try:
-            db.engine.execute("""
-                ALTER TABLE market_data DROP CONSTRAINT IF EXISTS unique_symbol_date_timestamp;
-            """)
-        except:
-            pass
+        for constraint_name in constraints_to_drop:
+            try:
+                db.engine.execute(f"""
+                    ALTER TABLE market_data DROP CONSTRAINT IF EXISTS {constraint_name};
+                """)
+            except:
+                pass
         
+        # Add the correct new constraint
         db.engine.execute("""
             ALTER TABLE market_data ADD CONSTRAINT unique_ticker_date_timestamp 
             UNIQUE (ticker, date, timestamp);
@@ -5204,7 +5207,8 @@ def run_intraday_migration():
                 'Added timestamp column to market_data table',
                 'Renamed symbol column to ticker for consistency',
                 'Increased ticker column size to VARCHAR(20)',
-                'Updated unique constraint to include timestamp'
+                'Dropped all conflicting constraints',
+                'Added new unique constraint (ticker, date, timestamp)'
             ]
         })
         
