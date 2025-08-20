@@ -3908,8 +3908,8 @@ def populate_sp500_data():
         from portfolio_performance import PortfolioPerformanceCalculator
         from models import MarketData
         
-        # Get years parameter (default 2 for faster testing)
-        years = int(request.args.get('years', 2))
+        # Get years parameter (default 5 for full historical data)
+        years = int(request.args.get('years', 5))
         
         logger.info(f"Starting SYNCHRONOUS S&P 500 population for {years} years")
         calculator = PortfolioPerformanceCalculator()
