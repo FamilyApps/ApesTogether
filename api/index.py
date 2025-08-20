@@ -3901,7 +3901,7 @@ def create_todays_snapshots():
 @login_required
 def populate_sp500_data():
     """Admin endpoint to populate S&P 500 data in chunks to avoid timeouts"""
-    if not is_admin():
+    if not current_user.is_admin:
         return jsonify({'error': 'Admin access required'}), 403
     
     try:
