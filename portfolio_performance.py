@@ -345,31 +345,41 @@ class PortfolioPerformanceCalculator:
                 missing_dates.append(current_date)
             current_date += timedelta(days=1)
         
-        # Batch fetch missing dates (usually just today's data)
+        # Only fetch missing recent dates (avoid historical API calls)
         if missing_dates:
-            try:
-                # Single API call for SPY price (used for all missing dates)
-                stock_data = self.get_stock_data('SPY')
-                if stock_data and stock_data.get('price'):
-                    sp500_price = stock_data['price'] * 10
-                    
-                    # Apply to all missing dates (efficient for daily updates)
-                    for missing_date in missing_dates:
-                        market_data = MarketData(
-                            ticker=self.sp500_ticker,
-                            date=missing_date,
-                            close_price=sp500_price
-                        )
-                        db.session.add(market_data)
-                        cached_dates[missing_date] = sp500_price
+            # Only fetch if missing dates are recent (within last 7 days)
+            today = date.today()
+            recent_missing = [d for d in missing_dates if (today - d).days <= 7]
+            
+            if recent_missing:
+                try:
+                    # Single API call for current SPY price (used for all recent missing dates)
+                    stock_data = self.get_stock_data('SPY')
+                    if stock_data and stock_data.get('price'):
+                        sp500_price = stock_data['price'] * 10
                         
-            except Exception as e:
-                logger.error(f"Error fetching S&P 500 data: {e}")
-                # Use forward-fill from most recent cached data
-                if cached_dates:
-                    latest_price = max(cached_dates.values())
-                    for missing_date in missing_dates:
-                        cached_dates[missing_date] = latest_price
+                        # Apply to all recent missing dates only
+                        for missing_date in recent_missing:
+                            market_data = MarketData(
+                                ticker=self.sp500_ticker,
+                                date=missing_date,
+                                close_price=sp500_price
+                            )
+                            db.session.add(market_data)
+                            cached_dates[missing_date] = sp500_price
+                            
+                except Exception as e:
+                    logger.error(f"Error fetching recent S&P 500 data: {e}")
+            
+            # For older missing dates, use forward-fill from existing data
+            old_missing = [d for d in missing_dates if (today - d).days > 7]
+            if old_missing and cached_dates:
+                # Use the most recent cached price for old missing dates
+                recent_prices = [price for date_key, price in cached_dates.items() if (today - date_key).days <= 30]
+                if recent_prices:
+                    fill_price = recent_prices[-1]  # Most recent price
+                    for missing_date in old_missing:
+                        cached_dates[missing_date] = fill_price
         
         try:
             db.session.commit()
@@ -377,6 +387,18 @@ class PortfolioPerformanceCalculator:
             logger.error(f"Error committing S&P 500 data: {e}")
         
         return cached_dates
+    
+    def get_cached_sp500_data(self, start_date: date, end_date: date) -> Dict[date, float]:
+        """Get S&P 500 data from cache only - NO API calls for performance charts"""
+        cached_data = MarketData.query.filter(
+            and_(
+                MarketData.ticker == self.sp500_ticker,
+                MarketData.date >= start_date,
+                MarketData.date <= end_date
+            )
+        ).all()
+        
+        return {data.date: data.close_price for data in cached_data}
     
     def _sample_dates_for_period(self, dates: List[date], period: str) -> List[date]:
         """Sample data points based on period to reduce chart density"""
@@ -494,10 +516,10 @@ class PortfolioPerformanceCalculator:
         # Calculate portfolio return
         portfolio_return = self.calculate_modified_dietz_return(user_id, start_date, end_date)
         
-        # Calculate S&P 500 return
+        # Calculate S&P 500 return (cached data only)
         sp500_return = self.calculate_sp500_return(start_date, end_date)
         
-        # Get portfolio values for charting
+        # Get portfolio values for charting (database only)
         snapshots = PortfolioSnapshot.query.filter(
             and_(
                 PortfolioSnapshot.user_id == user_id,
@@ -506,8 +528,8 @@ class PortfolioPerformanceCalculator:
             )
         ).order_by(PortfolioSnapshot.date).all()
         
-        # Get S&P 500 data for charting
-        sp500_data = self.get_sp500_data(start_date, end_date)
+        # Get S&P 500 data for charting (cached data only - NO API calls)
+        sp500_data = self.get_cached_sp500_data(start_date, end_date)
         
         # Normalize both to percentage change from start
         chart_data = []
