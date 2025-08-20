@@ -3900,67 +3900,57 @@ def create_todays_snapshots():
 @app.route('/admin/populate-sp500-data', methods=['GET', 'POST'])
 @login_required
 def populate_sp500_data():
-    """Admin endpoint to populate S&P 500 data - returns immediately, processes in background"""
+    """Admin endpoint to populate S&P 500 data - synchronous version for debugging"""
     if not current_user.is_admin:
         return jsonify({'error': 'Admin access required'}), 403
     
     try:
         from portfolio_performance import PortfolioPerformanceCalculator
         from models import MarketData
-        import threading
         
-        # Get years parameter (default 5)
-        years = int(request.json.get('years', 5)) if request.is_json else 5
+        # Get years parameter (default 2 for faster testing)
+        years = int(request.args.get('years', 2))
         
-        def background_populate():
-            """Background function to populate S&P 500 data"""
-            try:
-                logger.info(f"Starting background S&P 500 population for {years} years")
-                calculator = PortfolioPerformanceCalculator()
-                
-                # Clear ALL existing market data to replace with real data
-                deleted_count = MarketData.query.count()
-                MarketData.query.delete()
-                db.session.commit()
-                logger.info(f"Cleared {deleted_count} existing market data records")
-                
-                # Verify AlphaVantage API key exists
-                if not hasattr(calculator, 'alpha_vantage_api_key') or not calculator.alpha_vantage_api_key:
-                    logger.error("AlphaVantage API key not found - cannot fetch real data")
-                    return
-                
-                logger.info("Starting AlphaVantage API call...")
-                # Use micro-chunked processing
-                result = calculator.fetch_historical_sp500_data_micro_chunks(years_back=years)
-                
-                if result['success']:
-                    logger.info(f"SUCCESS: Background S&P 500 population completed: {result['total_data_points']} data points")
-                    logger.info(f"Processed {result.get('chunks_processed', 0)} chunks")
-                else:
-                    logger.error(f"FAILED: Background S&P 500 population failed: {result['error']}")
-                    
-            except Exception as e:
-                logger.error(f"EXCEPTION: Background S&P 500 population error: {e}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.info(f"Starting SYNCHRONOUS S&P 500 population for {years} years")
+        calculator = PortfolioPerformanceCalculator()
         
-        # Start background processing
-        thread = threading.Thread(target=background_populate)
-        thread.daemon = True
-        thread.start()
+        # Clear ALL existing market data to replace with real data
+        deleted_count = MarketData.query.count()
+        MarketData.query.delete()
+        db.session.commit()
+        logger.info(f"Cleared {deleted_count} existing market data records")
         
-        # Return immediately
-        return jsonify({
-            'success': True,
-            'message': f'S&P 500 data population started in background for {years} years',
-            'status': 'processing',
-            'years_requested': years,
-            'note': 'Check server logs for completion status. Data will be available once processing completes.',
-            'data_source': 'AlphaVantage TIME_SERIES_DAILY (SPY ETF) - Background Processing'
-        })
+        # Verify AlphaVantage API key exists
+        if not hasattr(calculator, 'alpha_vantage_api_key') or not calculator.alpha_vantage_api_key:
+            error_msg = "AlphaVantage API key not found - cannot fetch real data"
+            logger.error(error_msg)
+            return jsonify({'error': error_msg}), 500
+        
+        logger.info(f"AlphaVantage API key found: {calculator.alpha_vantage_api_key[:10]}...")
+        logger.info("Starting AlphaVantage API call...")
+        
+        # Use micro-chunked processing
+        result = calculator.fetch_historical_sp500_data_micro_chunks(years_back=years)
+        
+        if result['success']:
+            logger.info(f"SUCCESS: S&P 500 population completed: {result['total_data_points']} data points")
+            return jsonify({
+                'success': True,
+                'message': f'Successfully populated {result["total_data_points"]} real S&P 500 data points',
+                'total_data_points': result['total_data_points'],
+                'chunks_processed': result.get('chunks_processed', 0),
+                'years_requested': years,
+                'errors': result.get('errors', []),
+                'data_source': 'AlphaVantage TIME_SERIES_DAILY (SPY ETF) - Synchronous Processing'
+            })
+        else:
+            logger.error(f"FAILED: S&P 500 population failed: {result['error']}")
+            return jsonify({'error': result['error']}), 500
         
     except Exception as e:
-        logger.error(f"Error starting S&P 500 data population: {e}")
+        logger.error(f"EXCEPTION: S&P 500 population error: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/sp500-data-status', methods=['GET'])
