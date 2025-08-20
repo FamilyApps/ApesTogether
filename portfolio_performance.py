@@ -490,6 +490,82 @@ class PortfolioPerformanceCalculator:
         
         return sampled
     
+    def ensure_snapshots_exist(self, user_id: int, start_date: date, end_date: date):
+        """Ensure portfolio snapshots exist for the given period"""
+        current_date = start_date
+        while current_date <= end_date:
+            if current_date.weekday() < 5:  # Only weekdays
+                existing = PortfolioSnapshot.query.filter_by(
+                    user_id=user_id, date=current_date
+                ).first()
+                
+                if not existing:
+                    try:
+                        self.create_daily_snapshot(user_id, current_date)
+                    except Exception as e:
+                        logger.error(f"Error creating snapshot for {current_date}: {e}")
+            
+            current_date += timedelta(days=1)
+    
+    def get_intraday_performance_data(self, user_id: int, start_date: date, end_date: date) -> Dict:
+        """Get intraday performance data for 1D charts"""
+        # For now, use daily data for 1D charts
+        # This can be enhanced later with real intraday data
+        return self.get_performance_data(user_id, '5D')
+    
+    def check_portfolio_snapshots_coverage(self, user_id: int) -> Dict:
+        """Check portfolio snapshots coverage for a user"""
+        try:
+            snapshots = PortfolioSnapshot.query.filter_by(user_id=user_id).order_by(PortfolioSnapshot.date).all()
+            
+            if not snapshots:
+                return {
+                    'success': False,
+                    'message': 'No portfolio snapshots found',
+                    'coverage': {
+                        'total_snapshots': 0,
+                        'earliest_date': None,
+                        'latest_date': None,
+                        'days_covered': 0
+                    }
+                }
+            
+            earliest = snapshots[0].date
+            latest = snapshots[-1].date
+            days_covered = (latest - earliest).days + 1
+            
+            # Check for gaps in coverage
+            expected_snapshots = []
+            current_date = earliest
+            while current_date <= latest:
+                if current_date.weekday() < 5:  # Only weekdays
+                    expected_snapshots.append(current_date)
+                current_date += timedelta(days=1)
+            
+            actual_dates = {s.date for s in snapshots}
+            missing_dates = [d for d in expected_snapshots if d not in actual_dates]
+            
+            return {
+                'success': True,
+                'coverage': {
+                    'total_snapshots': len(snapshots),
+                    'earliest_date': earliest.isoformat(),
+                    'latest_date': latest.isoformat(),
+                    'days_covered': days_covered,
+                    'expected_weekday_snapshots': len(expected_snapshots),
+                    'missing_snapshots': len(missing_dates),
+                    'coverage_percentage': round((len(snapshots) / len(expected_snapshots)) * 100, 1) if expected_snapshots else 0,
+                    'sample_recent': [
+                        {'date': s.date.isoformat(), 'value': s.total_value}
+                        for s in snapshots[-5:]
+                    ]
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error checking portfolio snapshots coverage: {e}")
+            return {'success': False, 'error': str(e)}
+
     def get_performance_data(self, user_id: int, period: str) -> Dict:
         """Get performance data for a specific period"""
         end_date = date.today()
@@ -594,8 +670,7 @@ class PortfolioPerformanceCalculator:
         return {
             'portfolio_return': portfolio_return,
             'sp500_return': sp500_return,
-            'portfolio_data': portfolio_chart_data,
-            'sp500_data': sp500_chart_data,
+            'chart_data': chart_data,
             'period': period,
             'start_date': start_date.isoformat(),
             'end_date': end_date.isoformat()

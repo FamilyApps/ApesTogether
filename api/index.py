@@ -5510,6 +5510,78 @@ def verify_sp500_data():
         logger.error(f"Error verifying S&P 500 data: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/check-cached-data')
+def check_cached_data():
+    """Admin endpoint to verify S&P 500 and portfolio snapshots coverage"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import MarketData, PortfolioSnapshot
+        from datetime import datetime, timedelta
+        
+        # Check S&P 500 data coverage
+        sp500_data = MarketData.query.filter_by(ticker='SPY_SP500').order_by(MarketData.date).all()
+        
+        sp500_coverage = {
+            'total_points': len(sp500_data),
+            'earliest_date': sp500_data[0].date.isoformat() if sp500_data else None,
+            'latest_date': sp500_data[-1].date.isoformat() if sp500_data else None,
+            'years_covered': 0,
+            'has_5_years': False
+        }
+        
+        if sp500_data:
+            earliest = sp500_data[0].date
+            latest = sp500_data[-1].date
+            years_covered = (latest - earliest).days / 365.25
+            five_years_ago = datetime.now().date() - timedelta(days=5*365)
+            
+            sp500_coverage.update({
+                'years_covered': round(years_covered, 1),
+                'has_5_years': earliest <= five_years_ago
+            })
+        
+        # Check portfolio snapshots for all users
+        all_users = User.query.all()
+        portfolio_coverage = {}
+        
+        for user in all_users:
+            snapshots = PortfolioSnapshot.query.filter_by(user_id=user.id).order_by(PortfolioSnapshot.date).all()
+            
+            if snapshots:
+                earliest = snapshots[0].date
+                latest = snapshots[-1].date
+                days_covered = (latest - earliest).days + 1
+                
+                portfolio_coverage[user.username] = {
+                    'user_id': user.id,
+                    'total_snapshots': len(snapshots),
+                    'earliest_date': earliest.isoformat(),
+                    'latest_date': latest.isoformat(),
+                    'days_covered': days_covered
+                }
+            else:
+                portfolio_coverage[user.username] = {
+                    'user_id': user.id,
+                    'total_snapshots': 0,
+                    'message': 'No snapshots found'
+                }
+        
+        return jsonify({
+            'success': True,
+            'sp500_coverage': sp500_coverage,
+            'portfolio_coverage': portfolio_coverage,
+            'total_users': len(all_users),
+            'users_with_snapshots': len([u for u in portfolio_coverage.values() if u['total_snapshots'] > 0])
+        })
+        
+    except Exception as e:
+        logger.error(f"Error checking cached data: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/test-performance-api')
 def test_performance_api():
     """Admin endpoint to test performance API response"""
