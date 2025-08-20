@@ -4569,36 +4569,179 @@ def fix_duplicate_sp500_values():
         
         fixes_applied = []
         
-        # Find and fix the specific problematic value around 6398
+        # Find and fix ALL occurrences of the problematic 6398.1 value
+        problematic_value = 6398.099999999999
+        
         for i in range(1, len(all_data) - 1):
             current = all_data[i]
-            prev_val = all_data[i-1].close_price
-            next_val = all_data[i+1].close_price
             curr_val = current.close_price
             
-            # Check if current value is identical to a distant value (suspicious)
-            if 6390 <= curr_val <= 6405:  # Focus on the problematic range
-                # Look for other occurrences of this exact value
-                for j, other in enumerate(all_data):
-                    if (j != i and 
-                        abs(other.close_price - curr_val) < 0.1 and  # Same value
-                        abs((other.date - current.date).days) > 5):  # Different dates, far apart
+            # Check if this is the problematic duplicate value
+            if abs(curr_val - problematic_value) < 0.1:
+                prev_val = all_data[i-1].close_price
+                next_val = all_data[i+1].close_price
+                
+                # Only fix if the neighboring values are reasonable (not also duplicates)
+                if (abs(prev_val - problematic_value) > 100 and 
+                    abs(next_val - problematic_value) > 100):
+                    
+                    # Interpolate between neighbors
+                    interpolated_value = (prev_val + next_val) / 2
+                    
+                    fixes_applied.append({
+                        'date': current.date.isoformat(),
+                        'original_value': curr_val,
+                        'interpolated_value': interpolated_value,
+                        'prev_value': prev_val,
+                        'next_value': next_val,
+                        'reason': 'problematic_6398_value_fixed'
+                    })
+                    
+                    current.close_price = interpolated_value
+        
+        # Also fix other suspicious duplicates (values appearing on distant dates)
+        value_groups = defaultdict(list)
+        for i, data_point in enumerate(all_data):
+            rounded_value = round(data_point.close_price, 1)
+            value_groups[rounded_value].append((i, data_point))
+        
+        # Fix other duplicate values that appear on dates >30 days apart
+        for value, occurrences in value_groups.items():
+            if len(occurrences) > 1 and value != round(problematic_value, 1):
+                # Check if dates are far apart
+                dates = [occ[1].date for occ in occurrences]
+                dates.sort()
+                
+                if len(dates) >= 2 and (dates[-1] - dates[0]).days > 30:
+                    # Fix all but the first occurrence
+                    for i, (idx, data_point) in enumerate(occurrences[1:], 1):
+                        if 1 <= idx < len(all_data) - 1:
+                            prev_val = all_data[idx-1].close_price
+                            next_val = all_data[idx+1].close_price
+                            interpolated_value = (prev_val + next_val) / 2
+                            
+                            fixes_applied.append({
+                                'date': data_point.date.isoformat(),
+                                'original_value': data_point.close_price,
+                                'interpolated_value': interpolated_value,
+                                'prev_value': prev_val,
+                                'next_value': next_val,
+                                'reason': f'duplicate_value_{value}_fixed'
+                            })
+                            
+                            data_point.close_price = interpolated_value
+        
+        # Commit changes
+        if fixes_applied:
+            db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'fixes_applied': len(fixes_applied),
+            'details': fixes_applied[:20],  # Show first 20 fixes
+            'message': f'Fixed {len(fixes_applied)} duplicate S&P 500 values across all historical data'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/fix-duplicates-with-alphavantage', methods=['GET'])
+@login_required
+def fix_duplicates_with_alphavantage():
+    """Replace duplicate S&P 500 values with correct AlphaVantage data"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from portfolio_performance import PortfolioPerformanceCalculator
+        from models import MarketData, db
+        import requests
+        from datetime import datetime
+        
+        calculator = PortfolioPerformanceCalculator()
+        
+        # Get all S&P 500 data points
+        all_data = MarketData.query.filter_by(symbol='SPY_SP500').order_by(MarketData.date).all()
+        
+        if not all_data:
+            return jsonify({'error': 'No S&P 500 data found'})
+        
+        # Find all occurrences of the problematic 6398.1 value
+        problematic_value = 6398.099999999999
+        duplicate_dates = []
+        
+        for data_point in all_data:
+            if abs(data_point.close_price - problematic_value) < 0.1:
+                duplicate_dates.append(data_point.date.isoformat())
+        
+        if not duplicate_dates:
+            return jsonify({'message': 'No duplicate 6398.1 values found'})
+        
+        # Fetch fresh AlphaVantage data for SPY
+        url = "https://www.alphavantage.co/query"
+        params = {
+            'function': 'TIME_SERIES_DAILY',
+            'symbol': 'SPY',
+            'outputsize': 'full',
+            'apikey': calculator.alpha_vantage_api_key
+        }
+        
+        response = requests.get(url, params=params, timeout=60)
+        alphavantage_data = response.json()
+        
+        if 'Time Series (Daily)' not in alphavantage_data:
+            return jsonify({'error': 'Could not fetch AlphaVantage data', 'response': alphavantage_data})
+        
+        time_series = alphavantage_data['Time Series (Daily)']
+        fixes_applied = []
+        
+        # Replace duplicate values with correct AlphaVantage data
+        for data_point in all_data:
+            if abs(data_point.close_price - problematic_value) < 0.1:
+                date_str = data_point.date.isoformat()
+                
+                if date_str in time_series:
+                    # Get correct SPY price and convert to S&P 500
+                    spy_close = float(time_series[date_str]['4. close'])
+                    correct_sp500_value = spy_close * 10
+                    
+                    fixes_applied.append({
+                        'date': date_str,
+                        'original_value': data_point.close_price,
+                        'correct_alphavantage_value': correct_sp500_value,
+                        'spy_close': spy_close,
+                        'reason': 'replaced_with_alphavantage_data'
+                    })
+                    
+                    data_point.close_price = correct_sp500_value
+                else:
+                    # If exact date not found, try to interpolate from nearby dates
+                    date_obj = data_point.date
+                    nearby_values = []
+                    
+                    # Look for dates within ±3 days
+                    for days_offset in range(-3, 4):
+                        check_date = date_obj + timedelta(days=days_offset)
+                        check_date_str = check_date.isoformat()
                         
-                        # This is likely a duplicate - interpolate
-                        interpolated_value = (prev_val + next_val) / 2
+                        if check_date_str in time_series:
+                            spy_close = float(time_series[check_date_str]['4. close'])
+                            nearby_values.append(spy_close * 10)
+                    
+                    if nearby_values:
+                        # Use average of nearby values
+                        correct_sp500_value = sum(nearby_values) / len(nearby_values)
                         
                         fixes_applied.append({
-                            'date': current.date.isoformat(),
-                            'original_value': curr_val,
-                            'interpolated_value': interpolated_value,
-                            'prev_value': prev_val,
-                            'next_value': next_val,
-                            'duplicate_date': other.date.isoformat(),
-                            'reason': 'duplicate_value_interpolated'
+                            'date': date_str,
+                            'original_value': data_point.close_price,
+                            'correct_alphavantage_value': correct_sp500_value,
+                            'reason': 'interpolated_from_nearby_alphavantage_data',
+                            'nearby_values_count': len(nearby_values)
                         })
                         
-                        current.close_price = interpolated_value
-                        break
+                        data_point.close_price = correct_sp500_value
         
         # Commit changes
         if fixes_applied:
@@ -4608,7 +4751,8 @@ def fix_duplicate_sp500_values():
             'success': True,
             'fixes_applied': len(fixes_applied),
             'details': fixes_applied,
-            'message': f'Fixed {len(fixes_applied)} duplicate S&P 500 values'
+            'duplicate_dates_found': duplicate_dates,
+            'message': f'Replaced {len(fixes_applied)} duplicate values with correct AlphaVantage data'
         })
         
     except Exception as e:
