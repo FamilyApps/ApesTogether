@@ -427,6 +427,40 @@ class PortfolioPerformanceCalculator:
         
         return (end_price - start_price) / start_price
     
+    def _sample_dates_for_period(self, dates: List[date], period: str) -> List[date]:
+        """Sample dates appropriately for chart display based on period"""
+        if not dates:
+            return []
+        
+        # Define target number of points for each period
+        target_points = {
+            '1D': len(dates),  # Show all points for 1 day
+            '5D': len(dates),  # Show all points for 5 days
+            '1M': min(len(dates), 30),  # Up to 30 points for 1 month
+            '3M': min(len(dates), 60),  # Up to 60 points for 3 months
+            'YTD': min(len(dates), 100),  # Up to 100 points for YTD
+            '1Y': min(len(dates), 120),  # Up to 120 points for 1 year
+            '5Y': min(len(dates), 200)   # Up to 200 points for 5 years
+        }
+        
+        max_points = target_points.get(period, len(dates))
+        
+        if len(dates) <= max_points:
+            return dates
+        
+        # Sample evenly across the date range
+        step = len(dates) // max_points
+        sampled = []
+        
+        for i in range(0, len(dates), step):
+            sampled.append(dates[i])
+        
+        # Always include the last date
+        if dates[-1] not in sampled:
+            sampled.append(dates[-1])
+        
+        return sampled
+    
     def get_performance_data(self, user_id: int, period: str) -> Dict:
         """Get performance data for a specific period"""
         end_date = date.today()
@@ -486,18 +520,23 @@ class PortfolioPerformanceCalculator:
                     break
             
             if start_portfolio_value > 0 and start_sp500_value:
+                # Sample snapshots for appropriate chart density
+                snapshot_dates = [s.date for s in snapshots]
+                sampled_dates = self._sample_dates_for_period(snapshot_dates, period)
+                
                 for snapshot in snapshots:
-                    portfolio_pct = ((snapshot.total_value - start_portfolio_value) / start_portfolio_value) * 100
-                    
-                    sp500_pct = 0
-                    if snapshot.date in sp500_data:
-                        sp500_pct = ((sp500_data[snapshot.date] - start_sp500_value) / start_sp500_value) * 100
-                    
-                    chart_data.append({
-                        'date': snapshot.date.isoformat(),
-                        'portfolio': round(portfolio_pct, 2),
-                        'sp500': round(sp500_pct, 2)
-                    })
+                    if snapshot.date in sampled_dates:
+                        portfolio_pct = ((snapshot.total_value - start_portfolio_value) / start_portfolio_value) * 100
+                        
+                        sp500_pct = 0
+                        if snapshot.date in sp500_data:
+                            sp500_pct = ((sp500_data[snapshot.date] - start_sp500_value) / start_sp500_value) * 100
+                        
+                        chart_data.append({
+                            'date': snapshot.date.isoformat(),
+                            'portfolio': round(portfolio_pct, 2),
+                            'sp500': round(sp500_pct, 2)
+                        })
         
         # Always show S&P 500 data if available (even with limited portfolio history)
         if not chart_data and sp500_data:

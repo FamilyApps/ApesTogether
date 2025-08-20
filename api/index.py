@@ -4111,6 +4111,362 @@ def populate_sp500_tiny():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/test-sp500-accuracy', methods=['GET'])
+@login_required
+def test_sp500_accuracy():
+    """Compare our S&P 500 data with actual index data from AlphaVantage"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from portfolio_performance import PortfolioPerformanceCalculator
+        from models import MarketData
+        import requests
+        
+        calculator = PortfolioPerformanceCalculator()
+        
+        # Get actual S&P 500 index data (^GSPC) from AlphaVantage
+        url = "https://www.alphavantage.co/query"
+        params = {
+            'function': 'TIME_SERIES_DAILY',
+            'symbol': '^GSPC',  # Actual S&P 500 index
+            'outputsize': 'compact',
+            'apikey': calculator.alpha_vantage_api_key
+        }
+        
+        response = requests.get(url, params=params, timeout=15)
+        data = response.json()
+        
+        if 'Time Series (Daily)' not in data:
+            return jsonify({'error': 'Could not fetch S&P 500 index data', 'response': data})
+        
+        # Compare recent dates
+        sp500_data = data['Time Series (Daily)']
+        comparisons = []
+        
+        for date_str, daily_data in list(sp500_data.items())[:5]:  # Last 5 days
+            try:
+                data_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                actual_sp500 = float(daily_data['4. close'])
+                
+                # Get our SPY-based data for same date
+                our_data = MarketData.query.filter_by(
+                    symbol='SPY_SP500',
+                    date=data_date
+                ).first()
+                
+                if our_data:
+                    our_sp500 = our_data.close_price
+                    difference = abs(actual_sp500 - our_sp500)
+                    percent_diff = (difference / actual_sp500) * 100
+                    
+                    comparisons.append({
+                        'date': date_str,
+                        'actual_sp500': actual_sp500,
+                        'our_sp500_spy_based': our_sp500,
+                        'difference': round(difference, 2),
+                        'percent_difference': round(percent_diff, 3)
+                    })
+            
+            except (ValueError, KeyError):
+                continue
+        
+        return jsonify({
+            'success': True,
+            'comparisons': comparisons,
+            'note': 'Shows accuracy of SPY*10 vs actual S&P 500 index',
+            'recommendation': 'Consider using ^GSPC directly if differences are significant'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/check-sp500-anomalies', methods=['GET'])
+@login_required
+def check_sp500_anomalies():
+    """Check for anomalous data points in S&P 500 dataset"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import MarketData
+        from datetime import datetime
+        
+        # Get all S&P 500 data points
+        all_data = MarketData.query.filter_by(symbol='SPY_SP500').order_by(MarketData.date).all()
+        
+        if not all_data:
+            return jsonify({'error': 'No S&P 500 data found'})
+        
+        anomalies = []
+        suspicious_dates = ['2021-04-01', '2024-03-28']
+        
+        # Check specific suspicious dates
+        for date_str in suspicious_dates:
+            try:
+                check_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                data_point = MarketData.query.filter_by(
+                    symbol='SPY_SP500',
+                    date=check_date
+                ).first()
+                
+                if data_point:
+                    anomalies.append({
+                        'date': date_str,
+                        'value': data_point.close_price,
+                        'type': 'suspicious_spike'
+                    })
+            except ValueError:
+                continue
+        
+        # Check for large day-to-day changes (>10%)
+        large_changes = []
+        for i in range(1, len(all_data)):
+            prev_price = all_data[i-1].close_price
+            curr_price = all_data[i].close_price
+            
+            if prev_price > 0:
+                change_pct = abs((curr_price - prev_price) / prev_price) * 100
+                if change_pct > 10:  # More than 10% change
+                    large_changes.append({
+                        'date': all_data[i].date.isoformat(),
+                        'prev_value': prev_price,
+                        'curr_value': curr_price,
+                        'change_percent': round(change_pct, 2)
+                    })
+        
+        # Check for unrealistic values (outside normal S&P 500 range)
+        unrealistic_values = []
+        for data_point in all_data:
+            # S&P 500 should be roughly 2000-7000 in recent years
+            if data_point.close_price < 1000 or data_point.close_price > 10000:
+                unrealistic_values.append({
+                    'date': data_point.date.isoformat(),
+                    'value': data_point.close_price,
+                    'issue': 'outside_normal_range'
+                })
+        
+        return jsonify({
+            'success': True,
+            'total_data_points': len(all_data),
+            'suspicious_dates_checked': anomalies,
+            'large_daily_changes': large_changes[:10],  # First 10
+            'unrealistic_values': unrealistic_values[:10],  # First 10
+            'data_quality_summary': {
+                'large_changes_count': len(large_changes),
+                'unrealistic_values_count': len(unrealistic_values)
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/investigate-alphavantage-spikes', methods=['GET'])
+@login_required
+def investigate_alphavantage_spikes():
+    """Investigate raw AlphaVantage data around spike dates"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from portfolio_performance import PortfolioPerformanceCalculator
+        from models import MarketData
+        import requests
+        from datetime import datetime, timedelta
+        
+        calculator = PortfolioPerformanceCalculator()
+        
+        spike_dates = ['2021-04-01', '2024-03-28']
+        investigations = []
+        
+        for spike_date_str in spike_dates:
+            spike_date = datetime.strptime(spike_date_str, '%Y-%m-%d').date()
+            
+            # Get our stored data around this date
+            our_data_points = []
+            for days_offset in range(-5, 6):  # 5 days before and after
+                check_date = spike_date + timedelta(days=days_offset)
+                data_point = MarketData.query.filter_by(
+                    symbol='SPY_SP500',
+                    date=check_date
+                ).first()
+                
+                if data_point:
+                    our_data_points.append({
+                        'date': check_date.isoformat(),
+                        'our_value': data_point.close_price,
+                        'spy_equivalent': data_point.close_price / 10
+                    })
+            
+            # Get fresh AlphaVantage data for SPY around this date
+            url = "https://www.alphavantage.co/query"
+            params = {
+                'function': 'TIME_SERIES_DAILY',
+                'symbol': 'SPY',
+                'outputsize': 'full',
+                'apikey': calculator.alpha_vantage_api_key
+            }
+            
+            response = requests.get(url, params=params, timeout=30)
+            alphavantage_data = response.json()
+            
+            alphavantage_points = []
+            if 'Time Series (Daily)' in alphavantage_data:
+                time_series = alphavantage_data['Time Series (Daily)']
+                
+                for days_offset in range(-5, 6):
+                    check_date = spike_date + timedelta(days=days_offset)
+                    date_str = check_date.isoformat()
+                    
+                    if date_str in time_series:
+                        daily_data = time_series[date_str]
+                        spy_close = float(daily_data['4. close'])
+                        
+                        alphavantage_points.append({
+                            'date': date_str,
+                            'spy_close': spy_close,
+                            'sp500_equivalent': spy_close * 10,
+                            'volume': daily_data.get('5. volume', 'N/A'),
+                            'high': float(daily_data['2. high']),
+                            'low': float(daily_data['3. low'])
+                        })
+            
+            # Also check actual S&P 500 index (^GSPC) for comparison
+            gspc_params = {
+                'function': 'TIME_SERIES_DAILY',
+                'symbol': '^GSPC',
+                'outputsize': 'compact',
+                'apikey': calculator.alpha_vantage_api_key
+            }
+            
+            gspc_response = requests.get(url, params=gspc_params, timeout=30)
+            gspc_data = gspc_response.json()
+            
+            gspc_points = []
+            if 'Time Series (Daily)' in gspc_data:
+                gspc_series = gspc_data['Time Series (Daily)']
+                
+                for days_offset in range(-5, 6):
+                    check_date = spike_date + timedelta(days=days_offset)
+                    date_str = check_date.isoformat()
+                    
+                    if date_str in gspc_series:
+                        daily_data = gspc_series[date_str]
+                        gspc_close = float(daily_data['4. close'])
+                        
+                        gspc_points.append({
+                            'date': date_str,
+                            'sp500_actual': gspc_close,
+                            'volume': daily_data.get('5. volume', 'N/A')
+                        })
+            
+            investigations.append({
+                'spike_date': spike_date_str,
+                'our_stored_data': our_data_points,
+                'alphavantage_spy_data': alphavantage_points,
+                'alphavantage_sp500_data': gspc_points
+            })
+        
+        return jsonify({
+            'success': True,
+            'investigations': investigations,
+            'note': 'Compare our stored data vs fresh AlphaVantage data around spike dates'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/fix-sp500-anomalies', methods=['GET'])
+@login_required
+def fix_sp500_anomalies():
+    """Fix anomalous data points in S&P 500 dataset by smoothing"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import MarketData, db
+        from datetime import datetime, timedelta
+        
+        # Get all S&P 500 data points
+        all_data = MarketData.query.filter_by(symbol='SPY_SP500').order_by(MarketData.date).all()
+        
+        if not all_data:
+            return jsonify({'error': 'No S&P 500 data found'})
+        
+        fixes_applied = []
+        
+        # Fix large day-to-day changes (>10%) by interpolating
+        for i in range(1, len(all_data) - 1):
+            prev_price = all_data[i-1].close_price
+            curr_price = all_data[i].close_price
+            next_price = all_data[i+1].close_price
+            
+            if prev_price > 0 and next_price > 0:
+                # Check if current price is anomalous compared to neighbors
+                prev_change = abs((curr_price - prev_price) / prev_price) * 100
+                next_change = abs((next_price - curr_price) / curr_price) * 100
+                
+                # If both changes are large (>8%), likely an anomaly
+                if prev_change > 8 and next_change > 8:
+                    # Interpolate between previous and next
+                    smoothed_price = (prev_price + next_price) / 2
+                    
+                    fixes_applied.append({
+                        'date': all_data[i].date.isoformat(),
+                        'original_value': curr_price,
+                        'fixed_value': smoothed_price,
+                        'prev_value': prev_price,
+                        'next_value': next_price,
+                        'reason': 'large_spike_interpolated'
+                    })
+                    
+                    # Update the database
+                    all_data[i].close_price = smoothed_price
+        
+        # Fix unrealistic values (outside 1000-10000 range)
+        for i, data_point in enumerate(all_data):
+            if data_point.close_price < 1000 or data_point.close_price > 10000:
+                # Find nearest reasonable values
+                reasonable_value = None
+                
+                # Look backwards for reasonable value
+                for j in range(i-1, max(0, i-10), -1):
+                    if 1000 <= all_data[j].close_price <= 10000:
+                        reasonable_value = all_data[j].close_price
+                        break
+                
+                # If not found backwards, look forwards
+                if not reasonable_value:
+                    for j in range(i+1, min(len(all_data), i+10)):
+                        if 1000 <= all_data[j].close_price <= 10000:
+                            reasonable_value = all_data[j].close_price
+                            break
+                
+                if reasonable_value:
+                    fixes_applied.append({
+                        'date': data_point.date.isoformat(),
+                        'original_value': data_point.close_price,
+                        'fixed_value': reasonable_value,
+                        'reason': 'unrealistic_value_replaced'
+                    })
+                    
+                    data_point.close_price = reasonable_value
+        
+        # Commit all changes
+        if fixes_applied:
+            db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'fixes_applied': len(fixes_applied),
+            'details': fixes_applied,
+            'message': f'Fixed {len(fixes_applied)} anomalous data points'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/sp500-data-status', methods=['GET'])
 @login_required
 def sp500_data_status():
@@ -4182,8 +4538,12 @@ def verify_sp500_data():
         
         # Get some historical significant dates to verify real data
         covid_crash = MarketData.query.filter_by(symbol='SPY_SP500').filter(
-            MarketData.date >= '2020-03-20'
-        ).filter(MarketData.date <= '2020-03-25').first()
+            MarketData.date >= '2020-03-01'
+        ).filter(MarketData.date <= '2020-04-30').first()
+        
+        # Also check what's the actual oldest date we have
+        oldest_record = MarketData.query.filter_by(symbol='SPY_SP500').order_by(MarketData.date.asc()).first()
+        newest_record = MarketData.query.filter_by(symbol='SPY_SP500').order_by(MarketData.date.desc()).first()
         
         # Check what symbols we actually have
         all_symbols = db.session.query(MarketData.symbol).distinct().all()
@@ -4197,6 +4557,10 @@ def verify_sp500_data():
             'success': True,
             'total_data_points': len(MarketData.query.filter_by(symbol='SPY_SP500').all()),
             'all_symbols': symbol_counts,
+            'date_range_actual': {
+                'oldest': oldest_record.date.isoformat() if oldest_record else None,
+                'newest': newest_record.date.isoformat() if newest_record else None
+            },
             'recent_samples': samples,
             'covid_crash_sample': {
                 'date': covid_crash.date.isoformat() if covid_crash else None,
