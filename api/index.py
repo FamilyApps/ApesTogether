@@ -3912,6 +3912,7 @@ def populate_sp500_data():
         from datetime import date, timedelta
         sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from portfolio_performance import performance_calculator
+        from models import MarketData
         
         # Populate S&P 500 data for the last 5 years
         end_date = date.today()
