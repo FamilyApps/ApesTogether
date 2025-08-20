@@ -20,6 +20,7 @@ class PortfolioPerformanceCalculator:
     
     def __init__(self):
         self.sp500_symbol = "SPY_SP500"  # S&P 500 proxy using SPY
+        self.alpha_vantage_api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
     
     def get_stock_data(self, ticker_symbol: str) -> Dict:
         """Fetches stock data using AlphaVantage API with caching (same as existing system)"""
