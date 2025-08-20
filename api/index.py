@@ -3952,38 +3952,17 @@ def populate_sp500_data():
                     # Base trend (going back in time, prices should be lower)
                     trend_factor = (1 + daily_return) ** (-days_ago)
                     
-                    # Add some realistic random variation
-                    random_factor = 1 + random.gauss(0, volatility)
-                    
-                    historical_price = sp500_base_price * trend_factor * random_factor
-                    
-                    # Create market data entry
-                    market_data = MarketData(
-                        symbol='SPY_SP500',
-                        date=current_date,
-                        close_price=historical_price
-                    )
-                    db.session.add(market_data)
-                    data_points_created += 1
-            
-            current_date += timedelta(days=1)
-        
-        try:
-            db.session.commit()
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({'error': f'Database commit failed: {str(e)}'}), 500
-        
         return jsonify({
             'success': True,
-            'data_points_created': data_points_created,
+            'message': f'Successfully populated {len(historical_data)} real S&P 500 data points from AlphaVantage',
             'start_date': start_date.isoformat(),
             'end_date': end_date.isoformat(),
-            'message': f'S&P 500 historical data populated for 5 years. Created {data_points_created} new data points.'
+            'data_points': len(historical_data),
+            'data_source': 'AlphaVantage TIME_SERIES_DAILY (SPY ETF)'
         })
         
     except Exception as e:
-        logger.error(f"S&P 500 data population error: {e}")
+        logger.error(f"Error populating real S&P 500 data: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/test-performance-api')

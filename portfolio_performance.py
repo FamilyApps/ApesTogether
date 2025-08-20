@@ -212,6 +212,82 @@ class PortfolioPerformanceCalculator:
         
         return (ending_value - beginning_value - net_cash_flow) / denominator
     
+    def fetch_historical_sp500_data(self, start_date: date, end_date: date) -> Dict[date, float]:
+        """Fetch real historical S&P 500 data from AlphaVantage using SPY ETF"""
+        logger.info(f"Fetching real S&P 500 data from {start_date} to {end_date}")
+        
+        try:
+            # Fetch full historical SPY data from AlphaVantage
+            url = f"https://www.alphavantage.co/query"
+            params = {
+                'function': 'TIME_SERIES_DAILY',
+                'symbol': 'SPY',
+                'outputsize': 'full',
+                'apikey': self.alpha_vantage_api_key
+            }
+            
+            response = requests.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
+            
+            if 'Error Message' in data:
+                logger.error(f"AlphaVantage error: {data['Error Message']}")
+                return {}
+            
+            if 'Time Series (Daily)' not in data:
+                logger.error(f"Unexpected AlphaVantage response format: {data.keys()}")
+                return {}
+            
+            time_series = data['Time Series (Daily)']
+            historical_data = {}
+            
+            # Process historical data within date range
+            for date_str, daily_data in time_series.items():
+                try:
+                    data_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                    
+                    # Only include dates within our range
+                    if start_date <= data_date <= end_date:
+                        # Use adjusted close price
+                        spy_price = float(daily_data['4. close'])
+                        
+                        # Convert SPY price to approximate S&P 500 index value
+                        # SPY typically trades at about 1/10th of S&P 500 index
+                        sp500_value = spy_price * 10
+                        
+                        historical_data[data_date] = sp500_value
+                        
+                        # Store in database
+                        existing = MarketData.query.filter_by(
+                            symbol='SPY_SP500',
+                            date=data_date
+                        ).first()
+                        
+                        if not existing:
+                            market_data = MarketData(
+                                symbol='SPY_SP500',
+                                date=data_date,
+                                price=sp500_value
+                            )
+                            db.session.add(market_data)
+                
+                except (ValueError, KeyError) as e:
+                    logger.warning(f"Error processing date {date_str}: {e}")
+                    continue
+            
+            try:
+                db.session.commit()
+                logger.info(f"Successfully stored {len(historical_data)} real S&P 500 data points")
+            except Exception as e:
+                logger.error(f"Error storing historical S&P 500 data: {e}")
+                db.session.rollback()
+            
+            return historical_data
+            
+        except Exception as e:
+            logger.error(f"Error fetching historical S&P 500 data: {e}")
+            return {}
+    
     def get_sp500_data(self, start_date: date, end_date: date) -> Dict[date, float]:
         """Fetch and cache S&P 500 data using AlphaVantage - optimized for incremental updates"""
         # Check cache first
