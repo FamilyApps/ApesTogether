@@ -4015,8 +4015,9 @@ def verify_sp500_data():
         for data_point in sample_data:
             samples.append({
                 'date': data_point.date.isoformat(),
-                'sp500_value': data_point.price,
-                'spy_equivalent': round(data_point.price / 10, 2)  # Convert back to SPY price
+                'sp500_value': data_point.close_price,
+                'spy_equivalent': round(data_point.close_price / 10, 2) if data_point.close_price > 100 else data_point.close_price,
+                'symbol': data_point.symbol
             })
         
         # Get some historical significant dates to verify real data
@@ -4024,13 +4025,22 @@ def verify_sp500_data():
             MarketData.date >= '2020-03-20'
         ).filter(MarketData.date <= '2020-03-25').first()
         
+        # Check what symbols we actually have
+        all_symbols = db.session.query(MarketData.symbol).distinct().all()
+        symbol_counts = {}
+        for symbol_tuple in all_symbols:
+            symbol = symbol_tuple[0]
+            count = MarketData.query.filter_by(symbol=symbol).count()
+            symbol_counts[symbol] = count
+        
         return jsonify({
             'success': True,
             'total_data_points': len(MarketData.query.filter_by(symbol='SPY_SP500').all()),
+            'all_symbols': symbol_counts,
             'recent_samples': samples,
             'covid_crash_sample': {
                 'date': covid_crash.date.isoformat() if covid_crash else None,
-                'sp500_value': covid_crash.price if covid_crash else None,
+                'sp500_value': covid_crash.close_price if covid_crash else None,
                 'note': 'Should show market crash values around March 2020'
             } if covid_crash else None,
             'verification_notes': [

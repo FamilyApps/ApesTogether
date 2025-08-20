@@ -286,7 +286,7 @@ class PortfolioPerformanceCalculator:
                             market_data = MarketData(
                                 symbol='SPY_SP500',
                                 date=data_date,
-                                price=sp500_value
+                                close_price=sp500_value
                             )
                             db.session.add(market_data)
                             chunk_data_points += 1
