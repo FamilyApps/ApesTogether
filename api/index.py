@@ -1094,25 +1094,41 @@ def dashboard():
         # Get user's stocks from database
         stocks = Stock.query.filter_by(user_id=current_user.id).all()
         
+        # Get all tickers for batch processing
+        tickers = [stock.ticker for stock in stocks]
+        batch_prices = get_batch_stock_data(tickers)
+        
         for stock in stocks:
-            # In a real app, you would fetch current prices from an API
-            # For now, we'll use a simple mock price
-            current_price = stock.purchase_price * (1 + (random.random() - 0.5) * 0.1)  # +/- 5% from purchase price
-            value = stock.quantity * current_price
-            gain_loss = value - (stock.quantity * stock.purchase_price)
-            gain_loss_percent = (gain_loss / (stock.quantity * stock.purchase_price)) * 100
+            ticker_upper = stock.ticker.upper()
+            current_price = batch_prices.get(ticker_upper)
             
-            portfolio_data.append({
-                'ticker': stock.ticker,
-                'quantity': stock.quantity,
-                'purchase_price': stock.purchase_price,
-                'current_price': current_price,
-                'value': value,
-                'gain_loss': gain_loss,
-                'gain_loss_percent': gain_loss_percent
-            })
-            
-            total_portfolio_value += value
+            if current_price is not None:
+                value = stock.quantity * current_price
+                gain_loss = value - (stock.quantity * stock.purchase_price)
+                gain_loss_percent = (gain_loss / (stock.quantity * stock.purchase_price)) * 100 if stock.purchase_price else 0
+                
+                portfolio_data.append({
+                    'ticker': stock.ticker,
+                    'quantity': stock.quantity,
+                    'purchase_price': stock.purchase_price,
+                    'current_price': current_price,
+                    'value': value,
+                    'gain_loss': gain_loss,
+                    'gain_loss_percent': gain_loss_percent
+                })
+                
+                total_portfolio_value += value
+            else:
+                # Handle cases where stock data couldn't be fetched
+                portfolio_data.append({
+                    'ticker': stock.ticker,
+                    'quantity': stock.quantity,
+                    'purchase_price': stock.purchase_price,
+                    'current_price': 'N/A',
+                    'value': 'N/A',
+                    'gain_loss': 'N/A',
+                    'gain_loss_percent': 'N/A'
+                })
     
     return render_template_with_defaults('dashboard.html', stocks=portfolio_data, total_portfolio_value=total_portfolio_value, current_user=current_user)
 
