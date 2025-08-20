@@ -343,8 +343,8 @@ class PortfolioPerformanceCalculator:
         # Normalize both to percentage change from start
         chart_data = []
         
-        if snapshots and sp500_data:
-            # Both portfolio and S&P 500 data available
+        if snapshots and sp500_data and len(snapshots) > 1:
+            # Both portfolio and S&P 500 data available with multiple snapshots
             start_portfolio_value = snapshots[0].total_value
             start_sp500_value = None
             
@@ -367,7 +367,9 @@ class PortfolioPerformanceCalculator:
                         'portfolio': round(portfolio_pct, 2),
                         'sp500': round(sp500_pct, 2)
                     })
-        elif sp500_data:
+        
+        # Always show S&P 500 data if available (even with limited portfolio history)
+        if not chart_data and sp500_data:
             # Only S&P 500 data available (show market benchmark even without portfolio history)
             sp500_dates = sorted(sp500_data.keys())
             if sp500_dates:
