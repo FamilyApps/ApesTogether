@@ -8,13 +8,16 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # Now import the app from index.py
+error_info = None
 try:
     from index import app
     print("Successfully imported app from index.py")
 except Exception as e:
     import traceback
-    print(f"Error importing app from index.py: {e}")
-    print(traceback.format_exc())
+    error_message = str(e)
+    error_traceback = traceback.format_exc()
+    print(f"Error importing app from index.py: {error_message}")
+    print(error_traceback)
     
     # Create a fallback app for debugging
     from flask import Flask, jsonify
@@ -23,8 +26,8 @@ except Exception as e:
     @app.route('/')
     def debug_index():
         return jsonify({
-            "error": str(e),
-            "traceback": traceback.format_exc(),
+            "error": error_message,
+            "traceback": error_traceback,
             "sys_path": sys.path,
             "cwd": os.getcwd(),
             "files": os.listdir(os.path.dirname(os.path.abspath(__file__)))
