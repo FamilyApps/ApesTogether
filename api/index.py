@@ -3991,6 +3991,59 @@ def sp500_data_status():
         logger.error(f"Error checking S&P 500 data status: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/verify-sp500-data', methods=['GET'])
+@login_required
+def verify_sp500_data():
+    """Show sample S&P 500 data points to verify they're real"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import MarketData
+        
+        # Get some sample data points
+        sample_data = MarketData.query.filter_by(symbol='SPY_SP500').order_by(MarketData.date.desc()).limit(10).all()
+        
+        if not sample_data:
+            return jsonify({
+                'success': False,
+                'message': 'No S&P 500 data found'
+            })
+        
+        # Format sample data
+        samples = []
+        for data_point in sample_data:
+            samples.append({
+                'date': data_point.date.isoformat(),
+                'sp500_value': data_point.price,
+                'spy_equivalent': round(data_point.price / 10, 2)  # Convert back to SPY price
+            })
+        
+        # Get some historical significant dates to verify real data
+        covid_crash = MarketData.query.filter_by(symbol='SPY_SP500').filter(
+            MarketData.date >= '2020-03-20'
+        ).filter(MarketData.date <= '2020-03-25').first()
+        
+        return jsonify({
+            'success': True,
+            'total_data_points': len(MarketData.query.filter_by(symbol='SPY_SP500').all()),
+            'recent_samples': samples,
+            'covid_crash_sample': {
+                'date': covid_crash.date.isoformat() if covid_crash else None,
+                'sp500_value': covid_crash.price if covid_crash else None,
+                'note': 'Should show market crash values around March 2020'
+            } if covid_crash else None,
+            'verification_notes': [
+                'Check if SP500 values look realistic (3000-5000+ range)',
+                'COVID crash should show lower values in March 2020',
+                'Recent dates should have current market levels'
+            ]
+        })
+        
+    except Exception as e:
+        logger.error(f"Error verifying S&P 500 data: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/test-performance-api')
 def test_performance_api():
     """Admin endpoint to test performance API response"""
