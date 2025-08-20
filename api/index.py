@@ -3900,41 +3900,95 @@ def create_todays_snapshots():
 @app.route('/admin/populate-sp500-data', methods=['GET', 'POST'])
 @login_required
 def populate_sp500_data():
-    """Admin endpoint to populate S&P 500 data in chunks to avoid timeouts"""
+    """Admin endpoint to populate S&P 500 data - returns immediately, processes in background"""
     if not current_user.is_admin:
         return jsonify({'error': 'Admin access required'}), 403
     
     try:
         from portfolio_performance import PortfolioPerformanceCalculator
         from models import MarketData
-        
-        calculator = PortfolioPerformanceCalculator()
+        import threading
         
         # Get years parameter (default 5)
         years = int(request.json.get('years', 5)) if request.is_json else 5
         
-        # Clear existing data to replace with real data
-        MarketData.query.filter_by(symbol='SPY_SP500').delete()
-        db.session.commit()
+        def background_populate():
+            """Background function to populate S&P 500 data"""
+            try:
+                calculator = PortfolioPerformanceCalculator()
+                
+                # Clear existing data to replace with real data
+                MarketData.query.filter_by(symbol='SPY_SP500').delete()
+                db.session.commit()
+                
+                # Use micro-chunked processing
+                result = calculator.fetch_historical_sp500_data_micro_chunks(years_back=years)
+                
+                if result['success']:
+                    logger.info(f"Background S&P 500 population completed: {result['total_data_points']} data points")
+                else:
+                    logger.error(f"Background S&P 500 population failed: {result['error']}")
+                    
+            except Exception as e:
+                logger.error(f"Background S&P 500 population error: {e}")
         
-        # Use micro-chunked processing to avoid Cloudflare timeout
-        result = calculator.fetch_historical_sp500_data_micro_chunks(years_back=years)
+        # Start background processing
+        thread = threading.Thread(target=background_populate)
+        thread.daemon = True
+        thread.start()
         
-        if result['success']:
-            return jsonify({
-                'success': True,
-                'message': f'Successfully populated {result["total_data_points"]} real S&P 500 data points',
-                'total_data_points': result['total_data_points'],
-                'chunks_processed': result['chunks_processed'],
-                'years_requested': result['years_requested'],
-                'errors': result.get('errors', []),
-                'data_source': 'AlphaVantage TIME_SERIES_DAILY (SPY ETF) - Micro-Chunked Processing'
-            })
-        else:
-            return jsonify({'error': result['error']}), 500
+        # Return immediately
+        return jsonify({
+            'success': True,
+            'message': f'S&P 500 data population started in background for {years} years',
+            'status': 'processing',
+            'years_requested': years,
+            'note': 'Check server logs for completion status. Data will be available once processing completes.',
+            'data_source': 'AlphaVantage TIME_SERIES_DAILY (SPY ETF) - Background Processing'
+        })
         
     except Exception as e:
-        logger.error(f"Error populating S&P 500 data: {e}")
+        logger.error(f"Error starting S&P 500 data population: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/sp500-data-status', methods=['GET'])
+@login_required
+def sp500_data_status():
+    """Check status of S&P 500 data population"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import MarketData
+        
+        # Count existing S&P 500 data points
+        data_count = MarketData.query.filter_by(symbol='SPY_SP500').count()
+        
+        if data_count > 0:
+            # Get date range of existing data
+            oldest = MarketData.query.filter_by(symbol='SPY_SP500').order_by(MarketData.date.asc()).first()
+            newest = MarketData.query.filter_by(symbol='SPY_SP500').order_by(MarketData.date.desc()).first()
+            
+            return jsonify({
+                'success': True,
+                'data_points': data_count,
+                'date_range': {
+                    'oldest': oldest.date.isoformat() if oldest else None,
+                    'newest': newest.date.isoformat() if newest else None
+                },
+                'status': 'completed' if data_count > 100 else 'partial',
+                'message': f'Found {data_count} S&P 500 data points'
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'data_points': 0,
+                'status': 'empty',
+                'message': 'No S&P 500 data found. Run /admin/populate-sp500-data to populate.'
+            })
+            
+    except Exception as e:
+        logger.error(f"Error checking S&P 500 data status: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/test-performance-api')
