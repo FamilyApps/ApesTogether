@@ -22,10 +22,10 @@ class PortfolioPerformanceCalculator:
         self.sp500_ticker = "SPY_SP500"  # S&P 500 proxy using SPY
         self.alpha_vantage_api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
     
-    def get_stock_data(self, ticker_ticker: str) -> Dict:
+    def get_stock_data(self, ticker_symbol: str) -> Dict:
         """Fetches stock data using AlphaVantage API with caching (same as existing system)"""
         # Check cache first
-        ticker_upper = ticker_ticker.upper()
+        ticker_upper = ticker_symbol.upper()
         current_time = datetime.now()
         
         if ticker_upper in stock_price_cache:
@@ -37,18 +37,11 @@ class PortfolioPerformanceCalculator:
         try:
             api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
             if not api_key:
-                logger.warning("Alpha Vantage API key not found, using mock data")
-                # Mock prices for common stocks
-                mock_prices = {
-                    'AAPL': 185.92, 'MSFT': 420.45, 'GOOGL': 175.33, 'AMZN': 182.81,
-                    'TSLA': 248.29, 'META': 475.12, 'NVDA': 116.64, '^GSPC': 4500.00
-                }
-                price = mock_prices.get(ticker_upper, 100.00)
-                stock_price_cache[ticker_upper] = {'price': price, 'timestamp': current_time}
-                return {'price': price}
+                logger.warning("Alpha Vantage API key not found, cannot fetch stock price")
+                return None
             
             # Use Alpha Vantage API
-            url = f'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker_ticker}&apikey={api_key}'
+            url = f'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker_symbol}&apikey={api_key}'
             response = requests.get(url, timeout=5)
             data = response.json()
             
@@ -57,22 +50,15 @@ class PortfolioPerformanceCalculator:
                 stock_price_cache[ticker_upper] = {'price': price, 'timestamp': current_time}
                 return {'price': price}
             else:
-                logger.warning(f"Could not get price for {ticker_ticker}, using fallback")
-                # Fallback to cached price or mock data
-                mock_prices = {
-                    'AAPL': 185.92, 'MSFT': 420.45, 'GOOGL': 175.33, 'AMZN': 182.81,
-                    'TSLA': 248.29, 'META': 475.12, 'NVDA': 116.64, '^GSPC': 4500.00
-                }
-                price = mock_prices.get(ticker_upper, 100.00)
-                stock_price_cache[ticker_upper] = {'price': price, 'timestamp': current_time}
-                return {'price': price}
+                logger.warning(f"Could not get price for {ticker_symbol} from API")
+                return None
                 
         except Exception as e:
-            logger.error(f"Error fetching data for {ticker_ticker}: {e}")
-            # Return cached data if available, otherwise mock data
+            logger.error(f"Error fetching data for {ticker_symbol}: {e}")
+            # Return cached data if available, otherwise None
             if ticker_upper in stock_price_cache:
                 return {'price': stock_price_cache[ticker_upper]['price']}
-            return {'price': 100.00}
+            return None
 
     def calculate_portfolio_value(self, user_id: int, target_date: date = None) -> float:
         """Calculate total portfolio value for a user on a specific date"""

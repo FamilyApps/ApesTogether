@@ -1156,10 +1156,15 @@ def portfolio_value():
     portfolio_data = []
     total_value = 0
 
+    # Get all tickers for batch processing
+    tickers = [stock.ticker for stock in stocks]
+    batch_prices = get_batch_stock_data(tickers)
+    
     for stock in stocks:
-        stock_data = get_stock_data(stock.ticker)
-        if stock_data and stock_data.get('price') is not None:
-            current_price = stock_data['price']
+        ticker_upper = stock.ticker.upper()
+        current_price = batch_prices.get(ticker_upper)
+        
+        if current_price is not None:
             value = stock.quantity * current_price
             total_value += value
             stock_info = {
@@ -1305,10 +1310,15 @@ def profile(username):
         stocks = Stock.query.filter_by(user_id=user_to_view.id).all()
         total_value = 0
         stock_details = []
+        # Get all tickers for batch processing
+        tickers = [stock.ticker for stock in stocks]
+        batch_prices = get_batch_stock_data(tickers)
+        
         for stock in stocks:
-            stock_data = get_stock_data(stock.ticker)
-            if stock_data and stock_data.get('price') is not None:
-                price = stock_data['price']
+            ticker_upper = stock.ticker.upper()
+            price = batch_prices.get(ticker_upper)
+            
+            if price is not None:
                 value = stock.quantity * price
                 total_value += value
                 stock_details.append({'ticker': stock.ticker, 'quantity': stock.quantity, 'price': price, 'value': value})
@@ -1770,65 +1780,66 @@ def reset_admin_password():
 stock_price_cache = {}
 cache_duration = 90  # 90 seconds
 
-def get_stock_data(ticker_symbol):
-    """Fetches real-time stock data from Alpha Vantage with caching."""
-    from datetime import datetime, timedelta
+def get_batch_stock_data(ticker_symbols):
+    """Fetch multiple stock prices efficiently with caching and batch API calls."""
+    from datetime import datetime
     
-    # Default mock prices for common stocks
-    mock_prices = {
-        'AAPL': 185.92,
-        'MSFT': 420.45,
-        'GOOGL': 175.33,
-        'AMZN': 182.81,
-        'TSLA': 248.29,
-        'META': 475.12,
-        'NVDA': 116.64,
-    }
-    
-    # Check cache first
-    ticker_upper = ticker_symbol.upper()
     current_time = datetime.now()
+    result = {}
+    tickers_to_fetch = []
     
-    if ticker_upper in stock_price_cache:
-        cached_data = stock_price_cache[ticker_upper]
-        cache_time = cached_data.get('timestamp')
-        if cache_time and (current_time - cache_time).total_seconds() < cache_duration:
-            return {'price': cached_data['price']}
+    # No mock prices - only use real API data or cached data
+    for ticker in ticker_symbols:
+        ticker_upper = ticker.upper()
+        
+        # Check if we have fresh cached data (< 90 seconds)
+        if ticker_upper in stock_price_cache:
+            cached_data = stock_price_cache[ticker_upper]
+            cache_time = cached_data.get('timestamp')
+            if cache_time and (current_time - cache_time).total_seconds() < cache_duration:
+                result[ticker_upper] = cached_data['price']
+                continue
+        
+        # Need to fetch this ticker
+        tickers_to_fetch.append(ticker_upper)
     
-    try:
+    # If we need to fetch any tickers, make batch API call
+    if tickers_to_fetch:
         api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
         if not api_key:
-            logger.warning("Alpha Vantage API key not found, using mock data")
-            # Return mock data if no API key is available
-            price = mock_prices.get(ticker_upper, 100.00)
-            # Cache the mock price
-            stock_price_cache[ticker_upper] = {'price': price, 'timestamp': current_time}
-            return {'price': price}
-        
-        # Use Alpha Vantage API to get real stock data
-        url = f'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker_symbol}&apikey={api_key}'
-        response = requests.get(url, timeout=5)  # Add timeout to prevent hanging
-        data = response.json()
-        
-        if 'Global Quote' in data and '05. price' in data['Global Quote']:
-            price = float(data['Global Quote']['05. price'])
-            # Cache the real price
-            stock_price_cache[ticker_upper] = {'price': price, 'timestamp': current_time}
-            return {'price': price}
+            logger.warning("Alpha Vantage API key not found, cannot fetch stock prices")
+            # Do not add any prices if API key is missing - only use real data
         else:
-            logger.warning(f"Could not get price for {ticker_symbol}, using fallback")
-            # Fallback to mock data if API doesn't return expected format
-            price = mock_prices.get(ticker_upper, 100.00)
-            # Cache the fallback price
-            stock_price_cache[ticker_upper] = {'price': price, 'timestamp': current_time}
-            return {'price': price}
-    except Exception as e:
-        logger.error(f"Error getting stock data for {ticker_symbol}: {str(e)}")
-        # Return a default price if there's an error
-        price = mock_prices.get(ticker_upper, 100.00)
-        # Cache the error fallback price
-        stock_price_cache[ticker_upper] = {'price': price, 'timestamp': current_time}
-        return {'price': price}
+            # Make individual API calls for all tickers (no mock fallback)
+            for ticker in tickers_to_fetch:
+                try:
+                    url = f'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={api_key}'
+                    response = requests.get(url, timeout=3)  # Reduced timeout
+                    data = response.json()
+                    
+                    if 'Global Quote' in data and '05. price' in data['Global Quote']:
+                        price = float(data['Global Quote']['05. price'])
+                        stock_price_cache[ticker] = {'price': price, 'timestamp': current_time}
+                        result[ticker] = price
+                    else:
+                        logger.warning(f"Could not get price for {ticker} from API - no fallback used")
+                        # Do not add to result if API fails - only use real data
+                        
+                except Exception as e:
+                    logger.error(f"Error fetching {ticker}: {e}")
+                    # Do not add to result if API fails - only use real data
+    
+    return result
+
+def get_stock_data(ticker_symbol):
+    """Fetches single stock data - wrapper around batch function for backward compatibility."""
+    batch_result = get_batch_stock_data([ticker_symbol])
+    ticker_upper = ticker_symbol.upper()
+    if ticker_upper in batch_result:
+        return {'price': batch_result[ticker_upper]}
+    else:
+        # Return None if no real price available
+        return None
 
 # HTML Templates for core functionality
 LOGIN_HTML = """
