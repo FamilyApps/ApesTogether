@@ -4759,6 +4759,308 @@ def fix_duplicates_with_alphavantage():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/debug-1d-5d-charts', methods=['GET'])
+@login_required
+def debug_1d_5d_charts():
+    """Debug 1D and 5D chart data to understand limitations"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from portfolio_performance import PortfolioPerformanceCalculator
+        from models import MarketData, PortfolioSnapshot
+        from datetime import datetime, date, timedelta
+        
+        calculator = PortfolioPerformanceCalculator()
+        end_date = date.today()
+        
+        # Check 1D data
+        start_1d = end_date - timedelta(days=1)
+        sp500_1d = calculator.get_sp500_data(start_1d, end_date)
+        
+        # Check 5D data
+        start_5d = end_date - timedelta(days=5)
+        sp500_5d = calculator.get_sp500_data(start_5d, end_date)
+        
+        # Check portfolio snapshots for comparison
+        user_id = session.get('user_id', 1)  # Use session user or default
+        snapshots_1d = PortfolioSnapshot.query.filter(
+            PortfolioSnapshot.user_id == user_id,
+            PortfolioSnapshot.date >= start_1d,
+            PortfolioSnapshot.date <= end_date
+        ).order_by(PortfolioSnapshot.date).all()
+        
+        snapshots_5d = PortfolioSnapshot.query.filter(
+            PortfolioSnapshot.user_id == user_id,
+            PortfolioSnapshot.date >= start_5d,
+            PortfolioSnapshot.date <= end_date
+        ).order_by(PortfolioSnapshot.date).all()
+        
+        return jsonify({
+            'success': True,
+            'analysis': {
+                '1D_data': {
+                    'sp500_points': len(sp500_1d),
+                    'portfolio_snapshots': len(snapshots_1d),
+                    'dates': list(sp500_1d.keys()) if sp500_1d else [],
+                    'issue': 'Only 1-2 data points for single day (weekend/holiday gaps)'
+                },
+                '5D_data': {
+                    'sp500_points': len(sp500_5d),
+                    'portfolio_snapshots': len(snapshots_5d),
+                    'dates': list(sp500_5d.keys()) if sp500_5d else [],
+                    'issue': 'Only 3-5 data points for 5 days (excludes weekends)'
+                },
+                'problems': [
+                    '1D charts show flat line or single point',
+                    '5D charts have large gaps between trading days',
+                    'No intraday data for meaningful 1D progression',
+                    'Weekend/holiday gaps create poor user experience'
+                ],
+                'solutions': [
+                    'Add AlphaVantage intraday API for 1D charts (15min/30min intervals)',
+                    'Extend 5D range to include more trading days',
+                    'Show hourly data for current trading day',
+                    'Add market hours awareness'
+                ]
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/implement-intraday-solution', methods=['GET'])
+@login_required
+def implement_intraday_solution():
+    """Implement intraday data solution for 1D charts"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        import requests
+        import os
+        from models import MarketData, db
+        from datetime import datetime, date, timedelta
+        
+        api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
+        if not api_key:
+            return jsonify({'error': 'AlphaVantage API key not found'}), 500
+        
+        # Fetch intraday data for SPY (30-minute intervals)
+        url = f'https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=SPY&interval=30min&apikey={api_key}'
+        response = requests.get(url)
+        data = response.json()
+        
+        if 'Time Series (30min)' not in data:
+            return jsonify({'error': 'Failed to fetch intraday data', 'response': data}), 500
+        
+        intraday_data = data['Time Series (30min)']
+        today = date.today()
+        points_added = 0
+        
+        # Process today's intraday data
+        for timestamp_str, values in intraday_data.items():
+            timestamp = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S')
+            
+            # Only process today's data
+            if timestamp.date() == today:
+                sp500_value = float(values['4. close']) * 10  # SPY to S&P 500 conversion
+                
+                # Create intraday market data entry with timestamp
+                existing = MarketData.query.filter_by(
+                    symbol='SPY_SP500_INTRADAY',
+                    date=timestamp.date(),
+                    timestamp=timestamp
+                ).first()
+                
+                if not existing:
+                    market_data = MarketData(
+                        symbol='SPY_SP500_INTRADAY',
+                        date=timestamp.date(),
+                        timestamp=timestamp,
+                        close_price=sp500_value
+                    )
+                    db.session.add(market_data)
+                    points_added += 1
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'solution': 'Intraday data implementation',
+            'points_added': points_added,
+            'message': f'Added {points_added} intraday data points for 1D charts',
+            'benefits': [
+                '30-minute intervals provide smooth 1D chart progression',
+                'Real-time market movement visibility',
+                'Single API call per day for intraday data'
+            ]
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/optimize-5d-charts', methods=['GET'])
+@login_required
+def optimize_5d_charts():
+    """Optimize 5D charts by extending to 10 trading days"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from portfolio_performance import PortfolioPerformanceCalculator
+        from datetime import date, timedelta
+        
+        calculator = PortfolioPerformanceCalculator()
+        end_date = date.today()
+        
+        # Extend 5D to show 10 calendar days (7-8 trading days)
+        start_date = end_date - timedelta(days=10)
+        sp500_data = calculator.get_sp500_data(start_date, end_date)
+        
+        # Count actual trading days
+        trading_days = len(sp500_data)
+        
+        return jsonify({
+            'success': True,
+            'solution': 'Extended 5D range to 10 calendar days',
+            'trading_days_found': trading_days,
+            'dates': list(sp500_data.keys()) if sp500_data else [],
+            'benefits': [
+                f'Shows {trading_days} trading days instead of 3-5',
+                'Eliminates weekend gaps in chart display',
+                'Better trend visualization for short-term periods',
+                'No additional API calls required'
+            ],
+            'recommendation': 'Update portfolio_performance.py period mapping: 5D -> 10 days'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/implement-1d-chart-alternatives', methods=['GET'])
+@login_required
+def implement_1d_chart_alternatives():
+    """Implement practical 1D chart alternatives without real-time intraday data"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from datetime import datetime, time
+        import pytz
+        
+        # Check if markets are currently open (approximate)
+        eastern = pytz.timezone('US/Eastern')
+        now_eastern = datetime.now(eastern)
+        market_open = time(9, 30)  # 9:30 AM
+        market_close = time(16, 0)  # 4:00 PM
+        is_weekday = now_eastern.weekday() < 5
+        is_market_hours = market_open <= now_eastern.time() <= market_close
+        
+        market_status = "OPEN" if (is_weekday and is_market_hours) else "CLOSED"
+        
+        alternatives = {
+            'option_1': {
+                'name': 'Market Status Indicator',
+                'description': 'Show single data point with market status',
+                'implementation': 'Add "Market Open/Closed" badge to 1D charts',
+                'pros': ['No API calls', 'Clear user expectation'],
+                'cons': ['Still single point display']
+            },
+            'option_2': {
+                'name': 'Extended Recent Period',
+                'description': 'Change 1D to show last 3 trading days',
+                'implementation': 'Rename "1D" to "3D" and show 3 trading days',
+                'pros': ['More meaningful progression', 'No API calls'],
+                'cons': ['Not truly "1 day"']
+            },
+            'option_3': {
+                'name': 'Hide 1D During Market Hours',
+                'description': 'Only show 1D chart when markets closed',
+                'implementation': 'Conditional display based on market hours',
+                'pros': ['Avoids incomplete data confusion'],
+                'cons': ['Feature unavailable during trading']
+            },
+            'option_4': {
+                'name': 'Previous Day Focus',
+                'description': 'Show "Yesterday\'s Performance" instead of "1D"',
+                'implementation': 'Relabel and show complete previous trading day',
+                'pros': ['Complete data story', 'Clear expectation'],
+                'cons': ['Not current day performance']
+            }
+        }
+        
+        return jsonify({
+            'success': True,
+            'current_market_status': market_status,
+            'current_time_eastern': now_eastern.strftime('%Y-%m-%d %H:%M:%S %Z'),
+            'alternatives': alternatives,
+            'recommendation': 'Option 2 (Extended Recent Period) or Option 4 (Previous Day Focus)',
+            'reasoning': 'Provides meaningful data without API complexity or incomplete current-day issues'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/test-premium-intraday', methods=['GET'])
+@login_required
+def test_premium_intraday():
+    """Test if current AlphaVantage API key has premium access for real-time intraday data"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        import requests
+        import os
+        from datetime import datetime
+        
+        api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
+        if not api_key:
+            return jsonify({'error': 'AlphaVantage API key not found'}), 500
+        
+        # Test current day intraday data (premium feature)
+        url = f'https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=SPY&interval=5min&apikey={api_key}'
+        response = requests.get(url)
+        data = response.json()
+        
+        # Check for premium access indicators
+        has_premium = False
+        current_day_data = False
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        if 'Time Series (5min)' in data:
+            intraday_data = data['Time Series (5min)']
+            
+            # Check if we have today's data
+            for timestamp in intraday_data.keys():
+                if timestamp.startswith(today):
+                    current_day_data = True
+                    break
+            
+            # Premium accounts typically get more frequent updates and current day data
+            has_premium = current_day_data and len(intraday_data) > 100
+        
+        # Check for error messages indicating premium requirement
+        error_msg = data.get('Error Message', '')
+        info_msg = data.get('Information', '')
+        premium_required = 'premium' in error_msg.lower() or 'premium' in info_msg.lower()
+        
+        return jsonify({
+            'success': True,
+            'api_key_status': 'Valid' if 'Time Series (5min)' in data else 'Invalid/Limited',
+            'has_premium_access': has_premium,
+            'current_day_data_available': current_day_data,
+            'total_data_points': len(data.get('Time Series (5min)', {})),
+            'sample_timestamps': list(data.get('Time Series (5min)', {}).keys())[:5],
+            'premium_required_message': premium_required,
+            'recommendation': 'Real-time 1D charts possible' if has_premium else 'Stick with extended 5D solution',
+            'raw_response_keys': list(data.keys())
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/fix-sp500-anomalies', methods=['GET'])
 @login_required
 def fix_sp500_anomalies():

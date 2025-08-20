@@ -85,13 +85,14 @@ class MarketData(db.Model):
     __tablename__ = 'market_data'
     
     id = db.Column(db.Integer, primary_key=True)
-    symbol = db.Column(db.String(10), nullable=False)  # 'SPY', '^GSPC', etc.
+    symbol = db.Column(db.String(20), nullable=False)  # 'SPY', '^GSPC', 'SPY_SP500_INTRADAY', etc.
     date = db.Column(db.Date, nullable=False)
+    timestamp = db.Column(db.DateTime, nullable=True)  # For intraday data
     close_price = db.Column(db.Float, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
-    # Ensure one entry per symbol per date
-    __table_args__ = (db.UniqueConstraint('symbol', 'date', name='unique_symbol_date'),)
+    # Ensure one entry per symbol per date (or timestamp for intraday)
+    __table_args__ = (db.UniqueConstraint('symbol', 'date', 'timestamp', name='unique_symbol_date_timestamp'),)
     
     def __repr__(self):
         return f"<MarketData {self.symbol} {self.date} ${self.close_price}>"
