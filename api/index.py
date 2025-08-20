@@ -5215,6 +5215,99 @@ def run_intraday_migration():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/debug-performance-api', methods=['GET'])
+@login_required
+def debug_performance_api():
+    """Debug portfolio performance API endpoint issues"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from portfolio_performance import PortfolioPerformanceCalculator
+        import time
+        
+        calculator = PortfolioPerformanceCalculator()
+        debug_info = {
+            'user_id': current_user.id,
+            'tests': []
+        }
+        
+        # Test each period with timing
+        periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y']
+        
+        for period in periods:
+            start_time = time.time()
+            try:
+                result = calculator.get_performance_data(current_user.id, period)
+                end_time = time.time()
+                
+                test_result = {
+                    'period': period,
+                    'duration_seconds': round(end_time - start_time, 2),
+                    'success': 'error' not in result,
+                    'data_points': len(result.get('portfolio_data', [])) if 'portfolio_data' in result else 0,
+                    'sp500_points': len(result.get('sp500_data', [])) if 'sp500_data' in result else 0
+                }
+                
+                if 'error' in result:
+                    test_result['error'] = result['error']
+                
+                debug_info['tests'].append(test_result)
+                
+            except Exception as e:
+                end_time = time.time()
+                debug_info['tests'].append({
+                    'period': period,
+                    'duration_seconds': round(end_time - start_time, 2),
+                    'success': False,
+                    'error': str(e)
+                })
+        
+        # Check database connectivity
+        from models import PortfolioSnapshot, MarketData
+        snapshot_count = PortfolioSnapshot.query.filter_by(user_id=current_user.id).count()
+        market_data_count = MarketData.query.count()
+        intraday_count = MarketData.query.filter(MarketData.timestamp.isnot(None)).count()
+        
+        debug_info['database'] = {
+            'user_snapshots': snapshot_count,
+            'total_market_data': market_data_count,
+            'intraday_data_points': intraday_count
+        }
+        
+        return jsonify(debug_info)
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/test-single-period', methods=['GET'])
+@login_required
+def test_single_period():
+    """Test a single period quickly for debugging"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    period = request.args.get('period', '1D')
+    
+    try:
+        from portfolio_performance import PortfolioPerformanceCalculator
+        import time
+        
+        start_time = time.time()
+        calculator = PortfolioPerformanceCalculator()
+        result = calculator.get_performance_data(current_user.id, period)
+        end_time = time.time()
+        
+        return jsonify({
+            'period': period,
+            'duration_seconds': round(end_time - start_time, 2),
+            'success': 'error' not in result,
+            'result': result
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/fix-sp500-anomalies', methods=['GET'])
 @login_required
 def fix_sp500_anomalies():
