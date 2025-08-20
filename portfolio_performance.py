@@ -484,6 +484,10 @@ class PortfolioPerformanceCalculator:
         else:
             start_date = end_date - timedelta(days=period_days[period])
         
+        # For 1D charts, use intraday data if available
+        if period == '1D':
+            return self.get_intraday_performance_data(user_id, start_date, end_date)
+        
         # Ensure we have snapshots for the period
         self.ensure_snapshots_exist(user_id, start_date, end_date)
         
@@ -554,32 +558,19 @@ class PortfolioPerformanceCalculator:
                         
                         chart_data.append({
                             'date': date_key.isoformat(),
-                            'portfolio': 0,  # No portfolio data yet
+                            'portfolio': 0,  # No portfolio data available
                             'sp500': round(sp500_pct, 2)
                         })
         
         return {
+            'portfolio_return': portfolio_return,
+            'sp500_return': sp500_return,
+            'portfolio_data': portfolio_chart_data,
+            'sp500_data': sp500_chart_data,
             'period': period,
-            'portfolio_return': round(portfolio_return * 100, 2),
-            'sp500_return': round(sp500_return * 100, 2),
-            'chart_data': chart_data,
-            'current_value': snapshots[-1].total_value if snapshots else 0
+            'start_date': start_date.isoformat(),
+            'end_date': end_date.isoformat()
         }
-    
-    def ensure_snapshots_exist(self, user_id: int, start_date: date, end_date: date):
-        """Ensure portfolio snapshots exist for the date range"""
-        current_date = start_date
-        while current_date <= end_date:
-            # Skip weekends for now (markets closed)
-            if current_date.weekday() < 5:  # Monday = 0, Friday = 4
-                existing = PortfolioSnapshot.query.filter_by(
-                    user_id=user_id, date=current_date
-                ).first()
-                
-                if not existing:
-                    self.create_daily_snapshot(user_id, current_date)
-            
-            current_date += timedelta(days=1)
 
 # Global instance
 performance_calculator = PortfolioPerformanceCalculator()
