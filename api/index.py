@@ -3915,22 +3915,34 @@ def populate_sp500_data():
         def background_populate():
             """Background function to populate S&P 500 data"""
             try:
+                logger.info(f"Starting background S&P 500 population for {years} years")
                 calculator = PortfolioPerformanceCalculator()
                 
-                # Clear existing data to replace with real data
-                MarketData.query.filter_by(symbol='SPY_SP500').delete()
+                # Clear ALL existing market data to replace with real data
+                deleted_count = MarketData.query.count()
+                MarketData.query.delete()
                 db.session.commit()
+                logger.info(f"Cleared {deleted_count} existing market data records")
                 
+                # Verify AlphaVantage API key exists
+                if not hasattr(calculator, 'alpha_vantage_api_key') or not calculator.alpha_vantage_api_key:
+                    logger.error("AlphaVantage API key not found - cannot fetch real data")
+                    return
+                
+                logger.info("Starting AlphaVantage API call...")
                 # Use micro-chunked processing
                 result = calculator.fetch_historical_sp500_data_micro_chunks(years_back=years)
                 
                 if result['success']:
-                    logger.info(f"Background S&P 500 population completed: {result['total_data_points']} data points")
+                    logger.info(f"SUCCESS: Background S&P 500 population completed: {result['total_data_points']} data points")
+                    logger.info(f"Processed {result.get('chunks_processed', 0)} chunks")
                 else:
-                    logger.error(f"Background S&P 500 population failed: {result['error']}")
+                    logger.error(f"FAILED: Background S&P 500 population failed: {result['error']}")
                     
             except Exception as e:
-                logger.error(f"Background S&P 500 population error: {e}")
+                logger.error(f"EXCEPTION: Background S&P 500 population error: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
         
         # Start background processing
         thread = threading.Thread(target=background_populate)
