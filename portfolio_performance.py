@@ -213,7 +213,7 @@ class PortfolioPerformanceCalculator:
         return (ending_value - beginning_value - net_cash_flow) / denominator
     
     def get_sp500_data(self, start_date: date, end_date: date) -> Dict[date, float]:
-        """Fetch and cache S&P 500 data using AlphaVantage"""
+        """Fetch and cache S&P 500 data using AlphaVantage - optimized for incremental updates"""
         # Check cache first
         cached_data = MarketData.query.filter(
             and_(
@@ -225,43 +225,39 @@ class PortfolioPerformanceCalculator:
         
         cached_dates = {data.date: data.close_price for data in cached_data}
         
-        # For missing dates, try to get S&P 500 data from AlphaVantage
+        # Only fetch missing dates (incremental approach)
+        missing_dates = []
         current_date = start_date
         while current_date <= end_date:
             if current_date not in cached_dates and current_date.weekday() < 5:  # Skip weekends
-                try:
-                    # Use SPY as proxy for S&P 500 since AlphaVantage doesn't support ^GSPC directly
-                    stock_data = self.get_stock_data('SPY')
-                    if stock_data and stock_data.get('price'):
-                        # Convert SPY price to approximate S&P 500 index value (SPY is ~1/10th of S&P 500)
-                        sp500_price = stock_data['price'] * 10
-                        
-                        # Cache the data
+                missing_dates.append(current_date)
+            current_date += timedelta(days=1)
+        
+        # Batch fetch missing dates (usually just today's data)
+        if missing_dates:
+            try:
+                # Single API call for SPY price (used for all missing dates)
+                stock_data = self.get_stock_data('SPY')
+                if stock_data and stock_data.get('price'):
+                    sp500_price = stock_data['price'] * 10
+                    
+                    # Apply to all missing dates (efficient for daily updates)
+                    for missing_date in missing_dates:
                         market_data = MarketData(
                             symbol=self.sp500_symbol,
-                            date=current_date,
+                            date=missing_date,
                             close_price=sp500_price
                         )
                         db.session.add(market_data)
-                        cached_dates[current_date] = sp500_price
+                        cached_dates[missing_date] = sp500_price
                         
-                except Exception as e:
-                    logger.error(f"Error fetching S&P 500 data for {current_date}: {e}")
-                    # Use previous day's price if available or approximate based on recent data
-                    prev_date = current_date - timedelta(days=1)
-                    if prev_date in cached_dates:
-                        cached_dates[current_date] = cached_dates[prev_date]
-                    else:
-                        # For historical data, use current SPY price as approximation
-                        try:
-                            stock_data = self.get_stock_data('SPY')
-                            if stock_data and stock_data.get('price'):
-                                sp500_price = stock_data['price'] * 10
-                                cached_dates[current_date] = sp500_price
-                        except:
-                            pass
-            
-            current_date += timedelta(days=1)
+            except Exception as e:
+                logger.error(f"Error fetching S&P 500 data: {e}")
+                # Use forward-fill from most recent cached data
+                if cached_dates:
+                    latest_price = max(cached_dates.values())
+                    for missing_date in missing_dates:
+                        cached_dates[missing_date] = latest_price
         
         try:
             db.session.commit()

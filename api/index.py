@@ -3798,19 +3798,35 @@ def run_migration():
 @app.route('/api/portfolio/performance/<period>')
 @login_required
 def get_portfolio_performance(period):
-    """Get portfolio performance data for a specific time period"""
+    """Get portfolio performance data for a specific time period - optimized with caching"""
     try:
         # Import here to avoid circular imports
         import sys
         import os
+        from datetime import datetime, timedelta
         sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from portfolio_performance import performance_calculator
         
         user_id = session.get('user_id')
         if not user_id:
             return jsonify({'error': 'User not authenticated'}), 401
-            
+        
+        # Add simple response caching (5 minutes for performance data)
+        cache_key = f"perf_{user_id}_{period}"
+        cached_response = session.get(cache_key)
+        cache_time = session.get(f"{cache_key}_time")
+        
+        if cached_response and cache_time:
+            cache_age = datetime.now() - datetime.fromisoformat(cache_time)
+            if cache_age < timedelta(minutes=5):
+                return jsonify(cached_response)
+        
         performance_data = performance_calculator.get_performance_data(user_id, period.upper())
+        
+        # Cache the response
+        session[cache_key] = performance_data
+        session[f"{cache_key}_time"] = datetime.now().isoformat()
+        
         return jsonify(performance_data)
     except Exception as e:
         logger.error(f"Performance calculation error: {e}")
@@ -3925,8 +3941,14 @@ def cron_daily_snapshots():
         # Import here to avoid circular imports
         import sys
         import os
+        from datetime import date
         sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from portfolio_performance import performance_calculator
+        
+        # First, fetch today's S&P 500 data once (efficient - single API call)
+        today = date.today()
+        if today.weekday() < 5:  # Only on weekdays
+            performance_calculator.get_sp500_data(today, today)
         
         # Get all users with stocks
         users_with_stocks = db.session.query(User.id).join(Stock).distinct().all()
@@ -3948,7 +3970,8 @@ def cron_daily_snapshots():
             'snapshots_created': snapshots_created,
             'users_processed': len(users_with_stocks),
             'errors': errors,
-            'timestamp': date.today().isoformat()
+            'sp500_updated': today.weekday() < 5,
+            'timestamp': today.isoformat()
         })
         
     except Exception as e:
