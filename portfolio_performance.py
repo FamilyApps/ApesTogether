@@ -212,12 +212,16 @@ class PortfolioPerformanceCalculator:
         
         return (ending_value - beginning_value - net_cash_flow) / denominator
     
-    def fetch_historical_sp500_data(self, start_date: date, end_date: date) -> Dict[date, float]:
-        """Fetch real historical S&P 500 data from AlphaVantage using SPY ETF"""
-        logger.info(f"Fetching real S&P 500 data from {start_date} to {end_date}")
+    def fetch_historical_sp500_data_chunked(self, years_back: int = 5) -> Dict[str, any]:
+        """Fetch real historical S&P 500 data in yearly chunks to avoid timeouts"""
+        logger.info(f"Fetching {years_back} years of S&P 500 data in chunks")
+        
+        total_data_points = 0
+        errors = []
+        end_date = date.today()
         
         try:
-            # Fetch full historical SPY data from AlphaVantage
+            # Fetch full historical SPY data once (this gets all available data)
             url = f"https://www.alphavantage.co/query"
             params = {
                 'function': 'TIME_SERIES_DAILY',
@@ -226,67 +230,87 @@ class PortfolioPerformanceCalculator:
                 'apikey': self.alpha_vantage_api_key
             }
             
-            response = requests.get(url, params=params)
+            logger.info("Making single AlphaVantage API call for full SPY history...")
+            response = requests.get(url, params=params, timeout=30)
             response.raise_for_status()
             data = response.json()
             
             if 'Error Message' in data:
                 logger.error(f"AlphaVantage error: {data['Error Message']}")
-                return {}
+                return {'success': False, 'error': data['Error Message']}
             
             if 'Time Series (Daily)' not in data:
                 logger.error(f"Unexpected AlphaVantage response format: {data.keys()}")
-                return {}
+                return {'success': False, 'error': 'Invalid response format'}
             
             time_series = data['Time Series (Daily)']
-            historical_data = {}
+            logger.info(f"Received {len(time_series)} total data points from AlphaVantage")
             
-            # Process historical data within date range
-            for date_str, daily_data in time_series.items():
-                try:
-                    data_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-                    
-                    # Only include dates within our range
-                    if start_date <= data_date <= end_date:
-                        # Use adjusted close price
-                        spy_price = float(daily_data['4. close'])
-                        
-                        # Convert SPY price to approximate S&P 500 index value
-                        # SPY typically trades at about 1/10th of S&P 500 index
-                        sp500_value = spy_price * 10
-                        
-                        historical_data[data_date] = sp500_value
-                        
-                        # Store in database
-                        existing = MarketData.query.filter_by(
-                            symbol='SPY_SP500',
-                            date=data_date
-                        ).first()
-                        
-                        if not existing:
-                            market_data = MarketData(
-                                symbol='SPY_SP500',
-                                date=data_date,
-                                price=sp500_value
-                            )
-                            db.session.add(market_data)
+            # Process data in yearly chunks to avoid database timeout
+            start_date = end_date - timedelta(days=years_back*365)
+            
+            for year_offset in range(years_back):
+                year_start = end_date - timedelta(days=(year_offset+1)*365)
+                year_end = end_date - timedelta(days=year_offset*365)
                 
-                except (ValueError, KeyError) as e:
-                    logger.warning(f"Error processing date {date_str}: {e}")
-                    continue
+                logger.info(f"Processing year chunk: {year_start} to {year_end}")
+                year_data_points = 0
+                
+                # Process this year's data
+                for date_str, daily_data in time_series.items():
+                    try:
+                        data_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                        
+                        # Only include dates within this year's range
+                        if year_start <= data_date <= year_end:
+                            # Use close price
+                            spy_price = float(daily_data['4. close'])
+                            
+                            # Convert SPY price to approximate S&P 500 index value
+                            sp500_value = spy_price * 10
+                            
+                            # Store in database (check for existing first)
+                            existing = MarketData.query.filter_by(
+                                symbol='SPY_SP500',
+                                date=data_date
+                            ).first()
+                            
+                            if not existing:
+                                market_data = MarketData(
+                                    symbol='SPY_SP500',
+                                    date=data_date,
+                                    price=sp500_value
+                                )
+                                db.session.add(market_data)
+                                year_data_points += 1
+                    
+                    except (ValueError, KeyError) as e:
+                        errors.append(f"Error processing {date_str}: {e}")
+                        continue
+                
+                # Commit this year's data
+                try:
+                    db.session.commit()
+                    total_data_points += year_data_points
+                    logger.info(f"Committed {year_data_points} data points for year {year_start.year}")
+                except Exception as e:
+                    error_msg = f"Error committing year {year_start.year}: {e}"
+                    logger.error(error_msg)
+                    errors.append(error_msg)
+                    db.session.rollback()
             
-            try:
-                db.session.commit()
-                logger.info(f"Successfully stored {len(historical_data)} real S&P 500 data points")
-            except Exception as e:
-                logger.error(f"Error storing historical S&P 500 data: {e}")
-                db.session.rollback()
-            
-            return historical_data
+            return {
+                'success': True,
+                'total_data_points': total_data_points,
+                'years_processed': years_back,
+                'errors': errors[:10],  # Limit error list
+                'start_date': start_date.isoformat(),
+                'end_date': end_date.isoformat()
+            }
             
         except Exception as e:
-            logger.error(f"Error fetching historical S&P 500 data: {e}")
-            return {}
+            logger.error(f"Error in chunked S&P 500 data fetch: {e}")
+            return {'success': False, 'error': str(e)}
     
     def get_sp500_data(self, start_date: date, end_date: date) -> Dict[date, float]:
         """Fetch and cache S&P 500 data using AlphaVantage - optimized for incremental updates"""

@@ -3897,72 +3897,45 @@ def create_todays_snapshots():
         logger.error(f"Today's snapshots creation error: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/admin/populate-sp500-data')
+@api.route('/admin/populate-sp500-data', methods=['POST'])
+@login_required
 def populate_sp500_data():
-    """Admin endpoint to populate S&P 500 historical data for immediate chart display"""
+    """Admin endpoint to populate S&P 500 data in chunks to avoid timeouts"""
+    if not is_admin():
+        return jsonify({'error': 'Admin access required'}), 403
+    
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
-        # Import here to avoid circular imports
-        import sys
-        import os
-        from datetime import date, timedelta
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        from portfolio_performance import performance_calculator
+        from portfolio_performance import PortfolioPerformanceCalculator
         from models import MarketData
         
-        # Populate S&P 500 data for the last 5 years
-        end_date = date.today()
-        start_date = end_date - timedelta(days=1825)  # 5 years
+        calculator = PortfolioPerformanceCalculator()
         
-        # Get current SPY price once for all historical approximations
-        spy_data = performance_calculator.get_stock_data('SPY')
-        if not spy_data or not spy_data.get('price'):
-            return jsonify({'error': 'Could not fetch current SPY price'}), 500
+        # Get years parameter (default 5)
+        years = int(request.json.get('years', 5)) if request.is_json else 5
         
-        current_spy_price = spy_data['price']
-        sp500_base_price = current_spy_price * 10
+        # Clear existing data to replace with real data
+        MarketData.query.filter_by(symbol='SPY_SP500').delete()
+        db.session.commit()
         
-        # Create historical data with realistic variations (simulate market movements)
-        import random
-        data_points_created = 0
-        current_date = start_date
+        # Fetch data in chunks to avoid timeout
+        result = calculator.fetch_historical_sp500_data_chunked(years_back=years)
         
-        while current_date <= end_date:
-            if current_date.weekday() < 5:  # Skip weekends
-                # Check if data already exists
-                existing = MarketData.query.filter_by(
-                    symbol='SPY_SP500',
-                    date=current_date
-                ).first()
-                
-                if not existing:
-                    # Calculate days from today for price variation
-                    days_ago = (end_date - current_date).days
-                    
-                    # Simulate historical price with realistic variation
-                    # Assume average 10% annual return with daily volatility
-                    annual_return = 0.10
-                    daily_return = annual_return / 252  # Trading days per year
-                    volatility = 0.15 / (252 ** 0.5)  # Daily volatility
-                    
-                    # Base trend (going back in time, prices should be lower)
-                    trend_factor = (1 + daily_return) ** (-days_ago)
-                    
-        return jsonify({
-            'success': True,
-            'message': f'Successfully populated {len(historical_data)} real S&P 500 data points from AlphaVantage',
-            'start_date': start_date.isoformat(),
-            'end_date': end_date.isoformat(),
-            'data_points': len(historical_data),
-            'data_source': 'AlphaVantage TIME_SERIES_DAILY (SPY ETF)'
-        })
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'message': f'Successfully populated {result["total_data_points"]} real S&P 500 data points',
+                'total_data_points': result['total_data_points'],
+                'years_processed': result['years_processed'],
+                'start_date': result['start_date'],
+                'end_date': result['end_date'],
+                'errors': result.get('errors', []),
+                'data_source': 'AlphaVantage TIME_SERIES_DAILY (SPY ETF) - Chunked Processing'
+            })
+        else:
+            return jsonify({'error': result['error']}), 500
         
     except Exception as e:
-        logger.error(f"Error populating real S&P 500 data: {e}")
+        logger.error(f"Error populating S&P 500 data: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/test-performance-api')
