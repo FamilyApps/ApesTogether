@@ -4376,6 +4376,114 @@ def investigate_alphavantage_spikes():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/debug-chart-data/<period>', methods=['GET'])
+@login_required
+def debug_chart_data(period):
+    """Debug chart data generation to find spike sources"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from portfolio_performance import PortfolioPerformanceCalculator
+        from models import MarketData
+        from datetime import datetime, date, timedelta
+        
+        calculator = PortfolioPerformanceCalculator()
+        end_date = date.today()
+        
+        # Define period mappings (same as in performance calculator)
+        period_days = {
+            '1D': 1,
+            '5D': 5,
+            '1M': 30,
+            '3M': 90,
+            'YTD': (end_date - date(end_date.year, 1, 1)).days,
+            '1Y': 365,
+            '5Y': 1825
+        }
+        
+        if period not in period_days:
+            return jsonify({'error': 'Invalid period'})
+        
+        if period == 'YTD':
+            start_date = date(end_date.year, 1, 1)
+        else:
+            start_date = end_date - timedelta(days=period_days[period])
+        
+        # Get raw S&P 500 data
+        raw_sp500_data = calculator.get_sp500_data(start_date, end_date)
+        
+        # Get sampled data (what charts actually use)
+        sp500_dates = sorted(raw_sp500_data.keys())
+        sampled_dates = calculator._sample_dates_for_period(sp500_dates, period)
+        
+        # Check for large jumps in sampled data
+        sampled_data = []
+        large_jumps = []
+        
+        for i, date_key in enumerate(sampled_dates):
+            if date_key in raw_sp500_data:
+                value = raw_sp500_data[date_key]
+                sampled_data.append({
+                    'date': date_key.isoformat(),
+                    'value': value,
+                    'index': i
+                })
+                
+                # Check for large jumps between sampled points
+                if i > 0:
+                    prev_value = sampled_data[i-1]['value']
+                    change_pct = abs((value - prev_value) / prev_value) * 100
+                    
+                    if change_pct > 5:  # More than 5% jump
+                        large_jumps.append({
+                            'from_date': sampled_data[i-1]['date'],
+                            'to_date': date_key.isoformat(),
+                            'from_value': prev_value,
+                            'to_value': value,
+                            'change_percent': round(change_pct, 2),
+                            'days_between': (date_key - datetime.fromisoformat(sampled_data[i-1]['date']).date()).days
+                        })
+        
+        # Check what raw data exists between large jumps
+        jump_analysis = []
+        for jump in large_jumps:
+            from_date = datetime.fromisoformat(jump['from_date']).date()
+            to_date = datetime.fromisoformat(jump['to_date']).date()
+            
+            # Get all raw data points between these dates
+            between_dates = []
+            current = from_date + timedelta(days=1)
+            while current < to_date:
+                if current in raw_sp500_data:
+                    between_dates.append({
+                        'date': current.isoformat(),
+                        'value': raw_sp500_data[current],
+                        'included_in_sample': current in sampled_dates
+                    })
+                current += timedelta(days=1)
+            
+            jump_analysis.append({
+                'jump': jump,
+                'raw_data_between': between_dates
+            })
+        
+        return jsonify({
+            'success': True,
+            'period': period,
+            'date_range': f"{start_date} to {end_date}",
+            'total_raw_points': len(sp500_dates),
+            'sampled_points': len(sampled_dates),
+            'sampling_ratio': f"{len(sampled_dates)}/{len(sp500_dates)}",
+            'large_jumps_found': len(large_jumps),
+            'large_jumps': large_jumps,
+            'jump_analysis': jump_analysis,
+            'note': 'Large jumps may be caused by sampling skipping intermediate data points'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/fix-sp500-anomalies', methods=['GET'])
 @login_required
 def fix_sp500_anomalies():
