@@ -3953,6 +3953,61 @@ def populate_sp500_data():
         logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/test-alphavantage', methods=['GET'])
+@login_required
+def test_alphavantage():
+    """Test AlphaVantage API connection with minimal request"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from portfolio_performance import PortfolioPerformanceCalculator
+        import requests
+        
+        calculator = PortfolioPerformanceCalculator()
+        
+        # Check if API key exists
+        if not hasattr(calculator, 'alpha_vantage_api_key') or not calculator.alpha_vantage_api_key:
+            return jsonify({
+                'success': False,
+                'error': 'AlphaVantage API key not found',
+                'note': 'Check environment variables'
+            })
+        
+        # Make minimal API call (just get latest SPY price)
+        url = "https://www.alphavantage.co/query"
+        params = {
+            'function': 'GLOBAL_QUOTE',
+            'symbol': 'SPY',
+            'apikey': calculator.alpha_vantage_api_key
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        if 'Global Quote' in data:
+            quote = data['Global Quote']
+            return jsonify({
+                'success': True,
+                'api_key_works': True,
+                'spy_price': quote.get('05. price', 'N/A'),
+                'spy_change': quote.get('09. change', 'N/A'),
+                'last_updated': quote.get('07. latest trading day', 'N/A'),
+                'note': 'AlphaVantage API is working correctly'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'api_response': data,
+                'error': 'Unexpected API response format'
+            })
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
 @app.route('/admin/sp500-data-status', methods=['GET'])
 @login_required
 def sp500_data_status():
