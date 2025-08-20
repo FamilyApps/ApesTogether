@@ -3917,19 +3917,18 @@ def populate_sp500_data():
         MarketData.query.filter_by(symbol='SPY_SP500').delete()
         db.session.commit()
         
-        # Fetch data in chunks to avoid timeout
-        result = calculator.fetch_historical_sp500_data_chunked(years_back=years)
+        # Use micro-chunked processing to avoid Cloudflare timeout
+        result = calculator.fetch_historical_sp500_data_micro_chunks(years_back=years)
         
         if result['success']:
             return jsonify({
                 'success': True,
                 'message': f'Successfully populated {result["total_data_points"]} real S&P 500 data points',
                 'total_data_points': result['total_data_points'],
-                'years_processed': result['years_processed'],
-                'start_date': result['start_date'],
-                'end_date': result['end_date'],
+                'chunks_processed': result['chunks_processed'],
+                'years_requested': result['years_requested'],
                 'errors': result.get('errors', []),
-                'data_source': 'AlphaVantage TIME_SERIES_DAILY (SPY ETF) - Chunked Processing'
+                'data_source': 'AlphaVantage TIME_SERIES_DAILY (SPY ETF) - Micro-Chunked Processing'
             })
         else:
             return jsonify({'error': result['error']}), 500
