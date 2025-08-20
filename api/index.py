@@ -3897,7 +3897,7 @@ def create_todays_snapshots():
         logger.error(f"Today's snapshots creation error: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/admin/populate-sp500-data', methods=['POST'])
+@app.route('/admin/populate-sp500-data', methods=['GET', 'POST'])
 @login_required
 def populate_sp500_data():
     """Admin endpoint to populate S&P 500 data in chunks to avoid timeouts"""
