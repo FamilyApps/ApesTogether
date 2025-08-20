@@ -19,7 +19,7 @@ class PortfolioPerformanceCalculator:
     """Calculate portfolio performance using Modified Dietz method"""
     
     def __init__(self):
-        self.sp500_symbol = "^GSPC"  # S&P 500 index
+        self.sp500_symbol = "SPY_SP500"  # S&P 500 proxy using SPY
     
     def get_stock_data(self, ticker_symbol: str) -> Dict:
         """Fetches stock data using AlphaVantage API with caching (same as existing system)"""
