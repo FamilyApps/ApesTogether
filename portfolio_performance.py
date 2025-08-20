@@ -390,15 +390,22 @@ class PortfolioPerformanceCalculator:
     
     def get_cached_sp500_data(self, start_date: date, end_date: date) -> Dict[date, float]:
         """Get S&P 500 data from cache only - NO API calls for performance charts"""
-        cached_data = MarketData.query.filter(
-            and_(
-                MarketData.ticker == self.sp500_ticker,
-                MarketData.date >= start_date,
-                MarketData.date <= end_date
-            )
-        ).all()
-        
-        return {data.date: data.close_price for data in cached_data}
+        try:
+            cached_data = MarketData.query.filter(
+                and_(
+                    MarketData.ticker == self.sp500_ticker,
+                    MarketData.date >= start_date,
+                    MarketData.date <= end_date
+                )
+            ).all()
+            
+            result = {data.date: data.close_price for data in cached_data}
+            logger.info(f"Retrieved {len(result)} cached S&P 500 data points for {start_date} to {end_date}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error retrieving cached S&P 500 data: {e}")
+            return {}
     
     def _sample_dates_for_period(self, dates: List[date], period: str) -> List[date]:
         """Sample data points based on period to reduce chart density"""
@@ -528,7 +535,7 @@ class PortfolioPerformanceCalculator:
             )
         ).order_by(PortfolioSnapshot.date).all()
         
-        # Get S&P 500 data for charting (cached data only - NO API calls)
+        # Get S&P 500 data for charting (always use cached daily data - updated at 9PM)
         sp500_data = self.get_cached_sp500_data(start_date, end_date)
         
         # Normalize both to percentage change from start
