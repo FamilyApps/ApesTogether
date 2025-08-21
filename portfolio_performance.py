@@ -494,10 +494,47 @@ class PortfolioPerformanceCalculator:
             current_date += timedelta(days=1)
     
     def get_intraday_performance_data(self, user_id: int, start_date: date, end_date: date) -> Dict:
-        """Get intraday performance data for 1D charts"""
-        # For now, use daily data for 1D charts
-        # This can be enhanced later with real intraday data
-        return self.get_performance_data(user_id, '5D')
+        """Get performance data for 1D charts - shows only today's data"""
+        # Use only today's date for 1D charts
+        today = date.today()
+        
+        # Ensure we have snapshots for today
+        self.ensure_snapshots_exist(user_id, today, today)
+        
+        # Calculate portfolio return for today only
+        portfolio_return = self.calculate_modified_dietz_return(user_id, today, today)
+        
+        # Calculate S&P 500 return for today only
+        sp500_return = self.calculate_sp500_return(today, today)
+        
+        # Get portfolio snapshot for today only
+        snapshot = PortfolioSnapshot.query.filter(
+            and_(
+                PortfolioSnapshot.user_id == user_id,
+                PortfolioSnapshot.date == today
+            )
+        ).first()
+        
+        # Get S&P 500 data for today only
+        sp500_data = self.get_cached_sp500_data(today, today)
+        
+        chart_data = []
+        if snapshot and sp500_data:
+            # For 1D, show single point (today's performance)
+            chart_data.append({
+                'date': today.isoformat(),
+                'portfolio': round(portfolio_return * 100, 2),
+                'sp500': round(sp500_return * 100, 2)
+            })
+        
+        return {
+            'portfolio_return': round(portfolio_return * 100, 2),
+            'sp500_return': round(sp500_return * 100, 2),
+            'chart_data': chart_data,
+            'period': '1D',
+            'start_date': today.isoformat(),
+            'end_date': today.isoformat()
+        }
     
     def check_portfolio_snapshots_coverage(self, user_id: int) -> Dict:
         """Check portfolio snapshots coverage for a user"""
