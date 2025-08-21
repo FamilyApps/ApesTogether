@@ -96,3 +96,38 @@ class MarketData(db.Model):
     
     def __repr__(self):
         return f"<MarketData {self.ticker} {self.date} ${self.close_price}>"
+
+class PortfolioSnapshotIntraday(db.Model):
+    """Intraday portfolio value snapshots for detailed performance tracking"""
+    __tablename__ = 'portfolio_snapshot_intraday'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    timestamp = db.Column(db.DateTime, nullable=False)
+    total_value = db.Column(db.Float, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationship with User
+    user = db.relationship('User', backref=db.backref('intraday_snapshots', lazy='dynamic'))
+    
+    # Ensure one snapshot per user per timestamp
+    __table_args__ = (db.UniqueConstraint('user_id', 'timestamp', name='unique_user_timestamp_intraday'),)
+    
+    def __repr__(self):
+        return f"<PortfolioSnapshotIntraday {self.user_id} {self.timestamp} ${self.total_value}>"
+
+class SP500ChartCache(db.Model):
+    """Pre-generated S&P 500 chart data cache"""
+    __tablename__ = 'sp500_chart_cache'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    period = db.Column(db.String(10), nullable=False)  # '1D', '5D', '1M', etc.
+    chart_data = db.Column(db.Text, nullable=False)  # JSON string of chart data
+    generated_at = db.Column(db.DateTime, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    
+    # Ensure one cache entry per period
+    __table_args__ = (db.UniqueConstraint('period', name='unique_period_chart'),)
+    
+    def __repr__(self):
+        return f"<SP500ChartCache {self.period} generated at {self.generated_at}>"

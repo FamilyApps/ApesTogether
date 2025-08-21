@@ -31,8 +31,12 @@
   ],
   "crons": [
     {
-      "path": "/cron/daily-snapshots",
-      "schedule": "0 21 * * 1-5"
+      "path": "/api/cron/market-open",
+      "schedule": "30 13 * * 1-5"
+    },
+    {
+      "path": "/api/cron/market-close", 
+      "schedule": "0 20 * * 1-5"
     }
   ]
 }
