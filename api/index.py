@@ -5826,6 +5826,66 @@ def test_intraday_collection():
         logger.error(f"Unexpected error in intraday test: {str(e)}")
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
+@app.route('/admin/run-intraday-migration')
+@login_required
+def run_intraday_migration():
+    """Run the intraday database migration"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from flask_migrate import upgrade
+        from sqlalchemy import text
+        
+        results = {
+            'migration_status': 'starting',
+            'tables_created': [],
+            'errors': []
+        }
+        
+        try:
+            # Run the migration
+            upgrade()
+            results['migration_status'] = 'completed'
+            
+            # Verify tables were created
+            with db.engine.connect() as conn:
+                # Check if portfolio_snapshot_intraday table exists
+                result = conn.execute(text("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_name = 'portfolio_snapshot_intraday'
+                    );
+                """))
+                if result.scalar():
+                    results['tables_created'].append('portfolio_snapshot_intraday')
+                
+                # Check if sp500_chart_cache table exists
+                result = conn.execute(text("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_name = 'sp500_chart_cache'
+                    );
+                """))
+                if result.scalar():
+                    results['tables_created'].append('sp500_chart_cache')
+            
+        except Exception as e:
+            results['migration_status'] = 'failed'
+            results['errors'].append(f"Migration error: {str(e)}")
+        
+        return jsonify({
+            'success': results['migration_status'] == 'completed',
+            'message': f"Migration {results['migration_status']}",
+            'results': results
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Unexpected error in migration: {str(e)}")
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
 # For local testing
 if __name__ == '__main__':
     # Log app startup with structured information
