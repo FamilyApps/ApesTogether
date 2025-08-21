@@ -559,7 +559,7 @@ class PortfolioPerformanceCalculator:
         # Define period mappings
         period_days = {
             '1D': 1,
-            '5D': 10,  # Extended to 10 calendar days for better trading day coverage
+            '5D': 5,  # Exactly 5 calendar days
             '1M': 30,
             '3M': 90,
             'YTD': (end_date - date(end_date.year, 1, 1)).days,
