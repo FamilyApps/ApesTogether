@@ -654,8 +654,8 @@ class PortfolioPerformanceCalculator:
                         })
         
         return {
-            'portfolio_return': portfolio_return,
-            'sp500_return': sp500_return,
+            'portfolio_return': round(portfolio_return * 100, 2),
+            'sp500_return': round(sp500_return * 100, 2),
             'chart_data': chart_data,
             'period': period,
             'start_date': start_date.isoformat(),
