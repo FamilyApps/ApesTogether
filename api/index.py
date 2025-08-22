@@ -5909,6 +5909,147 @@ def portfolio_performance_intraday(period):
         logger.error(f"Error in performance-intraday API: {str(e)}")
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
+@app.route('/admin/simulate-intraday-data')
+@login_required
+def simulate_intraday_data():
+    """Create sample intraday data for testing charts"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime, timedelta
+        from models import User, PortfolioSnapshotIntraday
+        from portfolio_performance import PortfolioPerformanceCalculator
+        
+        calculator = PortfolioPerformanceCalculator()
+        today = datetime.now().date()
+        
+        # Create sample intraday snapshots for today (every 30 minutes from 9:30 AM to 4:00 PM)
+        market_times = []
+        start_time = datetime.combine(today, datetime.strptime('09:30', '%H:%M').time())
+        end_time = datetime.combine(today, datetime.strptime('16:00', '%H:%M').time())
+        
+        current_time = start_time
+        while current_time <= end_time:
+            market_times.append(current_time)
+            current_time += timedelta(minutes=30)
+        
+        users = User.query.all()
+        snapshots_created = 0
+        
+        for user in users:
+            base_portfolio_value = calculator.calculate_portfolio_value(user.id)
+            
+            for i, timestamp in enumerate(market_times):
+                # Add some realistic variation (±2% throughout the day)
+                variation = (i - len(market_times)/2) * 0.001  # Gradual trend
+                random_factor = 0.995 + (i % 3) * 0.005  # Small random variation
+                simulated_value = base_portfolio_value * (1 + variation) * random_factor
+                
+                # Check if snapshot already exists
+                existing = PortfolioSnapshotIntraday.query.filter_by(
+                    user_id=user.id,
+                    timestamp=timestamp
+                ).first()
+                
+                if not existing:
+                    snapshot = PortfolioSnapshotIntraday(
+                        user_id=user.id,
+                        timestamp=timestamp,
+                        total_value=simulated_value
+                    )
+                    db.session.add(snapshot)
+                    snapshots_created += 1
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Sample intraday data created',
+            'snapshots_created': snapshots_created,
+            'time_points': len(market_times),
+            'users_processed': len(users)
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error creating sample intraday data: {str(e)}")
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
+@app.route('/api/cron/collect-intraday-data', methods=['POST'])
+def collect_intraday_data():
+    """Collect intraday data for all users (called by GitHub Actions)"""
+    try:
+        # Verify authorization token
+        auth_header = request.headers.get('Authorization', '')
+        expected_token = os.environ.get('INTRADAY_CRON_TOKEN')
+        
+        if not expected_token:
+            logger.error("INTRADAY_CRON_TOKEN not configured")
+            return jsonify({'error': 'Server configuration error'}), 500
+        
+        if not auth_header.startswith('Bearer ') or auth_header[7:] != expected_token:
+            logger.warning(f"Unauthorized intraday collection attempt")
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        from datetime import datetime
+        from models import User, PortfolioSnapshotIntraday
+        from portfolio_performance import PortfolioPerformanceCalculator
+        
+        calculator = PortfolioPerformanceCalculator()
+        current_time = datetime.now()
+        
+        results = {
+            'timestamp': current_time.isoformat(),
+            'users_processed': 0,
+            'snapshots_created': 0,
+            'errors': []
+        }
+        
+        # Get all users
+        users = User.query.all()
+        
+        for user in users:
+            try:
+                # Calculate current portfolio value
+                portfolio_value = calculator.calculate_portfolio_value(user.id)
+                
+                # Create intraday snapshot
+                snapshot = PortfolioSnapshotIntraday(
+                    user_id=user.id,
+                    timestamp=current_time,
+                    total_value=portfolio_value
+                )
+                db.session.add(snapshot)
+                results['snapshots_created'] += 1
+                results['users_processed'] += 1
+                
+            except Exception as e:
+                error_msg = f"Error processing user {user.id}: {str(e)}"
+                results['errors'].append(error_msg)
+                logger.error(error_msg)
+        
+        # Commit all snapshots
+        try:
+            db.session.commit()
+            logger.info(f"Intraday collection completed: {results['snapshots_created']} snapshots created")
+        except Exception as e:
+            db.session.rollback()
+            error_msg = f"Database commit failed: {str(e)}"
+            results['errors'].append(error_msg)
+            logger.error(error_msg)
+        
+        return jsonify({
+            'success': len(results['errors']) == 0,
+            'message': 'Intraday data collection completed',
+            'results': results
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Unexpected error in intraday collection: {str(e)}")
+        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+
 # For local testing
 if __name__ == '__main__':
     # Log app startup with structured information
