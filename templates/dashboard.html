@@ -370,7 +370,12 @@ function loadPerformanceData(period) {
     document.getElementById('portfolio-return').textContent = 'Loading...';
     document.getElementById('sp500-return').textContent = 'Loading...';
     
-    fetch(`/api/portfolio/performance/${period}`)
+    // Use intraday API for 1D and 5D periods, regular API for others
+    const apiEndpoint = (period === '1D' || period === '5D') 
+        ? `/api/portfolio/performance-intraday/${period}`
+        : `/api/portfolio/performance/${period}`;
+    
+    fetch(apiEndpoint)
         .then(response => response.json())
         .then(data => {
             if (data.error) {
