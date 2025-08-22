@@ -5845,7 +5845,7 @@ def create_intraday_tables():
         
         try:
             # Create portfolio_snapshot_intraday table
-            with db.engine.connect() as conn:
+            with db.engine.begin() as conn:
                 conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS portfolio_snapshot_intraday (
                         id SERIAL PRIMARY KEY,
@@ -5874,7 +5874,6 @@ def create_intraday_tables():
                     );
                 """))
                 
-                conn.commit()
                 results['tables_created'] = ['portfolio_snapshot_intraday', 'sp500_chart_cache']
             
         except Exception as e:
