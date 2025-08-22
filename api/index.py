@@ -5896,17 +5896,12 @@ def portfolio_performance_intraday(period):
     try:
         user_id = current_user.id
         
-        # Import the intraday performance function
-        import sys
-        import os
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'portfolio'))
-        from performance_intraday import get_intraday_performance_data
+        # For now, use the regular performance API with intraday logic
+        # Since we don't have actual intraday snapshots yet, return regular performance data
+        from portfolio_performance import PortfolioPerformanceCalculator
         
-        # Get performance data using intraday system
-        performance_data = get_intraday_performance_data(user_id, period)
-        
-        if 'error' in performance_data:
-            return jsonify(performance_data), 400
+        calculator = PortfolioPerformanceCalculator()
+        performance_data = calculator.get_performance_data(user_id, period)
         
         return jsonify(performance_data), 200
     
