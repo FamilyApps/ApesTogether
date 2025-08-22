@@ -5889,6 +5889,31 @@ def create_intraday_tables():
         logger.error(f"Unexpected error creating tables: {str(e)}")
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
+@app.route('/api/portfolio/performance-intraday/<period>')
+@login_required
+def portfolio_performance_intraday(period):
+    """Get intraday portfolio performance data"""
+    try:
+        user_id = current_user.id
+        
+        # Import the intraday performance function
+        import sys
+        import os
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'portfolio'))
+        from performance_intraday import get_intraday_performance_data
+        
+        # Get performance data using intraday system
+        performance_data = get_intraday_performance_data(user_id, period)
+        
+        if 'error' in performance_data:
+            return jsonify(performance_data), 400
+        
+        return jsonify(performance_data), 200
+    
+    except Exception as e:
+        logger.error(f"Error in performance-intraday API: {str(e)}")
+        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+
 # For local testing
 if __name__ == '__main__':
     # Log app startup with structured information
