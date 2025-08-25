@@ -5892,18 +5892,92 @@ def create_intraday_tables():
 @app.route('/api/portfolio/performance-intraday/<period>')
 @login_required
 def portfolio_performance_intraday(period):
-    """Get intraday portfolio performance data"""
+    """Get intraday portfolio performance data using actual intraday snapshots"""
     try:
         user_id = current_user.id
         
-        # For now, use the regular performance API with intraday logic
-        # Since we don't have actual intraday snapshots yet, return regular performance data
-        from portfolio_performance import PortfolioPerformanceCalculator
+        from datetime import datetime, date, timedelta
+        from models import PortfolioSnapshotIntraday, MarketData
+        from sqlalchemy import func
         
-        calculator = PortfolioPerformanceCalculator()
-        performance_data = calculator.get_performance_data(user_id, period)
+        # Calculate date range based on period
+        today = date.today()
+        if period == '1D':
+            start_date = today
+            end_date = today
+        elif period == '5D':
+            start_date = today - timedelta(days=7)  # Include weekends to get 5 business days
+            end_date = today
+        else:
+            # Fallback to regular performance API for other periods
+            from portfolio_performance import PortfolioPerformanceCalculator
+            calculator = PortfolioPerformanceCalculator()
+            return jsonify(calculator.get_performance_data(user_id, period)), 200
         
-        return jsonify(performance_data), 200
+        # Get intraday snapshots for the user in the date range
+        snapshots = PortfolioSnapshotIntraday.query.filter(
+            PortfolioSnapshotIntraday.user_id == user_id,
+            func.date(PortfolioSnapshotIntraday.timestamp) >= start_date,
+            func.date(PortfolioSnapshotIntraday.timestamp) <= end_date
+        ).order_by(PortfolioSnapshotIntraday.timestamp).all()
+        
+        if not snapshots:
+            return jsonify({
+                'error': 'No intraday data available for this period',
+                'period': period,
+                'start_date': start_date.isoformat(),
+                'end_date': end_date.isoformat()
+            }), 404
+        
+        # Get S&P 500 data for the same period (use SPY as proxy)
+        spy_data = MarketData.query.filter(
+            MarketData.ticker == 'SPY_SP500',
+            MarketData.date >= start_date,
+            MarketData.date <= end_date
+        ).order_by(MarketData.date).all()
+        
+        # Build chart data
+        chart_data = []
+        first_portfolio_value = snapshots[0].total_value if snapshots else 0
+        first_spy_value = spy_data[0].close_price if spy_data else 0
+        
+        for snapshot in snapshots:
+            # Find corresponding S&P 500 value (use closest date)
+            snapshot_date = snapshot.timestamp.date()
+            spy_value = first_spy_value
+            
+            for spy_point in spy_data:
+                if spy_point.date <= snapshot_date:
+                    spy_value = spy_point.close_price
+                else:
+                    break
+            
+            # Calculate returns
+            portfolio_return = ((snapshot.total_value - first_portfolio_value) / first_portfolio_value * 100) if first_portfolio_value > 0 else 0
+            sp500_return = ((spy_value - first_spy_value) / first_spy_value * 100) if first_spy_value > 0 else 0
+            
+            chart_data.append({
+                'date': snapshot.timestamp.isoformat(),
+                'portfolio': round(portfolio_return, 2),
+                'sp500': round(sp500_return, 2)
+            })
+        
+        # Calculate overall returns
+        final_portfolio_value = snapshots[-1].total_value if snapshots else 0
+        final_spy_value = spy_data[-1].close_price if spy_data else first_spy_value
+        
+        portfolio_return = ((final_portfolio_value - first_portfolio_value) / first_portfolio_value * 100) if first_portfolio_value > 0 else 0
+        sp500_return = ((final_spy_value - first_spy_value) / first_spy_value * 100) if first_spy_value > 0 else 0
+        
+        return jsonify({
+            'portfolio_return': round(portfolio_return, 2),
+            'sp500_return': round(sp500_return, 2),
+            'chart_data': chart_data,
+            'period': period,
+            'start_date': start_date.isoformat(),
+            'end_date': end_date.isoformat(),
+            'data_points': len(chart_data)
+        }), 200
     
     except Exception as e:
         logger.error(f"Error in performance-intraday API: {str(e)}")
