@@ -6050,6 +6050,108 @@ def collect_intraday_data():
         logger.error(f"Unexpected error in intraday collection: {str(e)}")
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
+@app.route('/admin/check-intraday-data')
+@login_required
+def check_intraday_data():
+    """Check if intraday data was collected today"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime, date
+        from models import PortfolioSnapshotIntraday
+        from sqlalchemy import func
+        
+        today = date.today()
+        
+        # Check intraday snapshots for today
+        today_snapshots = PortfolioSnapshotIntraday.query.filter(
+            func.date(PortfolioSnapshotIntraday.timestamp) == today
+        ).all()
+        
+        # Group by user
+        user_snapshots = {}
+        for snapshot in today_snapshots:
+            if snapshot.user_id not in user_snapshots:
+                user_snapshots[snapshot.user_id] = []
+            user_snapshots[snapshot.user_id].append({
+                'timestamp': snapshot.timestamp.isoformat(),
+                'value': snapshot.total_value
+            })
+        
+        # Get total counts
+        total_snapshots = len(today_snapshots)
+        users_with_data = len(user_snapshots)
+        
+        # Sample recent snapshots
+        recent_snapshots = PortfolioSnapshotIntraday.query.order_by(
+            PortfolioSnapshotIntraday.timestamp.desc()
+        ).limit(10).all()
+        
+        recent_sample = []
+        for snapshot in recent_snapshots:
+            recent_sample.append({
+                'user_id': snapshot.user_id,
+                'timestamp': snapshot.timestamp.isoformat(),
+                'value': snapshot.total_value
+            })
+        
+        return jsonify({
+            'success': True,
+            'today_date': today.isoformat(),
+            'total_snapshots_today': total_snapshots,
+            'users_with_data_today': users_with_data,
+            'user_snapshots_today': user_snapshots,
+            'recent_snapshots_sample': recent_sample,
+            'message': f'Found {total_snapshots} intraday snapshots for {users_with_data} users today'
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error checking intraday data: {str(e)}")
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
+@app.route('/admin/test-cron-endpoint')
+@login_required
+def test_cron_endpoint():
+    """Test the intraday collection endpoint manually"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        import requests
+        
+        # Test the cron endpoint
+        url = "https://apestogether.ai/api/cron/collect-intraday-data"
+        headers = {
+            "Authorization": f"Bearer {os.environ.get('INTRADAY_CRON_TOKEN')}",
+            "Content-Type": "application/json"
+        }
+        
+        try:
+            response = requests.post(url, headers=headers, timeout=30)
+            
+            return jsonify({
+                'success': response.status_code == 200,
+                'status_code': response.status_code,
+                'response': response.json() if response.headers.get('content-type', '').startswith('application/json') else response.text,
+                'message': 'Cron endpoint test completed'
+            }), 200
+            
+        except requests.exceptions.RequestException as e:
+            return jsonify({
+                'success': False,
+                'error': f'Request failed: {str(e)}',
+                'message': 'Cron endpoint test failed'
+            }), 500
+    
+    except Exception as e:
+        logger.error(f"Error testing cron endpoint: {str(e)}")
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
 # For local testing
 if __name__ == '__main__':
     # Log app startup with structured information
