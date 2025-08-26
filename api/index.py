@@ -6546,6 +6546,77 @@ def create_sample_spy_intraday():
         logger.error(f"Error creating sample SPY intraday data: {str(e)}")
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
+@app.route('/admin/test-spy-fetch')
+@login_required
+def test_spy_fetch():
+    """Test SPY data fetching to debug why intraday collection failed"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from portfolio_performance import PortfolioPerformanceCalculator
+        from datetime import datetime
+        
+        calculator = PortfolioPerformanceCalculator()
+        current_time = datetime.now()
+        
+        # Test SPY data fetching (same as intraday collection)
+        try:
+            spy_data = calculator.get_stock_data('SPY')
+            spy_success = spy_data is not None and spy_data.get('price') is not None
+            spy_price = spy_data.get('price') if spy_data else None
+            sp500_value = spy_price * 10 if spy_price else None
+        except Exception as e:
+            spy_success = False
+            spy_data = None
+            spy_price = None
+            sp500_value = None
+            spy_error = str(e)
+        
+        # Check if AlphaVantage API key is available
+        import os
+        api_key_available = bool(os.environ.get('ALPHA_VANTAGE_API_KEY'))
+        
+        # Test a few other stocks to see if it's SPY-specific
+        test_results = {}
+        for ticker in ['AAPL', 'MSFT', 'TSLA']:
+            try:
+                test_data = calculator.get_stock_data(ticker)
+                test_results[ticker] = {
+                    'success': test_data is not None and test_data.get('price') is not None,
+                    'price': test_data.get('price') if test_data else None
+                }
+            except Exception as e:
+                test_results[ticker] = {
+                    'success': False,
+                    'error': str(e)
+                }
+        
+        return jsonify({
+            'success': True,
+            'timestamp': current_time.isoformat(),
+            'api_key_available': api_key_available,
+            'spy_test': {
+                'success': spy_success,
+                'raw_data': spy_data,
+                'spy_price': spy_price,
+                'sp500_value': sp500_value,
+                'error': spy_error if not spy_success else None
+            },
+            'other_stocks_test': test_results,
+            'debug_notes': [
+                'Check if SPY fetching works now vs during GitHub Actions',
+                'Compare SPY results with other stock fetches',
+                'Look for API key or network issues'
+            ]
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error testing SPY fetch: {str(e)}")
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
 @app.route('/admin/test-cron-endpoint')
 @login_required
 def test_cron_endpoint():
