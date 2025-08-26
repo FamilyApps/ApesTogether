@@ -5929,12 +5929,22 @@ def portfolio_performance_intraday(period):
                 'end_date': end_date.isoformat()
             }), 404
         
-        # Get S&P 500 data for the same period (use SPY as proxy)
-        spy_data = MarketData.query.filter(
-            MarketData.ticker == 'SPY_SP500',
-            MarketData.date >= start_date,
-            MarketData.date <= end_date
-        ).order_by(MarketData.date).all()
+        # Get S&P 500 data for the same period
+        if period in ['1D', '5D']:
+            # Use intraday S&P 500 data for short periods
+            spy_data = MarketData.query.filter(
+                MarketData.ticker == 'SPY_INTRADAY',
+                MarketData.date >= start_date,
+                MarketData.date <= end_date,
+                MarketData.timestamp.isnot(None)
+            ).order_by(MarketData.timestamp).all()
+        else:
+            # Use daily S&P 500 data for longer periods
+            spy_data = MarketData.query.filter(
+                MarketData.ticker == 'SPY_SP500',
+                MarketData.date >= start_date,
+                MarketData.date <= end_date
+            ).order_by(MarketData.date).all()
         
         # Build chart data
         chart_data = []
@@ -5942,15 +5952,24 @@ def portfolio_performance_intraday(period):
         first_spy_value = spy_data[0].close_price if spy_data else 0
         
         for snapshot in snapshots:
-            # Find corresponding S&P 500 value (use closest date)
-            snapshot_date = snapshot.timestamp.date()
+            # Find corresponding S&P 500 value
             spy_value = first_spy_value
             
-            for spy_point in spy_data:
-                if spy_point.date <= snapshot_date:
-                    spy_value = spy_point.close_price
-                else:
-                    break
+            if period in ['1D', '5D']:
+                # For intraday data, match by timestamp
+                for spy_point in spy_data:
+                    if spy_point.timestamp <= snapshot.timestamp:
+                        spy_value = spy_point.close_price
+                    else:
+                        break
+            else:
+                # For daily data, match by date
+                snapshot_date = snapshot.timestamp.date()
+                for spy_point in spy_data:
+                    if spy_point.date <= snapshot_date:
+                        spy_value = spy_point.close_price
+                    else:
+                        break
             
             # Calculate returns
             portfolio_return = ((snapshot.total_value - first_portfolio_value) / first_portfolio_value * 100) if first_portfolio_value > 0 else 0
@@ -6466,6 +6485,65 @@ def debug_sp500_data():
     
     except Exception as e:
         logger.error(f"Error debugging S&P 500 data: {str(e)}")
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
+@app.route('/admin/create-sample-spy-intraday')
+@login_required
+def create_sample_spy_intraday():
+    """Create sample SPY_INTRADAY data for testing charts"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime, timedelta
+        from models import MarketData
+        
+        today = datetime.now().date()
+        base_time = datetime.combine(today, datetime.min.time()) + timedelta(hours=9, minutes=30)  # 9:30 AM
+        base_price = 6424.70  # Current SPY_SP500 price
+        
+        # Create 15 intraday data points (every 30 minutes from 9:30 AM to 4:00 PM)
+        sample_data = []
+        for i in range(15):
+            timestamp = base_time + timedelta(minutes=30 * i)
+            # Add some realistic price variation (+/- 1%)
+            price_variation = (i - 7) * 0.002  # Gradual change throughout day
+            price = base_price * (1 + price_variation)
+            
+            # Check if data already exists
+            existing = MarketData.query.filter_by(
+                ticker='SPY_INTRADAY',
+                date=today,
+                timestamp=timestamp
+            ).first()
+            
+            if not existing:
+                market_data = MarketData(
+                    ticker='SPY_INTRADAY',
+                    date=today,
+                    timestamp=timestamp,
+                    close_price=price
+                )
+                db.session.add(market_data)
+                sample_data.append({
+                    'timestamp': timestamp.isoformat(),
+                    'price': round(price, 2)
+                })
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'created_count': len(sample_data),
+            'sample_data': sample_data,
+            'message': f'Created {len(sample_data)} SPY_INTRADAY data points for testing'
+        }), 200
+    
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error creating sample SPY intraday data: {str(e)}")
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
 @app.route('/admin/test-cron-endpoint')
