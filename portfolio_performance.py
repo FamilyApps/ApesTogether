@@ -71,31 +71,12 @@ class PortfolioPerformanceCalculator:
         
         total_value = 0.0
         
-        # First try to get holdings from transactions
-        transactions = Transaction.query.filter(
-            and_(
-                Transaction.user_id == user_id,
-                func.date(Transaction.timestamp) <= target_date
-            )
-        ).order_by(Transaction.timestamp).all()
-        
+        # Always use Stock table for current portfolio value (most accurate)
+        # Transaction table is for historical performance tracking only
+        stocks = Stock.query.filter_by(user_id=user_id).all()
         holdings = {}
-        if transactions:
-            # Calculate current holdings from transactions
-            for transaction in transactions:
-                ticker = transaction.ticker
-                if ticker not in holdings:
-                    holdings[ticker] = 0
-                
-                if transaction.transaction_type == 'buy':
-                    holdings[ticker] += transaction.quantity
-                else:  # sell
-                    holdings[ticker] -= transaction.quantity
-        else:
-            # Fallback to Stock table if no transactions exist
-            stocks = Stock.query.filter_by(user_id=user_id).all()
-            for stock in stocks:
-                holdings[stock.ticker] = stock.quantity
+        for stock in stocks:
+            holdings[stock.ticker] = stock.quantity
         
         # Get current prices and calculate value using AlphaVantage
         for ticker, quantity in holdings.items():
@@ -107,18 +88,10 @@ class PortfolioPerformanceCalculator:
                         total_value += quantity * price
                 except Exception as e:
                     logger.error(f"Error fetching price for {ticker}: {e}")
-                    # Fallback to last known price
-                    if transactions:
-                        last_transaction = Transaction.query.filter_by(
-                            user_id=user_id, ticker=ticker
-                        ).order_by(Transaction.timestamp.desc()).first()
-                        if last_transaction:
-                            total_value += quantity * last_transaction.price
-                    else:
-                        # Use purchase price from Stock table as fallback
-                        stock = Stock.query.filter_by(user_id=user_id, ticker=ticker).first()
-                        if stock:
-                            total_value += quantity * stock.purchase_price
+                    # Use purchase price from Stock table as fallback
+                    stock = Stock.query.filter_by(user_id=user_id, ticker=ticker).first()
+                    if stock:
+                        total_value += quantity * stock.purchase_price
         
         return total_value
     
