@@ -77,11 +77,23 @@ def handler(request):
         try:
             users = User.query.all()
             results['users_processed'] = len(users)
+            results['user_details'] = []
+            
+            logger.info(f"Found {len(users)} users to process")
             
             for user in users:
+                user_result = {
+                    'user_id': user.id,
+                    'username': getattr(user, 'username', 'unknown'),
+                    'success': False,
+                    'portfolio_value': 0,
+                    'error': None
+                }
+                
                 try:
                     # Calculate current portfolio value
                     portfolio_value = calculator.calculate_portfolio_value(user.id)
+                    user_result['portfolio_value'] = portfolio_value
                     
                     # Create intraday snapshot
                     snapshot = PortfolioSnapshotIntraday(
@@ -91,11 +103,17 @@ def handler(request):
                     )
                     db.session.add(snapshot)
                     results['snapshots_created'] += 1
+                    user_result['success'] = True
+                    
+                    logger.info(f"Created snapshot for user {user.id} ({user_result['username']}): ${portfolio_value}")
                     
                 except Exception as e:
-                    error_msg = f"Error processing user {user.id}: {str(e)}"
+                    error_msg = f"Error processing user {user.id} ({user_result['username']}): {str(e)}"
+                    user_result['error'] = str(e)
                     results['errors'].append(error_msg)
                     logger.error(error_msg)
+                
+                results['user_details'].append(user_result)
         
         except Exception as e:
             error_msg = f"Error querying users: {str(e)}"
