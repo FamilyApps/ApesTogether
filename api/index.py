@@ -6389,6 +6389,85 @@ def debug_all_users_portfolios():
         logger.error(f"Error debugging all users portfolios: {str(e)}")
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
+@app.route('/admin/debug-sp500-data')
+@login_required
+def debug_sp500_data():
+    """Debug S&P 500 data availability for intraday charts"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime, date, timedelta
+        from models import MarketData
+        from sqlalchemy import func
+        
+        today = date.today()
+        week_ago = today - timedelta(days=7)
+        
+        # Check all S&P 500 related data
+        sp500_data = MarketData.query.filter(
+            MarketData.ticker.like('%SP%'),
+            MarketData.date >= week_ago
+        ).order_by(MarketData.ticker, MarketData.date, MarketData.timestamp).all()
+        
+        data_by_ticker = {}
+        for data in sp500_data:
+            ticker = data.ticker
+            if ticker not in data_by_ticker:
+                data_by_ticker[ticker] = []
+            
+            data_by_ticker[ticker].append({
+                'date': data.date.isoformat(),
+                'timestamp': data.timestamp.isoformat() if data.timestamp else None,
+                'price': data.close_price,
+                'created_at': data.created_at.isoformat()
+            })
+        
+        # Check what the intraday API is looking for
+        spy_daily = MarketData.query.filter(
+            MarketData.ticker == 'SPY_SP500',
+            MarketData.date >= week_ago,
+            MarketData.timestamp.is_(None)
+        ).order_by(MarketData.date).all()
+        
+        spy_intraday = MarketData.query.filter(
+            MarketData.ticker == 'SPY_INTRADAY',
+            MarketData.date >= week_ago,
+            MarketData.timestamp.isnot(None)
+        ).order_by(MarketData.timestamp).all()
+        
+        return jsonify({
+            'success': True,
+            'date_range': f'{week_ago.isoformat()} to {today.isoformat()}',
+            'all_sp500_tickers': list(data_by_ticker.keys()),
+            'data_by_ticker': data_by_ticker,
+            'spy_daily_count': len(spy_daily),
+            'spy_intraday_count': len(spy_intraday),
+            'spy_daily_sample': [
+                {
+                    'date': d.date.isoformat(),
+                    'price': d.close_price
+                } for d in spy_daily[:5]
+            ],
+            'spy_intraday_sample': [
+                {
+                    'timestamp': d.timestamp.isoformat(),
+                    'price': d.close_price
+                } for d in spy_intraday[:5]
+            ],
+            'debug_notes': [
+                'Check which S&P 500 tickers exist in database',
+                'Verify intraday performance API is using correct ticker names',
+                'Look for data gaps or inconsistent naming'
+            ]
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error debugging S&P 500 data: {str(e)}")
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
 @app.route('/admin/test-cron-endpoint')
 @login_required
 def test_cron_endpoint():
