@@ -6272,6 +6272,54 @@ def debug_intraday_calculation():
         logger.error(f"Error debugging intraday calculation: {str(e)}")
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
+@app.route('/admin/create-admin-snapshot')
+@login_required
+def create_admin_snapshot():
+    """Create an intraday snapshot for the admin user manually"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime
+        from models import User, PortfolioSnapshotIntraday
+        from portfolio_performance import PortfolioPerformanceCalculator
+        
+        # Find admin user (witty-raven)
+        admin_user = User.query.filter_by(username='witty-raven').first()
+        if not admin_user:
+            return jsonify({'error': 'Admin user not found'}), 404
+        
+        calculator = PortfolioPerformanceCalculator()
+        current_time = datetime.now()
+        
+        # Calculate current portfolio value
+        portfolio_value = calculator.calculate_portfolio_value(admin_user.id)
+        
+        # Create intraday snapshot
+        snapshot = PortfolioSnapshotIntraday(
+            user_id=admin_user.id,
+            timestamp=current_time,
+            total_value=portfolio_value
+        )
+        
+        db.session.add(snapshot)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'admin_user_id': admin_user.id,
+            'portfolio_value': portfolio_value,
+            'snapshot_created': current_time.isoformat(),
+            'message': 'Manual admin snapshot created successfully'
+        }), 200
+    
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error creating admin snapshot: {str(e)}")
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
 @app.route('/admin/test-cron-endpoint')
 @login_required
 def test_cron_endpoint():
