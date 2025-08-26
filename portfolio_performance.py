@@ -88,10 +88,18 @@ class PortfolioPerformanceCalculator:
                         total_value += quantity * price
                 except Exception as e:
                     logger.error(f"Error fetching price for {ticker}: {e}")
-                    # Use purchase price from Stock table as fallback
-                    stock = Stock.query.filter_by(user_id=user_id, ticker=ticker).first()
-                    if stock:
-                        total_value += quantity * stock.purchase_price
+                    # First fallback: try to use any cached price (even if expired)
+                    ticker_upper = ticker.upper()
+                    if ticker_upper in stock_price_cache and stock_price_cache[ticker_upper].get('price'):
+                        cached_price = stock_price_cache[ticker_upper]['price']
+                        total_value += quantity * cached_price
+                        logger.info(f"Using expired cached price for {ticker}: ${cached_price}")
+                    else:
+                        # Final fallback: use purchase price from Stock table
+                        stock = Stock.query.filter_by(user_id=user_id, ticker=ticker).first()
+                        if stock:
+                            total_value += quantity * stock.purchase_price
+                            logger.info(f"Using purchase price for {ticker}: ${stock.purchase_price}")
         
         return total_value
     
