@@ -6186,6 +6186,92 @@ def check_intraday_data():
         logger.error(f"Error checking intraday data: {str(e)}")
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
+@app.route('/admin/debug-intraday-calculation')
+@login_required
+def debug_intraday_calculation():
+    """Debug why intraday portfolio values aren't changing"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime, date
+        from models import User, Stock, PortfolioSnapshotIntraday, MarketData
+        from portfolio_performance import PortfolioPerformanceCalculator
+        
+        # Find admin user (witty-raven)
+        admin_user = User.query.filter_by(username='witty-raven').first()
+        if not admin_user:
+            return jsonify({'error': 'Admin user not found'}), 404
+        
+        calculator = PortfolioPerformanceCalculator()
+        
+        # Check admin's stocks
+        admin_stocks = Stock.query.filter_by(user_id=admin_user.id).all()
+        stock_details = []
+        
+        for stock in admin_stocks:
+            # Get current stock price
+            stock_data = calculator.get_stock_data(stock.ticker)
+            current_price = stock_data.get('price', 0) if stock_data else 0
+            
+            stock_details.append({
+                'ticker': stock.ticker,
+                'shares': stock.shares,
+                'purchase_price': stock.purchase_price,
+                'current_price': current_price,
+                'current_value': stock.shares * current_price,
+                'gain_loss': (current_price - stock.purchase_price) * stock.shares
+            })
+        
+        # Calculate total portfolio value
+        total_value = sum(stock['current_value'] for stock in stock_details)
+        
+        # Check recent intraday snapshots for admin
+        today = date.today()
+        recent_snapshots = PortfolioSnapshotIntraday.query.filter(
+            PortfolioSnapshotIntraday.user_id == admin_user.id,
+            PortfolioSnapshotIntraday.timestamp >= datetime.combine(today, datetime.min.time())
+        ).order_by(PortfolioSnapshotIntraday.timestamp.desc()).limit(5).all()
+        
+        snapshot_details = []
+        for snapshot in recent_snapshots:
+            snapshot_details.append({
+                'timestamp': snapshot.timestamp.isoformat(),
+                'stored_value': snapshot.total_value
+            })
+        
+        # Check S&P 500 data availability
+        spy_data = MarketData.query.filter(
+            MarketData.ticker == 'SPY_SP500',
+            MarketData.date == today
+        ).first()
+        
+        return jsonify({
+            'success': True,
+            'admin_user_id': admin_user.id,
+            'admin_username': admin_user.username,
+            'current_portfolio_value': total_value,
+            'stock_count': len(admin_stocks),
+            'stock_details': stock_details,
+            'recent_snapshots': snapshot_details,
+            'spy_data_today': {
+                'exists': spy_data is not None,
+                'value': spy_data.close_price if spy_data else None,
+                'date': spy_data.date.isoformat() if spy_data else None
+            },
+            'debug_notes': [
+                'Check if stock prices are being fetched correctly',
+                'Verify if portfolio calculation matches stored snapshots',
+                'Check if S&P 500 data exists for today'
+            ]
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error debugging intraday calculation: {str(e)}")
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
 @app.route('/admin/test-cron-endpoint')
 @login_required
 def test_cron_endpoint():
