@@ -6320,6 +6320,75 @@ def create_admin_snapshot():
         logger.error(f"Error creating admin snapshot: {str(e)}")
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
+@app.route('/admin/debug-all-users-portfolios')
+@login_required
+def debug_all_users_portfolios():
+    """Debug portfolio calculations for all users to find $0 issue"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import User, Stock
+        from portfolio_performance import PortfolioPerformanceCalculator
+        
+        calculator = PortfolioPerformanceCalculator()
+        users = User.query.all()
+        user_analysis = []
+        
+        for user in users:
+            # Get user's stocks
+            stocks = Stock.query.filter_by(user_id=user.id).all()
+            stock_details = []
+            
+            for stock in stocks:
+                # Get current stock price
+                stock_data = calculator.get_stock_data(stock.ticker)
+                current_price = stock_data.get('price', 0) if stock_data else 0
+                
+                stock_details.append({
+                    'ticker': stock.ticker,
+                    'quantity': stock.quantity,
+                    'purchase_price': stock.purchase_price,
+                    'current_price': current_price,
+                    'current_value': stock.quantity * current_price
+                })
+            
+            # Calculate portfolio value using the same method as intraday collection
+            try:
+                portfolio_value = calculator.calculate_portfolio_value(user.id)
+            except Exception as e:
+                portfolio_value = f"ERROR: {str(e)}"
+            
+            manual_total = sum(stock['current_value'] for stock in stock_details)
+            
+            user_analysis.append({
+                'user_id': user.id,
+                'username': getattr(user, 'username', 'unknown'),
+                'email': getattr(user, 'email', 'unknown'),
+                'stock_count': len(stocks),
+                'stocks': stock_details,
+                'calculated_portfolio_value': portfolio_value,
+                'manual_total_value': manual_total,
+                'values_match': abs(float(portfolio_value) - manual_total) < 0.01 if isinstance(portfolio_value, (int, float)) else False
+            })
+        
+        return jsonify({
+            'success': True,
+            'total_users': len(users),
+            'user_analysis': user_analysis,
+            'debug_notes': [
+                'Compare calculated_portfolio_value vs manual_total_value',
+                'Check if stock prices are being fetched correctly',
+                'Look for users with stocks but $0 calculated values'
+            ]
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error debugging all users portfolios: {str(e)}")
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
 @app.route('/admin/test-cron-endpoint')
 @login_required
 def test_cron_endpoint():
