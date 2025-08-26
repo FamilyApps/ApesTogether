@@ -6095,12 +6095,41 @@ def collect_intraday_data():
         
         results = {
             'timestamp': current_time.isoformat(),
+            'spy_data_collected': False,
             'users_processed': 0,
             'snapshots_created': 0,
+            'charts_generated': 0,
             'errors': []
         }
         
-        # Get all users
+        # Step 1: Collect SPY data
+        try:
+            spy_data = calculator.get_stock_data('SPY')
+            if spy_data and spy_data.get('price'):
+                spy_price = spy_data['price']
+                sp500_value = spy_price * 10  # Convert SPY to S&P 500 approximation
+                
+                # Store intraday SPY data
+                from models import MarketData
+                market_data = MarketData(
+                    ticker='SPY_INTRADAY',
+                    date=current_time.date(),
+                    timestamp=current_time,
+                    close_price=sp500_value
+                )
+                db.session.add(market_data)
+                results['spy_data_collected'] = True
+                logger.info(f"SPY data collected: ${spy_price} (S&P 500: ${sp500_value})")
+            else:
+                results['errors'].append("Failed to fetch SPY data")
+                logger.error("Failed to fetch SPY data from AlphaVantage")
+        
+        except Exception as e:
+            error_msg = f"Error collecting SPY data: {str(e)}"
+            results['errors'].append(error_msg)
+            logger.error(error_msg)
+        
+        # Step 2: Get all users
         users = User.query.all()
         
         for user in users:
