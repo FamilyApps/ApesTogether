@@ -6685,6 +6685,56 @@ def test_spy_intraday_collection():
         logger.error(f"Error testing SPY intraday collection: {str(e)}")
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
+@app.route('/admin/test-github-actions-endpoint')
+@login_required
+def test_github_actions_endpoint():
+    """Test the exact GitHub Actions cron endpoint to see what's failing"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        import requests
+        import os
+        
+        # Get the token
+        token = os.environ.get('INTRADAY_CRON_TOKEN')
+        if not token:
+            return jsonify({'error': 'INTRADAY_CRON_TOKEN not found'}), 500
+        
+        # Make the same call GitHub Actions makes
+        url = "https://apestogether.ai/api/cron/collect-intraday-data"
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json'
+        }
+        
+        try:
+            response = requests.post(url, headers=headers, timeout=30)
+            
+            return jsonify({
+                'success': True,
+                'status_code': response.status_code,
+                'response_text': response.text,
+                'headers': dict(response.headers),
+                'url_called': url,
+                'token_available': bool(token),
+                'message': 'This shows exactly what GitHub Actions sees'
+            }), 200
+            
+        except requests.exceptions.RequestException as e:
+            return jsonify({
+                'success': False,
+                'error': f'Request failed: {str(e)}',
+                'url_called': url,
+                'token_available': bool(token)
+            }), 500
+    
+    except Exception as e:
+        logger.error(f"Error testing GitHub Actions endpoint: {str(e)}")
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
 @app.route('/admin/test-cron-endpoint')
 @login_required
 def test_cron_endpoint():
