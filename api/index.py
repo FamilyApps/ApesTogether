@@ -6617,6 +6617,74 @@ def test_spy_fetch():
         logger.error(f"Error testing SPY fetch: {str(e)}")
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
+@app.route('/admin/test-spy-intraday-collection')
+@login_required
+def test_spy_intraday_collection():
+    """Test SPY intraday data collection manually to debug GitHub Actions issue"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from portfolio_performance import PortfolioPerformanceCalculator
+        from models import MarketData
+        from datetime import datetime
+        
+        calculator = PortfolioPerformanceCalculator()
+        current_time = datetime.now()
+        
+        # Test SPY data collection (same logic as GitHub Actions)
+        result = {
+            'timestamp': current_time.isoformat(),
+            'spy_fetch_success': False,
+            'spy_price': None,
+            'sp500_value': None,
+            'database_save_success': False,
+            'error': None
+        }
+        
+        try:
+            # Step 1: Fetch SPY data
+            spy_data = calculator.get_stock_data('SPY')
+            if spy_data and spy_data.get('price'):
+                spy_price = spy_data['price']
+                sp500_value = spy_price * 10  # Convert SPY to S&P 500 approximation
+                
+                result['spy_fetch_success'] = True
+                result['spy_price'] = spy_price
+                result['sp500_value'] = sp500_value
+                
+                # Step 2: Store intraday SPY data
+                market_data = MarketData(
+                    ticker='SPY_INTRADAY',
+                    date=current_time.date(),
+                    timestamp=current_time,
+                    close_price=sp500_value
+                )
+                db.session.add(market_data)
+                db.session.commit()
+                
+                result['database_save_success'] = True
+                result['message'] = f'Successfully collected and stored SPY intraday data: ${spy_price} -> S&P 500: ${sp500_value}'
+                
+            else:
+                result['error'] = 'Failed to fetch SPY data from AlphaVantage'
+        
+        except Exception as e:
+            db.session.rollback()
+            result['error'] = str(e)
+        
+        # Check current SPY_INTRADAY count
+        spy_intraday_count = MarketData.query.filter_by(ticker='SPY_INTRADAY').count()
+        result['spy_intraday_total_count'] = spy_intraday_count
+        
+        return jsonify(result), 200
+    
+    except Exception as e:
+        logger.error(f"Error testing SPY intraday collection: {str(e)}")
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
 @app.route('/admin/test-cron-endpoint')
 @login_required
 def test_cron_endpoint():
