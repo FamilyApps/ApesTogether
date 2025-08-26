@@ -6218,11 +6218,11 @@ def debug_intraday_calculation():
             
             stock_details.append({
                 'ticker': stock.ticker,
-                'shares': stock.shares,
+                'quantity': stock.quantity,
                 'purchase_price': stock.purchase_price,
                 'current_price': current_price,
-                'current_value': stock.shares * current_price,
-                'gain_loss': (current_price - stock.purchase_price) * stock.shares
+                'current_value': stock.quantity * current_price,
+                'gain_loss': (current_price - stock.purchase_price) * stock.quantity
             })
         
         # Calculate total portfolio value
