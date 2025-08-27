@@ -6714,6 +6714,51 @@ def test_spy_intraday_collection():
         logger.error(f"Error testing SPY intraday collection: {str(e)}")
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
+@app.route('/admin/check-spy-collection')
+def check_spy_collection():
+    """Check SPY_INTRADAY data collection (public endpoint for verification)"""
+    try:
+        from models import MarketData
+        from datetime import datetime, timedelta
+        
+        # Get today's SPY_INTRADAY data
+        today = datetime.now().date()
+        spy_records = MarketData.query.filter(
+            MarketData.ticker == 'SPY_INTRADAY',
+            MarketData.date == today
+        ).order_by(MarketData.timestamp.desc()).all()
+        
+        # Get yesterday's data for comparison
+        yesterday = today - timedelta(days=1)
+        yesterday_records = MarketData.query.filter(
+            MarketData.ticker == 'SPY_INTRADAY',
+            MarketData.date == yesterday
+        ).count()
+        
+        # Get total SPY_INTRADAY records
+        total_records = MarketData.query.filter(
+            MarketData.ticker == 'SPY_INTRADAY'
+        ).count()
+        
+        return jsonify({
+            'success': True,
+            'today_date': today.isoformat(),
+            'spy_records_today': len(spy_records),
+            'spy_records_yesterday': yesterday_records,
+            'total_spy_intraday_records': total_records,
+            'latest_records': [
+                {
+                    'timestamp': record.timestamp.isoformat(),
+                    'sp500_value': record.close_price,
+                    'date': record.date.isoformat()
+                }
+                for record in spy_records[:5]  # Show last 5 records
+            ]
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/test-github-actions-endpoint')
 @login_required
 def test_github_actions_endpoint():
