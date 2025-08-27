@@ -5926,7 +5926,8 @@ def portfolio_performance_intraday(period):
                 'error': 'No intraday data available for this period',
                 'period': period,
                 'start_date': start_date.isoformat(),
-                'end_date': end_date.isoformat()
+                'end_date': end_date.isoformat(),
+                'debug_info': f'Checked for user_id={user_id} between {start_date} and {end_date}'
             }), 404
         
         # Get S&P 500 data for the same period
@@ -5975,8 +5976,19 @@ def portfolio_performance_intraday(period):
             portfolio_return = ((snapshot.total_value - first_portfolio_value) / first_portfolio_value * 100) if first_portfolio_value > 0 else 0
             sp500_return = ((spy_value - first_spy_value) / first_spy_value * 100) if first_spy_value > 0 else 0
             
+            # Format date label based on period
+            if period == '1D':
+                # For 1D charts, show time only
+                date_label = snapshot.timestamp.strftime('%I:%M %p')
+            elif period == '5D':
+                # For 5D charts, show day name and date
+                date_label = snapshot.timestamp.strftime('%a %m/%d')
+            else:
+                # For longer periods, use ISO date
+                date_label = snapshot.timestamp.date().isoformat()
+            
             chart_data.append({
-                'date': snapshot.timestamp.isoformat(),
+                'date': date_label,
                 'portfolio': round(portfolio_return, 2),
                 'sp500': round(sp500_return, 2)
             })
@@ -5995,7 +6007,14 @@ def portfolio_performance_intraday(period):
             'period': period,
             'start_date': start_date.isoformat(),
             'end_date': end_date.isoformat(),
-            'data_points': len(chart_data)
+            'data_points': len(chart_data),
+            'debug_info': {
+                'snapshots_found': len(snapshots),
+                'spy_data_found': len(spy_data),
+                'first_portfolio_value': first_portfolio_value,
+                'first_spy_value': first_spy_value,
+                'sample_timestamps': [s.timestamp.isoformat() for s in snapshots[:3]]
+            }
         }), 200
     
     except Exception as e:
