@@ -5976,13 +5976,13 @@ def portfolio_performance_intraday(period):
             portfolio_return = ((snapshot.total_value - first_portfolio_value) / first_portfolio_value * 100) if first_portfolio_value > 0 else 0
             sp500_return = ((spy_value - first_spy_value) / first_spy_value * 100) if first_spy_value > 0 else 0
             
-            # Format date label based on period
+            # Format date label based on period - use ISO format for Chart.js compatibility
             if period == '1D':
-                # For 1D charts, show time only
-                date_label = snapshot.timestamp.strftime('%I:%M %p')
+                # For 1D charts, use full ISO timestamp so Chart.js can parse it
+                date_label = snapshot.timestamp.isoformat()
             elif period == '5D':
-                # For 5D charts, show day name and date
-                date_label = snapshot.timestamp.strftime('%a %m/%d')
+                # For 5D charts, use full ISO timestamp
+                date_label = snapshot.timestamp.isoformat()
             else:
                 # For longer periods, use ISO date
                 date_label = snapshot.timestamp.date().isoformat()

@@ -489,10 +489,18 @@ function updatePerformanceChart(data) {
             },
             scales: {
                 x: {
+                    type: 'time',
                     display: true,
                     title: {
                         display: true,
-                        text: 'Date'
+                        text: currentPeriod === '1D' ? 'Time' : 'Date'
+                    },
+                    time: {
+                        displayFormats: {
+                            hour: 'h:mm a',
+                            day: 'MMM dd'
+                        },
+                        tooltipFormat: currentPeriod === '1D' ? 'h:mm a' : 'MMM dd, yyyy'
                     },
                     ticks: {
                         maxTicksLimit: currentPeriod === '1D' ? 8 : (currentPeriod === '5D' ? 5 : 10),
