@@ -194,8 +194,19 @@ def combine_chart_data(sp500_chart, portfolio_data, period):
                 if portfolio_start_value and portfolio_start_value > 0 and portfolio_value > 0:
                     portfolio_pct = ((portfolio_value - portfolio_start_value) / portfolio_start_value) * 100
                 
+                # Format date label based on period
+                if period == '1D':
+                    # For 1D charts, show time only
+                    time_label = point_date.strftime('%I:%M %p')
+                elif period == '5D':
+                    # For 5D charts, show day name or date
+                    time_label = point_date.strftime('%a %m/%d')
+                else:
+                    # For longer periods, use the original date
+                    time_label = sp500_point['date']
+                
                 combined_data.append({
-                    'date': sp500_point['date'],
+                    'date': time_label,
                     'portfolio': round(portfolio_pct, 2),
                     'sp500': sp500_point['pct_change']
                 })

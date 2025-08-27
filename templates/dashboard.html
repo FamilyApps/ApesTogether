@@ -495,7 +495,9 @@ function updatePerformanceChart(data) {
                         text: 'Date'
                     },
                     ticks: {
-                        maxTicksLimit: 10
+                        maxTicksLimit: currentPeriod === '1D' ? 8 : (currentPeriod === '5D' ? 5 : 10),
+                        maxRotation: 45,
+                        minRotation: 0
                     }
                 },
                 y: {
