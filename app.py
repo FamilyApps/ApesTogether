@@ -132,6 +132,18 @@ def load_user(user_id):
 def index():
     return render_template('index.html')
 
+@app.route('/register')
+def register():
+    return render_template('register.html')
+
+@app.route('/terms-of-service')
+def terms_of_service():
+    return render_template('terms_of_service.html')
+
+@app.route('/privacy-policy')
+def privacy_policy():
+    return render_template('privacy_policy.html')
+
 @app.route('/admin-direct')
 @login_required
 def admin_direct():
