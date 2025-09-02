@@ -2236,6 +2236,16 @@ def login():
     
     return render_template_with_defaults('login.html')
 
+@app.route('/terms-of-service')
+def terms_of_service():
+    """Terms of Service page"""
+    return render_template_with_defaults('terms_of_service.html')
+
+@app.route('/privacy-policy')
+def privacy_policy():
+    """Privacy Policy page"""
+    return render_template_with_defaults('privacy_policy.html')
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     """User registration page"""
