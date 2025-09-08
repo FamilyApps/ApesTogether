@@ -3821,6 +3821,72 @@ def run_migration():
                 )
             """))
             
+            # Create subscription_tier table
+            db.session.execute(text("""
+                CREATE TABLE IF NOT EXISTS subscription_tier (
+                    id SERIAL PRIMARY KEY,
+                    tier_name VARCHAR(50) NOT NULL UNIQUE,
+                    price FLOAT NOT NULL,
+                    max_trades_per_day INTEGER NOT NULL,
+                    stripe_price_id VARCHAR(100) NOT NULL UNIQUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            
+            # Create trade_limit table
+            db.session.execute(text("""
+                CREATE TABLE IF NOT EXISTS trade_limit (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES "user"(id),
+                    date DATE NOT NULL,
+                    trades_made INTEGER DEFAULT 0,
+                    max_trades_allowed INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, date)
+                )
+            """))
+            
+            # Create sms_notification table
+            db.session.execute(text("""
+                CREATE TABLE IF NOT EXISTS sms_notification (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES "user"(id),
+                    phone_number VARCHAR(20),
+                    verification_code VARCHAR(10),
+                    is_verified BOOLEAN DEFAULT FALSE,
+                    notifications_enabled BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    verified_at TIMESTAMP
+                )
+            """))
+            
+            # Create stock_info table
+            db.session.execute(text("""
+                CREATE TABLE IF NOT EXISTS stock_info (
+                    id SERIAL PRIMARY KEY,
+                    symbol VARCHAR(10) NOT NULL UNIQUE,
+                    company_name VARCHAR(200),
+                    market_cap BIGINT,
+                    sector VARCHAR(100),
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            
+            # Create leaderboard_entry table
+            db.session.execute(text("""
+                CREATE TABLE IF NOT EXISTS leaderboard_entry (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES "user"(id),
+                    date DATE NOT NULL,
+                    portfolio_value FLOAT NOT NULL,
+                    daily_return FLOAT DEFAULT 0.0,
+                    total_return FLOAT DEFAULT 0.0,
+                    rank_position INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, date)
+                )
+            """))
+            
             db.session.commit()
         
         return jsonify({
