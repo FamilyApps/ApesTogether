@@ -3827,9 +3827,69 @@ def run_migration():
             'success': True, 
             'message': 'Migration completed successfully. New tables created.'
         })
+        
     except Exception as e:
-        logger.error(f"Migration error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()})
+
+@app.route('/admin/populate-tiers')
+def populate_tiers():
+    """Populate subscription tiers with Stripe price IDs"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+            
+        # Define the 5 tiers with real Stripe price IDs
+        tiers = [
+            {
+                'tier_name': 'Light',
+                'price': 8.00,
+                'max_trades_per_day': 3,
+                'stripe_price_id': 'price_1S4tN2HwKH0J9vzFchmuJXTze'
+            },
+            {
+                'tier_name': 'Standard', 
+                'price': 12.00,
+                'max_trades_per_day': 6,
+                'stripe_price_id': 'price_1S4tNdHwKH0J9vzFdJY3Opim'
+            },
+            {
+                'tier_name': 'Active',
+                'price': 20.00,
+                'max_trades_per_day': 12,
+                'stripe_price_id': 'price_1S4tO8HwKH0J9vzFqZBDgCOK'
+            },
+            {
+                'tier_name': 'Pro',
+                'price': 30.00,
+                'max_trades_per_day': 25,
+                'stripe_price_id': 'price_1S4tOYHwKH0J9vzFckMoFWwG'
+            },
+            {
+                'tier_name': 'Elite',
+                'price': 50.00,
+                'max_trades_per_day': 50,
+                'stripe_price_id': 'price_1S4tOtHwKH0J9vzFuxiERwQv'
+            }
+        ]
+        
+        # Clear existing tiers
+        db.session.execute(text("DELETE FROM subscription_tier"))
+        
+        # Add new tiers
+        for tier_data in tiers:
+            db.session.execute(text("""
+                INSERT INTO subscription_tier (tier_name, price, max_trades_per_day, stripe_price_id)
+                VALUES (:tier_name, :price, :max_trades_per_day, :stripe_price_id)
+            """), tier_data)
+        
+        db.session.commit()
+        return jsonify({"success": True, "message": f"Successfully populated {len(tiers)} subscription tiers"})
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"success": False, "message": f"Error: {str(e)}"})
 
 # Portfolio performance API endpoints
 @app.route('/api/portfolio/performance/<period>')
