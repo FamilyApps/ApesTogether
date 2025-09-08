@@ -28,18 +28,15 @@ def send_sms(phone_number, message):
         return True, f"mock_msg_{random.randint(1000, 9999)}", None
     
     try:
-        # Real Twilio implementation (uncomment when credentials are added)
-        # from twilio.rest import Client
-        # client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-        # message = client.messages.create(
-        #     body=message,
-        #     from_=TWILIO_PHONE_NUMBER,
-        #     to=phone_number
-        # )
-        # return True, message.sid, None
-        
-        # For now, return mock response
-        return True, f"mock_msg_{random.randint(1000, 9999)}", None
+        # Real Twilio implementation
+        from twilio.rest import Client
+        client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        message = client.messages.create(
+            body=message,
+            from_=TWILIO_PHONE_NUMBER,
+            to=phone_number
+        )
+        return True, message.sid, None
         
     except Exception as e:
         current_app.logger.error(f"SMS sending failed: {str(e)}")
