@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}SMS Settings{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <h4><i class="fas fa-sms"></i> SMS Notification Settings</h4>
+                </div>
+                <div class="card-body">
+                    {% if settings.has_settings and settings.is_verified %}
+                        <div class="alert alert-success">
+                            <i class="fas fa-check-circle"></i> Phone number verified: {{ settings.phone_number }}
+                        </div>
+                        
+                        <div class="mb-3">
+                            <h5>SMS Notifications</h5>
+                            <form method="POST" action="{{ url_for('sms.toggle_sms') }}">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="smsEnabled" 
+                                           {% if settings.sms_enabled %}checked{% endif %} 
+                                           onchange="this.form.submit()">
+                                    <label class="form-check-label" for="smsEnabled">
+                                        Enable SMS notifications for trades and updates
+                                    </label>
+                                </div>
+                            </form>
+                        </div>
+                        
+                        <div class="alert alert-info">
+                            <h6>What you'll receive:</h6>
+                            <ul class="mb-0">
+                                <li>Trade confirmations when you make trades</li>
+                                <li>Notifications when traders you subscribe to make trades</li>
+                                <li>Important account updates</li>
+                            </ul>
+                        </div>
+                        
+                    {% elif settings.has_settings and not settings.is_verified %}
+                        <div class="alert alert-warning">
+                            <i class="fas fa-exclamation-triangle"></i> Phone number added but not verified: {{ settings.phone_number }}
+                        </div>
+                        
+                        <form method="POST" action="{{ url_for('sms.verify') }}" class="mb-3">
+                            <div class="mb-3">
+                                <label for="verification_code" class="form-label">Enter Verification Code</label>
+                                <input type="text" class="form-control" id="verification_code" name="verification_code" 
+                                       placeholder="Enter 6-digit code" maxlength="6" required>
+                                <div class="form-text">Check your phone for the verification code we sent.</div>
+                            </div>
+                            <button type="submit" class="btn btn-success">Verify Phone Number</button>
+                        </form>
+                        
+                        <form method="POST" action="{{ url_for('sms.send_verification') }}">
+                            <input type="hidden" name="phone_number" value="{{ settings.phone_number }}">
+                            <button type="submit" class="btn btn-outline-secondary">Resend Code</button>
+                        </form>
+                        
+                    {% else %}
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle"></i> Add your phone number to receive SMS notifications for trades and updates.
+                        </div>
+                        
+                        <form method="POST" action="{{ url_for('sms.send_verification') }}">
+                            <div class="mb-3">
+                                <label for="phone_number" class="form-label">Phone Number</label>
+                                <input type="tel" class="form-control" id="phone_number" name="phone_number" 
+                                       placeholder="+1 (555) 123-4567" required>
+                                <div class="form-text">We'll send you a verification code to confirm your number.</div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Add Phone Number</button>
+                        </form>
+                    {% endif %}
+                    
+                    <hr>
+                    
+                    <div class="mt-4">
+                        <h6>SMS Features:</h6>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="card border-light">
+                                    <div class="card-body">
+                                        <h6 class="card-title"><i class="fas fa-bell"></i> Trade Notifications</h6>
+                                        <p class="card-text small">Get notified when traders you subscribe to make moves</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card border-light">
+                                    <div class="card-body">
+                                        <h6 class="card-title"><i class="fas fa-check"></i> Trade Confirmations</h6>
+                                        <p class="card-text small">Instant confirmation when your trades are processed</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-3">
+                        <small class="text-muted">
+                            <i class="fas fa-shield-alt"></i> Your phone number is secure and will only be used for notifications. 
+                            Standard SMS rates may apply.
+                        </small>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">Back to Dashboard</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

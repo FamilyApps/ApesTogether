@@ -24,7 +24,7 @@ import re
 # from flask_migrate import Migrate
 # from authlib.integrations.flask_client import OAuth
 # import requests
-# import stripe
+import stripe
 from datetime import datetime, date, timedelta
 
 # App configuration
@@ -483,20 +483,32 @@ def add_stock():
         db.session.add(stock)
         db.session.commit()
 
-        # --- Logic to update subscription price based on trade frequency ---
-        today_start = datetime.combine(date.today(), datetime.min.time())
-        trades_today = Stock.query.filter(
-            Stock.user_id == current_user.id,
-            Stock.purchase_date >= today_start
-        ).count()
-
-        # If this is the 5th trade of the day, and price is not already $8
-        if trades_today > 4 and current_user.subscription_price != 8.00:
-            current_user.stripe_price_id = 'price_1RbX1FQWUhVa3vgDoTuknCC6'  # $8 Price ID
-            current_user.subscription_price = 8.00
-            db.session.commit()
-            flash('Congratulations on your active trading! Your portfolio subscription price for new subscribers has been updated to $8/month.', 'info')
-        # --- End of subscription price logic ---
+        # --- Enhanced dynamic pricing logic for 5-tier system ---
+        # Update trade count tracking
+        trades_today = update_trade_limit_count(current_user.id)
+        
+        # Check if trade limit exceeded
+        exceeded, current_count, limit, tier_name = check_trade_limit_exceeded(current_user.id)
+        if exceeded:
+            flash(f'Trade limit reached! You have made {current_count} trades today. Your {tier_name} tier allows {limit} trades per day. Upgrade your activity to increase your subscription price and attract more subscribers!', 'warning')
+        
+        # Update subscription price based on 7-day trading average
+        price_updated = update_user_subscription_price(current_user.id)
+        if price_updated:
+            flash(f'Your subscription price has been updated to ${current_user.subscription_price}/month based on your recent trading activity!', 'info')
+        
+        # Send SMS notifications
+        from sms_utils import send_trade_confirmation_sms, send_subscriber_notification_sms
+        
+        # Send trade confirmation to user if SMS enabled
+        send_trade_confirmation_sms(current_user.id, ticker, quantity, "bought")
+        
+        # Send notifications to subscribers
+        subscriptions = Subscription.query.filter_by(subscribed_to_id=current_user.id, status='active').all()
+        for subscription in subscriptions:
+            send_subscriber_notification_sms(subscription.subscriber_id, current_user.username, ticker, quantity, "bought")
+        
+        # --- End of enhanced subscription price logic ---
 
         flash(f'Successfully added {quantity} shares of {ticker} to your portfolio.', 'success')
     
@@ -564,29 +576,50 @@ def portfolio_value():
 
 def get_stock_data(ticker_symbol):
     """Fetches real-time stock data from Alpha Vantage."""
+    api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
+    
+    if not api_key:
+        print(f"ERROR: No ALPHA_VANTAGE_API_KEY found in environment variables")
+        print(f"Please add ALPHA_VANTAGE_API_KEY to your .env file")
+        return None
+    
     try:
-        # Simplified implementation that returns mock data
-        # This avoids the need for the heavy alpha_vantage dependency
-        print(f"Using mock data for {ticker_symbol} since Alpha Vantage dependency was removed")
+        import requests
         
-        # Return a mock price based on the ticker symbol
-        # In production, you would replace this with a real API call
-        mock_prices = {
-            'AAPL': 185.92,
-            'MSFT': 420.45,
-            'GOOGL': 175.33,
-            'AMZN': 182.81,
-            'TSLA': 248.29,
-            'META': 475.12,
-            'NVDA': 116.64,
+        # Use Alpha Vantage Global Quote endpoint for real-time data
+        url = 'https://www.alphavantage.co/query'
+        params = {
+            'function': 'GLOBAL_QUOTE',
+            'symbol': ticker_symbol,
+            'apikey': api_key
         }
         
-        # Default price if ticker not in our mock data
-        price = mock_prices.get(ticker_symbol.upper(), 100.00)
-        return {'price': price}
-
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        # Check for API errors
+        if 'Error Message' in data:
+            print(f"Alpha Vantage Error: {data['Error Message']}")
+            return None
+            
+        if 'Note' in data:
+            print(f"Alpha Vantage Rate Limit: {data['Note']}")
+            return None
+        
+        # Extract price from Global Quote response
+        quote = data.get('Global Quote', {})
+        price_str = quote.get('05. price')
+        
+        if price_str:
+            price = float(price_str)
+            print(f"Retrieved real price for {ticker_symbol}: ${price}")
+            return {'price': price}
+        else:
+            print(f"No price data found for {ticker_symbol}")
+            return None
+            
     except Exception as e:
-        print(f"Error generating mock data for {ticker_symbol}: {e}")
+        print(f"Error fetching real data for {ticker_symbol}: {e}")
         return None
 
 # Context processor to provide current datetime to all templates
@@ -803,6 +836,30 @@ try:
 except ImportError as e:
     print(f"Could not register admin debug blueprint: {e}")
 
+# Register the main debug blueprint
+try:
+    from debug_routes import debug_bp as main_debug_bp
+    app.register_blueprint(main_debug_bp)
+    print("Main debug blueprint registered successfully")
+except ImportError as e:
+    print(f"Could not register main debug blueprint: {e}")
+
+# Register the SMS blueprint
+try:
+    from sms_routes import sms_bp
+    app.register_blueprint(sms_bp)
+    print("SMS blueprint registered successfully")
+except ImportError as e:
+    print(f"Could not register SMS blueprint: {e}")
+
+# Register the leaderboard blueprint
+try:
+    from leaderboard_routes import leaderboard_bp
+    app.register_blueprint(leaderboard_bp)
+    print("Leaderboard blueprint registered successfully")
+except ImportError as e:
+    print(f"Could not register leaderboard blueprint: {e}")
+
 # Portfolio performance API endpoints
 @app.route('/api/portfolio/performance/<period>')
 @login_required
@@ -836,7 +893,8 @@ def run_migration():
             return jsonify({'error': 'Admin access required'}), 403
         
         # Create the new tables
-        from models import PortfolioSnapshot, MarketData
+        from models import db, User, Stock, Subscription, Transaction, PortfolioSnapshot, MarketData, SP500ChartCache, SubscriptionTier, TradeLimit, SMSNotification, StockInfo, LeaderboardEntry
+        from subscription_utils import update_user_subscription_price, update_trade_limit_count, check_trade_limit_exceeded, get_subscription_tier_info
         db.create_all()
         
         return jsonify({

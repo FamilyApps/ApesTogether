@@ -131,3 +131,94 @@ class SP500ChartCache(db.Model):
     
     def __repr__(self):
         return f"<SP500ChartCache {self.period} generated at {self.generated_at}>"
+
+class SubscriptionTier(db.Model):
+    """Subscription tier definitions with pricing and trade limits"""
+    __tablename__ = 'subscription_tier'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    tier_name = db.Column(db.String(50), nullable=False, unique=True)  # 'Light', 'Standard', etc.
+    price = db.Column(db.Float, nullable=False)
+    max_trades_per_day = db.Column(db.Integer, nullable=False)
+    stripe_price_id = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    def __repr__(self):
+        return f"<SubscriptionTier {self.tier_name} ${self.price} {self.max_trades_per_day} trades/day>"
+
+class TradeLimit(db.Model):
+    """Daily trade count tracking per user"""
+    __tablename__ = 'trade_limit'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    date = db.Column(db.Date, nullable=False)
+    trade_count = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationship with User
+    user = db.relationship('User', backref=db.backref('trade_limits', lazy='dynamic'))
+    
+    # Ensure one record per user per day
+    __table_args__ = (db.UniqueConstraint('user_id', 'date', name='unique_user_date_trade_limit'),)
+    
+    def __repr__(self):
+        return f"<TradeLimit {self.user_id} {self.date} {self.trade_count} trades>"
+
+class SMSNotification(db.Model):
+    """SMS notification settings and phone verification"""
+    __tablename__ = 'sms_notification'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    phone_number = db.Column(db.String(20), nullable=True)
+    is_verified = db.Column(db.Boolean, default=False)
+    sms_enabled = db.Column(db.Boolean, default=True)
+    verification_code = db.Column(db.String(6), nullable=True)
+    verification_expires = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationship with User
+    user = db.relationship('User', backref=db.backref('sms_notification', uselist=False))
+    
+    def __repr__(self):
+        return f"<SMSNotification {self.user_id} {self.phone_number} verified={self.is_verified}>"
+
+class StockInfo(db.Model):
+    """Stock information including market cap and classification"""
+    __tablename__ = 'stock_info'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    ticker = db.Column(db.String(10), unique=True, nullable=False)
+    company_name = db.Column(db.String(200), nullable=True)
+    market_cap = db.Column(db.BigInteger, nullable=True)  # In dollars
+    cap_classification = db.Column(db.String(20), nullable=True)  # 'small' or 'large'
+    last_updated = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    def __repr__(self):
+        return f"<StockInfo {self.ticker} {self.company_name} {self.cap_classification} cap>"
+
+class LeaderboardEntry(db.Model):
+    """Leaderboard performance metrics and cap percentages"""
+    __tablename__ = 'leaderboard_entry'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    period = db.Column(db.String(10), nullable=False)  # '1D', '5D', '3M', 'YTD', '1Y', '5Y', 'MAX'
+    performance_percent = db.Column(db.Float, nullable=False)
+    small_cap_percent = db.Column(db.Float, default=0.0)
+    large_cap_percent = db.Column(db.Float, default=0.0)
+    avg_trades_per_week = db.Column(db.Float, default=0.0)
+    portfolio_value = db.Column(db.Float, default=0.0)
+    calculated_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationship with User
+    user = db.relationship('User', backref=db.backref('leaderboard_entries', lazy='dynamic'))
+    
+    # Ensure one entry per user per period
+    __table_args__ = (db.UniqueConstraint('user_id', 'period', name='unique_user_period_leaderboard'),)
+    
+    def __repr__(self):
+        return f"<LeaderboardEntry {self.user_id} {self.period} {self.performance_percent}%>"

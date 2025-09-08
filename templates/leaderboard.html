@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+
+{% block title %}Leaderboard{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2><i class="fas fa-trophy"></i> Performance Leaderboard</h2>
+                <div class="btn-group" role="group">
+                    <a href="{{ url_for('sms.sms_settings') }}" class="btn btn-outline-primary">
+                        <i class="fas fa-sms"></i> SMS Settings
+                    </a>
+                    <a href="{{ url_for('debug.debug_home') }}" class="btn btn-outline-secondary">
+                        <i class="fas fa-bug"></i> Debug
+                    </a>
+                </div>
+            </div>
+            
+            <!-- Period and Category Filters -->
+            <div class="card mb-4">
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label class="form-label">Time Period:</label>
+                            <div class="btn-group d-block" role="group">
+                                {% for period in periods %}
+                                <a href="{{ url_for('leaderboard.leaderboard_home', period=period, category=current_category) }}" 
+                                   class="btn btn-sm {% if period == current_period %}btn-primary{% else %}btn-outline-primary{% endif %}">
+                                    {{ period }}
+                                </a>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Category:</label>
+                            <div class="btn-group d-block" role="group">
+                                {% for cat_key, cat_name in categories %}
+                                <a href="{{ url_for('leaderboard.leaderboard_home', period=current_period, category=cat_key) }}" 
+                                   class="btn btn-sm {% if cat_key == current_category %}btn-success{% else %}btn-outline-success{% endif %}">
+                                    {{ cat_name }}
+                                </a>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Leaderboard Table -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        {{ current_period }} Performance 
+                        {% if current_category != 'all' %}
+                        - {{ dict(categories)[current_category] }}
+                        {% endif %}
+                    </h5>
+                </div>
+                <div class="card-body p-0">
+                    {% if leaderboard_data %}
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Rank</th>
+                                    <th>Trader</th>
+                                    <th>Performance</th>
+                                    <th>Portfolio Value</th>
+                                    <th>Small Cap %</th>
+                                    <th>Large Cap %</th>
+                                    <th>Avg Trades/Week</th>
+                                    <th>Subscription</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for entry in leaderboard_data %}
+                                <tr {% if entry.is_current_user %}class="table-info"{% endif %}>
+                                    <td>
+                                        <span class="badge bg-secondary">{{ loop.index }}</span>
+                                        {% if loop.index <= 3 %}
+                                        <i class="fas fa-trophy text-warning"></i>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <strong>{{ entry.username }}</strong>
+                                        {% if entry.is_current_user %}
+                                        <span class="badge bg-info ms-1">You</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <span class="{% if entry.performance_percent >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                            {% if entry.performance_percent >= 0 %}+{% endif %}{{ "%.2f"|format(entry.performance_percent) }}%
+                                        </span>
+                                    </td>
+                                    <td>${{ "{:,.2f}"|format(entry.portfolio_value) }}</td>
+                                    <td>
+                                        <div class="progress" style="height: 20px;">
+                                            <div class="progress-bar bg-info" role="progressbar" 
+                                                 style="width: {{ entry.small_cap_percent }}%">
+                                                {{ "%.1f"|format(entry.small_cap_percent) }}%
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="progress" style="height: 20px;">
+                                            <div class="progress-bar bg-primary" role="progressbar" 
+                                                 style="width: {{ entry.large_cap_percent }}%">
+                                                {{ "%.1f"|format(entry.large_cap_percent) }}%
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>{{ "%.1f"|format(entry.avg_trades_per_week) }}</td>
+                                    <td>
+                                        {% if entry.is_current_user %}
+                                        <span class="text-muted">Your Portfolio</span>
+                                        {% elif entry.is_subscribed %}
+                                        <span class="badge bg-success">
+                                            <i class="fas fa-check"></i> Subscribed
+                                        </span>
+                                        {% else %}
+                                        <a href="{{ url_for('profile', username=entry.username) }}" 
+                                           class="btn btn-primary btn-sm">
+                                            Subscribe for ${{ "%.0f"|format(entry.subscription_price) }}
+                                        </a>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="text-center py-5">
+                        <i class="fas fa-chart-line fa-3x text-muted mb-3"></i>
+                        <h5>No performance data available</h5>
+                        <p class="text-muted">Leaderboard data will appear once users have portfolio activity.</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            
+            <!-- Subscription Tiers Info -->
+            <div class="card mt-4">
+                <div class="card-header">
+                    <h6><i class="fas fa-info-circle"></i> How Subscription Pricing Works</h6>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <p class="mb-2">
+                                Subscription prices are automatically determined by each trader's activity level. 
+                                More active traders command higher subscription prices.
+                            </p>
+                            <ul class="small mb-0">
+                                <li><strong>Light ($8/month):</strong> Up to 3 trades per day</li>
+                                <li><strong>Standard ($12/month):</strong> 4-6 trades per day</li>
+                                <li><strong>Active ($20/month):</strong> 7-12 trades per day</li>
+                                <li><strong>Pro ($30/month):</strong> 13-25 trades per day</li>
+                                <li><strong>Elite ($50/month):</strong> 26+ trades per day</li>
+                            </ul>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="alert alert-info mb-0">
+                                <small>
+                                    <i class="fas fa-lightbulb"></i> 
+                                    <strong>Tip:</strong> Traders receive 70% of subscription revenue. 
+                                    The more you trade, the higher your subscription price!
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Auto-refresh leaderboard data every 5 minutes
+setInterval(function() {
+    location.reload();
+}, 300000);
+
+// Add tooltips for performance metrics
+document.addEventListener('DOMContentLoaded', function() {
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+});
+</script>
+{% endblock %}

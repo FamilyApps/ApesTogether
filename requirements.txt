@@ -12,3 +12,5 @@ requests==2.31.0
 Authlib==1.2.1
 PyJWT==2.8.0
 Flask-Migrate==4.0.4
+twilio==8.10.0
+alembic==1.12.1
