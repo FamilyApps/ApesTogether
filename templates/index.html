@@ -1,58 +1,70 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-md-8 text-center">
-        <div class="mt-5 mb-5">
-            <h1 class="display-4">Track Your Stock Portfolio</h1>
-            <p class="lead">Easily manage and track your stock investments in one place</p>
+<!-- Header Section -->
+<div class="row justify-content-center mb-4">
+    <div class="col-md-10 text-center">
+        <div class="mt-4 mb-4">
+            <h1 class="display-5">Portfolio Performance Leaderboard</h1>
+            <p class="lead">Track and compare portfolio performance across all users</p>
             
             {% if current_user.is_authenticated %}
-                <a href="{{ url_for('dashboard') }}" class="btn btn-primary btn-lg mt-3 me-3">
+                <a href="{{ url_for('dashboard') }}" class="btn btn-primary btn-lg mt-3">
                     <i class="fas fa-tachometer-alt me-2"></i>Go to Dashboard
                 </a>
-                <a href="{{ url_for('leaderboard.leaderboard_home') }}" class="btn btn-success btn-lg mt-3">
-                    <i class="fas fa-trophy me-2"></i>View Leaderboard
-                </a>
             {% else %}
-                <a href="{{ url_for('login') }}" class="btn btn-primary btn-lg mt-3 me-3">
+                <a href="{{ url_for('login') }}" class="btn btn-primary btn-lg mt-3">
                     <i class="fas fa-sign-in-alt me-2"></i>Get Started
-                </a>
-                <a href="{{ url_for('leaderboard.leaderboard_home') }}" class="btn btn-success btn-lg mt-3">
-                    <i class="fas fa-trophy me-2"></i>View Leaderboard
                 </a>
             {% endif %}
         </div>
-        
-        <div class="row mt-5">
-            <div class="col-md-4">
-                <div class="card mb-4 shadow-sm">
-                    <div class="card-body">
-                        <i class="fas fa-lock fa-3x mb-3 text-primary"></i>
-                        <h5 class="card-title">Secure Authentication</h5>
-                        <p class="card-text">Log in securely with your Apple or Google account with FaceID support</p>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="card mb-4 shadow-sm">
-                    <div class="card-body">
-                        <i class="fas fa-chart-pie fa-3x mb-3 text-primary"></i>
-                        <h5 class="card-title">Portfolio Management</h5>
-                        <p class="card-text">Add and track your stock holdings with real-time market data</p>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="card mb-4 shadow-sm">
-                    <div class="card-body">
-                        <i class="fas fa-chart-line fa-3x mb-3 text-primary"></i>
-                        <h5 class="card-title">Performance Tracking</h5>
-                        <p class="card-text">Monitor your portfolio's performance and investment returns</p>
-                    </div>
+    </div>
+</div>
+
+<!-- Embedded Leaderboard -->
+<div class="row justify-content-center">
+    <div class="col-md-12">
+        <div id="leaderboard-content">
+            <!-- This will be populated by JavaScript -->
+            <div class="text-center">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading leaderboard...</span>
                 </div>
             </div>
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Load leaderboard content on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadLeaderboard();
+});
+
+function loadLeaderboard() {
+    fetch('/leaderboard/')
+        .then(response => response.text())
+        .then(html => {
+            // Extract just the leaderboard content from the full page
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            const leaderboardContent = doc.querySelector('.container-fluid');
+            
+            if (leaderboardContent) {
+                document.getElementById('leaderboard-content').innerHTML = leaderboardContent.innerHTML;
+            } else {
+                document.getElementById('leaderboard-content').innerHTML = '<p class="text-center">Unable to load leaderboard data.</p>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading leaderboard:', error);
+            document.getElementById('leaderboard-content').innerHTML = '<p class="text-center text-danger">Error loading leaderboard data.</p>';
+        });
+}
+
+// Auto-refresh leaderboard data every 5 minutes
+setInterval(loadLeaderboard, 300000);
+</script>
 {% endblock %}

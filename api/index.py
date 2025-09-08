@@ -3957,6 +3957,79 @@ def populate_tiers():
         db.session.rollback()
         return jsonify({"success": False, "message": f"Error: {str(e)}"})
 
+@app.route('/admin/populate-stock-info')
+def populate_stock_info():
+    """Populate stock_info table with company data from Alpha Vantage"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+            
+        import requests
+        
+        # Get Alpha Vantage API key
+        alpha_vantage_api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
+        if not alpha_vantage_api_key:
+            return jsonify({'error': 'Alpha Vantage API key not found'}), 500
+            
+        # Get all unique stock symbols from user portfolios
+        symbols = db.session.execute(text("SELECT DISTINCT ticker FROM stock")).fetchall()
+        
+        populated_count = 0
+        errors = []
+        
+        for (symbol,) in symbols:
+            try:
+                # Check if we already have data for this symbol
+                existing = db.session.execute(text("""
+                    SELECT id FROM stock_info WHERE symbol = :symbol
+                """), {'symbol': symbol}).fetchone()
+                
+                if existing:
+                    continue  # Skip if already exists
+                
+                # Fetch company overview from Alpha Vantage
+                url = f"https://www.alphavantage.co/query?function=COMPANY_OVERVIEW&symbol={symbol}&apikey={alpha_vantage_api_key}"
+                response = requests.get(url, timeout=10)
+                data = response.json()
+                
+                if 'Symbol' in data and data.get('MarketCapitalization'):
+                    market_cap = int(data.get('MarketCapitalization', 0))
+                    company_name = data.get('Name', symbol)
+                    sector = data.get('Sector', 'Unknown')
+                    
+                    # Insert into stock_info table
+                    db.session.execute(text("""
+                        INSERT INTO stock_info (symbol, company_name, market_cap, sector)
+                        VALUES (:symbol, :company_name, :market_cap, :sector)
+                    """), {
+                        'symbol': symbol,
+                        'company_name': company_name,
+                        'market_cap': market_cap,
+                        'sector': sector
+                    })
+                    
+                    populated_count += 1
+                else:
+                    errors.append(f"No data found for {symbol}")
+                    
+            except Exception as e:
+                errors.append(f"Error for {symbol}: {str(e)}")
+        
+        db.session.commit()
+        
+        return jsonify({
+            "success": True, 
+            "message": f"Successfully populated {populated_count} stock info records",
+            "populated_count": populated_count,
+            "errors": errors[:5]  # Limit errors shown
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"success": False, "message": f"Error: {str(e)}"})
+
 # Portfolio performance API endpoints
 @app.route('/api/portfolio/performance/<period>')
 @login_required
