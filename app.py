@@ -859,16 +859,6 @@ try:
 except ImportError as e:
     print(f"Could not register leaderboard blueprint: {e}")
 
-# Route to populate subscription tiers
-@app.route('/admin/populate-tiers')
-def populate_tiers():
-    """Populate subscription tiers with Stripe price IDs"""
-    try:
-        from populate_subscription_tiers import populate_subscription_tiers
-        populate_subscription_tiers()
-        return jsonify({"success": True, "message": "Subscription tiers populated successfully"})
-    except Exception as e:
-        return jsonify({"success": False, "message": f"Error: {str(e)}"})
 
 # Portfolio performance API endpoints
 @app.route('/api/portfolio/performance/<period>')

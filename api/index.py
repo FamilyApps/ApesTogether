@@ -2671,6 +2671,13 @@ def add_stock():
     try:
         db.session.add(new_stock)
         db.session.commit()
+        
+        # Auto-populate stock info for new stocks
+        try:
+            populate_single_stock_info(ticker.upper())
+        except Exception as stock_info_error:
+            logger.warning(f"Failed to populate stock info for {ticker}: {str(stock_info_error)}")
+        
         flash(f'Added {quantity} shares of {ticker}', 'success')
     except Exception as e:
         db.session.rollback()

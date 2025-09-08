@@ -7,6 +7,7 @@ from datetime import datetime, date
 from flask import request, jsonify
 from models import db, User, PortfolioSnapshot
 from portfolio_performance import PortfolioPerformanceCalculator
+from leaderboard_utils import update_all_user_leaderboards
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -31,6 +32,7 @@ def handler(request):
             'timestamp': current_time.isoformat(),
             'daily_snapshots_created': 0,
             'users_processed': 0,
+            'leaderboard_entries_updated': 0,
             'errors': []
         }
         
@@ -54,6 +56,17 @@ def handler(request):
         
         except Exception as e:
             error_msg = f"Error processing daily snapshots: {str(e)}"
+            results['errors'].append(error_msg)
+            logger.error(error_msg)
+        
+        # Update leaderboard entries for all users
+        try:
+            logger.info("Starting leaderboard refresh after market close")
+            updated_count = update_all_user_leaderboards()
+            results['leaderboard_entries_updated'] = updated_count
+            logger.info(f"Leaderboard refresh completed: {updated_count} entries updated")
+        except Exception as e:
+            error_msg = f"Error updating leaderboard entries: {str(e)}"
             results['errors'].append(error_msg)
             logger.error(error_msg)
         

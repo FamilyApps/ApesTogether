@@ -64,7 +64,25 @@ function loadLeaderboard() {
         });
 }
 
-// Auto-refresh leaderboard data every 5 minutes
-setInterval(loadLeaderboard, 300000);
+// Auto-refresh leaderboard data once daily at 8:30 PM EST (after market close)
+function scheduleNextRefresh() {
+    const now = new Date();
+    const refreshTime = new Date();
+    refreshTime.setHours(20, 30, 0, 0); // 8:30 PM
+    
+    // If it's already past 8:30 PM today, schedule for tomorrow
+    if (now > refreshTime) {
+        refreshTime.setDate(refreshTime.getDate() + 1);
+    }
+    
+    const timeUntilRefresh = refreshTime.getTime() - now.getTime();
+    setTimeout(() => {
+        loadLeaderboard();
+        scheduleNextRefresh(); // Schedule the next refresh
+    }, timeUntilRefresh);
+}
+
+// Start the daily refresh schedule
+scheduleNextRefresh();
 </script>
 {% endblock %}
