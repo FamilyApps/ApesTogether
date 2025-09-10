@@ -4319,7 +4319,7 @@ def admin_diagnose_portfolio_data():
             
             try:
                 # Test current portfolio value calculation
-                current_value = calculator.calculate_current_portfolio_value(test_user.id)
+                current_value = calculator.calculate_portfolio_value(test_user.id)
                 
                 # Test snapshot creation
                 today = date.today()
