@@ -71,6 +71,18 @@ def handler(request):
             results['errors'].append(error_msg)
             logger.error(error_msg)
         
+        # Update daily platform metrics
+        try:
+            logger.info("Starting daily platform metrics update")
+            from admin_metrics import update_daily_metrics
+            metrics_success = update_daily_metrics()
+            results['metrics_updated'] = metrics_success
+            logger.info(f"Platform metrics update completed: {'success' if metrics_success else 'failed'}")
+        except Exception as e:
+            error_msg = f"Error updating platform metrics: {str(e)}"
+            results['errors'].append(error_msg)
+            logger.error(error_msg)
+        
         # Commit changes
         try:
             db.session.commit()

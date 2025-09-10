@@ -3918,13 +3918,13 @@ def fix_all_columns():
         
         results = []
         
-        # Create LeaderboardCache and UserPortfolioChartCache tables if they don't exist
+        # Create all cache and metrics tables if they don't exist
         try:
-            from models import LeaderboardCache, UserPortfolioChartCache
+            from models import LeaderboardCache, UserPortfolioChartCache, AlphaVantageAPILog, PlatformMetrics
             db.create_all()
-            results.append('Created LeaderboardCache and UserPortfolioChartCache tables')
+            results.append('Created LeaderboardCache, UserPortfolioChartCache, AlphaVantageAPILog, and PlatformMetrics tables')
         except Exception as e:
-            results.append(f'Cache table creation: {str(e)}')
+            results.append(f'Cache and metrics table creation: {str(e)}')
         
         # Fix SMS notification columns
         try:
@@ -3953,11 +3953,59 @@ def fix_all_columns():
         return jsonify({
             'success': True,
             'results': results,
-            'message': 'All column fixes attempted - leaderboard now uses cache system'
+            'message': 'All tables and columns created - full system ready with metrics tracking'
         })
         
     except Exception as e:
         db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/metrics')
+@login_required
+def admin_metrics():
+    """Get platform health metrics for admin dashboard"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from admin_metrics import get_admin_dashboard_metrics
+        metrics = get_admin_dashboard_metrics()
+        
+        return jsonify({
+            'success': True,
+            'metrics': metrics
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/update-metrics')
+@login_required
+def update_metrics():
+    """Manually update platform metrics (normally done daily)"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from admin_metrics import update_daily_metrics
+        success = update_daily_metrics()
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'Platform metrics updated successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'Failed to update platform metrics'
+            }), 500
+        
+    except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/populate-tiers')
@@ -5976,7 +6024,7 @@ def create_tables():
             return jsonify({'error': 'Admin access required'}), 403
         
         # Create the new tables
-        from models import db, User, Stock, Subscription, Transaction, PortfolioSnapshot, MarketData, SP500ChartCache, SubscriptionTier, TradeLimit, SMSNotification, StockInfo, LeaderboardEntry, LeaderboardCache, UserPortfolioChartCache
+        from models import db, User, Stock, Subscription, Transaction, PortfolioSnapshot, MarketData, SP500ChartCache, SubscriptionTier, TradeLimit, SMSNotification, StockInfo, LeaderboardEntry, LeaderboardCache, UserPortfolioChartCache, AlphaVantageAPILog, PlatformMetrics
         
         current_time = datetime.now()
         

@@ -163,6 +163,40 @@ class UserPortfolioChartCache(db.Model):
     def __repr__(self):
         return f"<UserPortfolioChartCache user_id={self.user_id} {self.period} generated at {self.generated_at}>"
 
+class AlphaVantageAPILog(db.Model):
+    """Track Alpha Vantage API calls for monitoring and rate limiting"""
+    __tablename__ = 'alpha_vantage_api_log'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    endpoint = db.Column(db.String(100), nullable=False)  # API endpoint called
+    symbol = db.Column(db.String(10), nullable=True)  # Stock symbol if applicable
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    response_status = db.Column(db.String(20), nullable=False)  # 'success', 'error', 'rate_limited'
+    response_time_ms = db.Column(db.Integer, nullable=True)  # Response time in milliseconds
+    
+    def __repr__(self):
+        return f"<AlphaVantageAPILog {self.endpoint} {self.symbol} at {self.timestamp}>"
+
+class PlatformMetrics(db.Model):
+    """Daily platform metrics for admin dashboard"""
+    __tablename__ = 'platform_metrics'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.Date, nullable=False, unique=True)
+    unique_stocks_count = db.Column(db.Integer, nullable=False, default=0)
+    active_users_1d = db.Column(db.Integer, nullable=False, default=0)
+    active_users_7d = db.Column(db.Integer, nullable=False, default=0)
+    active_users_30d = db.Column(db.Integer, nullable=False, default=0)
+    active_users_90d = db.Column(db.Integer, nullable=False, default=0)
+    api_calls_total = db.Column(db.Integer, nullable=False, default=0)
+    api_calls_avg_per_minute = db.Column(db.Float, nullable=False, default=0.0)
+    api_calls_peak_per_minute = db.Column(db.Integer, nullable=False, default=0)
+    api_calls_peak_time = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    
+    def __repr__(self):
+        return f"<PlatformMetrics {self.date} - {self.unique_stocks_count} stocks, {self.active_users_1d} active users>"
+
 class SubscriptionTier(db.Model):
     """Subscription tier definitions with pricing and trade limits"""
     __tablename__ = 'subscription_tier'
