@@ -1145,7 +1145,66 @@ def dashboard():
                     'gain_loss_percent': 'N/A'
                 })
     
-    return render_template_with_defaults('dashboard.html', stocks=portfolio_data, total_portfolio_value=total_portfolio_value, current_user=current_user)
+    return render_template_with_defaults('admin/dashboard.html', now=datetime.now())
+
+@app.route('/admin/debug-activity')
+@login_required
+def debug_activity():
+    """Debug endpoint to check user activity tracking"""
+    if not is_admin():
+        return redirect(url_for('index'))
+    
+    try:
+        from models import UserActivity
+        from datetime import datetime, timedelta
+        
+        # Get recent activity
+        recent_activity = UserActivity.query.order_by(UserActivity.timestamp.desc()).limit(10).all()
+        
+        # Get activity counts by time period
+        now = datetime.utcnow()
+        one_day_ago = now - timedelta(days=1)
+        seven_days_ago = now - timedelta(days=7)
+        
+        activity_1d = UserActivity.query.filter(UserActivity.timestamp >= one_day_ago).count()
+        activity_7d = UserActivity.query.filter(UserActivity.timestamp >= seven_days_ago).count()
+        
+        # Get unique users in last day
+        unique_users_1d = db.session.query(UserActivity.user_id.distinct()).filter(
+            UserActivity.timestamp >= one_day_ago
+        ).count()
+        
+        debug_info = {
+            'total_activity_records': UserActivity.query.count(),
+            'activity_last_24h': activity_1d,
+            'activity_last_7d': activity_7d,
+            'unique_users_last_24h': unique_users_1d,
+            'current_time_utc': now.isoformat(),
+            'cutoff_24h': one_day_ago.isoformat(),
+            'recent_activity': []
+        }
+        
+        for activity in recent_activity:
+            debug_info['recent_activity'].append({
+                'user_id': activity.user_id,
+                'activity_type': activity.activity_type,
+                'timestamp': activity.timestamp.isoformat(),
+                'ip_address': activity.ip_address
+            })
+        
+        return f"""
+        <html>
+        <head><title>Activity Debug</title></head>
+        <body>
+        <h1>User Activity Debug</h1>
+        <pre>{debug_info}</pre>
+        <a href="/admin">Back to Admin</a>
+        </body>
+        </html>
+        """
+        
+    except Exception as e:
+        return f"Error: {str(e)}"
 
 @app.route('/update_username', methods=['POST'])
 @login_required
