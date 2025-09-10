@@ -2711,7 +2711,7 @@ def delete_stock(stock_id):
 @app.route('/admin')
 @login_required
 def admin_dashboard():
-    """Secure admin dashboard - requires Google OAuth authentication"""
+    """Enhanced admin dashboard with platform metrics and API status"""
     # Verify user is authenticated
     if not current_user.is_authenticated:
         flash('You must be logged in to access the admin dashboard.', 'warning')
@@ -2723,111 +2723,38 @@ def admin_dashboard():
         return redirect(url_for('dashboard'))
     
     try:
-        # Get real data from database
+        # Get basic counts
         user_count = User.query.count()
         stock_count = Stock.query.count()
         transaction_count = Transaction.query.count()
         subscription_count = Subscription.query.count()
         
-        # Get recent users
-        recent_users = User.query.order_by(User.created_at.desc()).limit(5).all()
+        # Get recent users (limit 10 for table display)
+        recent_users = User.query.order_by(User.created_at.desc()).limit(10).all()
+        
+        # Check for problematic users (missing subscription data)
+        problematic_users = User.query.filter(
+            (User.subscription_price == None) | (User.stripe_price_id == None)
+        ).limit(10).all()
+        
     except Exception as e:
-        # If database connection fails, use mock data
-        app.logger.error(f"Database error: {str(e)}")
-        user_count = 15
-        stock_count = 42
-        transaction_count = 87
-        subscription_count = 10
-        
-        # Mock recent users
-        recent_users = [
-            {'id': 1, 'username': 'user1', 'email': 'user1@example.com'},
-            {'id': 2, 'username': 'user2', 'email': 'user2@example.com'},
-            {'id': 3, 'username': 'user3', 'email': 'user3@example.com'},
-        ]
+        app.logger.error(f"Database error in admin dashboard: {str(e)}")
+        # Fallback to basic counts
+        user_count = User.query.count() if User.query else 0
+        stock_count = Stock.query.count() if Stock.query else 0
+        transaction_count = Transaction.query.count() if Transaction.query else 0
+        subscription_count = Subscription.query.count() if Subscription.query else 0
+        recent_users = []
+        problematic_users = []
     
-    # Create user list HTML
-    user_list_html = ""
-    for user in recent_users:
-        username = getattr(user, 'username', 'N/A') if user else 'N/A'
-        email = getattr(user, 'email', 'N/A') if user else 'N/A'
-        user_id = getattr(user, 'id', 'N/A') if user else 'N/A'
-        user_list_html += f"""
-        <div class="user-item">
-            <strong>{username}</strong> - {email}
-            <small>(ID: {user_id})</small>
-        </div>"""
-    
-    return f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Admin Dashboard</title>
-    <style>
-        body {{ font-family: Arial, sans-serif; margin: 40px; background-color: #f5f5f5; }}
-        .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-        .header {{ border-bottom: 2px solid #4CAF50; padding-bottom: 20px; margin-bottom: 30px; }}
-        .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }}
-        .stat-card {{ background: linear-gradient(135deg, #4CAF50, #45a049); color: white; padding: 20px; border-radius: 8px; text-align: center; }}
-        .stat-number {{ font-size: 2em; font-weight: bold; margin-bottom: 5px; }}
-        .stat-label {{ font-size: 0.9em; opacity: 0.9; }}
-        .section {{ margin-bottom: 30px; }}
-        .section h3 {{ color: #333; border-bottom: 1px solid #ddd; padding-bottom: 10px; }}
-        .user-list {{ background: #f9f9f9; padding: 15px; border-radius: 5px; }}
-        .user-item {{ padding: 8px 0; border-bottom: 1px solid #eee; }}
-        .user-item:last-child {{ border-bottom: none; }}
-        .button {{ display: inline-block; background: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin: 5px; }}
-        .button:hover {{ background: #45a049; }}
-        .nav-buttons {{ margin-top: 20px; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>🚀 Admin Dashboard</h1>
-            <p>Welcome, {current_user.email}! You have admin access to ApesTogether.</p>
-        </div>
-        
-        <div class="stats">
-            <div class="stat-card">
-                <div class="stat-number">{user_count}</div>
-                <div class="stat-label">Total Users</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number">{stock_count}</div>
-                <div class="stat-label">Tracked Stocks</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number">{transaction_count}</div>
-                <div class="stat-label">Transactions</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number">{subscription_count}</div>
-                <div class="stat-label">Subscriptions</div>
-            </div>
-        </div>
-        
-        <div class="section">
-            <h3>📊 Quick Actions</h3>
-            <a href="/admin/users" class="button">👥 Manage Users</a>
-            <a href="/admin/transactions" class="button">💰 View Transactions</a>
-        </div>
-        
-        <div class="section">
-            <h3>👥 Recent Users</h3>
-            <div class="user-list">
-                {user_list_html}
-            </div>
-        </div>
-        
-        <div class="nav-buttons">
-            <a href="/dashboard" class="button">📈 Back to Dashboard</a>
-            <a href="/logout" class="button">🚪 Logout</a>
-        </div>
-    </div>
-</body>
-</html>
-    """
+    return render_template('admin/dashboard.html',
+        user_count=user_count,
+        stock_count=stock_count,
+        transaction_count=transaction_count,
+        subscription_count=subscription_count,
+        recent_users=recent_users,
+        problematic_users=problematic_users
+    )
 
 @app.route('/admin/db-debug')
 @login_required
