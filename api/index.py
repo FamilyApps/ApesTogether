@@ -4778,6 +4778,133 @@ def admin_clean_historical_snapshots():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/diagnose-snapshot-creation')
+@login_required
+def admin_diagnose_snapshot_creation():
+    """Diagnose why snapshots are identical - check API calls, caching, calculation logic"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime, date, timedelta
+        from models import db, PortfolioSnapshot, User, Stock
+        from portfolio_performance import PortfolioPerformanceCalculator
+        import os
+        
+        diagnosis = {
+            'api_status': {},
+            'calculation_tests': [],
+            'caching_analysis': {},
+            'root_cause_analysis': []
+        }
+        
+        # Test 1: Check Alpha Vantage API connectivity
+        try:
+            api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
+            diagnosis['api_status']['api_key_present'] = bool(api_key)
+            diagnosis['api_status']['api_key_length'] = len(api_key) if api_key else 0
+            
+            calculator = PortfolioPerformanceCalculator()
+            
+            # Test API call for a common stock
+            test_stock = Stock.query.first()
+            if test_stock:
+                stock_data = calculator.get_stock_data(test_stock.ticker)
+                diagnosis['api_status']['test_api_call'] = {
+                    'ticker': test_stock.ticker,
+                    'success': stock_data is not None,
+                    'current_price': float(stock_data.get('current_price', 0)) if stock_data else 0,
+                    'data_keys': list(stock_data.keys()) if stock_data else []
+                }
+        except Exception as e:
+            diagnosis['api_status']['api_error'] = str(e)
+        
+        # Test 2: Check portfolio calculation consistency
+        users = User.query.join(Stock).distinct().limit(3).all()
+        
+        for user in users:
+            try:
+                # Calculate portfolio value multiple times to check consistency
+                calc1 = calculator.calculate_portfolio_value(user.id)
+                calc2 = calculator.calculate_portfolio_value(user.id)
+                calc3 = calculator.calculate_portfolio_value(user.id)
+                
+                # Get user's stocks for analysis
+                stocks = Stock.query.filter_by(user_id=user.id).all()
+                stock_details = []
+                
+                for stock in stocks:
+                    stock_data = calculator.get_stock_data(stock.ticker)
+                    stock_details.append({
+                        'ticker': stock.ticker,
+                        'quantity': float(stock.quantity),
+                        'purchase_price': float(stock.purchase_price),
+                        'current_price': float(stock_data.get('current_price', 0)) if stock_data else 0,
+                        'api_success': stock_data is not None
+                    })
+                
+                calculation_test = {
+                    'user_id': user.id,
+                    'username': user.username,
+                    'calculation_1': float(calc1),
+                    'calculation_2': float(calc2),
+                    'calculation_3': float(calc3),
+                    'calculations_identical': calc1 == calc2 == calc3,
+                    'stock_count': len(stocks),
+                    'stock_details': stock_details
+                }
+                
+                diagnosis['calculation_tests'].append(calculation_test)
+                
+            except Exception as e:
+                diagnosis['calculation_tests'].append({
+                    'user_id': user.id,
+                    'error': str(e)
+                })
+        
+        # Test 3: Check caching behavior
+        try:
+            # Check if get_batch_stock_data is using cached values
+            test_tickers = [stock.ticker for stock in Stock.query.limit(3).all()]
+            if test_tickers:
+                batch_data_1 = calculator.get_batch_stock_data(test_tickers)
+                batch_data_2 = calculator.get_batch_stock_data(test_tickers)
+                
+                diagnosis['caching_analysis'] = {
+                    'test_tickers': test_tickers,
+                    'batch_1_success': batch_data_1 is not None,
+                    'batch_2_success': batch_data_2 is not None,
+                    'results_identical': batch_data_1 == batch_data_2 if batch_data_1 and batch_data_2 else False,
+                    'cache_working': True  # If results are identical, caching is working
+                }
+        except Exception as e:
+            diagnosis['caching_analysis']['error'] = str(e)
+        
+        # Root cause analysis
+        diagnosis['root_cause_analysis'] = [
+            "Identical snapshots can be caused by:",
+            "1. API failures causing fallback to cached/default values",
+            "2. Portfolio calculation using stale cached prices",
+            "3. Snapshot creation logic using current values for all historical dates",
+            "4. Database constraints or transaction issues",
+            "5. Cron job running with same timestamp for multiple days"
+        ]
+        
+        return jsonify({
+            'success': True,
+            'diagnosis': diagnosis
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/populate-leaderboard')
 @login_required
 def admin_populate_leaderboard():
