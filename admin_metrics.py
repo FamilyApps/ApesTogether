@@ -2,7 +2,7 @@
 Admin dashboard metrics utilities for tracking platform health
 """
 from datetime import datetime, date, timedelta
-from models import db, User, Stock, StockInfo, AlphaVantageAPILog, PlatformMetrics
+from models import db, User, Stock, StockInfo, AlphaVantageAPILog, PlatformMetrics, PortfolioSnapshot
 from sqlalchemy import func, distinct, and_
 
 def log_alpha_vantage_call(endpoint, symbol=None, response_status='success', response_time_ms=None):
@@ -51,9 +51,9 @@ def calculate_active_users(days):
     try:
         cutoff_date = datetime.now() - timedelta(days=days)
         
-        # Count users who have logged in or made transactions in the period
-        active_users = db.session.query(distinct(User.id)).filter(
-            User.last_login >= cutoff_date
+        # Count users who have portfolio snapshots in the period (indicates activity)
+        active_users = db.session.query(distinct(PortfolioSnapshot.user_id)).filter(
+            PortfolioSnapshot.date >= cutoff_date.date()
         ).count()
         
         return active_users

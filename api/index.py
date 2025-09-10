@@ -3926,29 +3926,40 @@ def fix_all_columns():
         except Exception as e:
             results.append(f'Cache and metrics table creation: {str(e)}')
         
-        # Fix SMS notification columns
+        # Commit table creation first
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            results.append(f'Error committing table creation: {str(e)}')
+        
+        # Fix SMS notification columns in separate transactions
         try:
             db.session.execute(text('ALTER TABLE sms_notification ADD COLUMN sms_enabled BOOLEAN DEFAULT TRUE'))
+            db.session.commit()
             results.append('Added sms_enabled column to sms_notification')
         except Exception as e:
+            db.session.rollback()
             if 'already exists' not in str(e).lower() and 'duplicate column' not in str(e).lower():
                 results.append(f'Error adding sms_enabled: {str(e)}')
         
         try:
             db.session.execute(text('ALTER TABLE sms_notification ADD COLUMN verification_expires DATETIME'))
+            db.session.commit()
             results.append('Added verification_expires column to sms_notification')
         except Exception as e:
+            db.session.rollback()
             if 'already exists' not in str(e).lower() and 'duplicate column' not in str(e).lower():
                 results.append(f'Error adding verification_expires: {str(e)}')
         
         try:
             db.session.execute(text('ALTER TABLE sms_notification ADD COLUMN updated_at DATETIME'))
+            db.session.commit()
             results.append('Added updated_at column to sms_notification')
         except Exception as e:
+            db.session.rollback()
             if 'already exists' not in str(e).lower() and 'duplicate column' not in str(e).lower():
                 results.append(f'Error adding updated_at: {str(e)}')
-        
-        db.session.commit()
         
         return jsonify({
             'success': True,

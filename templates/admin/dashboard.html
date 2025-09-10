@@ -6,6 +6,114 @@
 <div class="container mt-4">
     <h1 class="mb-4">Admin Dashboard</h1>
     
+    <!-- Platform Health Metrics -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Platform Health Metrics</h5>
+                    <button id="refreshMetrics" class="btn btn-sm btn-outline-primary">Refresh</button>
+                </div>
+                <div class="card-body">
+                    <div id="metricsLoading" class="text-center py-3">
+                        <div class="spinner-border" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                    <div id="metricsContent" style="display: none;">
+                        <div class="row">
+                            <div class="col-md-2">
+                                <div class="card bg-light">
+                                    <div class="card-body text-center">
+                                        <h6 class="card-title">Unique Stocks</h6>
+                                        <h4 class="text-primary" id="uniqueStocks">-</h4>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="card bg-light">
+                                    <div class="card-body text-center">
+                                        <h6 class="card-title">Active Users (1D)</h6>
+                                        <h4 class="text-success" id="activeUsers1d">-</h4>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="card bg-light">
+                                    <div class="card-body text-center">
+                                        <h6 class="card-title">Active Users (7D)</h6>
+                                        <h4 class="text-success" id="activeUsers7d">-</h4>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="card bg-light">
+                                    <div class="card-body text-center">
+                                        <h6 class="card-title">Active Users (30D)</h6>
+                                        <h4 class="text-success" id="activeUsers30d">-</h4>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="card bg-light">
+                                    <div class="card-body text-center">
+                                        <h6 class="card-title">Active Users (90D)</h6>
+                                        <h4 class="text-success" id="activeUsers90d">-</h4>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="card bg-light">
+                                    <div class="card-body text-center">
+                                        <h6 class="card-title">API Calls (7D)</h6>
+                                        <h4 class="text-info" id="apiCallsTotal">-</h4>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row mt-3">
+                            <div class="col-md-4">
+                                <div class="card bg-light">
+                                    <div class="card-body text-center">
+                                        <h6 class="card-title">Avg API Calls/Min (7D)</h6>
+                                        <h4 class="text-warning" id="apiCallsAvg">-</h4>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card bg-light">
+                                    <div class="card-body text-center">
+                                        <h6 class="card-title">Peak API Calls/Min (7D)</h6>
+                                        <h4 class="text-danger" id="apiCallsPeak">-</h4>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card bg-light">
+                                    <div class="card-body text-center">
+                                        <h6 class="card-title">Peak Time</h6>
+                                        <small class="text-muted" id="apiCallsPeakTime">-</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row mt-2">
+                            <div class="col-12">
+                                <small class="text-muted">
+                                    Last updated: <span id="metricsLastUpdated">-</span> | 
+                                    <span id="metricsCached" class="badge bg-secondary">-</span>
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="metricsError" style="display: none;" class="alert alert-danger">
+                        <strong>Error loading metrics:</strong> <span id="metricsErrorText"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="row mb-4">
         <div class="col-md-3">
             <div class="card text-white bg-primary">
@@ -106,4 +214,94 @@
         </div>
     </div>
 </div>
+
+<script>
+// Load platform metrics on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadPlatformMetrics();
+    
+    // Refresh button handler
+    document.getElementById('refreshMetrics').addEventListener('click', function() {
+        loadPlatformMetrics(true);
+    });
+});
+
+function loadPlatformMetrics(forceRefresh = false) {
+    const loading = document.getElementById('metricsLoading');
+    const content = document.getElementById('metricsContent');
+    const error = document.getElementById('metricsError');
+    
+    // Show loading state
+    loading.style.display = 'block';
+    content.style.display = 'none';
+    error.style.display = 'none';
+    
+    // If force refresh, update metrics first
+    const endpoint = forceRefresh ? '/admin/update-metrics' : '/admin/metrics';
+    
+    fetch(endpoint)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                if (forceRefresh) {
+                    // After updating, fetch the latest metrics
+                    return fetch('/admin/metrics').then(r => r.json());
+                }
+                return data;
+            } else {
+                throw new Error(data.error || 'Failed to load metrics');
+            }
+        })
+        .then(data => {
+            if (data.success && data.metrics) {
+                displayMetrics(data.metrics);
+            } else {
+                throw new Error(data.metrics?.error || 'Invalid metrics data');
+            }
+        })
+        .catch(err => {
+            console.error('Error loading metrics:', err);
+            loading.style.display = 'none';
+            error.style.display = 'block';
+            document.getElementById('metricsErrorText').textContent = err.message;
+        });
+}
+
+function displayMetrics(metrics) {
+    const loading = document.getElementById('metricsLoading');
+    const content = document.getElementById('metricsContent');
+    
+    // Update metric values
+    document.getElementById('uniqueStocks').textContent = metrics.unique_stocks_count || 0;
+    document.getElementById('activeUsers1d').textContent = metrics.active_users?.['1_day'] || 0;
+    document.getElementById('activeUsers7d').textContent = metrics.active_users?.['7_days'] || 0;
+    document.getElementById('activeUsers30d').textContent = metrics.active_users?.['30_days'] || 0;
+    document.getElementById('activeUsers90d').textContent = metrics.active_users?.['90_days'] || 0;
+    document.getElementById('apiCallsTotal').textContent = metrics.api_calls?.total_last_7_days || 0;
+    document.getElementById('apiCallsAvg').textContent = metrics.api_calls?.avg_per_minute_7_days || '0.0';
+    document.getElementById('apiCallsPeak').textContent = metrics.api_calls?.peak_per_minute_7_days || 0;
+    
+    // Format peak time
+    const peakTime = metrics.api_calls?.peak_time;
+    if (peakTime) {
+        const date = new Date(peakTime);
+        document.getElementById('apiCallsPeakTime').textContent = date.toLocaleString();
+    } else {
+        document.getElementById('apiCallsPeakTime').textContent = 'N/A';
+    }
+    
+    // Update metadata
+    document.getElementById('metricsLastUpdated').textContent = metrics.last_updated ? 
+        new Date(metrics.last_updated).toLocaleString() : 
+        new Date().toLocaleString();
+    
+    const cachedBadge = document.getElementById('metricsCached');
+    cachedBadge.textContent = metrics.cached ? 'Cached' : 'Real-time';
+    cachedBadge.className = metrics.cached ? 'badge bg-success' : 'badge bg-warning';
+    
+    // Show content
+    loading.style.display = 'none';
+    content.style.display = 'block';
+}
+</script>
 {% endblock %}

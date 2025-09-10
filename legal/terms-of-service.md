@@ -76,7 +76,7 @@ Users may not:
 - Use the Service for illegal activities
 - Violate securities laws or regulations
 - Trade on or share material non-public information (insider information)
-- Use insider information in making investment decisions shared on the platform
+- Use insider information in portfolio activities shared on the platform
 - Engage in insider trading or facilitate insider trading activities
 
 ## 8. Account Termination
