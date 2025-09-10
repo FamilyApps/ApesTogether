@@ -4154,14 +4154,14 @@ def admin_validate_schema():
             return jsonify({'error': 'Admin access required'}), 403
         
         from sqlalchemy import text, inspect
-        from models import (User, Stock, Subscription, SubscriptionTier, StockTransaction, 
+        from models import (User, Stock, Subscription, SubscriptionTier, Transaction, 
                           PortfolioSnapshot, MarketData, PortfolioSnapshotIntraday, 
                           LeaderboardCache, UserPortfolioChartCache, StockInfo, 
                           AlphaVantageAPILog, UserActivity, PlatformMetrics, SMSNotification)
         
         # Get all model classes
         models_to_check = [
-            User, Stock, Subscription, SubscriptionTier, StockTransaction,
+            User, Stock, Subscription, SubscriptionTier, Transaction,
             PortfolioSnapshot, MarketData, PortfolioSnapshotIntraday,
             LeaderboardCache, UserPortfolioChartCache, StockInfo,
             AlphaVantageAPILog, UserActivity, PlatformMetrics, SMSNotification
