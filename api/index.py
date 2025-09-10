@@ -3859,12 +3859,13 @@ def run_migration():
                     id SERIAL PRIMARY KEY,
                     user_id INTEGER NOT NULL REFERENCES "user"(id),
                     phone_number VARCHAR(20),
-                    verification_code VARCHAR(10),
                     is_verified BOOLEAN DEFAULT FALSE,
-                    notifications_enabled BOOLEAN DEFAULT TRUE,
+                    sms_enabled BOOLEAN DEFAULT TRUE,
+                    verification_code VARCHAR(6),
+                    verification_expires TIMESTAMP,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    verified_at TIMESTAMP
-                )
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
             """))
             
             # Create stock_info table
@@ -3898,10 +3899,34 @@ def run_migration():
         
         return jsonify({
             'success': True, 
-            'message': 'Migration completed successfully. New tables created.'
+            'message': 'Migration completed successfully'
         })
         
     except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()})
+
+@app.route('/admin/fix-sms-column')
+def fix_sms_column():
+    """Fix missing sms_enabled column in sms_notification table"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        with app.app_context():
+            # Add sms_enabled column if it doesn't exist
+            db.session.execute(text("""
+                ALTER TABLE sms_notification 
+                ADD COLUMN IF NOT EXISTS sms_enabled BOOLEAN DEFAULT TRUE;
+            """))
+            
+            db.session.commit()
+        
+        return jsonify({'success': True, 'message': 'SMS column fix completed successfully'})
+    except Exception as e:
+        db.session.rollback()
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()})
 
 @app.route('/admin/populate-tiers')
