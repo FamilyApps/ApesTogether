@@ -2753,7 +2753,8 @@ def admin_dashboard():
         transaction_count=transaction_count,
         subscription_count=subscription_count,
         recent_users=recent_users,
-        problematic_users=problematic_users
+        problematic_users=problematic_users,
+        now=datetime.now()
     )
 
 @app.route('/admin/db-debug')
