@@ -44,10 +44,30 @@ def handler(request):
             
             for user in users:
                 try:
-                    # Create or update daily snapshot
-                    calculator.create_daily_snapshot(user.id, today)
+                    # Create or update daily snapshot using working calculation method
+                    portfolio_value = calculator.calculate_portfolio_value(user.id, today)
+                    cash_flow = calculator.calculate_daily_cash_flow(user.id, today)
+                    
+                    # Check if snapshot already exists
+                    from models import PortfolioSnapshot
+                    existing_snapshot = PortfolioSnapshot.query.filter_by(
+                        user_id=user.id, date=today
+                    ).first()
+                    
+                    if existing_snapshot:
+                        existing_snapshot.total_value = portfolio_value
+                        existing_snapshot.cash_flow = cash_flow
+                    else:
+                        snapshot = PortfolioSnapshot(
+                            user_id=user.id,
+                            date=today,
+                            total_value=portfolio_value,
+                            cash_flow=cash_flow
+                        )
+                        db.session.add(snapshot)
+                    
                     results['daily_snapshots_created'] += 1
-                    logger.info(f"Created daily snapshot for user {user.id}")
+                    logger.info(f"Created daily snapshot for user {user.id}: ${portfolio_value}")
                 
                 except Exception as e:
                     error_msg = f"Error creating daily snapshot for user {user.id}: {str(e)}"
