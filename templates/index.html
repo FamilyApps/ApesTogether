@@ -44,23 +44,38 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function loadLeaderboard() {
-    fetch('/leaderboard/')
-        .then(response => response.text())
-        .then(html => {
-            // Extract just the leaderboard content from the full page
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
-            const leaderboardContent = doc.querySelector('.container-fluid');
-            
-            if (leaderboardContent) {
-                document.getElementById('leaderboard-content').innerHTML = leaderboardContent.innerHTML;
+    fetch('/leaderboard/api/data?period=YTD&limit=10')
+        .then(response => response.json())
+        .then(data => {
+            if (data.data && data.data.length > 0) {
+                let html = '<div class="table-responsive"><table class="table table-striped"><thead><tr>';
+                html += '<th>Rank</th><th>User</th><th>Performance</th><th>Portfolio Value</th><th>Market Cap Focus</th></tr></thead><tbody>';
+                
+                data.data.forEach((entry, index) => {
+                    const marketCapFocus = entry.small_cap_percent > 50 ? 'Small Cap' : 
+                                         entry.large_cap_percent > 50 ? 'Large Cap' : 'Mixed';
+                    html += `<tr>
+                        <td>${index + 1}</td>
+                        <td>${entry.username}</td>
+                        <td class="${entry.performance_percent >= 0 ? 'text-success' : 'text-danger'}">
+                            ${entry.performance_percent >= 0 ? '+' : ''}${entry.performance_percent.toFixed(2)}%
+                        </td>
+                        <td>$${entry.portfolio_value.toLocaleString()}</td>
+                        <td>${marketCapFocus}</td>
+                    </tr>`;
+                });
+                
+                html += '</tbody></table></div>';
+                html += '<div class="text-center mt-3"><a href="/leaderboard/" class="btn btn-primary">View Full Leaderboard</a></div>';
+                
+                document.getElementById('leaderboard-content').innerHTML = html;
             } else {
-                document.getElementById('leaderboard-content').innerHTML = '<p class="text-center">Unable to load leaderboard data.</p>';
+                document.getElementById('leaderboard-content').innerHTML = '<p class="text-center">No leaderboard data available yet. Check back after market close for updated rankings.</p>';
             }
         })
         .catch(error => {
             console.error('Error loading leaderboard:', error);
-            document.getElementById('leaderboard-content').innerHTML = '<p class="text-center text-danger">Error loading leaderboard data.</p>';
+            document.getElementById('leaderboard-content').innerHTML = '<p class="text-center text-muted">Leaderboard data will be available after market close. Please check back later.</p>';
         });
 }
 

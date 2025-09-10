@@ -176,24 +176,42 @@ def get_real_stock_price(ticker):
 
 def calculate_performance_metrics(user_id, period):
     """
-    Calculate performance metrics for a specific period
+    Calculate real performance metrics for a specific period based on portfolio snapshots
     Returns performance percentage
     """
-    # This is a simplified mock implementation
-    # In production, you would calculate based on actual portfolio snapshots
+    from portfolio_performance import PortfolioPerformanceCalculator
     
-    # Mock performance data based on period
-    mock_performance = {
-        '1D': 1.2,   # 1.2% daily return
-        '5D': 3.8,   # 3.8% weekly return
-        '3M': 8.5,   # 8.5% quarterly return
-        'YTD': 15.2, # 15.2% year-to-date return
-        '1Y': 18.7,  # 18.7% annual return
-        '5Y': 95.4,  # 95.4% 5-year return
-        'MAX': 145.8 # 145.8% all-time return
-    }
-    
-    return mock_performance.get(period, 0.0)
+    try:
+        calculator = PortfolioPerformanceCalculator()
+        
+        # Get performance data for the specified period
+        performance_data = calculator.get_performance_data(user_id, period)
+        
+        if performance_data and 'performance_percent' in performance_data:
+            return performance_data['performance_percent']
+        else:
+            # If no performance data available, calculate current vs initial portfolio value
+            stocks = Stock.query.filter_by(user_id=user_id).all()
+            if not stocks:
+                return 0.0
+            
+            current_value = 0
+            initial_value = 0
+            
+            for stock in stocks:
+                current_price = get_real_stock_price(stock.ticker)
+                if current_price:
+                    current_value += stock.quantity * current_price
+                    initial_value += stock.quantity * stock.purchase_price
+            
+            if initial_value > 0:
+                return ((current_value - initial_value) / initial_value) * 100
+            else:
+                return 0.0
+                
+    except Exception as e:
+        current_app.logger.error(f"Error calculating performance for user {user_id}, period {period}: {str(e)}")
+        return 0.0
 
 def update_leaderboard_entry(user_id, period):
     """
