@@ -633,35 +633,42 @@ class PortfolioPerformanceCalculator:
         # Normalize both to percentage change from start
         chart_data = []
         
-        if snapshots and sp500_data and len(snapshots) > 1:
-            # Both portfolio and S&P 500 data available with multiple snapshots
-            start_portfolio_value = snapshots[0].total_value
-            start_sp500_value = None
-            
-            # Find S&P 500 start value
-            for snapshot in snapshots:
-                if snapshot.date in sp500_data:
-                    start_sp500_value = sp500_data[snapshot.date]
-                    break
-            
-            if start_portfolio_value > 0 and start_sp500_value:
-                # Sample snapshots for appropriate chart density
-                snapshot_dates = [s.date for s in snapshots]
-                sampled_dates = self._sample_dates_for_period(snapshot_dates, period)
+        # Get user's actual portfolio start date (first snapshot)
+        user_first_snapshot = PortfolioSnapshot.query.filter_by(user_id=user_id)\
+            .order_by(PortfolioSnapshot.date.asc()).first()
+        
+        if snapshots and sp500_data:
+            # Find S&P 500 data for the full period (always show full S&P line)
+            sp500_dates = sorted(sp500_data.keys())
+            if sp500_dates:
+                period_start_sp500 = None
+                for date_key in sp500_dates:
+                    if date_key >= start_date:
+                        period_start_sp500 = sp500_data[date_key]
+                        break
                 
-                for snapshot in snapshots:
-                    if snapshot.date in sampled_dates:
-                        portfolio_pct = ((snapshot.total_value - start_portfolio_value) / start_portfolio_value) * 100
-                        
-                        sp500_pct = 0
-                        if snapshot.date in sp500_data:
-                            sp500_pct = ((sp500_data[snapshot.date] - start_sp500_value) / start_sp500_value) * 100
-                        
-                        chart_data.append({
-                            'date': snapshot.date.isoformat(),
-                            'portfolio': round(portfolio_pct, 2),
-                            'sp500': round(sp500_pct, 2)
-                        })
+                if period_start_sp500:
+                    # Sample data points for chart density
+                    sampled_dates = self._sample_dates_for_period(sp500_dates, period)
+                    
+                    for date_key in sampled_dates:
+                        if date_key >= start_date and date_key in sp500_data:
+                            sp500_pct = ((sp500_data[date_key] - period_start_sp500) / period_start_sp500) * 100
+                            
+                            # Only include portfolio data from user's actual start date
+                            portfolio_pct = None
+                            if user_first_snapshot and date_key >= user_first_snapshot.date and len(snapshots) > 0:
+                                # Find portfolio snapshot for this date
+                                portfolio_snapshot = next((s for s in snapshots if s.date == date_key), None)
+                                if portfolio_snapshot and snapshots[0].total_value > 0:
+                                    start_portfolio_value = snapshots[0].total_value
+                                    portfolio_pct = ((portfolio_snapshot.total_value - start_portfolio_value) / start_portfolio_value) * 100
+                            
+                            chart_data.append({
+                                'date': date_key.isoformat(),
+                                'portfolio': round(portfolio_pct, 2) if portfolio_pct is not None else None,
+                                'sp500': round(sp500_pct, 2)
+                            })
         
         # Always show S&P 500 data if available (even with limited portfolio history)
         if not chart_data and sp500_data:

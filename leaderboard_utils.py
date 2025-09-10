@@ -390,15 +390,25 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
         if not latest_snapshot:
             continue
             
-        # Get snapshot closest to start date
+        # Get the user's first snapshot (actual portfolio start date)
+        first_snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id)\
+            .order_by(PortfolioSnapshot.date.asc()).first()
+        
+        if not first_snapshot:
+            continue
+        
+        # Use the later of: period start date OR user's actual first snapshot date
+        actual_start_date = max(start_date, first_snapshot.date)
+        
+        # Get snapshot closest to actual start date
         start_snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id)\
-            .filter(PortfolioSnapshot.date >= start_date)\
+            .filter(PortfolioSnapshot.date >= actual_start_date)\
             .order_by(PortfolioSnapshot.date.asc()).first()
         
         if not start_snapshot:
             continue
         
-        # Calculate performance
+        # Calculate performance from actual portfolio start, not arbitrary period start
         current_value = latest_snapshot.total_value
         start_value = start_snapshot.total_value
         

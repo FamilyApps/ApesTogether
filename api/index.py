@@ -4427,9 +4427,9 @@ def admin_fix_portfolio_snapshots():
                 current_value = calculator.calculate_portfolio_value(user.id)
                 user_result['current_portfolio_value'] = current_value
                 
-                # Get recent snapshots (last 30 days) that need fixing
+                # Get ALL snapshots from beginning of year that need fixing
                 end_date = date.today()
-                start_date = end_date - timedelta(days=30)
+                start_date = date(end_date.year, 1, 1)  # January 1st of current year
                 
                 # Get existing snapshots in this period
                 existing_snapshots = PortfolioSnapshot.query.filter(
