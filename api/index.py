@@ -4387,6 +4387,118 @@ def admin_diagnose_portfolio_data():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/fix-portfolio-snapshots')
+@login_required
+def admin_fix_portfolio_snapshots():
+    """Fix all portfolio snapshots to use real calculated values instead of zeros"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime, date, timedelta
+        from models import db, PortfolioSnapshot, User, Stock
+        from portfolio_performance import PortfolioPerformanceCalculator
+        
+        calculator = PortfolioPerformanceCalculator()
+        results = {
+            'users_processed': 0,
+            'snapshots_updated': 0,
+            'snapshots_created': 0,
+            'errors': [],
+            'user_details': []
+        }
+        
+        # Get all users with stocks
+        users = User.query.join(Stock).distinct().all()
+        
+        for user in users:
+            try:
+                user_result = {
+                    'user_id': user.id,
+                    'username': user.username,
+                    'snapshots_updated': 0,
+                    'snapshots_created': 0,
+                    'current_portfolio_value': 0
+                }
+                
+                # Calculate current portfolio value
+                current_value = calculator.calculate_portfolio_value(user.id)
+                user_result['current_portfolio_value'] = current_value
+                
+                # Get recent snapshots (last 30 days) that need fixing
+                end_date = date.today()
+                start_date = end_date - timedelta(days=30)
+                
+                # Get existing snapshots in this period
+                existing_snapshots = PortfolioSnapshot.query.filter(
+                    PortfolioSnapshot.user_id == user.id,
+                    PortfolioSnapshot.date >= start_date,
+                    PortfolioSnapshot.date <= end_date
+                ).all()
+                
+                # Update existing snapshots with correct values
+                for snapshot in existing_snapshots:
+                    old_value = snapshot.total_value
+                    # Recalculate portfolio value for that specific date
+                    snapshot_value = calculator.calculate_portfolio_value(user.id, snapshot.date)
+                    
+                    if abs(snapshot_value - old_value) > 0.01:  # Only update if significantly different
+                        snapshot.total_value = snapshot_value
+                        user_result['snapshots_updated'] += 1
+                        results['snapshots_updated'] += 1
+                
+                # Create missing snapshots for recent weekdays
+                current_date = start_date
+                while current_date <= end_date:
+                    if current_date.weekday() < 5:  # Only weekdays
+                        existing = PortfolioSnapshot.query.filter_by(
+                            user_id=user.id, date=current_date
+                        ).first()
+                        
+                        if not existing:
+                            # Create new snapshot
+                            portfolio_value = calculator.calculate_portfolio_value(user.id, current_date)
+                            cash_flow = calculator.calculate_daily_cash_flow(user.id, current_date)
+                            
+                            new_snapshot = PortfolioSnapshot(
+                                user_id=user.id,
+                                date=current_date,
+                                total_value=portfolio_value,
+                                cash_flow=cash_flow
+                            )
+                            db.session.add(new_snapshot)
+                            user_result['snapshots_created'] += 1
+                            results['snapshots_created'] += 1
+                    
+                    current_date += timedelta(days=1)
+                
+                results['user_details'].append(user_result)
+                results['users_processed'] += 1
+                
+            except Exception as e:
+                error_msg = f"Error processing user {user.id}: {str(e)}"
+                results['errors'].append(error_msg)
+        
+        # Commit all changes
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Fixed portfolio snapshots for {results["users_processed"]} users',
+            'results': results
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/populate-leaderboard')
 @login_required
 def admin_populate_leaderboard():
