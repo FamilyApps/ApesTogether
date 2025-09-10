@@ -132,6 +132,21 @@ class SP500ChartCache(db.Model):
     def __repr__(self):
         return f"<SP500ChartCache {self.period} generated at {self.generated_at}>"
 
+class LeaderboardCache(db.Model):
+    """Pre-generated leaderboard data cache updated at market close"""
+    __tablename__ = 'leaderboard_cache'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    period = db.Column(db.String(10), nullable=False)  # '1D', '5D', '3M', 'YTD', '1Y', '5Y', 'MAX'
+    leaderboard_data = db.Column(db.Text, nullable=False)  # JSON string of leaderboard data
+    generated_at = db.Column(db.DateTime, nullable=False)
+    
+    # Ensure one cache entry per period
+    __table_args__ = (db.UniqueConstraint('period', name='unique_period_leaderboard'),)
+    
+    def __repr__(self):
+        return f"<LeaderboardCache {self.period} generated at {self.generated_at}>"
+
 class SubscriptionTier(db.Model):
     """Subscription tier definitions with pricing and trade limits"""
     __tablename__ = 'subscription_tier'

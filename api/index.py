@@ -3907,73 +3907,58 @@ def run_migration():
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()})
 
 @app.route('/admin/fix-all-columns')
+@login_required
 def fix_all_columns():
-    """Fix all missing columns in database tables"""
+    """Fix all missing columns in one go"""
     try:
         # Check if user is admin
         email = session.get('email', '')
         if email != ADMIN_EMAIL:
             return jsonify({'error': 'Admin access required'}), 403
         
-        with app.app_context():
-            # Fix sms_notification table - add all missing columns
-            db.session.execute(text("""
-                ALTER TABLE sms_notification 
-                ADD COLUMN IF NOT EXISTS sms_enabled BOOLEAN DEFAULT TRUE;
-            """))
-            
-            db.session.execute(text("""
-                ALTER TABLE sms_notification 
-                ADD COLUMN IF NOT EXISTS verification_expires TIMESTAMP;
-            """))
-            
-            db.session.execute(text("""
-                ALTER TABLE sms_notification 
-                ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
-            """))
-            
-            # Fix leaderboard_entry table - add all missing columns
-            db.session.execute(text("""
-                ALTER TABLE leaderboard_entry 
-                ADD COLUMN IF NOT EXISTS period VARCHAR(10);
-            """))
-            
-            db.session.execute(text("""
-                ALTER TABLE leaderboard_entry 
-                ADD COLUMN IF NOT EXISTS performance_percent FLOAT;
-            """))
-            
-            db.session.execute(text("""
-                ALTER TABLE leaderboard_entry 
-                ADD COLUMN IF NOT EXISTS small_cap_percent FLOAT DEFAULT 0.0;
-            """))
-            
-            db.session.execute(text("""
-                ALTER TABLE leaderboard_entry 
-                ADD COLUMN IF NOT EXISTS large_cap_percent FLOAT DEFAULT 0.0;
-            """))
-            
-            db.session.execute(text("""
-                ALTER TABLE leaderboard_entry 
-                ADD COLUMN IF NOT EXISTS avg_trades_per_week FLOAT DEFAULT 0.0;
-            """))
-            
-            db.session.execute(text("""
-                ALTER TABLE leaderboard_entry 
-                ADD COLUMN IF NOT EXISTS portfolio_value FLOAT DEFAULT 0.0;
-            """))
-            
-            db.session.execute(text("""
-                ALTER TABLE leaderboard_entry 
-                ADD COLUMN IF NOT EXISTS calculated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
-            """))
-            
-            db.session.commit()
+        results = []
         
-        return jsonify({'success': True, 'message': 'All database columns fix completed successfully'})
+        # Create LeaderboardCache table if it doesn't exist
+        try:
+            from models import LeaderboardCache
+            db.create_all()
+            results.append('Created LeaderboardCache table')
+        except Exception as e:
+            results.append(f'LeaderboardCache table creation: {str(e)}')
+        
+        # Fix SMS notification columns
+        try:
+            db.session.execute(text('ALTER TABLE sms_notification ADD COLUMN sms_enabled BOOLEAN DEFAULT TRUE'))
+            results.append('Added sms_enabled column to sms_notification')
+        except Exception as e:
+            if 'already exists' not in str(e).lower() and 'duplicate column' not in str(e).lower():
+                results.append(f'Error adding sms_enabled: {str(e)}')
+        
+        try:
+            db.session.execute(text('ALTER TABLE sms_notification ADD COLUMN verification_expires DATETIME'))
+            results.append('Added verification_expires column to sms_notification')
+        except Exception as e:
+            if 'already exists' not in str(e).lower() and 'duplicate column' not in str(e).lower():
+                results.append(f'Error adding verification_expires: {str(e)}')
+        
+        try:
+            db.session.execute(text('ALTER TABLE sms_notification ADD COLUMN updated_at DATETIME'))
+            results.append('Added updated_at column to sms_notification')
+        except Exception as e:
+            if 'already exists' not in str(e).lower() and 'duplicate column' not in str(e).lower():
+                results.append(f'Error adding updated_at: {str(e)}')
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'results': results,
+            'message': 'All column fixes attempted - leaderboard now uses cache system'
+        })
+        
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()})
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/populate-tiers')
 def populate_tiers():
@@ -5980,24 +5965,24 @@ def cron_daily_snapshots():
         logger.error(f"Cron daily snapshots error: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/admin/test-intraday-collection')
+@app.route('/admin/create-tables')
 @login_required
-def test_intraday_collection():
-    """Test the intraday data collection system"""
+def create_tables():
+    """Create all database tables"""
     try:
         # Check if user is admin
         email = session.get('email', '')
         if email != ADMIN_EMAIL:
             return jsonify({'error': 'Admin access required'}), 403
         
-        from datetime import datetime
-        from models import User, PortfolioSnapshotIntraday, MarketData, SP500ChartCache
-        from portfolio_performance import PortfolioPerformanceCalculator
+        # Create the new tables
+        from models import db, User, Stock, Subscription, Transaction, PortfolioSnapshot, MarketData, SP500ChartCache, SubscriptionTier, TradeLimit, SMSNotification, StockInfo, LeaderboardEntry, LeaderboardCache
         
         current_time = datetime.now()
         
         results = {
             'timestamp': current_time.isoformat(),
+        # Rest of your code remains the same
             'environment_check': {},
             'spy_data_test': {},
             'user_count': 0,

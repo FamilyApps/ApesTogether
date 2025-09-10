@@ -297,8 +297,27 @@ def update_leaderboard_entry(user_id, period):
 
 def get_leaderboard_data(period='YTD', limit=50):
     """
-    Get leaderboard data directly from portfolio snapshots - no extra tables needed
-    Returns list of users sorted by performance
+    Get cached leaderboard data from LeaderboardCache table
+    Returns pre-calculated leaderboard data updated at market close
+    """
+    import json
+    from models import LeaderboardCache
+    
+    # Try to get cached data first
+    cache_entry = LeaderboardCache.query.filter_by(period=period).first()
+    
+    if cache_entry:
+        # Return cached data
+        cached_data = json.loads(cache_entry.leaderboard_data)
+        return cached_data[:limit]
+    
+    # Fallback: calculate on-demand if no cache exists
+    return calculate_leaderboard_data(period, limit)
+
+def calculate_leaderboard_data(period='YTD', limit=50):
+    """
+    Calculate leaderboard data directly from portfolio snapshots
+    Used for cache generation and fallback
     """
     from datetime import datetime, date, timedelta
     
@@ -362,12 +381,57 @@ def get_leaderboard_data(period='YTD', limit=50):
             'large_cap_percent': large_cap_percent,
             'portfolio_value': round(current_value, 2),
             'subscription_price': user.subscription_price,
-            'calculated_at': datetime.now()
+            'calculated_at': datetime.now().isoformat()
         })
     
     # Sort by performance and limit results
     leaderboard_data.sort(key=lambda x: x['performance_percent'], reverse=True)
     return leaderboard_data[:limit]
+
+def update_leaderboard_cache():
+    """
+    Update cached leaderboard data for all periods
+    Called at market close to pre-generate leaderboard data
+    """
+    import json
+    from datetime import datetime
+    from models import db, LeaderboardCache
+    
+    periods = ['1D', '5D', '3M', 'YTD', '1Y', '5Y', 'MAX']
+    updated_count = 0
+    
+    for period in periods:
+        try:
+            # Calculate fresh leaderboard data
+            leaderboard_data = calculate_leaderboard_data(period, 100)  # Cache top 100
+            
+            # Update or create cache entry
+            cache_entry = LeaderboardCache.query.filter_by(period=period).first()
+            if cache_entry:
+                cache_entry.leaderboard_data = json.dumps(leaderboard_data)
+                cache_entry.generated_at = datetime.now()
+            else:
+                cache_entry = LeaderboardCache(
+                    period=period,
+                    leaderboard_data=json.dumps(leaderboard_data),
+                    generated_at=datetime.now()
+                )
+                db.session.add(cache_entry)
+            
+            updated_count += 1
+            
+        except Exception as e:
+            print(f"Error updating leaderboard cache for period {period}: {str(e)}")
+            continue
+    
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error committing leaderboard cache updates: {str(e)}")
+        return 0
+    
+    return updated_count
 
 def update_all_user_leaderboards():
     """

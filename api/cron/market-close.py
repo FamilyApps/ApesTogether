@@ -59,14 +59,15 @@ def handler(request):
             results['errors'].append(error_msg)
             logger.error(error_msg)
         
-        # Update leaderboard entries for all users
+        # Update leaderboard cache for all periods
         try:
-            logger.info("Starting leaderboard refresh after market close")
-            updated_count = update_all_user_leaderboards()
-            results['leaderboard_entries_updated'] = updated_count
-            logger.info(f"Leaderboard refresh completed: {updated_count} entries updated")
+            logger.info("Starting leaderboard cache refresh after market close")
+            from leaderboard_utils import update_leaderboard_cache
+            updated_count = update_leaderboard_cache()
+            results['leaderboard_cache_updated'] = updated_count
+            logger.info(f"Leaderboard cache refresh completed: {updated_count} periods updated")
         except Exception as e:
-            error_msg = f"Error updating leaderboard entries: {str(e)}"
+            error_msg = f"Error updating leaderboard cache: {str(e)}"
             results['errors'].append(error_msg)
             logger.error(error_msg)
         
