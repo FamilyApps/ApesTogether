@@ -3994,8 +3994,8 @@ def admin_metrics():
 
 @app.route('/admin/update-metrics')
 @login_required
-def update_metrics():
-    """Manually update platform metrics (normally done daily)"""
+def admin_update_metrics():
+    """Manually update platform metrics"""
     try:
         # Check if user is admin
         email = session.get('email', '')
@@ -4005,19 +4005,172 @@ def update_metrics():
         from admin_metrics import update_daily_metrics
         success = update_daily_metrics()
         
-        if success:
-            return jsonify({
-                'success': True,
-                'message': 'Platform metrics updated successfully'
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'message': 'Failed to update platform metrics'
-            }), 500
+        return jsonify({
+            'success': success,
+            'message': 'Platform metrics updated successfully' if success else 'Error updating metrics'
+        })
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/populate-leaderboard')
+@login_required
+def admin_populate_leaderboard():
+    """Manually populate leaderboard cache - immediate fix for missing data"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime, date, timedelta
+        from models import db, PortfolioSnapshot, User, Stock
+        
+        # First check if we have the basic data needed
+        total_users = User.query.count()
+        users_with_stocks = User.query.join(Stock).distinct().count()
+        total_snapshots = PortfolioSnapshot.query.count()
+        yesterday = date.today() - timedelta(days=1)
+        yesterday_snapshots = PortfolioSnapshot.query.filter_by(date=yesterday).count()
+        
+        results = {
+            'data_check': {
+                'total_users': total_users,
+                'users_with_stocks': users_with_stocks,
+                'total_snapshots': total_snapshots,
+                'yesterday_snapshots': yesterday_snapshots
+            }
+        }
+        
+        if users_with_stocks == 0:
+            return jsonify({
+                'success': False,
+                'error': 'No users have stocks - leaderboard cannot be populated',
+                'results': results
+            })
+        
+        if total_snapshots == 0:
+            return jsonify({
+                'success': False,
+                'error': 'No portfolio snapshots exist - need to create snapshots first',
+                'results': results,
+                'suggestion': 'Run /admin/create-todays-snapshots first'
+            })
+        
+        # Update leaderboard cache
+        from leaderboard_utils import update_leaderboard_cache
+        updated_count = update_leaderboard_cache()
+        
+        # Test the API endpoint
+        from leaderboard_utils import get_leaderboard_data
+        test_data = get_leaderboard_data('YTD', 5, 'all')
+        
+        results.update({
+            'leaderboard_cache_updated': updated_count,
+            'test_data_entries': len(test_data),
+            'sample_entries': test_data[:3] if test_data else []
+        })
+        
+        return jsonify({
+            'success': True,
+            'message': f'Leaderboard cache populated with {updated_count} periods',
+            'results': results
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/debug-leaderboard')
+@login_required
+def admin_debug_leaderboard():
+    """Debug leaderboard data availability"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime, date, timedelta
+        from models import db, PortfolioSnapshot, User, Stock, LeaderboardCache
+        import json
+        
+        # Data availability check
+        yesterday = date.today() - timedelta(days=1)
+        today = date.today()
+        
+        debug_info = {
+            'basic_data': {
+                'total_users': User.query.count(),
+                'users_with_stocks': User.query.join(Stock).distinct().count(),
+                'total_snapshots': PortfolioSnapshot.query.count(),
+                'yesterday_snapshots': PortfolioSnapshot.query.filter_by(date=yesterday).count(),
+                'today_snapshots': PortfolioSnapshot.query.filter_by(date=today).count()
+            },
+            'recent_snapshots': [],
+            'cache_status': [],
+            'api_test': None
+        }
+        
+        # Recent snapshots
+        recent_snapshots = PortfolioSnapshot.query.filter(
+            PortfolioSnapshot.date >= yesterday - timedelta(days=3)
+        ).order_by(PortfolioSnapshot.date.desc()).limit(10).all()
+        
+        for snapshot in recent_snapshots:
+            debug_info['recent_snapshots'].append({
+                'user_id': snapshot.user_id,
+                'date': snapshot.date.isoformat(),
+                'value': float(snapshot.total_value)
+            })
+        
+        # Cache status
+        cache_entries = LeaderboardCache.query.all()
+        for cache in cache_entries:
+            try:
+                cached_data = json.loads(cache.leaderboard_data)
+                debug_info['cache_status'].append({
+                    'period': cache.period,
+                    'entries': len(cached_data),
+                    'generated_at': cache.generated_at.isoformat()
+                })
+            except Exception as e:
+                debug_info['cache_status'].append({
+                    'period': cache.period,
+                    'error': str(e)
+                })
+        
+        # Test API
+        try:
+            from leaderboard_utils import get_leaderboard_data
+            api_data = get_leaderboard_data('YTD', 5, 'all')
+            debug_info['api_test'] = {
+                'success': True,
+                'entries': len(api_data),
+                'sample': api_data[:2] if api_data else []
+            }
+        except Exception as e:
+            debug_info['api_test'] = {
+                'success': False,
+                'error': str(e)
+            }
+        
+        return jsonify({
+            'success': True,
+            'debug_info': debug_info
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
 
 @app.route('/admin/populate-tiers')
 def populate_tiers():
