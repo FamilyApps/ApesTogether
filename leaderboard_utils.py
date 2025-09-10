@@ -295,7 +295,7 @@ def update_leaderboard_entry(user_id, period):
     db.session.commit()
     return entry
 
-def get_leaderboard_data(period='YTD', limit=50):
+def get_leaderboard_data(period='YTD', limit=20, category='all'):
     """
     Get cached leaderboard data from LeaderboardCache table with chart data
     Returns pre-calculated leaderboard data updated at market close
@@ -303,8 +303,11 @@ def get_leaderboard_data(period='YTD', limit=50):
     import json
     from models import LeaderboardCache, UserPortfolioChartCache
     
+    # Create cache key for period + category
+    cache_key = f"{period}_{category}"
+    
     # Try to get cached data first
-    cache_entry = LeaderboardCache.query.filter_by(period=period).first()
+    cache_entry = LeaderboardCache.query.filter_by(period=cache_key).first()
     
     if cache_entry:
         # Return cached data with chart data included
@@ -313,7 +316,7 @@ def get_leaderboard_data(period='YTD', limit=50):
         # Add chart data for each user if available
         for entry in cached_data[:limit]:
             chart_cache = UserPortfolioChartCache.query.filter_by(
-                user_id=entry['user_id'], period=period
+                user_id=entry['user_id'], period=period.split('_')[0]  # Use base period for chart lookup
             ).first()
             
             if chart_cache:
@@ -324,7 +327,7 @@ def get_leaderboard_data(period='YTD', limit=50):
         return cached_data[:limit]
     
     # Fallback: calculate on-demand if no cache exists
-    return calculate_leaderboard_data(period, limit)
+    return calculate_leaderboard_data(period, limit, category)
 
 def get_user_chart_data(user_id, period):
     """
@@ -343,10 +346,15 @@ def get_user_chart_data(user_id, period):
     # Fallback: generate on-demand if not cached
     return generate_user_portfolio_chart(user_id, period)
 
-def calculate_leaderboard_data(period='YTD', limit=50):
+def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
     """
     Calculate leaderboard data directly from portfolio snapshots
     Used for cache generation and fallback
+    
+    Args:
+        period: Time period for performance calculation
+        limit: Number of top users to return
+        category: 'all', 'small_cap', or 'large_cap' for filtering
     """
     from datetime import datetime, date, timedelta
     
@@ -402,6 +410,12 @@ def calculate_leaderboard_data(period='YTD', limit=50):
         # Calculate market cap percentages using existing stock info
         small_cap_percent, large_cap_percent = calculate_portfolio_cap_percentages(user.id)
         
+        # Apply category filter
+        if category == 'small_cap' and small_cap_percent < 60:  # Must be 60%+ small cap focused
+            continue
+        elif category == 'large_cap' and large_cap_percent < 60:  # Must be 60%+ large cap focused
+            continue
+        
         leaderboard_data.append({
             'user_id': user.id,
             'username': user.username,
@@ -410,7 +424,8 @@ def calculate_leaderboard_data(period='YTD', limit=50):
             'large_cap_percent': large_cap_percent,
             'portfolio_value': round(current_value, 2),
             'subscription_price': user.subscription_price,
-            'calculated_at': datetime.now().isoformat()
+            'calculated_at': datetime.now().isoformat(),
+            'category': category
         })
     
     # Sort by performance and limit results
@@ -480,7 +495,7 @@ def generate_user_portfolio_chart(user_id, period):
 
 def update_leaderboard_cache():
     """
-    Update cached leaderboard data for all periods and pre-generate charts for top users
+    Update cached leaderboard data for all periods and categories, pre-generate charts for top users
     Called at market close to pre-generate leaderboard data and charts
     """
     import json
@@ -488,6 +503,7 @@ def update_leaderboard_cache():
     from models import db, LeaderboardCache, UserPortfolioChartCache
     
     periods = ['1D', '5D', '3M', 'YTD', '1Y', '5Y', 'MAX']
+    categories = ['all', 'small_cap', 'large_cap']
     updated_count = 0
     charts_generated = 0
     
@@ -495,32 +511,36 @@ def update_leaderboard_cache():
     leaderboard_users = set()
     
     for period in periods:
-        try:
-            # Calculate fresh leaderboard data
-            leaderboard_data = calculate_leaderboard_data(period, 50)  # Top 50 for leaderboard
-            
-            # Collect user IDs who made this leaderboard
-            for entry in leaderboard_data:
-                leaderboard_users.add(entry['user_id'])
-            
-            # Update or create cache entry
-            cache_entry = LeaderboardCache.query.filter_by(period=period).first()
-            if cache_entry:
-                cache_entry.leaderboard_data = json.dumps(leaderboard_data)
-                cache_entry.generated_at = datetime.now()
-            else:
-                cache_entry = LeaderboardCache(
-                    period=period,
-                    leaderboard_data=json.dumps(leaderboard_data),
-                    generated_at=datetime.now()
-                )
-                db.session.add(cache_entry)
-            
-            updated_count += 1
-            
-        except Exception as e:
-            print(f"Error updating leaderboard cache for period {period}: {str(e)}")
-            continue
+        for category in categories:
+            try:
+                # Calculate fresh leaderboard data for this period and category
+                leaderboard_data = calculate_leaderboard_data(period, 20, category)  # Top 20 for leaderboard
+                
+                # Collect user IDs who made this leaderboard
+                for entry in leaderboard_data:
+                    leaderboard_users.add(entry['user_id'])
+                
+                # Create unique cache key for period + category
+                cache_key = f"{period}_{category}"
+                
+                # Update or create cache entry
+                cache_entry = LeaderboardCache.query.filter_by(period=cache_key).first()
+                if cache_entry:
+                    cache_entry.leaderboard_data = json.dumps(leaderboard_data)
+                    cache_entry.generated_at = datetime.now()
+                else:
+                    cache_entry = LeaderboardCache(
+                        period=cache_key,
+                        leaderboard_data=json.dumps(leaderboard_data),
+                        generated_at=datetime.now()
+                    )
+                    db.session.add(cache_entry)
+                
+                updated_count += 1
+                
+            except Exception as e:
+                print(f"Error updating leaderboard cache for period {period}, category {category}: {str(e)}")
+                continue
     
     # Generate portfolio charts only for users who made any leaderboard
     for user_id in leaderboard_users:

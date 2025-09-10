@@ -54,11 +54,13 @@ def leaderboard_home():
 def api_leaderboard_data():
     """API endpoint for leaderboard data - no login required for public leaderboard"""
     period = request.args.get('period', 'YTD')
-    limit = int(request.args.get('limit', 50))
+    category = request.args.get('category', 'all')
+    limit = int(request.args.get('limit', 20))
     
-    leaderboard_data = get_leaderboard_data(period, limit)
+    leaderboard_data = get_leaderboard_data(period, limit, category)
     return jsonify({
         'period': period,
+        'category': category,
         'data': leaderboard_data,
         'count': len(leaderboard_data)
     })
