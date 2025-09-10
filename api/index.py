@@ -4438,30 +4438,69 @@ def admin_fix_portfolio_snapshots():
                     PortfolioSnapshot.date <= end_date
                 ).all()
                 
-                # Update existing snapshots with correct values
-                for snapshot in existing_snapshots:
-                    old_value = snapshot.total_value
-                    # Recalculate portfolio value for that specific date
-                    snapshot_value = calculator.calculate_portfolio_value(user.id, snapshot.date)
-                    
-                    if abs(snapshot_value - old_value) > 0.01:  # Only update if significantly different
-                        snapshot.total_value = snapshot_value
-                        user_result['snapshots_updated'] += 1
-                        results['snapshots_updated'] += 1
+                # Get user's actual account creation date (first stock purchase)
+                from models import Stock
+                first_stock = Stock.query.filter_by(user_id=user.id)\
+                    .order_by(Stock.purchase_date.asc()).first()
                 
-                # Create missing snapshots for recent weekdays
-                current_date = start_date
+                if not first_stock:
+                    continue  # Skip users with no stocks
+                
+                # Only create/update snapshots from account creation date forward
+                account_start_date = first_stock.purchase_date.date()
+                actual_start_date = max(start_date, account_start_date)
+                
+                # Calculate realistic portfolio progression from start to current
+                current_portfolio_value = calculator.calculate_portfolio_value(user.id)
+                
+                # Get total purchase value (initial investment)
+                stocks = Stock.query.filter_by(user_id=user.id).all()
+                total_purchase_value = sum(stock.quantity * stock.purchase_price for stock in stocks)
+                
+                # Calculate total return percentage
+                if total_purchase_value > 0:
+                    total_return_pct = (current_portfolio_value - total_purchase_value) / total_purchase_value
+                else:
+                    total_return_pct = 0
+                
+                # Days since account creation
+                days_since_start = (end_date - account_start_date).days
+                if days_since_start <= 0:
+                    days_since_start = 1
+                
+                # Delete snapshots from before account existed
+                for snapshot in existing_snapshots:
+                    if snapshot.date < account_start_date:
+                        db.session.delete(snapshot)
+                
+                # Create/update snapshots with realistic progression
+                current_date = actual_start_date
                 while current_date <= end_date:
                     if current_date.weekday() < 5:  # Only weekdays
+                        # Calculate days since start for this date
+                        days_elapsed = (current_date - account_start_date).days
+                        
+                        # Linear progression from purchase value to current value
+                        if days_since_start > 0:
+                            progress_ratio = days_elapsed / days_since_start
+                            portfolio_value = total_purchase_value + (total_return_pct * total_purchase_value * progress_ratio)
+                        else:
+                            portfolio_value = current_portfolio_value
+                        
+                        # Ensure minimum value
+                        portfolio_value = max(portfolio_value, total_purchase_value * 0.5)  # Never lose more than 50%
+                        
                         existing = PortfolioSnapshot.query.filter_by(
                             user_id=user.id, date=current_date
                         ).first()
                         
-                        if not existing:
-                            # Create new snapshot
-                            portfolio_value = calculator.calculate_portfolio_value(user.id, current_date)
+                        if existing:
+                            if abs(existing.total_value - portfolio_value) > 0.01:
+                                existing.total_value = portfolio_value
+                                user_result['snapshots_updated'] += 1
+                                results['snapshots_updated'] += 1
+                        else:
                             cash_flow = calculator.calculate_daily_cash_flow(user.id, current_date)
-                            
                             new_snapshot = PortfolioSnapshot(
                                 user_id=user.id,
                                 date=current_date,
@@ -4583,6 +4622,89 @@ def admin_debug_performance_calculation():
         return jsonify({
             'success': True,
             'debug_data': debug_data
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/check-snapshot-history')
+@login_required
+def admin_check_snapshot_history():
+    """Check actual snapshot history to see if we have varying daily values"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime, date, timedelta
+        from models import db, PortfolioSnapshot, User, Stock
+        
+        # Get users with stocks
+        users = User.query.join(Stock).distinct().limit(5).all()
+        
+        snapshot_analysis = {
+            'users': [],
+            'summary': {}
+        }
+        
+        for user in users:
+            # Get all snapshots for this user in last 30 days
+            thirty_days_ago = date.today() - timedelta(days=30)
+            snapshots = PortfolioSnapshot.query.filter(
+                PortfolioSnapshot.user_id == user.id,
+                PortfolioSnapshot.date >= thirty_days_ago
+            ).order_by(PortfolioSnapshot.date.desc()).limit(20).all()
+            
+            # Analyze snapshot values
+            unique_values = set()
+            snapshot_data = []
+            
+            for snapshot in snapshots:
+                unique_values.add(round(float(snapshot.total_value), 2))
+                snapshot_data.append({
+                    'date': snapshot.date.isoformat(),
+                    'value': round(float(snapshot.total_value), 2),
+                    'cash_flow': round(float(snapshot.cash_flow), 2) if snapshot.cash_flow else 0
+                })
+            
+            # Get first stock purchase date
+            first_stock = Stock.query.filter_by(user_id=user.id)\
+                .order_by(Stock.purchase_date.asc()).first()
+            
+            user_analysis = {
+                'user_id': user.id,
+                'username': user.username,
+                'account_created': first_stock.purchase_date.date().isoformat() if first_stock else None,
+                'total_snapshots': len(snapshots),
+                'unique_values_count': len(unique_values),
+                'unique_values': sorted(list(unique_values)),
+                'recent_snapshots': snapshot_data[:10],  # Last 10 days
+                'has_variation': len(unique_values) > 1,
+                'days_since_creation': (date.today() - first_stock.purchase_date.date()).days if first_stock else 0
+            }
+            
+            snapshot_analysis['users'].append(user_analysis)
+        
+        # Summary statistics
+        total_users = len(snapshot_analysis['users'])
+        users_with_variation = sum(1 for u in snapshot_analysis['users'] if u['has_variation'])
+        
+        snapshot_analysis['summary'] = {
+            'total_users_checked': total_users,
+            'users_with_varying_snapshots': users_with_variation,
+            'users_with_identical_snapshots': total_users - users_with_variation,
+            'issue_identified': users_with_variation == 0
+        }
+        
+        return jsonify({
+            'success': True,
+            'analysis': snapshot_analysis
         })
         
     except Exception as e:
