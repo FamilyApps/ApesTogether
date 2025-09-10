@@ -4905,6 +4905,60 @@ def admin_diagnose_snapshot_creation():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/test-api-response')
+@login_required
+def admin_test_api_response():
+    """Test actual Alpha Vantage API response format"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        import requests
+        import os
+        
+        api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
+        if not api_key:
+            return jsonify({'error': 'No API key found'}), 400
+        
+        # Test with AAPL
+        test_ticker = 'AAPL'
+        url = f'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={test_ticker}&apikey={api_key}'
+        
+        try:
+            response = requests.get(url, timeout=10)
+            raw_data = response.json()
+            
+            # Try to parse the response
+            parsed_price = None
+            if 'Global Quote' in raw_data and '05. price' in raw_data['Global Quote']:
+                parsed_price = float(raw_data['Global Quote']['05. price'])
+            
+            return jsonify({
+                'success': True,
+                'test_ticker': test_ticker,
+                'api_url': url,
+                'raw_response': raw_data,
+                'parsed_price': parsed_price,
+                'response_keys': list(raw_data.keys()) if isinstance(raw_data, dict) else None,
+                'global_quote_keys': list(raw_data.get('Global Quote', {}).keys()) if raw_data.get('Global Quote') else None
+            })
+            
+        except requests.exceptions.RequestException as e:
+            return jsonify({
+                'success': False,
+                'error': f'Request failed: {str(e)}'
+            }), 500
+            
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/populate-leaderboard')
 @login_required
 def admin_populate_leaderboard():
