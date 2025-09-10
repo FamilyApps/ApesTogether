@@ -297,30 +297,77 @@ def update_leaderboard_entry(user_id, period):
 
 def get_leaderboard_data(period='YTD', limit=50):
     """
-    Get leaderboard data for a specific period
+    Get leaderboard data directly from portfolio snapshots - no extra tables needed
     Returns list of users sorted by performance
     """
-    entries = LeaderboardEntry.query.filter_by(period=period)\
-        .order_by(LeaderboardEntry.performance_percent.desc())\
-        .limit(limit).all()
+    from datetime import datetime, date, timedelta
     
+    # Calculate date range for the period
+    today = date.today()
+    
+    if period == '1D':
+        start_date = today - timedelta(days=1)
+    elif period == '5D':
+        start_date = today - timedelta(days=5)
+    elif period == '3M':
+        start_date = today - timedelta(days=90)
+    elif period == 'YTD':
+        start_date = date(today.year, 1, 1)
+    elif period == '1Y':
+        start_date = today - timedelta(days=365)
+    elif period == '5Y':
+        start_date = today - timedelta(days=1825)
+    elif period == 'MAX':
+        start_date = date(2020, 1, 1)  # Reasonable start date
+    else:
+        start_date = date(today.year, 1, 1)  # Default to YTD
+    
+    # Get all users with portfolio snapshots
+    users = User.query.all()
     leaderboard_data = []
-    for entry in entries:
-        user = User.query.get(entry.user_id)
-        if user:
-            leaderboard_data.append({
-                'user_id': user.id,
-                'username': user.username,
-                'performance_percent': entry.performance_percent,
-                'small_cap_percent': entry.small_cap_percent,
-                'large_cap_percent': entry.large_cap_percent,
-                'avg_trades_per_week': entry.avg_trades_per_week,
-                'portfolio_value': entry.portfolio_value,
-                'subscription_price': user.subscription_price,
-                'calculated_at': entry.calculated_at
-            })
     
-    return leaderboard_data
+    for user in users:
+        # Get latest snapshot for current value
+        latest_snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id)\
+            .order_by(PortfolioSnapshot.date.desc()).first()
+        
+        if not latest_snapshot:
+            continue
+            
+        # Get snapshot closest to start date
+        start_snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id)\
+            .filter(PortfolioSnapshot.date >= start_date)\
+            .order_by(PortfolioSnapshot.date.asc()).first()
+        
+        if not start_snapshot:
+            continue
+        
+        # Calculate performance
+        current_value = latest_snapshot.total_value
+        start_value = start_snapshot.total_value
+        
+        if start_value > 0:
+            performance_percent = ((current_value - start_value) / start_value) * 100
+        else:
+            performance_percent = 0.0
+        
+        # Calculate market cap percentages using existing stock info
+        small_cap_percent, large_cap_percent = calculate_portfolio_cap_percentages(user.id)
+        
+        leaderboard_data.append({
+            'user_id': user.id,
+            'username': user.username,
+            'performance_percent': round(performance_percent, 2),
+            'small_cap_percent': small_cap_percent,
+            'large_cap_percent': large_cap_percent,
+            'portfolio_value': round(current_value, 2),
+            'subscription_price': user.subscription_price,
+            'calculated_at': datetime.now()
+        })
+    
+    # Sort by performance and limit results
+    leaderboard_data.sort(key=lambda x: x['performance_percent'], reverse=True)
+    return leaderboard_data[:limit]
 
 def update_all_user_leaderboards():
     """

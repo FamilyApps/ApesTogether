@@ -3906,9 +3906,9 @@ def run_migration():
         db.session.rollback()
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()})
 
-@app.route('/admin/fix-sms-column')
-def fix_sms_column():
-    """Fix missing columns in sms_notification table"""
+@app.route('/admin/fix-all-columns')
+def fix_all_columns():
+    """Fix all missing columns in database tables"""
     try:
         # Check if user is admin
         email = session.get('email', '')
@@ -3916,7 +3916,7 @@ def fix_sms_column():
             return jsonify({'error': 'Admin access required'}), 403
         
         with app.app_context():
-            # Add missing columns if they don't exist
+            # Fix sms_notification table - add all missing columns
             db.session.execute(text("""
                 ALTER TABLE sms_notification 
                 ADD COLUMN IF NOT EXISTS sms_enabled BOOLEAN DEFAULT TRUE;
@@ -3927,9 +3927,50 @@ def fix_sms_column():
                 ADD COLUMN IF NOT EXISTS verification_expires TIMESTAMP;
             """))
             
+            db.session.execute(text("""
+                ALTER TABLE sms_notification 
+                ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+            """))
+            
+            # Fix leaderboard_entry table - add all missing columns
+            db.session.execute(text("""
+                ALTER TABLE leaderboard_entry 
+                ADD COLUMN IF NOT EXISTS period VARCHAR(10);
+            """))
+            
+            db.session.execute(text("""
+                ALTER TABLE leaderboard_entry 
+                ADD COLUMN IF NOT EXISTS performance_percent FLOAT;
+            """))
+            
+            db.session.execute(text("""
+                ALTER TABLE leaderboard_entry 
+                ADD COLUMN IF NOT EXISTS small_cap_percent FLOAT DEFAULT 0.0;
+            """))
+            
+            db.session.execute(text("""
+                ALTER TABLE leaderboard_entry 
+                ADD COLUMN IF NOT EXISTS large_cap_percent FLOAT DEFAULT 0.0;
+            """))
+            
+            db.session.execute(text("""
+                ALTER TABLE leaderboard_entry 
+                ADD COLUMN IF NOT EXISTS avg_trades_per_week FLOAT DEFAULT 0.0;
+            """))
+            
+            db.session.execute(text("""
+                ALTER TABLE leaderboard_entry 
+                ADD COLUMN IF NOT EXISTS portfolio_value FLOAT DEFAULT 0.0;
+            """))
+            
+            db.session.execute(text("""
+                ALTER TABLE leaderboard_entry 
+                ADD COLUMN IF NOT EXISTS calculated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+            """))
+            
             db.session.commit()
         
-        return jsonify({'success': True, 'message': 'SMS columns fix completed successfully'})
+        return jsonify({'success': True, 'message': 'All database columns fix completed successfully'})
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()})

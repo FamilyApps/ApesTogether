@@ -51,9 +51,8 @@ def leaderboard_home():
                          ])
 
 @leaderboard_bp.route('/api/data')
-@login_required
 def api_leaderboard_data():
-    """API endpoint for leaderboard data"""
+    """API endpoint for leaderboard data - no login required for public leaderboard"""
     period = request.args.get('period', 'YTD')
     limit = int(request.args.get('limit', 50))
     
@@ -93,19 +92,9 @@ def update_period(period):
 @leaderboard_bp.route('/update-all')
 @login_required
 def update_all():
-    """Update all leaderboard entries (admin/debug use)"""
-    # Check if user is admin using the same logic as other admin routes
-    from flask import session
-    import os
-    ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
-    
-    email = session.get('email', '')
-    if email != ADMIN_EMAIL and current_user.email != ADMIN_EMAIL and current_user.username != 'admin':
-        return jsonify({'error': 'Admin access required'}), 403
-    
-    updated_count = update_all_user_leaderboards()
-    
+    """No longer needed - leaderboard calculates directly from snapshots"""
     return jsonify({
         'success': True,
-        'updated_count': updated_count
+        'message': 'Leaderboard now calculates directly from portfolio snapshots - no update needed',
+        'updated_count': 0
     })
