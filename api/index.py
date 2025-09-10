@@ -4013,6 +4013,53 @@ def admin_update_metrics():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/create-leaderboard-tables')
+@login_required
+def admin_create_leaderboard_tables():
+    """Create missing leaderboard-related tables"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import db, LeaderboardCache, UserPortfolioChartCache
+        
+        # Create the tables
+        try:
+            db.create_all()
+            
+            # Verify tables were created
+            from sqlalchemy import inspect
+            inspector = inspect(db.engine)
+            existing_tables = inspector.get_table_names()
+            
+            results = {
+                'leaderboard_cache_exists': 'leaderboard_cache' in existing_tables,
+                'user_portfolio_chart_cache_exists': 'user_portfolio_chart_cache' in existing_tables,
+                'all_tables': existing_tables
+            }
+            
+            return jsonify({
+                'success': True,
+                'message': 'Database tables created successfully',
+                'results': results
+            })
+            
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'error': f'Failed to create tables: {str(e)}'
+            }), 500
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/populate-leaderboard')
 @login_required
 def admin_populate_leaderboard():
