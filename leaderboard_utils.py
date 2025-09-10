@@ -126,33 +126,41 @@ def create_mock_stock_info(ticker):
 
 def calculate_portfolio_cap_percentages(user_id):
     """
-    Calculate small cap vs large cap percentages for user's portfolio
+    Calculate small cap vs large cap percentages using existing stock info - no API calls
     Returns (small_cap_percent, large_cap_percent)
     """
-    stocks = Stock.query.filter_by(user_id=user_id).all()
+    # Get the latest portfolio snapshot for total value
+    latest_snapshot = PortfolioSnapshot.query.filter_by(user_id=user_id)\
+        .order_by(PortfolioSnapshot.date.desc()).first()
     
-    if not stocks:
+    if not latest_snapshot:
         return 0.0, 0.0
     
-    total_value = 0
+    total_value = latest_snapshot.total_value
+    stocks = Stock.query.filter_by(user_id=user_id).all()
+    
+    if not stocks or total_value == 0:
+        return 0.0, 0.0
+    
     small_cap_value = 0
     large_cap_value = 0
     
+    # Calculate proportional values based on purchase prices and existing stock info
+    total_purchase_value = sum(stock.quantity * stock.purchase_price for stock in stocks)
+    
     for stock in stocks:
-        # Get current stock price using real API
-        current_price = get_real_stock_price(stock.ticker)
-        if current_price is None:
-            current_app.logger.warning(f"Skipping {stock.ticker} - could not get price")
-            continue
-        stock_value = stock.quantity * current_price
-        total_value += stock_value
+        # Get stock info (should already exist from previous population)
+        stock_info = StockInfo.query.filter_by(ticker=stock.ticker.upper()).first()
         
-        # Get stock info and classify
-        stock_info = get_or_create_stock_info(stock.ticker)
-        if stock_info.cap_classification == 'small':
-            small_cap_value += stock_value
-        else:
-            large_cap_value += stock_value
+        if stock_info and total_purchase_value > 0:
+            # Calculate proportional value based on purchase weight
+            stock_purchase_value = stock.quantity * stock.purchase_price
+            stock_current_value = (stock_purchase_value / total_purchase_value) * total_value
+            
+            if stock_info.cap_classification == 'small':
+                small_cap_value += stock_current_value
+            else:
+                large_cap_value += stock_current_value
     
     if total_value == 0:
         return 0.0, 0.0
@@ -191,38 +199,61 @@ def get_real_stock_price(ticker):
 
 def calculate_performance_metrics(user_id, period):
     """
-    Calculate real performance metrics for a specific period based on portfolio snapshots
+    Calculate performance metrics using existing portfolio snapshots - no API calls needed
     Returns performance percentage
     """
-    from portfolio_performance import PortfolioPerformanceCalculator
+    from datetime import datetime, date, timedelta
     
     try:
-        calculator = PortfolioPerformanceCalculator()
+        # Get the most recent snapshot for current value
+        latest_snapshot = PortfolioSnapshot.query.filter_by(user_id=user_id)\
+            .order_by(PortfolioSnapshot.date.desc()).first()
         
-        # Get performance data for the specified period
-        performance_data = calculator.get_performance_data(user_id, period)
+        if not latest_snapshot:
+            return 0.0
         
-        if performance_data and 'performance_percent' in performance_data:
-            return performance_data['performance_percent']
-        else:
-            # If no performance data available, calculate current vs initial portfolio value
-            stocks = Stock.query.filter_by(user_id=user_id).all()
-            if not stocks:
-                return 0.0
-            
-            current_value = 0
-            initial_value = 0
-            
-            for stock in stocks:
-                current_price = get_real_stock_price(stock.ticker)
-                if current_price:
-                    current_value += stock.quantity * current_price
-                    initial_value += stock.quantity * stock.purchase_price
-            
-            if initial_value > 0:
-                return ((current_value - initial_value) / initial_value) * 100
+        current_value = latest_snapshot.total_value
+        
+        # Calculate start date based on period
+        end_date = latest_snapshot.date
+        
+        if period == '1D':
+            start_date = end_date - timedelta(days=1)
+        elif period == '5D':
+            start_date = end_date - timedelta(days=5)
+        elif period == '3M':
+            start_date = end_date - timedelta(days=90)
+        elif period == 'YTD':
+            start_date = date(end_date.year, 1, 1)
+        elif period == '1Y':
+            start_date = end_date - timedelta(days=365)
+        elif period == '5Y':
+            start_date = end_date - timedelta(days=1825)
+        elif period == 'MAX':
+            # Find the earliest snapshot
+            earliest_snapshot = PortfolioSnapshot.query.filter_by(user_id=user_id)\
+                .order_by(PortfolioSnapshot.date.asc()).first()
+            if earliest_snapshot:
+                start_date = earliest_snapshot.date
             else:
                 return 0.0
+        else:
+            return 0.0
+        
+        # Get snapshot closest to start date
+        start_snapshot = PortfolioSnapshot.query.filter_by(user_id=user_id)\
+            .filter(PortfolioSnapshot.date >= start_date)\
+            .order_by(PortfolioSnapshot.date.asc()).first()
+        
+        if not start_snapshot:
+            return 0.0
+        
+        start_value = start_snapshot.total_value
+        
+        if start_value > 0:
+            return ((current_value - start_value) / start_value) * 100
+        else:
+            return 0.0
                 
     except Exception as e:
         current_app.logger.error(f"Error calculating performance for user {user_id}, period {period}: {str(e)}")
@@ -242,13 +273,11 @@ def update_leaderboard_entry(user_id, period):
     performance_percent = calculate_performance_metrics(user_id, period)
     small_cap_percent, large_cap_percent = calculate_portfolio_cap_percentages(user_id)
     
-    # Calculate portfolio value
-    stocks = Stock.query.filter_by(user_id=user_id).all()
-    portfolio_value = 0
-    for stock in stocks:
-        price = get_real_stock_price(stock.ticker)
-        if price is not None:
-            portfolio_value += stock.quantity * price
+    # Get portfolio value from latest snapshot - no API calls needed
+    latest_snapshot = PortfolioSnapshot.query.filter_by(user_id=user_id)\
+        .order_by(PortfolioSnapshot.date.desc()).first()
+    
+    portfolio_value = latest_snapshot.total_value if latest_snapshot else 0.0
     
     # Calculate average trades per week (last 4 weeks)
     from subscription_utils import get_user_avg_trades_per_day
