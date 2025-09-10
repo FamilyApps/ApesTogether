@@ -164,11 +164,26 @@ def calculate_portfolio_cap_percentages(user_id):
 
 def get_real_stock_price(ticker):
     """Get real stock price using Alpha Vantage API"""
-    from app import get_stock_data
-    
-    stock_data = get_stock_data(ticker)
-    if stock_data and stock_data.get('price'):
-        return stock_data['price']
+    try:
+        # Import from the production app location
+        import sys
+        sys.path.append('/var/task')
+        from api.index import get_stock_data
+        
+        stock_data = get_stock_data(ticker)
+        if stock_data and stock_data.get('price'):
+            return stock_data['price']
+    except ImportError:
+        try:
+            # Fallback to local app import
+            from app import get_stock_data
+            stock_data = get_stock_data(ticker)
+            if stock_data and stock_data.get('price'):
+                return stock_data['price']
+        except Exception as e:
+            current_app.logger.error(f"Could not import get_stock_data: {str(e)}")
+    except Exception as e:
+        current_app.logger.error(f"Error getting stock data for {ticker}: {str(e)}")
     
     # If API fails, return None to indicate failure
     current_app.logger.error(f"Could not get real price for {ticker}")
