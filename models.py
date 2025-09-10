@@ -177,6 +177,20 @@ class AlphaVantageAPILog(db.Model):
     def __repr__(self):
         return f"<AlphaVantageAPILog {self.endpoint} {self.symbol} at {self.timestamp}>"
 
+class UserActivity(db.Model):
+    """Track actual user activity for accurate metrics"""
+    __tablename__ = 'user_activity'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    activity_type = db.Column(db.String(50), nullable=False)  # 'login', 'add_stock', 'view_dashboard', etc.
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    ip_address = db.Column(db.String(45), nullable=True)  # For session tracking
+    user_agent = db.Column(db.String(255), nullable=True)  # For device tracking
+    
+    def __repr__(self):
+        return f"<UserActivity user_id={self.user_id} {self.activity_type} at {self.timestamp}>"
+
 class PlatformMetrics(db.Model):
     """Daily platform metrics for admin dashboard"""
     __tablename__ = 'platform_metrics'

@@ -3920,9 +3920,9 @@ def fix_all_columns():
         
         # Create all cache and metrics tables if they don't exist
         try:
-            from models import LeaderboardCache, UserPortfolioChartCache, AlphaVantageAPILog, PlatformMetrics
+            from models import LeaderboardCache, UserPortfolioChartCache, AlphaVantageAPILog, PlatformMetrics, UserActivity
             db.create_all()
-            results.append('Created LeaderboardCache, UserPortfolioChartCache, AlphaVantageAPILog, and PlatformMetrics tables')
+            results.append('Created LeaderboardCache, UserPortfolioChartCache, AlphaVantageAPILog, PlatformMetrics, and UserActivity tables')
         except Exception as e:
             results.append(f'Cache and metrics table creation: {str(e)}')
         
@@ -3944,7 +3944,7 @@ def fix_all_columns():
                 results.append(f'Error adding sms_enabled: {str(e)}')
         
         try:
-            db.session.execute(text('ALTER TABLE sms_notification ADD COLUMN verification_expires DATETIME'))
+            db.session.execute(text('ALTER TABLE sms_notification ADD COLUMN verification_expires TIMESTAMP'))
             db.session.commit()
             results.append('Added verification_expires column to sms_notification')
         except Exception as e:
@@ -3953,7 +3953,7 @@ def fix_all_columns():
                 results.append(f'Error adding verification_expires: {str(e)}')
         
         try:
-            db.session.execute(text('ALTER TABLE sms_notification ADD COLUMN updated_at DATETIME'))
+            db.session.execute(text('ALTER TABLE sms_notification ADD COLUMN updated_at TIMESTAMP'))
             db.session.commit()
             results.append('Added updated_at column to sms_notification')
         except Exception as e:
@@ -6035,7 +6035,7 @@ def create_tables():
             return jsonify({'error': 'Admin access required'}), 403
         
         # Create the new tables
-        from models import db, User, Stock, Subscription, Transaction, PortfolioSnapshot, MarketData, SP500ChartCache, SubscriptionTier, TradeLimit, SMSNotification, StockInfo, LeaderboardEntry, LeaderboardCache, UserPortfolioChartCache, AlphaVantageAPILog, PlatformMetrics
+        from models import db, User, Stock, Transaction, PortfolioSnapshot, StockInfo, SubscriptionTier, UserSubscription, SMSNotification, LeaderboardCache, UserPortfolioChartCache, AlphaVantageAPILog, PlatformMetrics, UserActivity
         
         current_time = datetime.now()
         

@@ -2,7 +2,7 @@
 Admin dashboard metrics utilities for tracking platform health
 """
 from datetime import datetime, date, timedelta
-from models import db, User, Stock, StockInfo, AlphaVantageAPILog, PlatformMetrics, PortfolioSnapshot
+from models import db, Stock, StockInfo, User, UserActivity, AlphaVantageAPILog, PlatformMetrics, PortfolioSnapshot
 from sqlalchemy import func, distinct, and_
 
 def log_alpha_vantage_call(endpoint, symbol=None, response_status='success', response_time_ms=None):
@@ -46,14 +46,33 @@ def calculate_unique_stocks_count():
         print(f"Error calculating unique stocks count: {str(e)}")
         return 0
 
+def get_active_users_count(days=1):
+    """
+    Get count of active users in the last N days based on actual user activity
+    
+    Args:
+        days: Number of days to look back (1, 7, 30, 90)
+    
+    Returns:
+        int: Number of unique active users
+    """
+    cutoff_date = datetime.utcnow() - timedelta(days=days)
+    
+    # Count users who have logged activity in the time period
+    active_users = db.session.query(distinct(UserActivity.user_id)).filter(
+        UserActivity.timestamp >= cutoff_date
+    ).count()
+    
+    return active_users
+
 def calculate_active_users(days):
-    """Calculate number of active users in the last N days"""
+    """Calculate number of active users in the last N days based on actual activity"""
     try:
         cutoff_date = datetime.now() - timedelta(days=days)
         
-        # Count users who have portfolio snapshots in the period (indicates activity)
-        active_users = db.session.query(distinct(PortfolioSnapshot.user_id)).filter(
-            PortfolioSnapshot.date >= cutoff_date.date()
+        # Count users who have logged activity in the period
+        active_users = db.session.query(distinct(UserActivity.user_id)).filter(
+            UserActivity.timestamp >= cutoff_date
         ).count()
         
         return active_users

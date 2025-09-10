@@ -202,10 +202,9 @@ def login():
         
         if user and user.password_hash and check_password_hash(user.password_hash, password):
             login_user(user)
-            # Redirect to onboarding if the user has no stocks, otherwise to dashboard
-            if user.stocks.count() == 0:
-                return redirect(url_for('onboarding'))
-            return redirect(url_for('dashboard'))
+            session['email'] = user.email
+            flash(f'Welcome back, {user.username}!', 'success')
+            
         else:
             flash('Invalid username or password.', 'danger')
             return redirect(url_for('login'))
@@ -249,6 +248,13 @@ def authorize_google():
         db.session.commit()
     
     login_user(user)
+    
+    # Log login activity
+    try:
+        from activity_tracker import log_login_activity
+        log_login_activity(user.id)
+    except Exception as e:
+        print(f"Error logging login activity: {str(e)}")
     
     # Check if this is the user's first login (no stocks yet)
     if user.stocks.count() == 0:
@@ -327,6 +333,13 @@ def authorize_apple():
     
     login_user(user)
     
+    # Log login activity
+    try:
+        from activity_tracker import log_login_activity
+        log_login_activity(user.id)
+    except Exception as e:
+        print(f"Error logging login activity: {str(e)}")
+    
     # Check if this is the user's first login (no stocks yet)
     if user.stocks.count() == 0:
         return redirect(url_for('onboarding'))
@@ -371,6 +384,13 @@ def logout():
 @app.route('/dashboard')
 @login_required
 def dashboard():
+    # Log dashboard view activity
+    try:
+        from activity_tracker import log_dashboard_view
+        log_dashboard_view(current_user.id)
+    except Exception as e:
+        print(f"Error logging dashboard activity: {str(e)}")
+    
     stocks = current_user.stocks.all()
     portfolio_data = []
     total_portfolio_value = 0
@@ -451,8 +471,6 @@ def save_onboarding():
         flash('No stocks were entered.', 'warning')
     
     return redirect(url_for('dashboard'))
-
-@app.route('/add_stock', methods=['POST'])
 @login_required
 def add_stock():
     ticker = request.form.get('ticker')
@@ -487,6 +505,15 @@ def add_stock():
         # Update trade count tracking
         trades_today = update_trade_limit_count(current_user.id)
         
+        flash(f'Added {quantity} shares of {ticker} to your portfolio!', 'success')
+        
+        # Log stock addition activity
+        try:
+            from activity_tracker import log_stock_addition
+            log_stock_addition(current_user.id)
+        except Exception as e:
+            print(f"Error logging stock addition activity: {str(e)}")
+        
         # Check if trade limit exceeded
         exceeded, current_count, limit, tier_name = check_trade_limit_exceeded(current_user.id)
         if exceeded:
@@ -496,24 +523,8 @@ def add_stock():
         price_updated = update_user_subscription_price(current_user.id)
         if price_updated:
             flash(f'Your subscription price has been updated to ${current_user.subscription_price}/month based on your recent trading activity!', 'info')
-        
-        # Send SMS notifications
-        from sms_utils import send_trade_confirmation_sms, send_subscriber_notification_sms
-        
-        # Send trade confirmation to user if SMS enabled
-        send_trade_confirmation_sms(current_user.id, ticker, quantity, "bought")
-        
-        # Send notifications to subscribers
-        subscriptions = Subscription.query.filter_by(subscribed_to_id=current_user.id, status='active').all()
-        for subscription in subscriptions:
-            send_subscriber_notification_sms(subscription.subscriber_id, current_user.username, ticker, quantity, "bought")
-        
-        # --- End of enhanced subscription price logic ---
-
-        flash(f'Successfully added {quantity} shares of {ticker} to your portfolio.', 'success')
-    
     else:
-        flash(f"Could not find ticker '{ticker}'. Please check the ticker symbol and try again.", 'danger')
+        flash(f'Could not find stock data for {ticker}. Please check the ticker symbol.', 'danger')
     
     return redirect(url_for('dashboard'))
 
