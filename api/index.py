@@ -4060,6 +4060,70 @@ def admin_create_leaderboard_tables():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/fix-stock-info-schema')
+@login_required
+def admin_fix_stock_info_schema():
+    """Fix stock_info table schema - add missing ticker column"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from sqlalchemy import text
+        
+        try:
+            # Check if ticker column exists
+            result = db.session.execute(text("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'stock_info' AND column_name = 'ticker'
+            """))
+            
+            ticker_exists = result.fetchone() is not None
+            
+            if not ticker_exists:
+                # Add ticker column
+                db.session.execute(text("""
+                    ALTER TABLE stock_info 
+                    ADD COLUMN ticker VARCHAR(10)
+                """))
+                
+                # Create index on ticker for performance
+                db.session.execute(text("""
+                    CREATE INDEX IF NOT EXISTS idx_stock_info_ticker 
+                    ON stock_info(ticker)
+                """))
+                
+                db.session.commit()
+                
+                return jsonify({
+                    'success': True,
+                    'message': 'Added ticker column to stock_info table',
+                    'actions': ['Added ticker column', 'Created ticker index']
+                })
+            else:
+                return jsonify({
+                    'success': True,
+                    'message': 'ticker column already exists',
+                    'actions': []
+                })
+                
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({
+                'success': False,
+                'error': f'Failed to fix stock_info schema: {str(e)}'
+            }), 500
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/populate-leaderboard')
 @login_required
 def admin_populate_leaderboard():
