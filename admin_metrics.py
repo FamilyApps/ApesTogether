@@ -33,7 +33,7 @@ def calculate_unique_stocks_count():
     try:
         # Count distinct stock symbols from both Stock and StockInfo tables
         stock_symbols = db.session.query(distinct(Stock.ticker)).all()
-        stock_info_symbols = db.session.query(distinct(StockInfo.symbol)).all()
+        stock_info_symbols = db.session.query(distinct(StockInfo.ticker)).all()
         
         all_symbols = set()
         for (symbol,) in stock_symbols:
