@@ -4499,6 +4499,100 @@ def admin_fix_portfolio_snapshots():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/debug-performance-calculation')
+@login_required
+def admin_debug_performance_calculation():
+    """Debug why performance calculations show 0.0% despite real snapshots"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime, date, timedelta
+        from models import db, PortfolioSnapshot, User, Stock
+        
+        debug_data = {
+            'users': [],
+            'period_tests': []
+        }
+        
+        # Test different periods for performance calculation
+        periods = ['YTD', '1Y', '3M', '1M']
+        today = date.today()
+        
+        users = User.query.join(Stock).distinct().limit(3).all()  # Test first 3 users
+        
+        for user in users:
+            user_debug = {
+                'user_id': user.id,
+                'username': user.username,
+                'period_calculations': []
+            }
+            
+            for period in periods:
+                # Calculate period start date (same logic as leaderboard)
+                if period == 'YTD':
+                    start_date = date(today.year, 1, 1)
+                elif period == '1Y':
+                    start_date = today - timedelta(days=365)
+                elif period == '3M':
+                    start_date = today - timedelta(days=90)
+                elif period == '1M':
+                    start_date = today - timedelta(days=30)
+                
+                # Get latest snapshot
+                latest_snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id)\
+                    .order_by(PortfolioSnapshot.date.desc()).first()
+                
+                # Get first snapshot (actual portfolio start)
+                first_snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id)\
+                    .order_by(PortfolioSnapshot.date.asc()).first()
+                
+                # Get actual start date (max of period start or first snapshot)
+                actual_start_date = max(start_date, first_snapshot.date) if first_snapshot else start_date
+                
+                # Get start snapshot
+                start_snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id)\
+                    .filter(PortfolioSnapshot.date >= actual_start_date)\
+                    .order_by(PortfolioSnapshot.date.asc()).first()
+                
+                # Calculate performance
+                performance_percent = 0.0
+                if latest_snapshot and start_snapshot and start_snapshot.total_value > 0:
+                    current_value = latest_snapshot.total_value
+                    start_value = start_snapshot.total_value
+                    performance_percent = ((current_value - start_value) / start_value) * 100
+                
+                period_calc = {
+                    'period': period,
+                    'period_start_date': start_date.isoformat(),
+                    'first_snapshot_date': first_snapshot.date.isoformat() if first_snapshot else None,
+                    'actual_start_date': actual_start_date.isoformat(),
+                    'start_snapshot_date': start_snapshot.date.isoformat() if start_snapshot else None,
+                    'start_value': float(start_snapshot.total_value) if start_snapshot else 0,
+                    'current_value': float(latest_snapshot.total_value) if latest_snapshot else 0,
+                    'performance_percent': round(performance_percent, 2),
+                    'calculation_valid': bool(start_snapshot and latest_snapshot and start_snapshot.total_value > 0)
+                }
+                
+                user_debug['period_calculations'].append(period_calc)
+            
+            debug_data['users'].append(user_debug)
+        
+        return jsonify({
+            'success': True,
+            'debug_data': debug_data
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/populate-leaderboard')
 @login_required
 def admin_populate_leaderboard():
