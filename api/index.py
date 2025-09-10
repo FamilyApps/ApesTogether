@@ -7105,6 +7105,22 @@ try:
 except Exception as e:
     print(f"Error registering admin blueprint: {e}")
 
+# Register the SMS blueprint for Vercel deployment
+try:
+    from sms_routes import sms_bp
+    app.register_blueprint(sms_bp)
+    logger.info("SMS blueprint registered successfully")
+except Exception as e:
+    print(f"Error registering SMS blueprint: {e}")
+
+# Register the leaderboard blueprint for Vercel deployment
+try:
+    from leaderboard_routes import leaderboard_bp
+    app.register_blueprint(leaderboard_bp)
+    logger.info("Leaderboard blueprint registered successfully")
+except Exception as e:
+    print(f"Error registering leaderboard blueprint: {e}")
+
 # Export the Flask app for Vercel serverless function
 # This is required for Vercel's Python runtime
 app.debug = False
