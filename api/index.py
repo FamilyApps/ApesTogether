@@ -1086,6 +1086,21 @@ def onboarding():
 @login_required
 def dashboard():
     """Display the user's dashboard."""
+    # Log dashboard view activity
+    try:
+        from models import UserActivity
+        activity = UserActivity(
+            user_id=current_user.id,
+            activity_type='view_dashboard',
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get('User-Agent', '')[:255]
+        )
+        db.session.add(activity)
+        db.session.commit()
+    except Exception as e:
+        logger.error(f"Error logging dashboard activity: {str(e)}")
+        db.session.rollback()
+    
     # Get user's portfolio
     portfolio_data = []
     total_portfolio_value = 0
@@ -2209,6 +2224,21 @@ def login():
                         login_user(user)
                         logger.info(f"User logged in successfully: {user.username}")
                         flash('Login successful!', 'success')
+                        
+                        # Log login activity
+                        try:
+                            from models import UserActivity
+                            activity = UserActivity(
+                                user_id=user.id,
+                                activity_type='login',
+                                ip_address=request.remote_addr,
+                                user_agent=request.headers.get('User-Agent', '')[:255]
+                            )
+                            db.session.add(activity)
+                            db.session.commit()
+                        except Exception as e:
+                            logger.error(f"Error logging login activity: {str(e)}")
+                            db.session.rollback()
                         
                         # For backward compatibility, also set session variables
                         session['user_id'] = user.id
