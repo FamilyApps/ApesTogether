@@ -68,7 +68,13 @@ def api_leaderboard_data():
 @login_required
 def update_period(period):
     """Update leaderboard for specific period (admin/debug use)"""
-    if not (current_user.email == 'admin@apestogether.ai' or current_user.username == 'admin'):
+    # Check if user is admin using the same logic as other admin routes
+    from flask import session
+    import os
+    ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
+    
+    email = session.get('email', '')
+    if email != ADMIN_EMAIL and current_user.email != ADMIN_EMAIL and current_user.username != 'admin':
         return jsonify({'error': 'Admin access required'}), 403
     
     users = User.query.all()
@@ -88,7 +94,13 @@ def update_period(period):
 @login_required
 def update_all():
     """Update all leaderboard entries (admin/debug use)"""
-    if not (current_user.email == 'admin@apestogether.ai' or current_user.username == 'admin'):
+    # Check if user is admin using the same logic as other admin routes
+    from flask import session
+    import os
+    ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
+    
+    email = session.get('email', '')
+    if email != ADMIN_EMAIL and current_user.email != ADMIN_EMAIL and current_user.username != 'admin':
         return jsonify({'error': 'Admin access required'}), 403
     
     updated_count = update_all_user_leaderboards()

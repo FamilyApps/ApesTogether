@@ -3908,7 +3908,7 @@ def run_migration():
 
 @app.route('/admin/fix-sms-column')
 def fix_sms_column():
-    """Fix missing sms_enabled column in sms_notification table"""
+    """Fix missing columns in sms_notification table"""
     try:
         # Check if user is admin
         email = session.get('email', '')
@@ -3916,15 +3916,20 @@ def fix_sms_column():
             return jsonify({'error': 'Admin access required'}), 403
         
         with app.app_context():
-            # Add sms_enabled column if it doesn't exist
+            # Add missing columns if they don't exist
             db.session.execute(text("""
                 ALTER TABLE sms_notification 
                 ADD COLUMN IF NOT EXISTS sms_enabled BOOLEAN DEFAULT TRUE;
             """))
             
+            db.session.execute(text("""
+                ALTER TABLE sms_notification 
+                ADD COLUMN IF NOT EXISTS verification_expires TIMESTAMP;
+            """))
+            
             db.session.commit()
         
-        return jsonify({'success': True, 'message': 'SMS column fix completed successfully'})
+        return jsonify({'success': True, 'message': 'SMS columns fix completed successfully'})
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()})
