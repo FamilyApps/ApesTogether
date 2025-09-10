@@ -4815,7 +4815,7 @@ def admin_diagnose_snapshot_creation():
                 diagnosis['api_status']['test_api_call'] = {
                     'ticker': test_stock.ticker,
                     'success': stock_data is not None,
-                    'current_price': float(stock_data.get('current_price', 0)) if stock_data else 0,
+                    'current_price': float(stock_data.get('price', 0)) if stock_data else 0,
                     'data_keys': list(stock_data.keys()) if stock_data else []
                 }
         except Exception as e:
@@ -4841,7 +4841,7 @@ def admin_diagnose_snapshot_creation():
                         'ticker': stock.ticker,
                         'quantity': float(stock.quantity),
                         'purchase_price': float(stock.purchase_price),
-                        'current_price': float(stock_data.get('current_price', 0)) if stock_data else 0,
+                        'current_price': float(stock_data.get('price', 0)) if stock_data else 0,
                         'api_success': stock_data is not None
                     })
                 

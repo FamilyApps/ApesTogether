@@ -91,8 +91,11 @@
                             <div class="col-md-4">
                                 <div class="card bg-light">
                                     <div class="card-body text-center">
-                                        <h6 class="card-title">Peak Time</h6>
-                                        <small class="text-muted" id="apiCallsPeakTime">-</small>
+                                        <h6 class="card-title">API Status</h6>
+                                        <div id="apiStatus">
+                                            <span id="apiStatusBadge" class="badge bg-secondary">Checking...</span>
+                                            <br><small class="text-muted" id="apiStatusText">-</small>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -255,6 +258,8 @@ function loadPlatformMetrics(forceRefresh = false) {
         .then(data => {
             if (data.success && data.metrics) {
                 displayMetrics(data.metrics);
+                // Load API status after metrics
+                loadApiStatus();
             } else {
                 throw new Error(data.metrics?.error || 'Invalid metrics data');
             }
@@ -265,6 +270,48 @@ function loadPlatformMetrics(forceRefresh = false) {
             error.style.display = 'block';
             document.getElementById('metricsErrorText').textContent = err.message;
         });
+}
+
+function loadApiStatus() {
+    fetch('/admin/diagnose-snapshot-creation')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.diagnosis) {
+                displayApiStatus(data.diagnosis);
+            }
+        })
+        .catch(err => {
+            console.error('Error loading API status:', err);
+            document.getElementById('apiStatusBadge').textContent = 'Error';
+            document.getElementById('apiStatusBadge').className = 'badge bg-danger';
+            document.getElementById('apiStatusText').textContent = 'Failed to check API status';
+        });
+}
+
+function displayApiStatus(diagnosis) {
+    const badge = document.getElementById('apiStatusBadge');
+    const text = document.getElementById('apiStatusText');
+    
+    // Check if API is working properly
+    const apiTest = diagnosis.api_status?.test_api_call;
+    const calculations = diagnosis.calculation_tests || [];
+    
+    if (apiTest && apiTest.success && apiTest.current_price > 0) {
+        // API is working and returning real prices
+        badge.textContent = 'Healthy';
+        badge.className = 'badge bg-success';
+        text.textContent = `Real prices: $${apiTest.current_price}`;
+    } else if (apiTest && apiTest.success && apiTest.current_price === 0) {
+        // API responding but returning 0 prices - fallback mode
+        badge.textContent = 'Fallback';
+        badge.className = 'badge bg-warning';
+        text.textContent = 'Using purchase prices';
+    } else {
+        // API failing
+        badge.textContent = 'Failed';
+        badge.className = 'badge bg-danger';
+        text.textContent = 'API calls failing';
+    }
 }
 
 function displayMetrics(metrics) {
