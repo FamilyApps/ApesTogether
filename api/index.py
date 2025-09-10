@@ -4251,6 +4251,142 @@ def _types_compatible(model_type, prod_type):
     
     return model_type == prod_type
 
+@app.route('/admin/diagnose-portfolio-data')
+@login_required
+def admin_diagnose_portfolio_data():
+    """Diagnose why portfolio values are showing as $0 and 0% performance"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime, date, timedelta
+        from models import db, PortfolioSnapshot, User, Stock
+        from portfolio_performance import PortfolioPerformanceCalculator
+        
+        diagnosis = {
+            'user_stock_data': [],
+            'snapshot_analysis': [],
+            'calculation_test': [],
+            'api_test': None
+        }
+        
+        # Check each user's stock holdings and snapshots
+        users = User.query.all()
+        for user in users:
+            stocks = Stock.query.filter_by(user_id=user.id).all()
+            
+            user_data = {
+                'user_id': user.id,
+                'username': user.username,
+                'stock_count': len(stocks),
+                'stocks': []
+            }
+            
+            total_purchase_value = 0
+            for stock in stocks:
+                stock_data = {
+                    'ticker': stock.ticker,
+                    'quantity': float(stock.quantity),
+                    'purchase_price': float(stock.purchase_price),
+                    'purchase_date': stock.purchase_date.isoformat(),
+                    'purchase_value': float(stock.quantity * stock.purchase_price)
+                }
+                total_purchase_value += stock_data['purchase_value']
+                user_data['stocks'].append(stock_data)
+            
+            user_data['total_purchase_value'] = total_purchase_value
+            
+            # Check recent snapshots for this user
+            recent_snapshots = PortfolioSnapshot.query.filter_by(user_id=user.id)\
+                .order_by(PortfolioSnapshot.date.desc()).limit(5).all()
+            
+            user_data['recent_snapshots'] = []
+            for snapshot in recent_snapshots:
+                user_data['recent_snapshots'].append({
+                    'date': snapshot.date.isoformat(),
+                    'total_value': float(snapshot.total_value),
+                    'cash_flow': float(snapshot.cash_flow) if snapshot.cash_flow else 0
+                })
+            
+            diagnosis['user_stock_data'].append(user_data)
+        
+        # Test portfolio calculation for one user
+        if users:
+            test_user = users[0]
+            calculator = PortfolioPerformanceCalculator()
+            
+            try:
+                # Test current portfolio value calculation
+                current_value = calculator.calculate_current_portfolio_value(test_user.id)
+                
+                # Test snapshot creation
+                today = date.today()
+                snapshot_result = calculator.create_daily_snapshot(test_user.id, today)
+                
+                diagnosis['calculation_test'] = {
+                    'test_user_id': test_user.id,
+                    'current_portfolio_value': current_value,
+                    'snapshot_creation': snapshot_result,
+                    'calculation_success': True
+                }
+                
+            except Exception as e:
+                diagnosis['calculation_test'] = {
+                    'test_user_id': test_user.id,
+                    'error': str(e),
+                    'calculation_success': False
+                }
+        
+        # Test Alpha Vantage API for a common stock
+        try:
+            import requests
+            import os
+            api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
+            
+            if api_key:
+                # Test API call for AAPL
+                url = f'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=AAPL&apikey={api_key}'
+                response = requests.get(url, timeout=10)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    diagnosis['api_test'] = {
+                        'success': True,
+                        'aapl_price': data.get('Global Quote', {}).get('05. price', 'N/A'),
+                        'api_calls_today': 'Check logs'
+                    }
+                else:
+                    diagnosis['api_test'] = {
+                        'success': False,
+                        'error': f'HTTP {response.status_code}'
+                    }
+            else:
+                diagnosis['api_test'] = {
+                    'success': False,
+                    'error': 'No API key found'
+                }
+                
+        except Exception as e:
+            diagnosis['api_test'] = {
+                'success': False,
+                'error': str(e)
+            }
+        
+        return jsonify({
+            'success': True,
+            'diagnosis': diagnosis
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/populate-leaderboard')
 @login_required
 def admin_populate_leaderboard():
