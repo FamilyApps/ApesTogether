@@ -3918,13 +3918,13 @@ def fix_all_columns():
         
         results = []
         
-        # Create LeaderboardCache table if it doesn't exist
+        # Create LeaderboardCache and UserPortfolioChartCache tables if they don't exist
         try:
-            from models import LeaderboardCache
+            from models import LeaderboardCache, UserPortfolioChartCache
             db.create_all()
-            results.append('Created LeaderboardCache table')
+            results.append('Created LeaderboardCache and UserPortfolioChartCache tables')
         except Exception as e:
-            results.append(f'LeaderboardCache table creation: {str(e)}')
+            results.append(f'Cache table creation: {str(e)}')
         
         # Fix SMS notification columns
         try:
@@ -5976,7 +5976,7 @@ def create_tables():
             return jsonify({'error': 'Admin access required'}), 403
         
         # Create the new tables
-        from models import db, User, Stock, Subscription, Transaction, PortfolioSnapshot, MarketData, SP500ChartCache, SubscriptionTier, TradeLimit, SMSNotification, StockInfo, LeaderboardEntry, LeaderboardCache
+        from models import db, User, Stock, Subscription, Transaction, PortfolioSnapshot, MarketData, SP500ChartCache, SubscriptionTier, TradeLimit, SMSNotification, StockInfo, LeaderboardEntry, LeaderboardCache, UserPortfolioChartCache
         
         current_time = datetime.now()
         

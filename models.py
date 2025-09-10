@@ -147,6 +147,22 @@ class LeaderboardCache(db.Model):
     def __repr__(self):
         return f"<LeaderboardCache {self.period} generated at {self.generated_at}>"
 
+class UserPortfolioChartCache(db.Model):
+    """Pre-generated portfolio charts for leaderboard users only"""
+    __tablename__ = 'user_portfolio_chart_cache'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    period = db.Column(db.String(10), nullable=False)  # '1D', '5D', '3M', 'YTD', '1Y', '5Y', 'MAX'
+    chart_data = db.Column(db.Text, nullable=False)  # JSON string of chart data
+    generated_at = db.Column(db.DateTime, nullable=False)
+    
+    # Ensure one cache entry per user per period
+    __table_args__ = (db.UniqueConstraint('user_id', 'period', name='unique_user_period_chart'),)
+    
+    def __repr__(self):
+        return f"<UserPortfolioChartCache user_id={self.user_id} {self.period} generated at {self.generated_at}>"
+
 class SubscriptionTier(db.Model):
     """Subscription tier definitions with pricing and trade limits"""
     __tablename__ = 'subscription_tier'

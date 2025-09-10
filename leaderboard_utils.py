@@ -297,22 +297,51 @@ def update_leaderboard_entry(user_id, period):
 
 def get_leaderboard_data(period='YTD', limit=50):
     """
-    Get cached leaderboard data from LeaderboardCache table
+    Get cached leaderboard data from LeaderboardCache table with chart data
     Returns pre-calculated leaderboard data updated at market close
     """
     import json
-    from models import LeaderboardCache
+    from models import LeaderboardCache, UserPortfolioChartCache
     
     # Try to get cached data first
     cache_entry = LeaderboardCache.query.filter_by(period=period).first()
     
     if cache_entry:
-        # Return cached data
+        # Return cached data with chart data included
         cached_data = json.loads(cache_entry.leaderboard_data)
+        
+        # Add chart data for each user if available
+        for entry in cached_data[:limit]:
+            chart_cache = UserPortfolioChartCache.query.filter_by(
+                user_id=entry['user_id'], period=period
+            ).first()
+            
+            if chart_cache:
+                entry['chart_data'] = json.loads(chart_cache.chart_data)
+            else:
+                entry['chart_data'] = None
+        
         return cached_data[:limit]
     
     # Fallback: calculate on-demand if no cache exists
     return calculate_leaderboard_data(period, limit)
+
+def get_user_chart_data(user_id, period):
+    """
+    Get cached chart data for a specific user and period
+    """
+    import json
+    from models import UserPortfolioChartCache
+    
+    chart_cache = UserPortfolioChartCache.query.filter_by(
+        user_id=user_id, period=period
+    ).first()
+    
+    if chart_cache:
+        return json.loads(chart_cache.chart_data)
+    
+    # Fallback: generate on-demand if not cached
+    return generate_user_portfolio_chart(user_id, period)
 
 def calculate_leaderboard_data(period='YTD', limit=50):
     """
@@ -388,22 +417,91 @@ def calculate_leaderboard_data(period='YTD', limit=50):
     leaderboard_data.sort(key=lambda x: x['performance_percent'], reverse=True)
     return leaderboard_data[:limit]
 
+def generate_user_portfolio_chart(user_id, period):
+    """
+    Generate portfolio chart data for a specific user and period
+    Returns chart data in format compatible with Chart.js
+    """
+    import json
+    from datetime import datetime, date, timedelta
+    from portfolio_performance import PortfolioPerformanceCalculator
+    
+    try:
+        calculator = PortfolioPerformanceCalculator()
+        
+        # Calculate date range for the period
+        today = date.today()
+        
+        if period == '1D':
+            start_date = today - timedelta(days=1)
+        elif period == '5D':
+            start_date = today - timedelta(days=5)
+        elif period == '3M':
+            start_date = today - timedelta(days=90)
+        elif period == 'YTD':
+            start_date = date(today.year, 1, 1)
+        elif period == '1Y':
+            start_date = today - timedelta(days=365)
+        elif period == '5Y':
+            start_date = today - timedelta(days=1825)
+        elif period == 'MAX':
+            start_date = date(2020, 1, 1)
+        else:
+            start_date = date(today.year, 1, 1)
+        
+        # Get portfolio snapshots for the period
+        snapshots = PortfolioSnapshot.query.filter_by(user_id=user_id)\
+            .filter(PortfolioSnapshot.date >= start_date)\
+            .order_by(PortfolioSnapshot.date.asc()).all()
+        
+        if not snapshots:
+            return None
+        
+        # Format chart data
+        chart_data = {
+            'labels': [snapshot.date.strftime('%Y-%m-%d') for snapshot in snapshots],
+            'datasets': [{
+                'label': 'Portfolio Value',
+                'data': [float(snapshot.total_value) for snapshot in snapshots],
+                'borderColor': 'rgb(75, 192, 192)',
+                'backgroundColor': 'rgba(75, 192, 192, 0.2)',
+                'tension': 0.1
+            }],
+            'period': period,
+            'user_id': user_id,
+            'generated_at': datetime.now().isoformat()
+        }
+        
+        return chart_data
+        
+    except Exception as e:
+        print(f"Error generating chart for user {user_id}, period {period}: {str(e)}")
+        return None
+
 def update_leaderboard_cache():
     """
-    Update cached leaderboard data for all periods
-    Called at market close to pre-generate leaderboard data
+    Update cached leaderboard data for all periods and pre-generate charts for top users
+    Called at market close to pre-generate leaderboard data and charts
     """
     import json
     from datetime import datetime
-    from models import db, LeaderboardCache
+    from models import db, LeaderboardCache, UserPortfolioChartCache
     
     periods = ['1D', '5D', '3M', 'YTD', '1Y', '5Y', 'MAX']
     updated_count = 0
+    charts_generated = 0
+    
+    # Track all users who make any leaderboard
+    leaderboard_users = set()
     
     for period in periods:
         try:
             # Calculate fresh leaderboard data
-            leaderboard_data = calculate_leaderboard_data(period, 100)  # Cache top 100
+            leaderboard_data = calculate_leaderboard_data(period, 50)  # Top 50 for leaderboard
+            
+            # Collect user IDs who made this leaderboard
+            for entry in leaderboard_data:
+                leaderboard_users.add(entry['user_id'])
             
             # Update or create cache entry
             cache_entry = LeaderboardCache.query.filter_by(period=period).first()
@@ -424,11 +522,55 @@ def update_leaderboard_cache():
             print(f"Error updating leaderboard cache for period {period}: {str(e)}")
             continue
     
+    # Generate portfolio charts only for users who made any leaderboard
+    for user_id in leaderboard_users:
+        for period in periods:
+            try:
+                # Generate chart data for this user and period
+                chart_data = generate_user_portfolio_chart(user_id, period)
+                
+                if chart_data:
+                    # Update or create chart cache entry
+                    chart_cache = UserPortfolioChartCache.query.filter_by(
+                        user_id=user_id, period=period
+                    ).first()
+                    
+                    if chart_cache:
+                        chart_cache.chart_data = json.dumps(chart_data)
+                        chart_cache.generated_at = datetime.now()
+                    else:
+                        chart_cache = UserPortfolioChartCache(
+                            user_id=user_id,
+                            period=period,
+                            chart_data=json.dumps(chart_data),
+                            generated_at=datetime.now()
+                        )
+                        db.session.add(chart_cache)
+                    
+                    charts_generated += 1
+                    
+            except Exception as e:
+                print(f"Error generating chart cache for user {user_id}, period {period}: {str(e)}")
+                continue
+    
+    # Clean up old chart cache entries for users no longer on leaderboards
+    try:
+        old_charts = UserPortfolioChartCache.query.filter(
+            ~UserPortfolioChartCache.user_id.in_(leaderboard_users)
+        ).all()
+        
+        for old_chart in old_charts:
+            db.session.delete(old_chart)
+            
+    except Exception as e:
+        print(f"Error cleaning up old chart cache: {str(e)}")
+    
     try:
         db.session.commit()
+        print(f"Leaderboard cache updated: {updated_count} periods, {charts_generated} charts generated for {len(leaderboard_users)} users")
     except Exception as e:
         db.session.rollback()
-        print(f"Error committing leaderboard cache updates: {str(e)}")
+        print(f"Error committing leaderboard and chart cache updates: {str(e)}")
         return 0
     
     return updated_count
