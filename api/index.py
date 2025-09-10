@@ -4063,7 +4063,7 @@ def admin_create_leaderboard_tables():
 @app.route('/admin/fix-stock-info-schema')
 @login_required
 def admin_fix_stock_info_schema():
-    """Fix stock_info table schema - add missing ticker column"""
+    """Fix stock_info table schema - add all missing columns"""
     try:
         # Check if user is admin
         email = session.get('email', '')
@@ -4073,40 +4073,59 @@ def admin_fix_stock_info_schema():
         from sqlalchemy import text
         
         try:
-            # Check if ticker column exists
+            # Get existing columns
             result = db.session.execute(text("""
                 SELECT column_name 
                 FROM information_schema.columns 
-                WHERE table_name = 'stock_info' AND column_name = 'ticker'
+                WHERE table_name = 'stock_info'
             """))
             
-            ticker_exists = result.fetchone() is not None
+            existing_columns = {row[0] for row in result.fetchall()}
+            actions = []
             
-            if not ticker_exists:
-                # Add ticker column
-                db.session.execute(text("""
-                    ALTER TABLE stock_info 
-                    ADD COLUMN ticker VARCHAR(10)
-                """))
-                
-                # Create index on ticker for performance
+            # Required columns based on StockInfo model
+            required_columns = {
+                'ticker': 'VARCHAR(10)',
+                'company_name': 'VARCHAR(200)',
+                'market_cap': 'BIGINT',
+                'cap_classification': 'VARCHAR(20)',
+                'last_updated': 'TIMESTAMP',
+                'created_at': 'TIMESTAMP'
+            }
+            
+            # Add missing columns
+            for column_name, column_type in required_columns.items():
+                if column_name not in existing_columns:
+                    db.session.execute(text(f"""
+                        ALTER TABLE stock_info 
+                        ADD COLUMN {column_name} {column_type}
+                    """))
+                    actions.append(f'Added {column_name} column')
+            
+            # Create indexes
+            if 'ticker' not in existing_columns:
                 db.session.execute(text("""
                     CREATE INDEX IF NOT EXISTS idx_stock_info_ticker 
                     ON stock_info(ticker)
                 """))
-                
-                db.session.commit()
-                
+                actions.append('Created ticker index')
+            
+            db.session.commit()
+            
+            if actions:
                 return jsonify({
                     'success': True,
-                    'message': 'Added ticker column to stock_info table',
-                    'actions': ['Added ticker column', 'Created ticker index']
+                    'message': 'Fixed stock_info table schema',
+                    'actions': actions,
+                    'existing_columns': list(existing_columns),
+                    'added_columns': [action for action in actions if 'Added' in action]
                 })
             else:
                 return jsonify({
                     'success': True,
-                    'message': 'ticker column already exists',
-                    'actions': []
+                    'message': 'All required columns already exist',
+                    'actions': [],
+                    'existing_columns': list(existing_columns)
                 })
                 
         except Exception as e:
@@ -4123,6 +4142,114 @@ def admin_fix_stock_info_schema():
             'error': str(e),
             'traceback': traceback.format_exc()
         }), 500
+
+@app.route('/admin/validate-schema')
+@login_required
+def admin_validate_schema():
+    """Comprehensive schema validation - compare all model columns against production database"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from sqlalchemy import text, inspect
+        from models import (User, Stock, Subscription, SubscriptionTier, StockTransaction, 
+                          PortfolioSnapshot, MarketData, PortfolioSnapshotIntraday, 
+                          LeaderboardCache, UserPortfolioChartCache, StockInfo, 
+                          AlphaVantageAPILog, UserActivity, PlatformMetrics, SMSNotification)
+        
+        # Get all model classes
+        models_to_check = [
+            User, Stock, Subscription, SubscriptionTier, StockTransaction,
+            PortfolioSnapshot, MarketData, PortfolioSnapshotIntraday,
+            LeaderboardCache, UserPortfolioChartCache, StockInfo,
+            AlphaVantageAPILog, UserActivity, PlatformMetrics, SMSNotification
+        ]
+        
+        inspector = inspect(db.engine)
+        production_tables = set(inspector.get_table_names())
+        
+        validation_results = {
+            'tables_checked': 0,
+            'missing_tables': [],
+            'missing_columns': [],
+            'type_mismatches': [],
+            'all_valid': True
+        }
+        
+        for model in models_to_check:
+            table_name = model.__tablename__
+            validation_results['tables_checked'] += 1
+            
+            # Check if table exists
+            if table_name not in production_tables:
+                validation_results['missing_tables'].append(table_name)
+                validation_results['all_valid'] = False
+                continue
+            
+            # Get production columns
+            production_columns = {col['name']: col for col in inspector.get_columns(table_name)}
+            
+            # Check each model column
+            for column in model.__table__.columns:
+                column_name = column.name
+                
+                if column_name not in production_columns:
+                    validation_results['missing_columns'].append({
+                        'table': table_name,
+                        'column': column_name,
+                        'expected_type': str(column.type),
+                        'nullable': column.nullable
+                    })
+                    validation_results['all_valid'] = False
+                else:
+                    # Check type compatibility (basic check)
+                    prod_col = production_columns[column_name]
+                    model_type = str(column.type).upper()
+                    prod_type = str(prod_col['type']).upper()
+                    
+                    # Basic type compatibility check
+                    if not _types_compatible(model_type, prod_type):
+                        validation_results['type_mismatches'].append({
+                            'table': table_name,
+                            'column': column_name,
+                            'model_type': model_type,
+                            'production_type': prod_type
+                        })
+        
+        return jsonify({
+            'success': True,
+            'validation_results': validation_results,
+            'production_tables_count': len(production_tables),
+            'models_checked_count': len(models_to_check)
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+def _types_compatible(model_type, prod_type):
+    """Basic type compatibility check"""
+    # Normalize types for comparison
+    type_mappings = {
+        'INTEGER': ['INTEGER', 'INT', 'SERIAL'],
+        'VARCHAR': ['VARCHAR', 'TEXT', 'STRING'],
+        'TIMESTAMP': ['TIMESTAMP', 'DATETIME'],
+        'BOOLEAN': ['BOOLEAN', 'BOOL'],
+        'FLOAT': ['FLOAT', 'REAL', 'DOUBLE'],
+        'BIGINT': ['BIGINT', 'LONG']
+    }
+    
+    for base_type, compatible_types in type_mappings.items():
+        if any(t in model_type for t in compatible_types) and any(t in prod_type for t in compatible_types):
+            return True
+    
+    return model_type == prod_type
 
 @app.route('/admin/populate-leaderboard')
 @login_required
