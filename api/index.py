@@ -4715,6 +4715,69 @@ def admin_check_snapshot_history():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/clean-historical-snapshots')
+@login_required
+def admin_clean_historical_snapshots():
+    """Remove incorrect historical snapshots and keep only recent real ones"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime, date, timedelta
+        from models import db, PortfolioSnapshot, User, Stock
+        
+        results = {
+            'users_processed': 0,
+            'snapshots_deleted': 0,
+            'snapshots_kept': 0
+        }
+        
+        # Get users with stocks
+        users = User.query.join(Stock).distinct().all()
+        
+        for user in users:
+            results['users_processed'] += 1
+            
+            # Keep only the last 7 days of snapshots (real daily data)
+            cutoff_date = date.today() - timedelta(days=7)
+            
+            # Delete old snapshots with identical values
+            old_snapshots = PortfolioSnapshot.query.filter(
+                PortfolioSnapshot.user_id == user.id,
+                PortfolioSnapshot.date < cutoff_date
+            ).all()
+            
+            for snapshot in old_snapshots:
+                db.session.delete(snapshot)
+                results['snapshots_deleted'] += 1
+            
+            # Count kept snapshots
+            kept_snapshots = PortfolioSnapshot.query.filter(
+                PortfolioSnapshot.user_id == user.id,
+                PortfolioSnapshot.date >= cutoff_date
+            ).count()
+            
+            results['snapshots_kept'] += kept_snapshots
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Cleaned historical snapshots for {results["users_processed"]} users',
+            'results': results
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/populate-leaderboard')
 @login_required
 def admin_populate_leaderboard():
