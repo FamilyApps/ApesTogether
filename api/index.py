@@ -1160,13 +1160,16 @@ def debug_activity():
         from models import UserActivity
         from datetime import datetime, timedelta
         
-        # Get recent activity
-        recent_activity = UserActivity.query.order_by(UserActivity.timestamp.desc()).limit(10).all()
-        
         # Get activity counts by time period
         now = datetime.utcnow()
         one_day_ago = now - timedelta(days=1)
         seven_days_ago = now - timedelta(days=7)
+        
+        # Force a fresh session to see committed records
+        db.session.commit()  # Ensure any pending transactions are committed
+        
+        # Get recent activity
+        recent_activity = UserActivity.query.order_by(UserActivity.timestamp.desc()).limit(10).all()
         
         activity_1d = UserActivity.query.filter(UserActivity.timestamp >= one_day_ago).count()
         activity_7d = UserActivity.query.filter(UserActivity.timestamp >= seven_days_ago).count()
