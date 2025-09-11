@@ -1151,7 +1151,7 @@ def dashboard():
 @login_required
 def debug_activity():
     """Debug endpoint to check user activity tracking"""
-    if not is_admin():
+    if not current_user.is_admin:
         return redirect(url_for('index'))
     
     try:
