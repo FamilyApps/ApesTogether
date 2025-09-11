@@ -1194,6 +1194,25 @@ def debug_activity():
                 'ip_address': activity.ip_address
             })
         
+        # Also test creating a record right now
+        test_record = None
+        try:
+            test_record = UserActivity(
+                user_id=current_user.id,
+                activity_type='debug_test',
+                ip_address=request.remote_addr,
+                user_agent='Debug Test'
+            )
+            db.session.add(test_record)
+            db.session.commit()
+            debug_info['test_record_created'] = True
+            debug_info['test_record_id'] = test_record.id
+        except Exception as e:
+            debug_info['test_record_created'] = False
+            debug_info['test_record_error'] = str(e)
+            debug_info['test_record_traceback'] = traceback.format_exc()
+            db.session.rollback()
+        
         return f"""
         <html>
         <head><title>Activity Debug</title></head>
