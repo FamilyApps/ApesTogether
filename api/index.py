@@ -1097,6 +1097,7 @@ def dashboard():
         )
         db.session.add(activity)
         db.session.commit()
+        db.session.flush()  # Ensure record is immediately visible
         logger.info(f"Successfully logged dashboard activity for user {current_user.id}")
     except Exception as e:
         logger.error(f"Error logging dashboard activity: {str(e)}")
@@ -2319,6 +2320,7 @@ def login():
                             )
                             db.session.add(activity)
                             db.session.commit()
+                            db.session.flush()  # Ensure record is immediately visible
                             logger.info(f"Successfully logged login activity for user {user.id}")
                         except Exception as e:
                             logger.error(f"Error logging login activity: {str(e)}")
