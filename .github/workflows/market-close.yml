@@ -1,0 +1,32 @@
+name: Market Close Processing
+on:
+  schedule:
+    # Run at 4:30 PM ET daily (after market close at 4:00 PM ET)
+    # Converted to UTC: 8:30 PM UTC (20:30) - accounts for EST/EDT
+    - cron: '30 20 * * 1-5'  # Monday-Friday only
+    - cron: '30 21 * * 1-5'  # Backup run during EDT (daylight saving)
+  workflow_dispatch:  # Allow manual triggering for testing
+
+jobs:
+  market-close-processing:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create End-of-Day Snapshots and Update Leaderboards
+        run: |
+          response=$(curl -s -w "%{http_code}" -X POST \
+            "https://apestogether.ai/api/cron/market-close" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json")
+          
+          http_code="${response: -3}"
+          body="${response%???}"
+          
+          echo "HTTP Status: $http_code"
+          echo "Response: $body"
+          
+          if [ "$http_code" -ne 200 ]; then
+            echo "Error: Market close processing failed with status $http_code"
+            exit 1
+          fi
+          
+          echo "Market close processing completed successfully"

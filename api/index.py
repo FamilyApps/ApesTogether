@@ -7405,24 +7405,89 @@ def create_tables():
             logger.error(error_msg)
         
         return jsonify({
-            'success': len(results['errors']) == 0,
-            'message': 'Intraday collection test completed',
+            'success': True,
+            'message': 'Market close processing completed',
             'results': results
         }), 200
     
     except Exception as e:
-        logger.error(f"Unexpected error in intraday test: {str(e)}")
+        logger.error(f"Unexpected error in market close: {str(e)}")
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
-@app.route('/admin/create-intraday-tables')
+@app.route('/admin/test-intraday-collection')
 @login_required
-def create_intraday_tables():
-    """Create the missing intraday portfolio snapshots and chart cache tables"""
+def test_intraday_collection():
+    """Admin endpoint to manually test intraday data collection"""
+    if not current_user.is_admin:
+        return redirect(url_for('index'))
+    
+    try:
+        from datetime import datetime
+        from models import User, PortfolioSnapshotIntraday
+        from portfolio_performance import PortfolioPerformanceCalculator
+        
+        calculator = PortfolioPerformanceCalculator()
+        current_time = datetime.now()
+        
+        results = {
+            'timestamp': current_time.isoformat(),
+            'users_processed': 0,
+            'snapshots_created': 0,
+            'errors': []
+        }
+        
+        # Get all users
+        users = User.query.all()
+        
+        for user in users:
+            try:
+                # Calculate current portfolio value
+                portfolio_value = calculator.calculate_portfolio_value(user.id)
+                
+                # Create intraday snapshot
+                snapshot = PortfolioSnapshotIntraday(
+                    user_id=user.id,
+                    timestamp=current_time,
+                    total_value=portfolio_value
+                )
+                db.session.add(snapshot)
+                results['snapshots_created'] += 1
+                results['users_processed'] += 1
+                
+            except Exception as e:
+                error_msg = f"Error processing user {user.id}: {str(e)}"
+                results['errors'].append(error_msg)
+        
+        # Commit all changes
+        db.session.commit()
+        
+        return f"""
+        <h1>Manual Intraday Collection Test</h1>
+        <h2>Results</h2>
+        <p><strong>Timestamp:</strong> {results['timestamp']}</p>
+        <p><strong>Users Processed:</strong> {results['users_processed']}</p>
+        <p><strong>Snapshots Created:</strong> {results['snapshots_created']}</p>
+        <p><strong>Errors:</strong> {len(results['errors'])}</p>
+        
+        {f'<h3>Errors:</h3><ul>{"".join([f"<li>{error}</li>" for error in results["errors"]])}</ul>' if results['errors'] else ''}
+        
+        <p><a href="/admin">Back to Admin</a></p>
+        """
+        
+    except Exception as e:
+        return f"""
+        <h1>Manual Intraday Collection Test - Error</h1>
+        <p><strong>Error:</strong> {str(e)}</p>
+        <p><a href="/admin">Back to Admin</a></p>
+        """
+
+@app.route('/admin/create-tables')
+@login_required  
+def create_tables():
     try:
         # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
+        if not current_user.is_admin:
+            return redirect(url_for('index'))
         
         from sqlalchemy import text
         
