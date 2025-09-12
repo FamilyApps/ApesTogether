@@ -2872,7 +2872,7 @@ def test_cron_execution():
     try:
         from datetime import datetime, timedelta
         from sqlalchemy import distinct
-        from models import PortfolioSnapshotIntraday
+        from models import PortfolioSnapshotIntraday, PortfolioSnapshot, LeaderboardEntry
         
         today = datetime.now().date()
         yesterday = today - timedelta(days=1)
