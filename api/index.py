@@ -2905,9 +2905,10 @@ def test_cron_execution():
             }
             
             # Check intraday snapshots for today
-            intraday_today = IntradaySnapshot.query.filter(
-                IntradaySnapshot.user_id == user.id,
-                IntradaySnapshot.date == today
+            intraday_today = PortfolioSnapshotIntraday.query.filter(
+                PortfolioSnapshotIntraday.user_id == user.id,
+                PortfolioSnapshotIntraday.timestamp >= datetime.combine(today, datetime.min.time()),
+                PortfolioSnapshotIntraday.timestamp < datetime.combine(today + timedelta(days=1), datetime.min.time())
             ).all()
             
             if intraday_today:
@@ -2916,7 +2917,7 @@ def test_cron_execution():
                 user_data['intraday_today'] = len(intraday_today)
                 
                 # Check for varying values
-                values = [snap.portfolio_value for snap in intraday_today]
+                values = [snap.total_value for snap in intraday_today]
                 if len(set(values)) > 1:
                     results['portfolio_values_varying'] += 1
                     user_data['varying_values'] = True
