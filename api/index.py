@@ -2870,7 +2870,7 @@ def test_cron_execution():
         return redirect(url_for('index'))
     
     try:
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, time
         from sqlalchemy import distinct
         from models import PortfolioSnapshotIntraday, PortfolioSnapshot, LeaderboardEntry, User, Transaction
         
@@ -2979,7 +2979,7 @@ def test_cron_execution():
                 from portfolio_performance import PortfolioPerformanceCalculator
                 calculator = PortfolioPerformanceCalculator()
                 test_user = users_with_portfolios[0]
-                current_value = calculator.calculate_current_portfolio_value(test_user.id)
+                current_value = calculator.calculate_portfolio_value(test_user.id)
                 results['portfolio_calculation_test'] = {
                     'success': True,
                     'test_user': test_user.username,
