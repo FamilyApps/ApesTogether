@@ -1859,31 +1859,19 @@ def get_batch_stock_data(ticker_symbols):
                         stock_price_cache[ticker] = {'price': price, 'timestamp': current_time}
                         result[ticker] = price
                         
-                        # Log successful API call
+                        # Log successful API call using existing function
                         try:
-                            from models import AlphaVantageAPILog
-                            api_log = AlphaVantageAPILog(
-                                endpoint='GLOBAL_QUOTE',
-                                symbol=ticker,
-                                response_status='success',
-                                response_time_ms=int((datetime.now() - current_time).total_seconds() * 1000)
-                            )
-                            db.session.add(api_log)
-                            db.session.commit()
+                            from admin_metrics import log_alpha_vantage_call
+                            response_time = int((datetime.now() - current_time).total_seconds() * 1000)
+                            log_alpha_vantage_call('GLOBAL_QUOTE', ticker, 'success', response_time)
                         except Exception as log_error:
                             logger.error(f"Error logging API call: {log_error}")
                     else:
                         logger.warning(f"Could not get price for {ticker} from API - no fallback used")
-                        # Log failed API call
+                        # Log failed API call using existing function
                         try:
-                            from models import AlphaVantageAPILog
-                            api_log = AlphaVantageAPILog(
-                                endpoint='GLOBAL_QUOTE',
-                                symbol=ticker,
-                                response_status='error'
-                            )
-                            db.session.add(api_log)
-                            db.session.commit()
+                            from admin_metrics import log_alpha_vantage_call
+                            log_alpha_vantage_call('GLOBAL_QUOTE', ticker, 'error')
                         except Exception as log_error:
                             logger.error(f"Error logging API call: {log_error}")
                         
@@ -2987,27 +2975,29 @@ def test_cron_execution():
             
             results['user_details'].append(user_data)
         
-        # Check leaderboard updates
-        recent_leaderboard = LeaderboardEntry.query.filter(
-            LeaderboardEntry.calculated_at >= datetime.combine(yesterday, datetime.min.time())
-        ).all()
-        
-        if recent_leaderboard:
-            results['leaderboard_updated'] = True
-            results['leaderboard_entries'] = len(recent_leaderboard)
+        # Check leaderboard updates using actual production schema
+        try:
+            # Query using raw SQL since the model doesn't match production schema
+            leaderboard_query = db.session.execute(text("""
+                SELECT COUNT(*) as count FROM leaderboard_entry 
+                WHERE date >= :yesterday_date
+            """), {'yesterday_date': yesterday})
+            leaderboard_count = leaderboard_query.fetchone()[0]
             
-            # Get top performers
-            top_performers = sorted(recent_leaderboard, key=lambda x: x.performance_percentage, reverse=True)[:5]
-            results['top_performers'] = []
-            for entry in top_performers:
-                user = User.query.get(entry.user_id)
-                results['top_performers'].append({
-                    'username': user.username if user else 'Unknown',
-                    'performance': entry.performance_percentage,
-                    'date': entry.calculated_at.date().isoformat()
-                })
-        else:
-            results['issues'].append("Leaderboard not updated recently")
+            if leaderboard_count > 0:
+                results['leaderboard_updated'] = True
+                results['leaderboard_entries'] = leaderboard_count
+                results['top_performers'] = []  # Skip detailed analysis due to schema mismatch
+            else:
+                results['leaderboard_updated'] = False
+                results['leaderboard_entries'] = 0
+                results['issues'].append("No recent leaderboard entries found")
+                
+        except Exception as leaderboard_error:
+            logger.warning(f"Leaderboard query failed: {leaderboard_error}")
+            results['leaderboard_updated'] = False
+            results['leaderboard_entries'] = 0
+            results['issues'].append(f"Leaderboard query error: {str(leaderboard_error)}")
         
         # Test portfolio calculation
         if users_with_portfolios:
