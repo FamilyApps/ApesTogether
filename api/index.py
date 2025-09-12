@@ -1148,88 +1148,10 @@ def dashboard():
                     'gain_loss_percent': 'N/A'
                 })
     
-    return render_template_with_defaults('admin/dashboard.html', now=datetime.now())
-
-@app.route('/admin/debug-activity')
-@login_required
-def debug_activity():
-    """Debug endpoint to check user activity tracking"""
-    if not current_user.is_admin:
-        return redirect(url_for('index'))
-    
-    try:
-        from models import UserActivity
-        from datetime import datetime, timedelta
-        
-        # Get activity counts by time period
-        now = datetime.utcnow()
-        one_day_ago = now - timedelta(days=1)
-        seven_days_ago = now - timedelta(days=7)
-        
-        # Force a fresh session to see committed records
-        db.session.commit()  # Ensure any pending transactions are committed
-        
-        # Get recent activity
-        recent_activity = UserActivity.query.order_by(UserActivity.timestamp.desc()).limit(10).all()
-        
-        activity_1d = UserActivity.query.filter(UserActivity.timestamp >= one_day_ago).count()
-        activity_7d = UserActivity.query.filter(UserActivity.timestamp >= seven_days_ago).count()
-        
-        # Get unique users in last day
-        unique_users_1d = db.session.query(UserActivity.user_id.distinct()).filter(
-            UserActivity.timestamp >= one_day_ago
-        ).count()
-        
-        debug_info = {
-            'total_activity_records': UserActivity.query.count(),
-            'activity_last_24h': activity_1d,
-            'activity_last_7d': activity_7d,
-            'unique_users_last_24h': unique_users_1d,
-            'current_time_utc': now.isoformat(),
-            'cutoff_24h': one_day_ago.isoformat(),
-            'recent_activity': []
-        }
-        
-        for activity in recent_activity:
-            debug_info['recent_activity'].append({
-                'user_id': activity.user_id,
-                'activity_type': activity.activity_type,
-                'timestamp': activity.timestamp.isoformat(),
-                'ip_address': activity.ip_address
-            })
-        
-        # Also test creating a record right now
-        test_record = None
-        try:
-            test_record = UserActivity(
-                user_id=current_user.id,
-                activity_type='debug_test',
-                ip_address=request.remote_addr,
-                user_agent='Debug Test'
-            )
-            db.session.add(test_record)
-            db.session.commit()
-            debug_info['test_record_created'] = True
-            debug_info['test_record_id'] = test_record.id
-        except Exception as e:
-            debug_info['test_record_created'] = False
-            debug_info['test_record_error'] = str(e)
-            debug_info['test_record_traceback'] = traceback.format_exc()
-            db.session.rollback()
-        
-        return f"""
-        <html>
-        <head><title>Activity Debug</title></head>
-        <body>
-        <h1>User Activity Debug</h1>
-        <pre>{debug_info}</pre>
-        <a href="/admin">Back to Admin</a>
-        </body>
-        </html>
-        """
-        
-    except Exception as e:
-        return f"Error: {str(e)}"
+    return render_template_with_defaults('dashboard.html', 
+                                       portfolio_data=portfolio_data, 
+                                       total_portfolio_value=total_portfolio_value,
+                                       now=datetime.now())
 
 @app.route('/update_username', methods=['POST'])
 @login_required
@@ -2935,15 +2857,178 @@ def debug_database():
     
     html_results = "<br>".join(results)
     return f"""
-    <h1>Database Diagnostics</h1>
-    <p>{html_results}</p>
-    <hr>
-    <p><a href="/admin">Back to Admin Dashboard</a></p>
+    <h1>Debug Error</h1>
+    <pre>{html_results}</pre>
+    <br><a href='/admin'>Back to Admin</a>
     """
 
 
-# Admin routes for viewing users and transactions
-# Removed conflicting admin users route - using admin_interface.py blueprint instead
+@app.route('/admin/test-cron-execution')
+@login_required
+def test_cron_execution():
+    if not current_user.is_admin:
+        return redirect(url_for('index'))
+    
+    try:
+        from datetime import datetime, timedelta
+        from sqlalchemy import distinct
+        
+        today = datetime.now().date()
+        yesterday = today - timedelta(days=1)
+        
+        # Get all users with portfolios
+        users_with_portfolios = db.session.query(User).join(Transaction).distinct().all()
+        
+        results = {
+            'test_date': today.isoformat(),
+            'users_tested': len(users_with_portfolios),
+            'intraday_snapshots_today': 0,
+            'eod_snapshots_today': 0,
+            'users_with_intraday_today': 0,
+            'users_with_eod_today': 0,
+            'portfolio_values_varying': 0,
+            'leaderboard_updated': False,
+            'chart_data_available': 0,
+            'issues': [],
+            'user_details': []
+        }
+        
+        # Check snapshots for each user
+        for user in users_with_portfolios:
+            user_data = {
+                'username': user.username,
+                'user_id': user.id,
+                'intraday_today': 0,
+                'eod_today': 0,
+                'varying_values': False,
+                'total_snapshots': 0
+            }
+            
+            # Check intraday snapshots for today
+            intraday_today = IntradaySnapshot.query.filter(
+                IntradaySnapshot.user_id == user.id,
+                IntradaySnapshot.date == today
+            ).all()
+            
+            if intraday_today:
+                results['users_with_intraday_today'] += 1
+                results['intraday_snapshots_today'] += len(intraday_today)
+                user_data['intraday_today'] = len(intraday_today)
+                
+                # Check for varying values
+                values = [snap.portfolio_value for snap in intraday_today]
+                if len(set(values)) > 1:
+                    results['portfolio_values_varying'] += 1
+                    user_data['varying_values'] = True
+                else:
+                    results['issues'].append(f"User {user.username} has identical intraday values")
+            else:
+                results['issues'].append(f"User {user.username} missing intraday snapshots for today")
+            
+            # Check end-of-day snapshots for today
+            eod_today = PortfolioSnapshot.query.filter(
+                PortfolioSnapshot.user_id == user.id,
+                PortfolioSnapshot.date == today
+            ).all()
+            
+            if eod_today:
+                results['users_with_eod_today'] += 1
+                results['eod_snapshots_today'] += len(eod_today)
+                user_data['eod_today'] = len(eod_today)
+            else:
+                results['issues'].append(f"User {user.username} missing end-of-day snapshot for today")
+            
+            # Check total snapshots for chart data
+            total_snapshots = PortfolioSnapshot.query.filter(
+                PortfolioSnapshot.user_id == user.id
+            ).count()
+            user_data['total_snapshots'] = total_snapshots
+            
+            if total_snapshots >= 2:
+                results['chart_data_available'] += 1
+            
+            results['user_details'].append(user_data)
+        
+        # Check leaderboard updates
+        recent_leaderboard = LeaderboardEntry.query.filter(
+            LeaderboardEntry.date >= yesterday
+        ).all()
+        
+        if recent_leaderboard:
+            results['leaderboard_updated'] = True
+            results['leaderboard_entries'] = len(recent_leaderboard)
+            
+            # Get top performers
+            top_performers = sorted(recent_leaderboard, key=lambda x: x.performance_percentage, reverse=True)[:5]
+            results['top_performers'] = []
+            for entry in top_performers:
+                user = User.query.get(entry.user_id)
+                results['top_performers'].append({
+                    'username': user.username if user else 'Unknown',
+                    'performance': entry.performance_percentage,
+                    'date': entry.date.isoformat()
+                })
+        else:
+            results['issues'].append("Leaderboard not updated recently")
+        
+        # Test portfolio calculation
+        if users_with_portfolios:
+            try:
+                from portfolio_performance import PortfolioPerformanceCalculator
+                calculator = PortfolioPerformanceCalculator()
+                test_user = users_with_portfolios[0]
+                current_value = calculator.calculate_current_portfolio_value(test_user.id)
+                results['portfolio_calculation_test'] = {
+                    'success': True,
+                    'test_user': test_user.username,
+                    'current_value': current_value
+                }
+            except Exception as e:
+                results['portfolio_calculation_test'] = {
+                    'success': False,
+                    'error': str(e)
+                }
+                results['issues'].append(f"Portfolio calculation error: {str(e)}")
+        
+        # Summary
+        results['summary'] = {
+            'all_tests_passed': len(results['issues']) == 0,
+            'total_issues': len(results['issues'])
+        }
+        
+        return f"""
+        <h1>Cron Job Execution Test Results</h1>
+        <h2>Summary</h2>
+        <p><strong>Test Date:</strong> {results['test_date']}</p>
+        <p><strong>Users Tested:</strong> {results['users_tested']}</p>
+        <p><strong>All Tests Passed:</strong> {'✓ Yes' if results['summary']['all_tests_passed'] else '✗ No'}</p>
+        <p><strong>Total Issues:</strong> {results['summary']['total_issues']}</p>
+        
+        <h2>Snapshot Results</h2>
+        <p><strong>Intraday Snapshots Today:</strong> {results['intraday_snapshots_today']}</p>
+        <p><strong>Users with Intraday Today:</strong> {results['users_with_intraday_today']}/{results['users_tested']}</p>
+        <p><strong>End-of-Day Snapshots Today:</strong> {results['eod_snapshots_today']}</p>
+        <p><strong>Users with EOD Today:</strong> {results['users_with_eod_today']}/{results['users_tested']}</p>
+        <p><strong>Users with Varying Values:</strong> {results['portfolio_values_varying']}</p>
+        <p><strong>Users with Chart Data:</strong> {results['chart_data_available']}</p>
+        
+        <h2>Leaderboard</h2>
+        <p><strong>Updated:</strong> {'✓ Yes' if results['leaderboard_updated'] else '✗ No'}</p>
+        {f"<p><strong>Recent Entries:</strong> {results.get('leaderboard_entries', 0)}</p>" if results['leaderboard_updated'] else ""}
+        
+        <h2>Full Results</h2>
+        <pre>{results}</pre>
+        
+        <br><a href='/admin'>Back to Admin</a>
+        """
+        
+    except Exception as e:
+        import traceback
+        error_details = {
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }
+        return f"<h1>Cron Test Error</h1><pre>{error_details}</pre><br><a href='/admin'>Back to Admin</a>"
 
 @app.route('/admin/transactions')
 @admin_required
