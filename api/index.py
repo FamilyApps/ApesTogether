@@ -7481,67 +7481,6 @@ def test_intraday_collection():
         <p><a href="/admin">Back to Admin</a></p>
         """
 
-@app.route('/admin/create-tables')
-@login_required  
-def create_tables():
-    try:
-        # Check if user is admin
-        if not current_user.is_admin:
-            return redirect(url_for('index'))
-        
-        from sqlalchemy import text
-        
-        results = {
-            'tables_created': [],
-            'errors': []
-        }
-        
-        try:
-            # Create portfolio_snapshot_intraday table
-            with db.engine.begin() as conn:
-                conn.execute(text("""
-                    CREATE TABLE IF NOT EXISTS portfolio_snapshot_intraday (
-                        id SERIAL PRIMARY KEY,
-                        user_id INTEGER NOT NULL REFERENCES "user"(id),
-                        timestamp TIMESTAMP NOT NULL,
-                        total_value FLOAT NOT NULL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        UNIQUE(user_id, timestamp)
-                    );
-                """))
-                
-                # Create index
-                conn.execute(text("""
-                    CREATE INDEX IF NOT EXISTS idx_intraday_user_timestamp 
-                    ON portfolio_snapshot_intraday (user_id, timestamp);
-                """))
-                
-                # Create sp500_chart_cache table
-                conn.execute(text("""
-                    CREATE TABLE IF NOT EXISTS sp500_chart_cache (
-                        id SERIAL PRIMARY KEY,
-                        period VARCHAR(10) NOT NULL UNIQUE,
-                        chart_data TEXT NOT NULL,
-                        generated_at TIMESTAMP NOT NULL,
-                        expires_at TIMESTAMP NOT NULL
-                    );
-                """))
-                
-                results['tables_created'] = ['portfolio_snapshot_intraday', 'sp500_chart_cache']
-            
-        except Exception as e:
-            results['errors'].append(f"Table creation error: {str(e)}")
-        
-        return jsonify({
-            'success': len(results['errors']) == 0,
-            'message': 'Intraday tables creation completed',
-            'results': results
-        }), 200
-    
-    except Exception as e:
-        logger.error(f"Unexpected error creating tables: {str(e)}")
-        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
-
 @app.route('/api/portfolio/performance-intraday/<period>')
 @login_required
 def portfolio_performance_intraday(period):
