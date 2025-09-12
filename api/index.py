@@ -1858,13 +1858,49 @@ def get_batch_stock_data(ticker_symbols):
                         price = float(data['Global Quote']['05. price'])
                         stock_price_cache[ticker] = {'price': price, 'timestamp': current_time}
                         result[ticker] = price
+                        
+                        # Log successful API call
+                        try:
+                            from models import AlphaVantageAPILog
+                            api_log = AlphaVantageAPILog(
+                                endpoint='GLOBAL_QUOTE',
+                                symbol=ticker,
+                                response_status='success',
+                                response_time_ms=int((datetime.now() - current_time).total_seconds() * 1000)
+                            )
+                            db.session.add(api_log)
+                            db.session.commit()
+                        except Exception as log_error:
+                            logger.error(f"Error logging API call: {log_error}")
                     else:
                         logger.warning(f"Could not get price for {ticker} from API - no fallback used")
-                        # Do not add to result if API fails - only use real data
+                        # Log failed API call
+                        try:
+                            from models import AlphaVantageAPILog
+                            api_log = AlphaVantageAPILog(
+                                endpoint='GLOBAL_QUOTE',
+                                symbol=ticker,
+                                response_status='error'
+                            )
+                            db.session.add(api_log)
+                            db.session.commit()
+                        except Exception as log_error:
+                            logger.error(f"Error logging API call: {log_error}")
                         
                 except Exception as e:
                     logger.error(f"Error fetching {ticker}: {e}")
-                    # Do not add to result if API fails - only use real data
+                    # Log failed API call
+                    try:
+                        from models import AlphaVantageAPILog
+                        api_log = AlphaVantageAPILog(
+                            endpoint='GLOBAL_QUOTE',
+                            symbol=ticker,
+                            response_status='error'
+                        )
+                        db.session.add(api_log)
+                        db.session.commit()
+                    except Exception as log_error:
+                        logger.error(f"Error logging API call: {log_error}")
     
     return result
 
@@ -2953,7 +2989,7 @@ def test_cron_execution():
         
         # Check leaderboard updates
         recent_leaderboard = LeaderboardEntry.query.filter(
-            LeaderboardEntry.date >= yesterday
+            LeaderboardEntry.calculated_at >= datetime.combine(yesterday, datetime.min.time())
         ).all()
         
         if recent_leaderboard:
@@ -2968,7 +3004,7 @@ def test_cron_execution():
                 results['top_performers'].append({
                     'username': user.username if user else 'Unknown',
                     'performance': entry.performance_percentage,
-                    'date': entry.date.isoformat()
+                    'date': entry.calculated_at.date().isoformat()
                 })
         else:
             results['issues'].append("Leaderboard not updated recently")
