@@ -74,6 +74,17 @@ class PortfolioPerformanceCalculator:
             if ticker_upper in stock_price_cache:
                 return {'price': stock_price_cache[ticker_upper]['price']}
             return None
+        finally:
+            # Commit any pending API logs
+            try:
+                from models import db
+                db.session.commit()
+            except Exception as commit_error:
+                logger.error(f"Error committing API logs: {commit_error}")
+                try:
+                    db.session.rollback()
+                except:
+                    pass
 
     def calculate_portfolio_value(self, user_id: int, target_date: date = None) -> float:
         """Calculate total portfolio value for a user on a specific date"""
