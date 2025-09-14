@@ -1859,19 +1859,34 @@ def get_batch_stock_data(ticker_symbols):
                         stock_price_cache[ticker] = {'price': price, 'timestamp': current_time}
                         result[ticker] = price
                         
-                        # Log successful API call using existing function
+                        # Log successful API call
                         try:
-                            from admin_metrics import log_alpha_vantage_call
-                            response_time = int((datetime.now() - current_time).total_seconds() * 1000)
-                            log_alpha_vantage_call('GLOBAL_QUOTE', ticker, 'success', response_time)
+                            from models import AlphaVantageAPILog
+                            api_log = AlphaVantageAPILog(
+                                endpoint='GLOBAL_QUOTE',
+                                symbol=ticker,
+                                response_code=response.status_code,
+                                success=True,
+                                timestamp=current_time
+                            )
+                            db.session.add(api_log)
+                            db.session.commit()
                         except Exception as log_error:
                             logger.error(f"Error logging API call: {log_error}")
                     else:
                         logger.warning(f"Could not get price for {ticker} from API - no fallback used")
-                        # Log failed API call using existing function
+                        # Log failed API call
                         try:
-                            from admin_metrics import log_alpha_vantage_call
-                            log_alpha_vantage_call('GLOBAL_QUOTE', ticker, 'error')
+                            from models import AlphaVantageAPILog
+                            api_log = AlphaVantageAPILog(
+                                endpoint='GLOBAL_QUOTE',
+                                symbol=ticker,
+                                response_code=response.status_code,
+                                success=False,
+                                timestamp=current_time
+                            )
+                            db.session.add(api_log)
+                            db.session.commit()
                         except Exception as log_error:
                             logger.error(f"Error logging API call: {log_error}")
                         
@@ -1883,7 +1898,9 @@ def get_batch_stock_data(ticker_symbols):
                         api_log = AlphaVantageAPILog(
                             endpoint='GLOBAL_QUOTE',
                             symbol=ticker,
-                            response_status='error'
+                            response_code=0,
+                            success=False,
+                            timestamp=current_time
                         )
                         db.session.add(api_log)
                         db.session.commit()

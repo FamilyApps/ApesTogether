@@ -45,6 +45,21 @@ class PortfolioPerformanceCalculator:
             response = requests.get(url, timeout=5)
             data = response.json()
             
+            # Log the API call
+            try:
+                from models import AlphaVantageAPILog, db
+                api_log = AlphaVantageAPILog(
+                    endpoint='GLOBAL_QUOTE',
+                    symbol=ticker_symbol,
+                    response_code=response.status_code,
+                    success='Global Quote' in data and '05. price' in data.get('Global Quote', {}),
+                    timestamp=current_time
+                )
+                db.session.add(api_log)
+                db.session.commit()
+            except Exception as log_error:
+                logger.error(f"Failed to log API call: {log_error}")
+            
             if 'Global Quote' in data and '05. price' in data['Global Quote']:
                 price = float(data['Global Quote']['05. price'])
                 stock_price_cache[ticker_upper] = {'price': price, 'timestamp': current_time}
