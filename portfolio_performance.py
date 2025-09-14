@@ -48,11 +48,11 @@ class PortfolioPerformanceCalculator:
             # Log the API call
             try:
                 from models import AlphaVantageAPILog, db
+                success = 'Global Quote' in data and '05. price' in data.get('Global Quote', {})
                 api_log = AlphaVantageAPILog(
                     endpoint='GLOBAL_QUOTE',
                     symbol=ticker_symbol,
-                    response_code=response.status_code,
-                    success='Global Quote' in data and '05. price' in data.get('Global Quote', {}),
+                    response_status='success' if success else 'error',
                     timestamp=current_time
                 )
                 db.session.add(api_log)

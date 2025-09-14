@@ -1865,8 +1865,7 @@ def get_batch_stock_data(ticker_symbols):
                             api_log = AlphaVantageAPILog(
                                 endpoint='GLOBAL_QUOTE',
                                 symbol=ticker,
-                                response_code=response.status_code,
-                                success=True,
+                                response_status='success',
                                 timestamp=current_time
                             )
                             db.session.add(api_log)
@@ -1881,8 +1880,7 @@ def get_batch_stock_data(ticker_symbols):
                             api_log = AlphaVantageAPILog(
                                 endpoint='GLOBAL_QUOTE',
                                 symbol=ticker,
-                                response_code=response.status_code,
-                                success=False,
+                                response_status='error',
                                 timestamp=current_time
                             )
                             db.session.add(api_log)
@@ -1898,8 +1896,7 @@ def get_batch_stock_data(ticker_symbols):
                         api_log = AlphaVantageAPILog(
                             endpoint='GLOBAL_QUOTE',
                             symbol=ticker,
-                            response_code=0,
-                            success=False,
+                            response_status='error',
                             timestamp=current_time
                         )
                         db.session.add(api_log)
