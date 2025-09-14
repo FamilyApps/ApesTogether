@@ -7574,6 +7574,91 @@ def test_market_close():
         <p><a href="/admin">Back to Admin</a></p>
         """
 
+@app.route('/admin/test-cron-endpoints')
+@login_required
+def test_cron_endpoints():
+    """Admin endpoint to test if cron endpoints are accessible"""
+    if not current_user.is_admin:
+        return redirect(url_for('index'))
+    
+    import requests
+    from datetime import datetime
+    
+    results = {
+        'timestamp': datetime.now().isoformat(),
+        'intraday_test': {'status': 'pending', 'response': None, 'error': None},
+        'market_close_test': {'status': 'pending', 'response': None, 'error': None}
+    }
+    
+    # Test intraday endpoint
+    try:
+        # Get the token from environment (if available)
+        import os
+        intraday_token = os.getenv('INTRADAY_CRON_TOKEN', 'test-token')
+        
+        response = requests.post(
+            'https://apestogether.ai/api/cron/collect-intraday-data',
+            headers={
+                'Authorization': f'Bearer {intraday_token}',
+                'Content-Type': 'application/json'
+            },
+            timeout=30
+        )
+        
+        results['intraday_test']['status'] = 'success' if response.status_code == 200 else 'failed'
+        results['intraday_test']['http_code'] = response.status_code
+        results['intraday_test']['response'] = response.text[:500]  # Truncate long responses
+        
+    except Exception as e:
+        results['intraday_test']['status'] = 'error'
+        results['intraday_test']['error'] = str(e)
+    
+    # Test market close endpoint
+    try:
+        cron_secret = os.getenv('CRON_SECRET', 'test-secret')
+        
+        response = requests.post(
+            'https://apestogether.ai/api/cron/market-close',
+            headers={
+                'Authorization': f'Bearer {cron_secret}',
+                'Content-Type': 'application/json'
+            },
+            timeout=30
+        )
+        
+        results['market_close_test']['status'] = 'success' if response.status_code == 200 else 'failed'
+        results['market_close_test']['http_code'] = response.status_code
+        results['market_close_test']['response'] = response.text[:500]
+        
+    except Exception as e:
+        results['market_close_test']['status'] = 'error'
+        results['market_close_test']['error'] = str(e)
+    
+    return f"""
+    <h1>Cron Endpoints Test</h1>
+    <h2>Results</h2>
+    <p><strong>Timestamp:</strong> {results['timestamp']}</p>
+    
+    <h3>Intraday Data Collection Endpoint</h3>
+    <p><strong>Status:</strong> {results['intraday_test']['status']}</p>
+    <p><strong>HTTP Code:</strong> {results['intraday_test'].get('http_code', 'N/A')}</p>
+    <p><strong>Response:</strong> <pre>{results['intraday_test'].get('response', 'N/A')}</pre></p>
+    {f"<p><strong>Error:</strong> {results['intraday_test']['error']}</p>" if results['intraday_test']['error'] else ''}
+    
+    <h3>Market Close Endpoint</h3>
+    <p><strong>Status:</strong> {results['market_close_test']['status']}</p>
+    <p><strong>HTTP Code:</strong> {results['market_close_test'].get('http_code', 'N/A')}</p>
+    <p><strong>Response:</strong> <pre>{results['market_close_test'].get('response', 'N/A')}</pre></p>
+    {f"<p><strong>Error:</strong> {results['market_close_test']['error']}</p>" if results['market_close_test']['error'] else ''}
+    
+    <h3>Next Steps</h3>
+    <p>If endpoints return 401/403: Check GitHub repository secrets</p>
+    <p>If endpoints return 200: GitHub Actions scheduling issue</p>
+    <p>If endpoints error: Network/DNS issue</p>
+    
+    <p><a href="/admin">Back to Admin</a></p>
+    """
+
 @app.route('/api/portfolio/performance-intraday/<period>')
 @login_required
 def portfolio_performance_intraday(period):
