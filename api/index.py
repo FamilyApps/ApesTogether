@@ -1109,44 +1109,106 @@ def dashboard():
     total_portfolio_value = 0
     
     if current_user.is_authenticated:
-        # Get user's stocks from database
-        stocks = Stock.query.filter_by(user_id=current_user.id).all()
+        from datetime import date, datetime, timedelta
+        from models import PortfolioSnapshot
         
-        # Get all tickers for batch processing
-        tickers = [stock.ticker for stock in stocks]
-        batch_prices = get_batch_stock_data(tickers)
+        # Check if it's weekend or after market hours - use cached snapshots
+        today = date.today()
+        is_weekend = today.weekday() >= 5  # Saturday = 5, Sunday = 6
+        current_hour = datetime.now().hour
+        is_after_hours = current_hour < 9 or current_hour >= 16  # Before 9 AM or after 4 PM
         
-        for stock in stocks:
-            ticker_upper = stock.ticker.upper()
-            current_price = batch_prices.get(ticker_upper)
+        # Use cached snapshots on weekends or after hours, live data during market hours on weekdays
+        use_cached_data = is_weekend or is_after_hours
+        
+        if use_cached_data:
+            # Get most recent portfolio snapshot (Friday's close or latest available)
+            latest_snapshot = PortfolioSnapshot.query.filter_by(user_id=current_user.id)\
+                .order_by(PortfolioSnapshot.date.desc()).first()
             
-            if current_price is not None:
-                value = stock.quantity * current_price
-                gain_loss = value - (stock.quantity * stock.purchase_price)
-                gain_loss_percent = (gain_loss / (stock.quantity * stock.purchase_price)) * 100 if stock.purchase_price else 0
+            if latest_snapshot:
+                total_portfolio_value = latest_snapshot.total_value
                 
-                portfolio_data.append({
-                    'ticker': stock.ticker,
-                    'quantity': stock.quantity,
-                    'purchase_price': stock.purchase_price,
-                    'current_price': current_price,
-                    'value': value,
-                    'gain_loss': gain_loss,
-                    'gain_loss_percent': gain_loss_percent
-                })
+                # Get individual stock data for display (use cached prices from Friday)
+                stocks = Stock.query.filter_by(user_id=current_user.id).all()
                 
-                total_portfolio_value += value
+                # For cached data, calculate individual stock values proportionally
+                # This is an approximation since we only have total portfolio value cached
+                total_cost_basis = sum(stock.quantity * stock.purchase_price for stock in stocks if stock.purchase_price)
+                
+                for stock in stocks:
+                    if total_cost_basis > 0:
+                        # Estimate current price based on proportional portfolio performance
+                        cost_basis = stock.quantity * stock.purchase_price if stock.purchase_price else 0
+                        portfolio_multiplier = total_portfolio_value / total_cost_basis if total_cost_basis > 0 else 1
+                        estimated_current_price = stock.purchase_price * portfolio_multiplier if stock.purchase_price else 0
+                        
+                        value = stock.quantity * estimated_current_price
+                        gain_loss = value - cost_basis
+                        gain_loss_percent = (gain_loss / cost_basis) * 100 if cost_basis > 0 else 0
+                        
+                        portfolio_data.append({
+                            'ticker': stock.ticker,
+                            'quantity': stock.quantity,
+                            'purchase_price': stock.purchase_price,
+                            'current_price': estimated_current_price,
+                            'value': value,
+                            'gain_loss': gain_loss,
+                            'gain_loss_percent': gain_loss_percent
+                        })
+                    else:
+                        portfolio_data.append({
+                            'ticker': stock.ticker,
+                            'quantity': stock.quantity,
+                            'purchase_price': stock.purchase_price,
+                            'current_price': 'N/A',
+                            'value': 'N/A',
+                            'gain_loss': 'N/A',
+                            'gain_loss_percent': 'N/A'
+                        })
             else:
-                # Handle cases where stock data couldn't be fetched
-                portfolio_data.append({
-                    'ticker': stock.ticker,
-                    'quantity': stock.quantity,
-                    'purchase_price': stock.purchase_price,
-                    'current_price': 'N/A',
-                    'value': 'N/A',
-                    'gain_loss': 'N/A',
-                    'gain_loss_percent': 'N/A'
-                })
+                # No cached data available, fall back to live data
+                use_cached_data = False
+        
+        if not use_cached_data:
+            # Use live API data during market hours on weekdays
+            stocks = Stock.query.filter_by(user_id=current_user.id).all()
+            
+            # Get all tickers for batch processing
+            tickers = [stock.ticker for stock in stocks]
+            batch_prices = get_batch_stock_data(tickers)
+            
+            for stock in stocks:
+                ticker_upper = stock.ticker.upper()
+                current_price = batch_prices.get(ticker_upper)
+                
+                if current_price is not None:
+                    value = stock.quantity * current_price
+                    gain_loss = value - (stock.quantity * stock.purchase_price)
+                    gain_loss_percent = (gain_loss / (stock.quantity * stock.purchase_price)) * 100 if stock.purchase_price else 0
+                    
+                    portfolio_data.append({
+                        'ticker': stock.ticker,
+                        'quantity': stock.quantity,
+                        'purchase_price': stock.purchase_price,
+                        'current_price': current_price,
+                        'value': value,
+                        'gain_loss': gain_loss,
+                        'gain_loss_percent': gain_loss_percent
+                    })
+                    
+                    total_portfolio_value += value
+                else:
+                    # Handle cases where stock data couldn't be fetched
+                    portfolio_data.append({
+                        'ticker': stock.ticker,
+                        'quantity': stock.quantity,
+                        'purchase_price': stock.purchase_price,
+                        'current_price': 'N/A',
+                        'value': 'N/A',
+                        'gain_loss': 'N/A',
+                        'gain_loss_percent': 'N/A'
+                    })
     
     return render_template_with_defaults('dashboard.html', 
                                        portfolio_data=portfolio_data, 
