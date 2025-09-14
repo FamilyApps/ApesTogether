@@ -45,7 +45,7 @@ class PortfolioPerformanceCalculator:
             response = requests.get(url, timeout=5)
             data = response.json()
             
-            # Log the API call
+            # Log the API call (but don't commit immediately for performance)
             try:
                 from models import AlphaVantageAPILog, db
                 success = 'Global Quote' in data and '05. price' in data.get('Global Quote', {})
@@ -56,7 +56,7 @@ class PortfolioPerformanceCalculator:
                     timestamp=current_time
                 )
                 db.session.add(api_log)
-                db.session.commit()
+                # Commit will happen at end of batch operation
             except Exception as log_error:
                 logger.error(f"Failed to log API call: {log_error}")
             

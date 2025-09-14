@@ -1869,7 +1869,7 @@ def get_batch_stock_data(ticker_symbols):
                                 timestamp=current_time
                             )
                             db.session.add(api_log)
-                            db.session.commit()
+                            # Don't commit immediately - batch commits for better performance
                         except Exception as log_error:
                             logger.error(f"Error logging API call: {log_error}")
                     else:
@@ -1884,7 +1884,7 @@ def get_batch_stock_data(ticker_symbols):
                                 timestamp=current_time
                             )
                             db.session.add(api_log)
-                            db.session.commit()
+                            # Don't commit immediately - batch commits for better performance
                         except Exception as log_error:
                             logger.error(f"Error logging API call: {log_error}")
                         
@@ -1900,9 +1900,16 @@ def get_batch_stock_data(ticker_symbols):
                             timestamp=current_time
                         )
                         db.session.add(api_log)
-                        db.session.commit()
+                        # Don't commit immediately - batch commits for better performance
                     except Exception as log_error:
                         logger.error(f"Error logging API call: {log_error}")
+    
+    # Batch commit all API logs at the end for better performance
+    try:
+        db.session.commit()
+    except Exception as e:
+        logger.error(f"Error committing API logs: {e}")
+        db.session.rollback()
     
     return result
 
