@@ -2768,8 +2768,35 @@ def delete_stock(stock_id):
     except Exception as e:
         db.session.rollback()
         flash(f'Error deleting stock: {str(e)}', 'danger')
+        return redirect(url_for('admin_dashboard'))
+
+@app.route('/admin/cleanup-intraday-data')
+@login_required
+def cleanup_intraday_data():
+    """Admin endpoint to clean up old intraday snapshots while preserving 4PM market close data"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        flash('Admin access required', 'danger')
+        return redirect(url_for('login'))
     
-    return redirect(url_for('dashboard'))
+    try:
+        from api.cleanup_intraday import cleanup_old_intraday_data
+        
+        # Run cleanup (keep 14 days of data)
+        results = cleanup_old_intraday_data(days_to_keep=14)
+        
+        if results['errors']:
+            flash(f'Cleanup completed with errors: {len(results["errors"])} errors occurred', 'warning')
+        else:
+            flash(f'Cleanup successful: {results["snapshots_deleted"]} snapshots deleted, {results["market_close_preserved"]} market close snapshots preserved', 'success')
+        
+        return render_template('admin_debug.html', 
+                             title='Intraday Data Cleanup Results',
+                             results=results)
+    
+    except Exception as e:
+        logger.error(f"Intraday cleanup error: {str(e)}")
+        flash(f'Intraday cleanup error: {str(e)}', 'danger')
+        return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin')
 @login_required
@@ -2778,6 +2805,7 @@ def admin_dashboard():
     # Verify user is authenticated
     if not current_user.is_authenticated:
         flash('You must be logged in to access the admin dashboard.', 'warning')
+    # ... (rest of the code remains the same)
         return redirect(url_for('login'))
     
     # Check if user is admin using the secure is_admin property
@@ -7737,7 +7765,13 @@ def market_close_cron():
             logger.error(f"Market close leaderboard error: {e}")
         
         # Commit all changes
-        db.session.commit()
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            error_msg = f"Database commit failed: {str(e)}"
+            results['errors'].append(error_msg)
+            logger.error(error_msg)
         
         return jsonify({
             'success': True,
@@ -7749,10 +7783,76 @@ def market_close_cron():
         logger.error(f"Unexpected error in market close: {str(e)}")
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
+@app.route('/api/cron/cleanup-intraday-data', methods=['POST'])
+def cleanup_intraday_data_cron():
+    """Automated cron endpoint to clean up old intraday snapshots while preserving 4PM market close data"""
+    try:
+        # Verify authorization token
+        auth_header = request.headers.get('Authorization', '')
+        expected_token = os.environ.get('CRON_SECRET')
+        
+        if not expected_token:
+            logger.error("CRON_SECRET not configured")
+            return jsonify({'error': 'Server configuration error'}), 500
+        
+        if not auth_header.startswith('Bearer ') or auth_header[7:] != expected_token:
+            logger.warning(f"Unauthorized cleanup attempt")
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        from api.cleanup_intraday import cleanup_old_intraday_data
+        
+        # Run cleanup (keep 14 days of data)
+        results = cleanup_old_intraday_data(days_to_keep=14)
+        
+        logger.info(f"Automated cleanup completed: {results['snapshots_deleted']} deleted, {results['market_close_preserved']} preserved")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Intraday data cleanup completed',
+            'results': results
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Automated cleanup error: {str(e)}")
+        return jsonify({'error': f'Cleanup error: {str(e)}'}), 500
+
+@app.route('/api/cron/update-leaderboard', methods=['POST'])
+def update_leaderboard_cron():
+    """Automated cron endpoint to update leaderboard cache"""
+    try:
+        # Verify authorization token
+        auth_header = request.headers.get('Authorization', '')
+        expected_token = os.environ.get('CRON_SECRET')
+        
+        if not expected_token:
+            logger.error("CRON_SECRET not configured")
+            return jsonify({'error': 'Server configuration error'}), 500
+        
+        if not auth_header.startswith('Bearer ') or auth_header[7:] != expected_token:
+            logger.warning(f"Unauthorized leaderboard update attempt")
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        from leaderboard_utils import update_leaderboard_cache
+        
+        # Update leaderboard cache
+        updated_count = update_leaderboard_cache()
+        
+        logger.info(f"Automated leaderboard update completed: {updated_count} entries updated")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Leaderboard cache updated',
+            'entries_updated': updated_count
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Automated leaderboard update error: {str(e)}")
+        return jsonify({'error': f'Leaderboard update error: {str(e)}'}), 500
+
 @app.route('/admin/snapshot-diagnostics')
 @login_required
 def snapshot_diagnostics():
-    """Comprehensive snapshot diagnostic system"""
+    """Comprehensive snapshot diagnostics for database tables, counts, and model validation"""
     if not current_user.is_admin:
         return redirect(url_for('index'))
     
