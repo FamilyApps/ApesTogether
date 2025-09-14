@@ -7866,6 +7866,33 @@ def update_leaderboard_cron():
         logger.error(f"Automated leaderboard update error: {str(e)}")
         return jsonify({'error': f'Leaderboard update error: {str(e)}'}), 500
 
+@app.route('/admin/test-api-logging')
+@login_required
+def test_api_logging():
+    """Admin endpoint to test Alpha Vantage API logging"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        flash('Admin access required', 'danger')
+        return redirect(url_for('login'))
+    
+    try:
+        from portfolio_performance import PortfolioPerformanceCalculator
+        
+        calculator = PortfolioPerformanceCalculator()
+        
+        # Make a test API call for SPY
+        result = calculator.get_stock_data('SPY')
+        
+        if result and result.get('price'):
+            flash(f'API call successful! SPY price: ${result["price"]:.2f}. Check admin dashboard for logging.', 'success')
+        else:
+            flash('API call failed but should still be logged. Check admin dashboard.', 'warning')
+        
+        return redirect(url_for('admin_dashboard'))
+            
+    except Exception as e:
+        flash(f'API test error: {str(e)}. Check admin dashboard for logging.', 'danger')
+        return redirect(url_for('admin_dashboard'))
+
 @app.route('/admin/snapshot-diagnostics')
 @login_required
 def snapshot_diagnostics():
