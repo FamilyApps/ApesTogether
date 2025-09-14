@@ -7659,6 +7659,262 @@ def test_cron_endpoints():
     <p><a href="/admin">Back to Admin</a></p>
     """
 
+@app.route('/api/cron/market-close', methods=['POST'])
+def market_close_cron():
+    """Market close cron job endpoint - creates EOD snapshots and updates leaderboards"""
+    try:
+        # Verify authorization
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({'error': 'Missing or invalid authorization header'}), 401
+        
+        token = auth_header.split(' ')[1]
+        expected_token = os.getenv('CRON_SECRET')
+        if not expected_token or token != expected_token:
+            return jsonify({'error': 'Invalid authorization token'}), 403
+        
+        from datetime import datetime, date
+        from models import User, PortfolioSnapshot
+        from portfolio_performance import PortfolioPerformanceCalculator
+        from leaderboard_utils import update_leaderboard_cache
+        
+        calculator = PortfolioPerformanceCalculator()
+        today = date.today()
+        current_time = datetime.now()
+        
+        results = {
+            'timestamp': current_time.isoformat(),
+            'users_processed': 0,
+            'snapshots_created': 0,
+            'snapshots_updated': 0,
+            'leaderboard_updated': False,
+            'errors': []
+        }
+        
+        # Get all users
+        users = User.query.all()
+        
+        for user in users:
+            try:
+                # Calculate portfolio value for today
+                portfolio_value = calculator.calculate_portfolio_value(user.id, today)
+                
+                # Check if snapshot already exists for today
+                existing_snapshot = PortfolioSnapshot.query.filter_by(
+                    user_id=user.id, 
+                    date=today
+                ).first()
+                
+                if existing_snapshot:
+                    existing_snapshot.total_value = portfolio_value
+                    results['snapshots_updated'] += 1
+                else:
+                    # Create new EOD snapshot
+                    snapshot = PortfolioSnapshot(
+                        user_id=user.id,
+                        date=today,
+                        total_value=portfolio_value,
+                        cash_flow=0  # Calculate if needed
+                    )
+                    db.session.add(snapshot)
+                    results['snapshots_created'] += 1
+                
+                results['users_processed'] += 1
+                
+            except Exception as e:
+                error_msg = f"Error processing user {user.id}: {str(e)}"
+                results['errors'].append(error_msg)
+                logger.error(f"Market close user {user.id} error: {e}")
+        
+        # Update leaderboard cache
+        try:
+            updated_count = update_leaderboard_cache()
+            results['leaderboard_updated'] = True
+            results['leaderboard_entries_updated'] = updated_count
+        except Exception as e:
+            error_msg = f"Leaderboard update error: {str(e)}"
+            results['errors'].append(error_msg)
+            logger.error(f"Market close leaderboard error: {e}")
+        
+        # Commit all changes
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Market close processing completed',
+            'results': results
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Unexpected error in market close: {str(e)}")
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
+@app.route('/admin/snapshot-diagnostics')
+@login_required
+def snapshot_diagnostics():
+    """Comprehensive snapshot diagnostic system"""
+    if not current_user.is_admin:
+        return redirect(url_for('index'))
+    
+    try:
+        from datetime import datetime, date, timedelta
+        from models import User, PortfolioSnapshotIntraday, PortfolioSnapshot, LeaderboardEntry
+        from sqlalchemy import func, text
+        
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+        
+        diagnostics = {
+            'timestamp': datetime.now().isoformat(),
+            'database_tables': {},
+            'snapshot_counts': {},
+            'model_validation': {},
+            'recent_data': {},
+            'errors': []
+        }
+        
+        # Check if tables exist
+        try:
+            # Test intraday snapshots table
+            intraday_count = db.session.execute(text("SELECT COUNT(*) FROM portfolio_snapshot_intraday")).fetchone()[0]
+            diagnostics['database_tables']['portfolio_snapshot_intraday'] = {'exists': True, 'total_records': intraday_count}
+            
+            # Test EOD snapshots table  
+            eod_count = db.session.execute(text("SELECT COUNT(*) FROM portfolio_snapshot")).fetchone()[0]
+            diagnostics['database_tables']['portfolio_snapshot'] = {'exists': True, 'total_records': eod_count}
+            
+            # Test leaderboard table
+            leaderboard_count = db.session.execute(text("SELECT COUNT(*) FROM leaderboard_entry")).fetchone()[0]
+            diagnostics['database_tables']['leaderboard_entry'] = {'exists': True, 'total_records': leaderboard_count}
+            
+        except Exception as e:
+            diagnostics['errors'].append(f"Database table check error: {str(e)}")
+        
+        # Count snapshots by date
+        try:
+            # Intraday snapshots today
+            intraday_today = PortfolioSnapshotIntraday.query.filter(
+                func.date(PortfolioSnapshotIntraday.timestamp) == today
+            ).count()
+            
+            # Intraday snapshots yesterday
+            intraday_yesterday = PortfolioSnapshotIntraday.query.filter(
+                func.date(PortfolioSnapshotIntraday.timestamp) == yesterday
+            ).count()
+            
+            # EOD snapshots today
+            eod_today = PortfolioSnapshot.query.filter_by(date=today).count()
+            
+            # EOD snapshots yesterday
+            eod_yesterday = PortfolioSnapshot.query.filter_by(date=yesterday).count()
+            
+            diagnostics['snapshot_counts'] = {
+                'intraday_today': intraday_today,
+                'intraday_yesterday': intraday_yesterday,
+                'eod_today': eod_today,
+                'eod_yesterday': eod_yesterday
+            }
+            
+        except Exception as e:
+            diagnostics['errors'].append(f"Snapshot count error: {str(e)}")
+        
+        # Validate model attributes
+        try:
+            # Test User model
+            user_count = User.query.count()
+            diagnostics['model_validation']['User'] = {'accessible': True, 'count': user_count}
+            
+            # Test PortfolioSnapshotIntraday model
+            sample_intraday = PortfolioSnapshotIntraday.query.first()
+            if sample_intraday:
+                diagnostics['model_validation']['PortfolioSnapshotIntraday'] = {
+                    'accessible': True,
+                    'sample_fields': {
+                        'id': hasattr(sample_intraday, 'id'),
+                        'user_id': hasattr(sample_intraday, 'user_id'),
+                        'timestamp': hasattr(sample_intraday, 'timestamp'),
+                        'total_value': hasattr(sample_intraday, 'total_value')
+                    }
+                }
+            
+            # Test PortfolioSnapshot model
+            sample_eod = PortfolioSnapshot.query.first()
+            if sample_eod:
+                diagnostics['model_validation']['PortfolioSnapshot'] = {
+                    'accessible': True,
+                    'sample_fields': {
+                        'id': hasattr(sample_eod, 'id'),
+                        'user_id': hasattr(sample_eod, 'user_id'),
+                        'date': hasattr(sample_eod, 'date'),
+                        'total_value': hasattr(sample_eod, 'total_value')
+                    }
+                }
+            
+        except Exception as e:
+            diagnostics['errors'].append(f"Model validation error: {str(e)}")
+        
+        # Get recent data samples
+        try:
+            # Recent intraday snapshots
+            recent_intraday = PortfolioSnapshotIntraday.query.order_by(
+                PortfolioSnapshotIntraday.timestamp.desc()
+            ).limit(5).all()
+            
+            diagnostics['recent_data']['intraday_snapshots'] = [
+                {
+                    'user_id': snap.user_id,
+                    'timestamp': snap.timestamp.isoformat(),
+                    'total_value': snap.total_value
+                } for snap in recent_intraday
+            ]
+            
+            # Recent EOD snapshots
+            recent_eod = PortfolioSnapshot.query.order_by(
+                PortfolioSnapshot.date.desc()
+            ).limit(5).all()
+            
+            diagnostics['recent_data']['eod_snapshots'] = [
+                {
+                    'user_id': snap.user_id,
+                    'date': snap.date.isoformat(),
+                    'total_value': snap.total_value
+                } for snap in recent_eod
+            ]
+            
+        except Exception as e:
+            diagnostics['errors'].append(f"Recent data error: {str(e)}")
+        
+        return f"""
+        <h1>Snapshot Diagnostics</h1>
+        <h2>Database Tables</h2>
+        <pre>{diagnostics['database_tables']}</pre>
+        
+        <h2>Snapshot Counts</h2>
+        <pre>{diagnostics['snapshot_counts']}</pre>
+        
+        <h2>Model Validation</h2>
+        <pre>{diagnostics['model_validation']}</pre>
+        
+        <h2>Recent Data Samples</h2>
+        <h3>Recent Intraday Snapshots</h3>
+        <pre>{diagnostics['recent_data'].get('intraday_snapshots', [])}</pre>
+        
+        <h3>Recent EOD Snapshots</h3>
+        <pre>{diagnostics['recent_data'].get('eod_snapshots', [])}</pre>
+        
+        <h2>Errors</h2>
+        <pre>{diagnostics['errors']}</pre>
+        
+        <p><a href="/admin">Back to Admin</a></p>
+        """
+        
+    except Exception as e:
+        return f"""
+        <h1>Snapshot Diagnostics - Error</h1>
+        <p><strong>Error:</strong> {str(e)}</p>
+        <p><a href="/admin">Back to Admin</a></p>
+        """
+
 @app.route('/api/portfolio/performance-intraday/<period>')
 @login_required
 def portfolio_performance_intraday(period):
@@ -7921,23 +8177,62 @@ def collect_intraday_data():
         # Step 2: Get all users
         users = User.query.all()
         
+        # Check if this is the 4:00 PM collection (market close)
+        is_market_close = current_time.hour == 16 and current_time.minute == 0  # 4:00 PM ET
+        
         for user in users:
             try:
                 # Calculate current portfolio value
                 portfolio_value = calculator.calculate_portfolio_value(user.id)
                 
-                # Create intraday snapshot
-                snapshot = PortfolioSnapshotIntraday(
+                # Always create intraday snapshot
+                intraday_snapshot = PortfolioSnapshotIntraday(
                     user_id=user.id,
                     timestamp=current_time,
                     total_value=portfolio_value
                 )
-                db.session.add(snapshot)
+                db.session.add(intraday_snapshot)
                 results['snapshots_created'] += 1
+                
+                # If this is market close time, also create EOD snapshot
+                if is_market_close:
+                    from models import PortfolioSnapshot
+                    today = current_time.date()
+                    
+                    # Check if EOD snapshot already exists for today
+                    existing_eod = PortfolioSnapshot.query.filter_by(
+                        user_id=user.id, 
+                        date=today
+                    ).first()
+                    
+                    if existing_eod:
+                        existing_eod.total_value = portfolio_value
+                    else:
+                        eod_snapshot = PortfolioSnapshot(
+                            user_id=user.id,
+                            date=today,
+                            total_value=portfolio_value,
+                            cash_flow=0
+                        )
+                        db.session.add(eod_snapshot)
+                
                 results['users_processed'] += 1
                 
             except Exception as e:
                 error_msg = f"Error processing user {user.id}: {str(e)}"
+                results['errors'].append(error_msg)
+                logger.error(error_msg)
+        
+        # If this is market close, update leaderboard
+        if is_market_close:
+            try:
+                from leaderboard_utils import update_leaderboard_cache
+                updated_count = update_leaderboard_cache()
+                results['leaderboard_updated'] = True
+                results['leaderboard_entries_updated'] = updated_count
+                logger.info(f"Leaderboard updated with {updated_count} entries")
+            except Exception as e:
+                error_msg = f"Leaderboard update error: {str(e)}"
                 results['errors'].append(error_msg)
                 logger.error(error_msg)
         
