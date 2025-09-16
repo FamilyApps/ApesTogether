@@ -8072,7 +8072,7 @@ def debug_user_data(username):
 
 @app.route('/admin/test-performance-api-user/<username>')
 @login_required
-def test_performance_api_user(username):
+def test_performance_api_for_user(username):
     """Test portfolio performance API endpoints for a specific user"""
     if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
         flash('Admin access required', 'danger')
