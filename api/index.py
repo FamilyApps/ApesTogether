@@ -8070,6 +8070,70 @@ def debug_user_data(username):
     except Exception as e:
         return f"<h1>Error: {str(e)}</h1><p><a href='/admin'>Back to Admin</a></p>"
 
+@app.route('/admin/test-performance-api/<username>')
+@login_required
+def test_performance_api(username):
+    """Test portfolio performance API endpoints for a specific user"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        flash('Admin access required', 'danger')
+        return redirect(url_for('login'))
+    
+    try:
+        from models import User
+        
+        # Find the user
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return f"<h1>User '{username}' not found</h1>"
+        
+        # Test different time periods
+        periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y']
+        results = {}
+        
+        for period in periods:
+            try:
+                # Import performance calculator
+                from portfolio_performance import PortfolioPerformanceCalculator
+                calculator = PortfolioPerformanceCalculator()
+                
+                # Test the performance calculation directly
+                performance_data = calculator.get_performance_data(user.id, period)
+                
+                if 'error' in performance_data:
+                    results[period] = f"ERROR: {performance_data['error']}"
+                else:
+                    # Summarize the results
+                    chart_data_count = len(performance_data.get('chart_data', []))
+                    portfolio_return = performance_data.get('portfolio_return', 'N/A')
+                    sp500_return = performance_data.get('sp500_return', 'N/A')
+                    
+                    results[period] = f"✅ SUCCESS - {chart_data_count} data points, Portfolio: {portfolio_return}%, S&P500: {sp500_return}%"
+                    
+            except Exception as e:
+                results[period] = f"EXCEPTION: {str(e)}"
+        
+        html = f"""
+        <h1>Performance API Test for User: {username} (ID: {user.id})</h1>
+        
+        <h2>API Endpoint Results:</h2>
+        <ul>
+        """
+        
+        for period, result in results.items():
+            color = "green" if "SUCCESS" in result else "red"
+            html += f'<li style="color: {color}"><strong>{period}:</strong> {result}</li>'
+        
+        html += f"""
+        </ul>
+        
+        <p><a href="/admin">Back to Admin</a></p>
+        """
+        
+        return html
+        
+    except Exception as e:
+        return f"<h1>Error: {str(e)}</h1><p><a href='/admin'>Back to Admin</a></p>"
+
 @app.route('/admin/test-api-logging')
 @login_required
 def test_api_logging():
