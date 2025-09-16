@@ -609,7 +609,9 @@ def update_leaderboard_cache():
         print(f"Leaderboard cache updated: {updated_count} periods, {charts_generated} charts generated for {len(leaderboard_users)} users")
     except Exception as e:
         db.session.rollback()
+        import traceback
         print(f"Error committing leaderboard and chart cache updates: {str(e)}")
+        print(f"Full traceback: {traceback.format_exc()}")
         return 0
     
     return updated_count
