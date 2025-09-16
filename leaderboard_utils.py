@@ -523,8 +523,15 @@ def update_leaderboard_cache():
     for period in periods:
         for category in categories:
             try:
+                print(f"Processing leaderboard cache for {period}_{category}...")
+                
                 # Calculate fresh leaderboard data for this period and category
                 leaderboard_data = calculate_leaderboard_data(period, 20, category)  # Top 20 for leaderboard
+                print(f"  Calculated {len(leaderboard_data)} entries for {period}_{category}")
+                
+                if not leaderboard_data:
+                    print(f"  ⚠ No leaderboard data for {period}_{category} - skipping cache update")
+                    continue
                 
                 # Collect user IDs who made this leaderboard
                 for entry in leaderboard_data:
@@ -536,9 +543,11 @@ def update_leaderboard_cache():
                 # Update or create cache entry
                 cache_entry = LeaderboardCache.query.filter_by(period=cache_key).first()
                 if cache_entry:
+                    print(f"  Updating existing cache entry for {cache_key}")
                     cache_entry.leaderboard_data = json.dumps(leaderboard_data)
                     cache_entry.generated_at = datetime.now()
                 else:
+                    print(f"  Creating new cache entry for {cache_key}")
                     cache_entry = LeaderboardCache(
                         period=cache_key,
                         leaderboard_data=json.dumps(leaderboard_data),
@@ -547,9 +556,12 @@ def update_leaderboard_cache():
                     db.session.add(cache_entry)
                 
                 updated_count += 1
+                print(f"  ✓ Cache entry prepared for {cache_key} (count: {updated_count})")
                 
             except Exception as e:
                 print(f"Error updating leaderboard cache for period {period}, category {category}: {str(e)}")
+                import traceback
+                print(f"Full traceback: {traceback.format_exc()}")
                 continue
     
     # Generate portfolio charts only for users who made any leaderboard
