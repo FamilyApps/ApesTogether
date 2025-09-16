@@ -8061,7 +8061,7 @@ def debug_user_data(username):
         """
         
         for stock in stocks:
-            html += f"<li>{stock.symbol}: {stock.shares} shares @ ${stock.purchase_price}</li>"
+            html += f"<li>{stock.ticker}: {stock.quantity} shares @ ${stock.purchase_price}</li>"
         
         html += f"""
         </ul>
