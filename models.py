@@ -137,7 +137,7 @@ class LeaderboardCache(db.Model):
     __tablename__ = 'leaderboard_cache'
     
     id = db.Column(db.Integer, primary_key=True)
-    period = db.Column(db.String(10), nullable=False)  # '1D', '5D', '3M', 'YTD', '1Y', '5Y', 'MAX'
+    period = db.Column(db.String(20), nullable=False)  # '1D_all', '1D_small_cap', '1D_large_cap', etc.
     leaderboard_data = db.Column(db.Text, nullable=False)  # JSON string of leaderboard data
     generated_at = db.Column(db.DateTime, nullable=False)
     

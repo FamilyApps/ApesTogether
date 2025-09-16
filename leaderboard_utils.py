@@ -604,6 +604,12 @@ def update_leaderboard_cache():
     print(f"Generated {charts_generated} chart cache entries")
     print(f"Leaderboard users: {len(leaderboard_users)} - {list(leaderboard_users)}")
     
+    # Check what's in the session before commit
+    print(f"Session new objects: {len(db.session.new)}")
+    print(f"Session dirty objects: {len(db.session.dirty)}")
+    for obj in list(db.session.new)[:3]:  # Show first 3 new objects
+        print(f"New object: {obj}")
+    
     try:
         db.session.commit()
         print(f"Leaderboard cache updated: {updated_count} periods, {charts_generated} charts generated for {len(leaderboard_users)} users")
