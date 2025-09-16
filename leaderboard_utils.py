@@ -578,6 +578,9 @@ def update_leaderboard_cache():
                         db.session.add(chart_cache)
                     
                     charts_generated += 1
+                    print(f"✓ Generated chart cache for user {user_id}, period {period}")
+                else:
+                    print(f"⚠ No chart data generated for user {user_id}, period {period} - insufficient snapshots")
                     
             except Exception as e:
                 print(f"Error generating chart cache for user {user_id}, period {period}: {str(e)}")
@@ -591,9 +594,15 @@ def update_leaderboard_cache():
         
         for old_chart in old_charts:
             db.session.delete(old_chart)
-            
+        
+        print(f"Cleaned up {len(old_charts)} old chart cache entries")
     except Exception as e:
         print(f"Error cleaning up old chart cache: {str(e)}")
+    
+    print(f"\n=== LEADERBOARD CACHE UPDATE COMPLETE ===")
+    print(f"Updated {updated_count} leaderboard cache entries")
+    print(f"Generated {charts_generated} chart cache entries")
+    print(f"Leaderboard users: {len(leaderboard_users)} - {list(leaderboard_users)}")
     
     try:
         db.session.commit()
