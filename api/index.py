@@ -5357,7 +5357,7 @@ def admin_populate_leaderboard():
         
         # Test the API endpoint
         from leaderboard_utils import get_leaderboard_data
-        test_data = get_leaderboard_data('YTD', 5, 'all')
+        test_data = get_leaderboard_data('YTD', 10, 'all')  # Get more entries to match homepage
         
         results.update({
             'leaderboard_cache_updated': updated_count,
