@@ -5,8 +5,6 @@ Includes market cap, sector, industry, NAICS codes, and exchange data
 import requests
 import time
 from datetime import datetime, timedelta
-from models import db, StockInfo, Stock
-from admin_metrics import log_alpha_vantage_call
 import os
 
 def get_alpha_vantage_company_overview(ticker):
@@ -37,24 +35,43 @@ def get_alpha_vantage_company_overview(ticker):
             
             # Check for API limit or error
             if 'Note' in data or 'Error Message' in data:
-                log_alpha_vantage_call('OVERVIEW', ticker, 'rate_limited', response_time_ms)
+                try:
+                    from admin_metrics import log_alpha_vantage_call
+                    log_alpha_vantage_call('OVERVIEW', ticker, 'rate_limited', response_time_ms)
+                except ImportError:
+                    print(f"API rate limited for {ticker}")
                 return None
             
             # Check if we got valid data
             if 'Symbol' not in data or data.get('Symbol') != ticker.upper():
-                log_alpha_vantage_call('OVERVIEW', ticker, 'error', response_time_ms)
+                try:
+                    from admin_metrics import log_alpha_vantage_call
+                    log_alpha_vantage_call('OVERVIEW', ticker, 'error', response_time_ms)
+                except ImportError:
+                    print(f"Invalid data for {ticker}")
                 return None
             
-            log_alpha_vantage_call('OVERVIEW', ticker, 'success', response_time_ms)
+            try:
+                from admin_metrics import log_alpha_vantage_call
+                log_alpha_vantage_call('OVERVIEW', ticker, 'success', response_time_ms)
+            except ImportError:
+                print(f"Successfully fetched data for {ticker}")
             return data
         else:
-            log_alpha_vantage_call('OVERVIEW', ticker, 'error', response_time_ms)
+            try:
+                from admin_metrics import log_alpha_vantage_call
+                log_alpha_vantage_call('OVERVIEW', ticker, 'error', response_time_ms)
+            except ImportError:
+                print(f"HTTP error for {ticker}: {response.status_code}")
             return None
             
     except Exception as e:
         response_time_ms = int((time.time() - start_time) * 1000)
-        log_alpha_vantage_call('OVERVIEW', ticker, 'error', response_time_ms)
-        print(f"Error fetching overview for {ticker}: {str(e)}")
+        try:
+            from admin_metrics import log_alpha_vantage_call
+            log_alpha_vantage_call('OVERVIEW', ticker, 'error', response_time_ms)
+        except ImportError:
+            print(f"Error fetching overview for {ticker}: {str(e)}")
         return None
 
 def classify_market_cap(market_cap_str):
@@ -159,6 +176,9 @@ def populate_stock_info(ticker, force_update=False):
     """
     Populate or update stock info for a given ticker
     """
+    # Import models locally to avoid circular dependencies
+    from models import db, StockInfo
+    
     ticker_upper = ticker.upper()
     
     # Check if we already have recent data
@@ -222,6 +242,9 @@ def populate_all_user_stocks():
     """
     Populate stock info for all stocks held by users
     """
+    # Import models locally to avoid circular dependencies
+    from models import db, Stock
+    
     # Get all unique tickers from user portfolios
     unique_tickers = db.session.query(Stock.ticker).distinct().all()
     tickers = [ticker[0] for ticker in unique_tickers]
@@ -258,6 +281,9 @@ def get_stocks_by_industry(naics_code=None, industry_name=None):
     Get stocks filtered by NAICS code or industry name
     Useful for creating industry-specific leaderboards
     """
+    # Import models locally to avoid circular dependencies
+    from models import StockInfo
+    
     query = StockInfo.query.filter(StockInfo.is_active == True)
     
     if naics_code:
