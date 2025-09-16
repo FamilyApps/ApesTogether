@@ -157,10 +157,14 @@ def calculate_portfolio_cap_percentages(user_id):
             stock_purchase_value = stock.quantity * stock.purchase_price
             stock_current_value = (stock_purchase_value / total_purchase_value) * total_value
             
-            if stock_info.cap_classification == 'small':
+            # Use dynamic market cap classification if available
+            cap_category = stock_info.get_market_cap_category() if stock_info.market_cap else stock_info.cap_classification
+            
+            if cap_category in ['small', 'mid']:
                 small_cap_value += stock_current_value
-            else:
+            elif cap_category in ['large', 'mega']:
                 large_cap_value += stock_current_value
+            # Unknown/missing classification doesn't count toward either category
     
     if total_value == 0:
         return 0.0, 0.0

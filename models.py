@@ -265,16 +265,36 @@ class SMSNotification(db.Model):
         return f"<SMSNotification {self.user_id} {self.phone_number} verified={self.is_verified}>"
 
 class StockInfo(db.Model):
-    """Stock information including market cap and classification"""
+    """Stock information including market cap, industry classification, and metadata"""
     __tablename__ = 'stock_info'
     
     id = db.Column(db.Integer, primary_key=True)
     ticker = db.Column(db.String(10), unique=True, nullable=False)
     company_name = db.Column(db.String(200), nullable=True)
     market_cap = db.Column(db.BigInteger, nullable=True)  # In dollars
-    cap_classification = db.Column(db.String(20), nullable=True)  # 'small' or 'large'
+    cap_classification = db.Column(db.String(20), nullable=True)  # 'small', 'mid', 'large', 'mega'
+    sector = db.Column(db.String(100), nullable=True)  # Technology, Healthcare, etc.
+    industry = db.Column(db.String(100), nullable=True)  # Software, Biotechnology, etc.
+    naics_code = db.Column(db.String(10), nullable=True)  # 6-digit NAICS industry code
+    exchange = db.Column(db.String(10), nullable=True)  # NYSE, NASDAQ, etc.
+    country = db.Column(db.String(5), nullable=True, default='US')  # ISO country code
+    is_active = db.Column(db.Boolean, default=True)  # For delisted stocks
     last_updated = db.Column(db.DateTime, default=datetime.utcnow)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    def get_market_cap_category(self):
+        """Return market cap category based on current market cap"""
+        if not self.market_cap:
+            return 'unknown'
+        
+        if self.market_cap >= 200_000_000_000:  # $200B+
+            return 'mega'
+        elif self.market_cap >= 10_000_000_000:  # $10B+
+            return 'large'
+        elif self.market_cap >= 2_000_000_000:   # $2B+
+            return 'mid'
+        else:
+            return 'small'
     
     def __repr__(self):
         return f"<StockInfo {self.ticker} {self.company_name} {self.cap_classification} cap>"

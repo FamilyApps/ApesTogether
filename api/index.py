@@ -5379,6 +5379,89 @@ def admin_populate_leaderboard():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/populate-stock-metadata')
+@login_required
+def admin_populate_stock_metadata():
+    """Populate comprehensive stock metadata for all user-held stocks"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from stock_metadata_utils import populate_all_user_stocks
+        from models import StockInfo, Stock
+        
+        # Get current stats
+        total_stocks = Stock.query.distinct(Stock.ticker).count()
+        existing_stock_info = StockInfo.query.count()
+        stock_info_with_metadata = StockInfo.query.filter(
+            StockInfo.sector.isnot(None),
+            StockInfo.industry.isnot(None)
+        ).count()
+        
+        results = {
+            'before_population': {
+                'unique_tickers_held': total_stocks,
+                'existing_stock_info_records': existing_stock_info,
+                'records_with_metadata': stock_info_with_metadata
+            }
+        }
+        
+        # Populate stock metadata
+        success_count, failed_count = populate_all_user_stocks()
+        
+        # Get updated stats
+        updated_stock_info = StockInfo.query.count()
+        updated_with_metadata = StockInfo.query.filter(
+            StockInfo.sector.isnot(None),
+            StockInfo.industry.isnot(None)
+        ).count()
+        
+        # Sample of populated data
+        sample_stocks = StockInfo.query.filter(
+            StockInfo.sector.isnot(None)
+        ).limit(5).all()
+        
+        sample_data = []
+        for stock in sample_stocks:
+            sample_data.append({
+                'ticker': stock.ticker,
+                'company_name': stock.company_name,
+                'sector': stock.sector,
+                'industry': stock.industry,
+                'cap_classification': stock.cap_classification,
+                'naics_code': stock.naics_code,
+                'exchange': stock.exchange
+            })
+        
+        results.update({
+            'population_results': {
+                'success_count': success_count,
+                'failed_count': failed_count,
+                'total_processed': success_count + failed_count
+            },
+            'after_population': {
+                'total_stock_info_records': updated_stock_info,
+                'records_with_metadata': updated_with_metadata
+            },
+            'sample_populated_stocks': sample_data
+        })
+        
+        return jsonify({
+            'success': True,
+            'message': f'Stock metadata populated: {success_count} successful, {failed_count} failed',
+            'results': results
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/debug-leaderboard')
 @login_required
 def admin_debug_leaderboard():
