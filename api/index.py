@@ -7993,6 +7993,83 @@ def update_leaderboard_cron():
         logger.error(f"Automated leaderboard update error: {str(e)}")
         return jsonify({'error': f'Leaderboard update error: {str(e)}'}), 500
 
+@app.route('/admin/debug-user-data/<username>')
+@login_required
+def debug_user_data(username):
+    """Debug endpoint to check user data availability"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        flash('Admin access required', 'danger')
+        return redirect(url_for('login'))
+    
+    try:
+        from models import User, Stock, PortfolioSnapshot, UserActivity
+        from datetime import datetime, timedelta, date
+        
+        # Find the user
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return f"<h1>User '{username}' not found</h1>"
+        
+        # Check stocks
+        stocks = Stock.query.filter_by(user_id=user.id).all()
+        
+        # Check portfolio snapshots
+        snapshots = PortfolioSnapshot.query.filter_by(user_id=user.id)\
+            .order_by(PortfolioSnapshot.date.desc()).limit(10).all()
+        
+        # Check recent user activity
+        recent_activity = UserActivity.query.filter_by(user_id=user.id)\
+            .order_by(UserActivity.timestamp.desc()).limit(5).all()
+        
+        # Check active users count
+        cutoff_date = datetime.utcnow() - timedelta(days=1)
+        active_count = UserActivity.query.filter(
+            UserActivity.timestamp >= cutoff_date
+        ).distinct(UserActivity.user_id).count()
+        
+        html = f"""
+        <h1>Debug Data for User: {username} (ID: {user.id})</h1>
+        
+        <h2>Stocks ({len(stocks)})</h2>
+        <ul>
+        """
+        
+        for stock in stocks:
+            html += f"<li>{stock.ticker}: {stock.quantity} @ ${stock.purchase_price}</li>"
+        
+        html += f"""
+        </ul>
+        
+        <h2>Portfolio Snapshots ({len(snapshots)} recent)</h2>
+        <ul>
+        """
+        
+        for snapshot in snapshots:
+            html += f"<li>{snapshot.date}: ${snapshot.total_value}</li>"
+        
+        html += f"""
+        </ul>
+        
+        <h2>Recent Activity ({len(recent_activity)})</h2>
+        <ul>
+        """
+        
+        for activity in recent_activity:
+            html += f"<li>{activity.timestamp}: {activity.activity_type}</li>"
+        
+        html += f"""
+        </ul>
+        
+        <h2>Active Users (1D): {active_count}</h2>
+        
+        <p><a href="/admin">Back to Admin</a></p>
+        """
+        
+        return html
+        
+    except Exception as e:
+        return f"<h1>Error: {str(e)}</h1><p><a href='/admin'>Back to Admin</a></p>"
+
 @app.route('/admin/test-api-logging')
 @login_required
 def test_api_logging():
