@@ -4390,6 +4390,73 @@ def admin_create_leaderboard_tables():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/fix-stock-info-symbol')
+@login_required
+def admin_fix_stock_info_symbol():
+    """Normalize legacy 'symbol' column on stock_info to avoid NOT NULL violations.
+
+    Some production databases still have a legacy 'symbol' column defined as NOT NULL,
+    while the current model only defines 'ticker'. This endpoint:
+      - Detects if 'symbol' exists on stock_info
+      - Backfills symbol from ticker where missing
+      - Drops the NOT NULL constraint on symbol so future inserts (which only set ticker) succeed
+    """
+    try:
+        # Admin check aligned with other admin endpoints
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+
+        from sqlalchemy import text
+
+        # Check if 'symbol' column exists and whether it is NOT NULL
+        col_info = db.session.execute(text("""
+            SELECT column_name, is_nullable
+            FROM information_schema.columns
+            WHERE table_name = 'stock_info' AND column_name = 'symbol'
+        """)).fetchone()
+
+        if not col_info:
+            return jsonify({
+                'success': True,
+                'message': "Column 'symbol' does not exist; no action needed"
+            })
+
+        actions = []
+
+        # Backfill symbol from ticker where missing
+        db.session.execute(text("""
+            UPDATE stock_info
+            SET symbol = ticker
+            WHERE (symbol IS NULL OR symbol = '') AND ticker IS NOT NULL
+        """))
+        actions.append('Backfilled symbol from ticker where missing')
+
+        # If column is NOT NULL, drop the constraint by altering to NULLable
+        if col_info[1] == 'NO':
+            db.session.execute(text("""
+                ALTER TABLE stock_info
+                ALTER COLUMN symbol DROP NOT NULL
+            """))
+            actions.append('Dropped NOT NULL constraint on symbol')
+
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': 'Normalized legacy symbol column on stock_info',
+            'actions': actions
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/fix-stock-info-schema')
 @login_required
 def admin_fix_stock_info_schema():
