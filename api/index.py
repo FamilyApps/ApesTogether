@@ -8096,7 +8096,7 @@ def debug_user_data(username):
         """
         
         for activity in recent_activity:
-            html += f"<li>{activity.timestamp}: {activity.action}</li>"
+            html += f"<li>{activity.timestamp}: {activity.activity_type}</li>"
         
         html += f"""
         </ul>
