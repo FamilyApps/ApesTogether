@@ -5379,6 +5379,67 @@ def admin_populate_leaderboard():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/run-stock-info-migration')
+@login_required
+def admin_run_stock_info_migration():
+    """Run the StockInfo metadata enhancement migration"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        # Add missing columns to stock_info table
+        with app.app_context():
+            # Check if columns already exist first
+            result = db.session.execute(text("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'stock_info' 
+                AND column_name IN ('sector', 'industry', 'naics_code', 'exchange', 'country', 'is_active')
+            """))
+            existing_columns = [row[0] for row in result.fetchall()]
+            
+            columns_to_add = []
+            if 'sector' not in existing_columns:
+                columns_to_add.append("ADD COLUMN sector VARCHAR(100)")
+            if 'industry' not in existing_columns:
+                columns_to_add.append("ADD COLUMN industry VARCHAR(100)")
+            if 'naics_code' not in existing_columns:
+                columns_to_add.append("ADD COLUMN naics_code VARCHAR(10)")
+            if 'exchange' not in existing_columns:
+                columns_to_add.append("ADD COLUMN exchange VARCHAR(10)")
+            if 'country' not in existing_columns:
+                columns_to_add.append("ADD COLUMN country VARCHAR(5) DEFAULT 'US'")
+            if 'is_active' not in existing_columns:
+                columns_to_add.append("ADD COLUMN is_active BOOLEAN DEFAULT TRUE")
+            
+            if columns_to_add:
+                # Add columns one by one to avoid syntax issues
+                for column_sql in columns_to_add:
+                    db.session.execute(text(f"ALTER TABLE stock_info {column_sql}"))
+                
+                db.session.commit()
+                
+                return jsonify({
+                    'success': True,
+                    'message': f'Successfully added {len(columns_to_add)} columns to stock_info table',
+                    'columns_added': columns_to_add
+                })
+            else:
+                return jsonify({
+                    'success': True,
+                    'message': 'All columns already exist in stock_info table',
+                    'existing_columns': existing_columns
+                })
+                
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/populate-stock-metadata')
 @login_required
 def admin_populate_stock_metadata():
