@@ -1211,7 +1211,8 @@ def dashboard():
                     })
     
     return render_template_with_defaults('dashboard.html', 
-                                       portfolio_data=portfolio_data, 
+                                       portfolio_data=portfolio_data,
+                                       stocks=portfolio_data,  # Template expects 'stocks' variable
                                        total_portfolio_value=total_portfolio_value,
                                        now=datetime.now())
 
