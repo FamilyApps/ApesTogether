@@ -5585,20 +5585,33 @@ def populate_stock_info():
 @app.route('/api/portfolio/performance/<period>')
 @login_required
 def get_portfolio_performance(period):
-    """Get portfolio performance data for a specific time period - optimized with caching"""
+    """Get portfolio performance data for a specific time period - uses cached data for leaderboard users"""
     try:
-        # Import here to avoid circular imports
-        import sys
-        import os
         from datetime import datetime, timedelta
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        from portfolio_performance import performance_calculator
+        from models import UserPortfolioChartCache
+        import json
         
         user_id = session.get('user_id')
         if not user_id:
             return jsonify({'error': 'User not authenticated'}), 401
         
-        # Add simple response caching (5 minutes for performance data)
+        period_upper = period.upper()
+        
+        # First, try to get cached chart data for leaderboard users
+        chart_cache = UserPortfolioChartCache.query.filter_by(
+            user_id=user_id, period=period_upper
+        ).first()
+        
+        if chart_cache:
+            try:
+                # Use cached data - super fast for leaderboard users
+                cached_data = json.loads(chart_cache.chart_data)
+                logger.info(f"Using cached chart data for user {user_id}, period {period_upper}")
+                return jsonify(cached_data)
+            except Exception as e:
+                logger.warning(f"Failed to parse cached chart data: {e}")
+        
+        # Fallback: Check session cache (5 minutes)
         cache_key = f"perf_{user_id}_{period}"
         cached_response = session.get(cache_key)
         cache_time = session.get(f"{cache_key}_time")
@@ -5606,11 +5619,19 @@ def get_portfolio_performance(period):
         if cached_response and cache_time:
             cache_age = datetime.now() - datetime.fromisoformat(cache_time)
             if cache_age < timedelta(minutes=5):
+                logger.info(f"Using session cache for user {user_id}, period {period_upper}")
                 return jsonify(cached_response)
         
-        performance_data = performance_calculator.get_performance_data(user_id, period.upper())
+        # Last resort: Live calculation (slow for non-leaderboard users)
+        import sys
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from portfolio_performance import performance_calculator
         
-        # Cache the response
+        logger.info(f"Performing live calculation for user {user_id}, period {period_upper}")
+        performance_data = performance_calculator.get_performance_data(user_id, period_upper)
+        
+        # Cache the response in session
         session[cache_key] = performance_data
         session[f"{cache_key}_time"] = datetime.now().isoformat()
         
@@ -8002,60 +8023,80 @@ def debug_user_data(username):
         return redirect(url_for('login'))
     
     try:
-        from models import User, Stock, PortfolioSnapshot, UserActivity
-        from datetime import datetime, timedelta, date
+        from models import User, Stock, PortfolioSnapshot, UserActivity, UserPortfolioChartCache
+        from admin_metrics import get_active_users_count
+        from datetime import datetime, timedelta
+        import json
         
         # Find the user
         user = User.query.filter_by(username=username).first()
         if not user:
-            return f"<h1>User '{username}' not found</h1>"
+            return f"<h1>User '{username}' not found</h1><p><a href='/admin'>Back to Admin</a></p>"
         
-        # Check stocks
+        # Get user's stocks
         stocks = Stock.query.filter_by(user_id=user.id).all()
         
-        # Check portfolio snapshots
-        snapshots = PortfolioSnapshot.query.filter_by(user_id=user.id)\
-            .order_by(PortfolioSnapshot.date.desc()).limit(10).all()
+        # Get recent portfolio snapshots
+        snapshots = PortfolioSnapshot.query.filter_by(user_id=user.id).order_by(PortfolioSnapshot.date.desc()).limit(10).all()
         
-        # Check recent user activity
-        recent_activity = UserActivity.query.filter_by(user_id=user.id)\
-            .order_by(UserActivity.timestamp.desc()).limit(5).all()
+        # Get recent user activity
+        recent_activity = UserActivity.query.filter_by(user_id=user.id).order_by(UserActivity.timestamp.desc()).limit(5).all()
+        
+        # Get cached chart data
+        cached_charts = UserPortfolioChartCache.query.filter_by(user_id=user.id).all()
         
         # Check active users count
-        cutoff_date = datetime.utcnow() - timedelta(days=1)
-        active_count = UserActivity.query.filter(
-            UserActivity.timestamp >= cutoff_date
-        ).distinct(UserActivity.user_id).count()
+        active_count = get_active_users_count(1)  # 1 day
         
         html = f"""
-        <h1>Debug Data for User: {username} (ID: {user.id})</h1>
+        <h1>Debug Data for User: {username}</h1>
         
-        <h2>Stocks ({len(stocks)})</h2>
+        <h2>User Info:</h2>
+        <p>ID: {user.id}</p>
+        <p>Email: {user.email}</p>
+        <p>Created: {user.created_at}</p>
+        
+        <h2>Stocks ({len(stocks)}):</h2>
         <ul>
         """
         
         for stock in stocks:
-            html += f"<li>{stock.ticker}: {stock.quantity} @ ${stock.purchase_price}</li>"
+            html += f"<li>{stock.symbol}: {stock.shares} shares @ ${stock.purchase_price}</li>"
         
         html += f"""
         </ul>
         
-        <h2>Portfolio Snapshots ({len(snapshots)} recent)</h2>
+        <h2>Recent Portfolio Snapshots ({len(snapshots)}):</h2>
         <ul>
         """
         
         for snapshot in snapshots:
-            html += f"<li>{snapshot.date}: ${snapshot.total_value}</li>"
+            html += f"<li>{snapshot.date}: ${snapshot.total_value:.2f}</li>"
         
         html += f"""
         </ul>
         
-        <h2>Recent Activity ({len(recent_activity)})</h2>
+        <h2>Cached Chart Data ({len(cached_charts)}):</h2>
+        <ul>
+        """
+        
+        for chart in cached_charts:
+            try:
+                chart_data = json.loads(chart.chart_data)
+                data_points = len(chart_data.get('dates', []))
+                html += f"<li>{chart.period}: {data_points} data points (generated {chart.generated_at})</li>"
+            except:
+                html += f"<li>{chart.period}: Invalid JSON data (generated {chart.generated_at})</li>"
+        
+        html += f"""
+        </ul>
+        
+        <h2>Recent Activity ({len(recent_activity)}):</h2>
         <ul>
         """
         
         for activity in recent_activity:
-            html += f"<li>{activity.timestamp}: {activity.activity_type}</li>"
+            html += f"<li>{activity.timestamp}: {activity.action}</li>"
         
         html += f"""
         </ul>
