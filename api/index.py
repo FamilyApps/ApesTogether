@@ -8054,7 +8054,7 @@ def debug_user_data(username):
         <h2>User Info:</h2>
         <p>ID: {user.id}</p>
         <p>Email: {user.email}</p>
-        <p>Created: {user.created_at}</p>
+        <p>Username: {user.username}</p>
         
         <h2>Stocks ({len(stocks)}):</h2>
         <ul>
