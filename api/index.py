@@ -3249,11 +3249,11 @@ def admin_transactions():
                 'id': tx.id,
                 'user_id': tx.user_id,
                 'username': username,
-                'symbol': tx.symbol,
-                'shares': tx.shares,
+                'symbol': tx.ticker,
+                'shares': tx.quantity,
                 'price': tx.price,
                 'transaction_type': tx.transaction_type,
-                'date': tx.date.strftime('%Y-%m-%d'),
+                'date': tx.timestamp.strftime('%Y-%m-%d'),
                 'notes': tx.notes or ''
             })
     except Exception as e:
@@ -3277,13 +3277,13 @@ def admin_transactions():
     if user_filter:
         filtered_transactions = [t for t in filtered_transactions if str(t['user_id']) == user_filter]
     if symbol_filter:
-        filtered_transactions = [t for t in filtered_transactions if t['symbol'].lower() == symbol_filter.lower()]
+        filtered_transactions = [t for t in filtered_transactions if t['ticker'].lower() == symbol_filter.lower()]
     if type_filter:
         filtered_transactions = [t for t in filtered_transactions if t['transaction_type'].lower() == type_filter.lower()]
     
     # Get unique users and symbols for filters
     unique_users = list(set([(t['user_id'], t['username']) for t in transactions]))
-    unique_symbols = list(set([t['symbol'] for t in transactions]))
+    unique_symbols = list(set([t['ticker'] for t in transactions]))
     
     return render_template_string("""
 <!DOCTYPE html>
@@ -3391,7 +3391,7 @@ def admin_transactions():
                 </select>
                 
                 <select name="symbol">
-                    <option value="">All Symbols</option>
+                    <option value="">All Tickers</option>
                     {% for symbol in unique_symbols %}
                     <option value="{{ symbol }}" {% if symbol_filter == symbol %}selected{% endif %}>{{ symbol }}</option>
                     {% endfor %}
@@ -3418,12 +3418,12 @@ def admin_transactions():
             <tr>
                 <th>ID</th>
                 <th>User</th>
-                <th>Symbol</th>
-                <th>Shares</th>
+                <th>Ticker</th>
+                <th>Quantity</th>
                 <th>Price</th>
                 <th>Total</th>
                 <th>Type</th>
-                <th>Date</th>
+                <th>Timestamp</th>
                 <th>Notes</th>
                 <th>Actions</th>
             </tr>
@@ -3431,12 +3431,12 @@ def admin_transactions():
             <tr>
                 <td>{{ tx.id }}</td>
                 <td>{{ tx.username }}</td>
-                <td>{{ tx.symbol }}</td>
-                <td>{{ tx.shares }}</td>
+                <td>{{ tx.ticker }}</td>
+                <td>{{ tx.quantity }}</td>
                 <td>${{ '%0.2f'|format(tx.price) }}</td>
-                <td>${{ '%0.2f'|format(tx.shares * tx.price) }}</td>
+                <td>${{ '%0.2f'|format(tx.quantity * tx.price) }}</td>
                 <td class="{{ tx.transaction_type }}">{{ tx.transaction_type|upper }}</td>
-                <td>{{ tx.date }}</td>
+                <td>{{ tx.timestamp }}</td>
                 <td>{{ tx.notes }}</td>
                 <td>
                     <a href="/admin/transactions/{{ tx.id }}/edit" class="button button-warning button-small">Edit</a>
@@ -3475,7 +3475,7 @@ def admin_stocks():
                 'ticker': stock.ticker,
                 'quantity': stock.quantity,
                 'purchase_price': stock.purchase_price,
-                'current_price': stock.current_price,
+                'current_price': 0.0,  # Stock model doesn't have current_price field
                 'purchase_date': stock.purchase_date.strftime('%Y-%m-%d')
             })
     except Exception as e:
@@ -3870,12 +3870,12 @@ def admin_edit_transaction(transaction_id):
             
             <div class="form-group">
                 <label for="ticker">Symbol</label>
-                <input type="text" id="ticker" name="ticker" value="{{ transaction_data.symbol }}" required>
+                <input type="text" id="ticker" name="ticker" value="{{ transaction_data.ticker }}" required>
             </div>
             
             <div class="form-group">
                 <label for="quantity">Shares</label>
-                <input type="number" id="quantity" name="quantity" value="{{ transaction_data.shares }}" step="0.01" required>
+                <input type="number" id="quantity" name="quantity" value="{{ transaction_data.quantity }}" step="0.01" required>
             </div>
             
             <div class="form-group">
@@ -3893,7 +3893,7 @@ def admin_edit_transaction(transaction_id):
             
             <div class="form-group">
                 <label for="date">Date</label>
-                <input type="date" id="date" name="date" value="{{ transaction_data.date }}" required>
+                <input type="date" id="date" name="date" value="{{ transaction_data.timestamp.strftime('%Y-%m-%d') }}" required>
             </div>
             
             <div class="form-group">

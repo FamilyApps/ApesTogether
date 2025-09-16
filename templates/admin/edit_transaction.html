@@ -19,7 +19,7 @@
             <form method="POST">
                 <div class="mb-3">
                     <label for="symbol" class="form-label">Stock Symbol</label>
-                    <input type="text" class="form-control" id="symbol" value="{{ transaction.symbol }}" disabled>
+                    <input type="text" class="form-control" id="symbol" value="{{ transaction.ticker }}" disabled>
                     <div class="form-text">Symbol cannot be changed. Create a new transaction if needed.</div>
                 </div>
                 
@@ -31,7 +31,7 @@
                 
                 <div class="mb-3">
                     <label for="quantity" class="form-label">Number of Shares</label>
-                    <input type="number" step="0.01" class="form-control" id="quantity" name="quantity" value="{{ transaction.shares }}" required>
+                    <input type="number" step="0.01" class="form-control" id="quantity" name="quantity" value="{{ transaction.quantity }}" required>
                     <div class="form-text">Changing this will update the user's stock position.</div>
                 </div>
                 
@@ -42,7 +42,7 @@
                 
                 <div class="mb-3">
                     <label for="transaction_date" class="form-label">Transaction Date</label>
-                    <input type="date" class="form-control" id="transaction_date" name="transaction_date" value="{{ transaction.date.strftime('%Y-%m-%d') }}" required>
+                    <input type="date" class="form-control" id="transaction_date" name="transaction_date" value="{{ transaction.timestamp.strftime('%Y-%m-%d') }}" required>
                 </div>
                 
                 <div class="mb-3">

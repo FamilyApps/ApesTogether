@@ -865,10 +865,16 @@ except ImportError as e:
 
 # Register the leaderboard blueprint
 try:
+    from leaderboard_routes import leaderboard_bp
     app.register_blueprint(leaderboard_bp)
     print("Leaderboard blueprint registered successfully")
 except ImportError as e:
     print(f"Could not register leaderboard blueprint: {e}")
+
+# Note: app.py and api/index.py are separate Flask applications
+# app.py is for Heroku/traditional deployment
+# api/index.py is for Vercel deployment via api/vercel.py
+# Do not merge routes between them
 
 
 # Portfolio performance API endpoints
