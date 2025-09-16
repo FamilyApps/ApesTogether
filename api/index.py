@@ -5300,7 +5300,7 @@ def admin_populate_leaderboard():
             return jsonify({'error': 'Admin access required'}), 403
         
         from datetime import datetime, date, timedelta
-        from models import db, PortfolioSnapshot, User, Stock
+        from models import db, PortfolioSnapshot, User, Stock, LeaderboardCache
         
         # First check if we have the basic data needed
         total_users = User.query.count()
@@ -5309,13 +5309,31 @@ def admin_populate_leaderboard():
         yesterday = date.today() - timedelta(days=1)
         yesterday_snapshots = PortfolioSnapshot.query.filter_by(date=yesterday).count()
         
+        # Test database write capability
+        test_entry = LeaderboardCache(
+            period='TEST_WRITE',
+            leaderboard_data='[]',
+            generated_at=datetime.now()
+        )
+        
+        try:
+            db.session.add(test_entry)
+            db.session.commit()
+            db.session.delete(test_entry)
+            db.session.commit()
+            db_write_test = "SUCCESS"
+        except Exception as db_e:
+            db.session.rollback()
+            db_write_test = f"FAILED: {str(db_e)}"
+        
         results = {
             'data_check': {
                 'total_users': total_users,
                 'users_with_stocks': users_with_stocks,
                 'total_snapshots': total_snapshots,
                 'yesterday_snapshots': yesterday_snapshots
-            }
+            },
+            'db_write_test': db_write_test
         }
         
         if users_with_stocks == 0:
