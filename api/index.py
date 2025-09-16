@@ -5383,12 +5383,12 @@ def admin_populate_leaderboard():
 @login_required
 def admin_populate_stock_metadata():
     """Populate comprehensive stock metadata for all user-held stocks"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
+        # Count existing stock info records
+        existing_stock_info = StockInfo.query.count()
         from stock_metadata_utils import populate_all_user_stocks
         from models import StockInfo, Stock
         
