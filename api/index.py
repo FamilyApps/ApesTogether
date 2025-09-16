@@ -8070,9 +8070,9 @@ def debug_user_data(username):
     except Exception as e:
         return f"<h1>Error: {str(e)}</h1><p><a href='/admin'>Back to Admin</a></p>"
 
-@app.route('/admin/test-performance-api/<username>')
+@app.route('/admin/test-performance-api-user/<username>')
 @login_required
-def test_performance_api(username):
+def test_performance_api_user(username):
     """Test portfolio performance API endpoints for a specific user"""
     if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
         flash('Admin access required', 'danger')
