@@ -5448,10 +5448,12 @@ def admin_populate_stock_metadata():
         return jsonify({'error': 'Admin access required'}), 403
     
     try:
+        # Import dependencies before first use to avoid UnboundLocalError
+        from models import StockInfo, Stock
+        from stock_metadata_utils import populate_all_user_stocks
+        
         # Count existing stock info records
         existing_stock_info = StockInfo.query.count()
-        from stock_metadata_utils import populate_all_user_stocks
-        from models import StockInfo, Stock
         
         # Get current stats
         total_stocks = Stock.query.distinct(Stock.ticker).count()
