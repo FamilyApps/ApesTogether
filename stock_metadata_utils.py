@@ -276,6 +276,66 @@ def populate_all_user_stocks():
     
     return success_count, failed_count
 
+def populate_user_stocks_batch(limit=None, offset=0, tickers=None, force_update=False, sleep_seconds=12):
+    """
+    Populate stock info for a subset of stocks to support batching.
+
+    Params:
+    - limit: maximum number of tickers to process in this batch (None = all)
+    - offset: number of tickers to skip from the start
+    - tickers: optional explicit list of tickers (list[str] or comma-separated string)
+    - force_update: if True, ignore 7-day freshness window
+    - sleep_seconds: delay between API calls to respect rate limits
+    """
+    from models import db, Stock
+
+    # Build base ticker list from user portfolios
+    unique_tickers = db.session.query(Stock.ticker).distinct().all()
+    all_tickers = [t[0] for t in unique_tickers]
+
+    # If explicit tickers provided, normalize and filter to known
+    if tickers:
+        if isinstance(tickers, str):
+            tickers = [t.strip().upper() for t in tickers.split(',') if t.strip()]
+        else:
+            tickers = [str(t).strip().upper() for t in tickers]
+        # keep only those present in portfolios to avoid wasted calls
+        ticker_set = set(all_tickers)
+        selected = [t for t in tickers if t in ticker_set]
+    else:
+        selected = all_tickers
+
+    # Apply offset/limit
+    if offset:
+        selected = selected[offset:]
+    if isinstance(limit, int) and limit > 0:
+        selected = selected[:limit]
+
+    print(f"Batch populate: {len(selected)} tickers (offset={offset}, limit={limit})")
+
+    processed = []
+    success_count = 0
+    failed_count = 0
+
+    for i, ticker in enumerate(selected, 1):
+        print(f"\n[{i}/{len(selected)}] Processing {ticker}...")
+        res = populate_stock_info(ticker, force_update=force_update)
+        processed.append(ticker)
+        if res:
+            success_count += 1
+        else:
+            failed_count += 1
+        if i < len(selected) and sleep_seconds and sleep_seconds > 0:
+            print(f"Waiting {sleep_seconds} seconds for API rate limit...")
+            time.sleep(sleep_seconds)
+
+    return {
+        'success_count': success_count,
+        'failed_count': failed_count,
+        'total_processed': len(selected),
+        'tickers_processed': processed
+    }
+
 def get_stocks_by_industry(naics_code=None, industry_name=None):
     """
     Get stocks filtered by NAICS code or industry name

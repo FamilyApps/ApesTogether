@@ -5517,7 +5517,7 @@ def admin_populate_stock_metadata():
     try:
         # Import dependencies before first use to avoid UnboundLocalError
         from models import StockInfo, Stock
-        from stock_metadata_utils import populate_all_user_stocks
+        from stock_metadata_utils import populate_all_user_stocks, populate_user_stocks_batch
         
         # Count existing stock info records
         existing_stock_info = StockInfo.query.count()
@@ -5537,9 +5537,39 @@ def admin_populate_stock_metadata():
                 'records_with_metadata': stock_info_with_metadata
             }
         }
-        
-        # Populate stock metadata
-        success_count, failed_count = populate_all_user_stocks()
+        # Optional batching controls via query params
+        # /admin/populate-stock-metadata?limit=5&offset=0&tickers=KO,MSFT&force=true&sleep=8
+        limit = request.args.get('limit', default=None, type=int)
+        offset = request.args.get('offset', default=0, type=int)
+        tickers = request.args.get('tickers', default=None, type=str)
+        force_flag = request.args.get('force', default='false', type=str)
+        sleep_seconds = request.args.get('sleep', default=12, type=int)
+        batch_flag = request.args.get('batch', default=None, type=str)
+
+        use_batch = (limit is not None) or (tickers is not None) or (batch_flag is not None)
+        force_update = str(force_flag).lower() in ('1', 'true', 'yes')
+
+        if use_batch:
+            batch_result = populate_user_stocks_batch(
+                limit=limit,
+                offset=offset,
+                tickers=tickers,
+                force_update=force_update,
+                sleep_seconds=sleep_seconds
+            )
+            success_count = batch_result['success_count']
+            failed_count = batch_result['failed_count']
+            results['batch'] = {
+                'limit': limit,
+                'offset': offset,
+                'tickers': tickers.split(',') if tickers else None,
+                'sleep_seconds': sleep_seconds,
+                'force_update': force_update,
+                'tickers_processed': batch_result['tickers_processed']
+            }
+        else:
+            # Populate all stock metadata
+            success_count, failed_count = populate_all_user_stocks()
         
         # Get updated stats
         updated_stock_info = StockInfo.query.count()
