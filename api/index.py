@@ -5660,9 +5660,92 @@ def admin_populate_stock_metadata():
             'message': f'Stock metadata populated: {success_count} successful, {failed_count} failed',
             'results': results
         })
-        
+
     except Exception as e:
         import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/upsert-stock-info-manual')
+@login_required
+def admin_upsert_stock_info_manual():
+    """Manually upsert minimal StockInfo metadata for specific tickers.
+
+    Query params:
+      - tickers: comma-separated list, e.g. tickers=SCHD,VTI,SSPY (required)
+      - sector: default 'ETF'
+      - industry: default 'ETF - Index Fund'
+      - cap: default 'unknown' (small|mid|large|mega|unknown)
+      - exchange: default 'NYSEARCA'
+      - country: default 'USA'
+    """
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+
+    try:
+        tickers_param = request.args.get('tickers', '').strip()
+        if not tickers_param:
+            return jsonify({'success': False, 'error': 'tickers parameter is required'}), 400
+
+        sector = request.args.get('sector', default='ETF')
+        industry = request.args.get('industry', default='ETF - Index Fund')
+        cap = request.args.get('cap', default='unknown')
+        exchange = request.args.get('exchange', default='NYSEARCA')
+        country = request.args.get('country', default='USA')
+
+        from models import StockInfo, db
+        from datetime import datetime
+
+        tickers = [t.strip().upper() for t in tickers_param.split(',') if t.strip()]
+        processed = []
+        created = 0
+        updated = 0
+        errors = []
+
+        for t in tickers:
+            try:
+                si = StockInfo.query.filter_by(ticker=t).first()
+                if not si:
+                    si = StockInfo(ticker=t)
+                    db.session.add(si)
+                    created += 1
+                else:
+                    updated += 1
+
+                # Minimal fields
+                if not si.company_name:
+                    si.company_name = t
+                si.sector = sector
+                si.industry = industry
+                si.cap_classification = cap
+                si.exchange = exchange
+                si.country = country
+                si.is_active = True
+                si.last_updated = datetime.now()
+
+                processed.append(t)
+            except Exception as inner_e:
+                errors.append({'ticker': t, 'error': str(inner_e)})
+
+        # Commit once at the end
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': 'Manual upsert complete',
+            'processed': processed,
+            'created': created,
+            'updated': updated,
+            'errors': errors
+        })
+
+    except Exception as e:
+        import traceback
+        from models import db
+        db.session.rollback()
         return jsonify({
             'success': False,
             'error': str(e),
