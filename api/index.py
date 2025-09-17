@@ -5517,7 +5517,12 @@ def admin_populate_stock_metadata():
     try:
         # Import dependencies before first use to avoid UnboundLocalError
         from models import StockInfo, Stock
-        from stock_metadata_utils import populate_all_user_stocks, populate_user_stocks_batch
+        from stock_metadata_utils import (
+            populate_all_user_stocks,
+            populate_user_stocks_batch,
+            populate_user_stocks_resume,
+            get_remaining_tickers,
+        )
         
         # Count existing stock info records
         existing_stock_info = StockInfo.query.count()
@@ -5537,19 +5542,61 @@ def admin_populate_stock_metadata():
                 'records_with_metadata': stock_info_with_metadata
             }
         }
-        # Optional batching controls via query params
-        # /admin/populate-stock-metadata?limit=5&offset=0&tickers=KO,MSFT&force=true&sleep=8
+        # Optional batching/resume controls via query params
+        # Examples:
+        #   /admin/populate-stock-metadata?limit=5
+        #   /admin/populate-stock-metadata?limit=5&offset=5
+        #   /admin/populate-stock-metadata?tickers=KO,MSFT
+        #   /admin/populate-stock-metadata?force=true&sleep=8
+        #   /admin/populate-stock-metadata?resume=true&limit=5
+        #   /admin/populate-stock-metadata?resume=true&dry_run=true
         limit = request.args.get('limit', default=None, type=int)
         offset = request.args.get('offset', default=0, type=int)
         tickers = request.args.get('tickers', default=None, type=str)
         force_flag = request.args.get('force', default='false', type=str)
         sleep_seconds = request.args.get('sleep', default=12, type=int)
         batch_flag = request.args.get('batch', default=None, type=str)
+        resume_flag = request.args.get('resume', default='false', type=str)
+        dry_run_flag = request.args.get('dry_run', default='false', type=str)
 
         use_batch = (limit is not None) or (tickers is not None) or (batch_flag is not None)
         force_update = str(force_flag).lower() in ('1', 'true', 'yes')
+        use_resume = str(resume_flag).lower() in ('1', 'true', 'yes')
+        use_dry_run = str(dry_run_flag).lower() in ('1', 'true', 'yes')
 
-        if use_batch:
+        if use_resume:
+            remaining_list = get_remaining_tickers(force_update=force_update)
+            # Dry run: just return what would be processed
+            if use_dry_run:
+                preview = remaining_list[offset:(offset + limit) if (isinstance(limit, int) and limit > 0) else None]
+                success_count = 0
+                failed_count = 0
+                results['resume'] = {
+                    'dry_run': True,
+                    'remaining_total': len(remaining_list),
+                    'next_batch_preview': preview,
+                    'limit': limit,
+                    'offset': offset,
+                    'force_update': force_update
+                }
+            else:
+                resume_result = populate_user_stocks_resume(
+                    limit=limit,
+                    offset=offset,
+                    force_update=force_update,
+                    sleep_seconds=sleep_seconds
+                )
+                success_count = resume_result['success_count']
+                failed_count = resume_result['failed_count']
+                results['resume'] = {
+                    'remaining_total_after': resume_result['remaining_total'],
+                    'limit': limit,
+                    'offset': offset,
+                    'sleep_seconds': sleep_seconds,
+                    'force_update': force_update,
+                    'tickers_processed': resume_result['tickers_processed']
+                }
+        elif use_batch:
             batch_result = populate_user_stocks_batch(
                 limit=limit,
                 offset=offset,

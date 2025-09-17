@@ -336,6 +336,74 @@ def populate_user_stocks_batch(limit=None, offset=0, tickers=None, force_update=
         'tickers_processed': processed
     }
 
+def get_remaining_tickers(force_update=False):
+    """
+    Compute the list of portfolio tickers that still need metadata.
+
+    A ticker is considered remaining if:
+      - There is no StockInfo row for it, OR
+      - force_update is True, OR
+      - last_updated is older than 7 days
+    """
+    from models import db, Stock, StockInfo
+    from datetime import datetime, timedelta
+
+    all_portfolio_tickers = [t[0] for t in db.session.query(Stock.ticker).distinct().all()]
+    remaining = []
+
+    threshold = datetime.now() - timedelta(days=7)
+    # Fetch all existing StockInfo rows into a dict for quick lookup
+    infos = StockInfo.query.filter(StockInfo.ticker.in_([t.upper() for t in all_portfolio_tickers])).all()
+    info_by_ticker = {s.ticker.upper(): s for s in infos}
+
+    for t in all_portfolio_tickers:
+        key = (t or '').upper()
+        si = info_by_ticker.get(key)
+        if not si:
+            remaining.append(key)
+        else:
+            if force_update or (not si.last_updated or si.last_updated < threshold):
+                remaining.append(key)
+
+    return remaining
+
+def populate_user_stocks_resume(limit=None, offset=0, force_update=False, sleep_seconds=12):
+    """
+    Populate only the remaining/unprocessed tickers determined by get_remaining_tickers().
+    Supports limit/offset and returns the list processed for transparency.
+    """
+    remaining = get_remaining_tickers(force_update=force_update)
+
+    # Apply paging
+    if offset:
+        remaining = remaining[offset:]
+    if isinstance(limit, int) and limit > 0:
+        remaining = remaining[:limit]
+
+    processed = []
+    success_count = 0
+    failed_count = 0
+
+    for i, ticker in enumerate(remaining, 1):
+        print(f"\n[resume {i}/{len(remaining)}] Processing {ticker}...")
+        res = populate_stock_info(ticker, force_update=force_update)
+        processed.append(ticker)
+        if res:
+            success_count += 1
+        else:
+            failed_count += 1
+        if i < len(remaining) and sleep_seconds and sleep_seconds > 0:
+            print(f"Waiting {sleep_seconds} seconds for API rate limit...")
+            time.sleep(sleep_seconds)
+
+    return {
+        'success_count': success_count,
+        'failed_count': failed_count,
+        'total_processed': len(remaining),
+        'tickers_processed': processed,
+        'remaining_total': len(get_remaining_tickers(force_update=force_update))
+    }
+
 def get_stocks_by_industry(naics_code=None, industry_name=None):
     """
     Get stocks filtered by NAICS code or industry name
