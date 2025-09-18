@@ -566,6 +566,11 @@ def update_leaderboard_cache():
                 print(f"Error updating leaderboard cache for period {period}, category {category}: {str(e)}")
                 import traceback
                 print(f"Full traceback: {traceback.format_exc()}")
+                # Important: rollback so the session can continue processing the next items
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
                 continue
     
     # Generate portfolio charts only for users who made any leaderboard

@@ -1807,6 +1807,47 @@ def admin_debug_oauth_login():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/fix-leaderboard-period-length')
+@login_required
+def admin_fix_leaderboard_period_length():
+    """Widen leaderboard_cache.period column to support keys like '1D_large_cap'.
+
+    Some production databases have leaderboard_cache.period defined as VARCHAR(10),
+    which truncates values such as '1D_large_cap'. This endpoint alters the column to
+    VARCHAR(50) to safely store period_category keys.
+    """
+    try:
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+
+        from sqlalchemy import text
+
+        # Inspect current column length
+        col = db.session.execute(text("""
+            SELECT character_maximum_length
+            FROM information_schema.columns
+            WHERE table_name = 'leaderboard_cache' AND column_name = 'period'
+        """)).fetchone()
+
+        before_len = col[0] if col else None
+
+        # Alter to VARCHAR(50) if needed
+        if before_len is None or before_len < 50:
+            db.session.execute(text("""
+                ALTER TABLE leaderboard_cache
+                ALTER COLUMN period TYPE VARCHAR(50)
+            """))
+            db.session.commit()
+            return jsonify({'success': True, 'message': 'leaderboard_cache.period widened to VARCHAR(50)', 'before_length': before_len, 'after_length': 50})
+        else:
+            return jsonify({'success': True, 'message': 'No change needed; sufficient length', 'current_length': before_len})
+
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
+
 @app.route('/admin/debug/oauth-session')
 def admin_debug_oauth_session():
     """Debug endpoint to check Flask-Login session state"""
