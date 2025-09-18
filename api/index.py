@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime, Boolean, func, text
+from sqlalchemy.pool import NullPool
 from flask import Flask, render_template_string, render_template, redirect, url_for, request, session, flash, jsonify, send_from_directory
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from flask_sqlalchemy import SQLAlchemy
@@ -202,6 +203,11 @@ try:
     app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-for-testing')
     app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    # Serverless-friendly SQLAlchemy engine options to avoid pool exhaustion
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'poolclass': NullPool,       # Disable pooling; connections are short-lived on serverless
+        'pool_pre_ping': True,       # Validate connections before use
+    }
     
     # Configure Flask-Session with SQLAlchemy backend for serverless environment
     app.config['SESSION_TYPE'] = 'sqlalchemy'
