@@ -8537,6 +8537,246 @@ def admin_add_html_cache_column():
         logger.error(f"Error adding rendered_html column: {str(e)}")
         return jsonify({'error': f'Migration error: {str(e)}'}), 500
 
+@app.route('/admin/market-close-status')
+@login_required
+def admin_market_close_status():
+    """Monitor the status of market close pipeline processes"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from datetime import datetime, date, timedelta
+        from models import db, PortfolioSnapshot, LeaderboardCache, UserPortfolioChartCache
+        import json
+        
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+        
+        # Check portfolio snapshots
+        snapshots_today = PortfolioSnapshot.query.filter_by(date=today).count()
+        snapshots_yesterday = PortfolioSnapshot.query.filter_by(date=yesterday).count()
+        
+        # Check leaderboard cache
+        leaderboard_entries = LeaderboardCache.query.count()
+        recent_leaderboard = LeaderboardCache.query.filter(
+            LeaderboardCache.generated_at >= datetime.now() - timedelta(hours=24)
+        ).count()
+        
+        # Check chart cache
+        chart_entries = UserPortfolioChartCache.query.count()
+        recent_charts = UserPortfolioChartCache.query.filter(
+            UserPortfolioChartCache.generated_at >= datetime.now() - timedelta(hours=24)
+        ).count()
+        
+        # Check for HTML pre-rendering
+        html_prerendered = 0
+        try:
+            html_entries = LeaderboardCache.query.filter(
+                LeaderboardCache.rendered_html.isnot(None),
+                LeaderboardCache.generated_at >= datetime.now() - timedelta(hours=24)
+            ).count()
+            html_prerendered = html_entries
+        except Exception:
+            html_prerendered = 0
+        
+        # Check GitHub Actions workflow status (last run)
+        workflow_status = "unknown"
+        try:
+            # This would require GitHub API integration, for now just check recent updates
+            if recent_leaderboard > 0:
+                workflow_status = "success"
+            elif datetime.now().hour >= 21:  # After 9 PM UTC (5 PM ET)
+                workflow_status = "may_have_failed"
+            else:
+                workflow_status = "not_yet_run_today"
+        except Exception:
+            workflow_status = "unknown"
+        
+        # Determine overall status
+        pipeline_health = "healthy"
+        issues = []
+        
+        if snapshots_today == 0:
+            pipeline_health = "warning"
+            issues.append("No portfolio snapshots created today")
+        
+        if recent_leaderboard == 0:
+            pipeline_health = "warning" 
+            issues.append("No recent leaderboard updates (last 24h)")
+        
+        if recent_charts == 0:
+            pipeline_health = "warning"
+            issues.append("No recent chart generation (last 24h)")
+        
+        if html_prerendered == 0:
+            issues.append("No HTML pre-rendering detected (expected after market close)")
+        
+        return jsonify({
+            "success": True,
+            "pipeline_health": pipeline_health,
+            "timestamp": datetime.now().isoformat(),
+            "daily_snapshots": {
+                "today": snapshots_today,
+                "yesterday": snapshots_yesterday,
+                "status": "✅ Good" if snapshots_today > 0 else "⚠️ Missing"
+            },
+            "leaderboard_cache": {
+                "total_entries": leaderboard_entries,
+                "recent_updates": recent_leaderboard,
+                "html_prerendered": html_prerendered,
+                "status": "✅ Good" if recent_leaderboard > 0 else "⚠️ Stale"
+            },
+            "chart_cache": {
+                "total_entries": chart_entries,
+                "recent_generation": recent_charts,
+                "status": "✅ Good" if recent_charts > 0 else "⚠️ Stale"
+            },
+            "github_workflow": {
+                "status": workflow_status,
+                "next_run": "5:00 PM ET (9:00 PM UTC) on weekdays"
+            },
+            "issues": issues,
+            "recommendations": [
+                "Check GitHub Actions workflow logs if issues persist",
+                "Verify AlphaVantage API key and rate limits",
+                "Monitor database performance during market close"
+            ] if issues else []
+        })
+        
+    except Exception as e:
+        logger.error(f"Market close status check error: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }), 500
+
+@app.route('/admin/trigger-market-close-test', methods=['GET', 'POST'])
+@login_required  
+def admin_trigger_market_close_test():
+    """Manually trigger market close pipeline for testing"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        results = {
+            "test_started": datetime.now().isoformat(),
+            "steps": {}
+        }
+        
+        # 1. Test portfolio snapshots
+        try:
+            from portfolio_performance import PortfolioPerformanceCalculator
+            calculator = PortfolioPerformanceCalculator()
+            
+            # Test with a few users
+            from models import User
+            test_users = User.query.limit(3).all()
+            snapshot_count = 0
+            errors = []
+            
+            for user in test_users:
+                try:
+                    calculator.create_daily_snapshot(user.id)
+                    snapshot_count += 1
+                except Exception as e:
+                    errors.append(f"User {user.id}: {str(e)}")
+            
+            results["steps"]["portfolio_snapshots"] = {
+                "status": "success" if snapshot_count > 0 else "failed",
+                "snapshots_created": snapshot_count,
+                "errors": errors
+            }
+            
+        except Exception as e:
+            results["steps"]["portfolio_snapshots"] = {
+                "status": "failed",
+                "error": str(e)
+            }
+        
+        # 2. Test leaderboard calculation
+        try:
+            from leaderboard_utils import update_leaderboard_cache
+            
+            # Test with just 7D period
+            updated_count = update_leaderboard_cache(periods=['7D'])
+            
+            results["steps"]["leaderboard_calculation"] = {
+                "status": "success",
+                "entries_updated": updated_count
+            }
+            
+        except Exception as e:
+            results["steps"]["leaderboard_calculation"] = {
+                "status": "failed", 
+                "error": str(e)
+            }
+        
+        # 3. Test HTML pre-rendering (check if it worked)
+        try:
+            from models import LeaderboardCache
+            html_count = LeaderboardCache.query.filter(
+                LeaderboardCache.rendered_html.isnot(None)
+            ).count()
+            
+            results["steps"]["html_prerendering"] = {
+                "status": "success" if html_count > 0 else "warning",
+                "html_entries": html_count,
+                "note": "HTML pre-rendering happens during leaderboard cache update"
+            }
+            
+        except Exception as e:
+            results["steps"]["html_prerendering"] = {
+                "status": "failed",
+                "error": str(e)
+            }
+        
+        # 4. Test AlphaVantage connectivity
+        try:
+            from stock_metadata_utils import get_stock_info_from_api
+            
+            # Test with a common stock
+            test_result = get_stock_info_from_api("AAPL")
+            
+            results["steps"]["alpha_vantage_test"] = {
+                "status": "success" if test_result else "failed",
+                "test_ticker": "AAPL",
+                "api_responsive": test_result is not None
+            }
+            
+        except Exception as e:
+            results["steps"]["alpha_vantage_test"] = {
+                "status": "failed",
+                "error": str(e)
+            }
+        
+        results["test_completed"] = datetime.now().isoformat()
+        
+        # Overall assessment
+        successful_steps = sum(1 for step in results["steps"].values() 
+                             if step.get("status") == "success")
+        total_steps = len(results["steps"])
+        
+        results["summary"] = {
+            "successful_steps": successful_steps,
+            "total_steps": total_steps,
+            "success_rate": f"{successful_steps/total_steps*100:.1f}%",
+            "overall_status": "healthy" if successful_steps == total_steps else "issues_detected"
+        }
+        
+        return jsonify({
+            "success": True,
+            "message": "Market close test completed",
+            "results": results
+        })
+        
+    except Exception as e:
+        logger.error(f"Market close test error: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
 @app.route('/admin/debug-user-data/<username>')
 @login_required
 def debug_user_data(username):
