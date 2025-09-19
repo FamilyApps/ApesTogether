@@ -152,19 +152,23 @@ def calculate_portfolio_cap_percentages(user_id):
         # Get stock info (should already exist from previous population)
         stock_info = StockInfo.query.filter_by(ticker=stock.ticker.upper()).first()
         
-        if stock_info and total_purchase_value > 0:
+        if total_purchase_value > 0:
             # Calculate proportional value based on purchase weight
             stock_purchase_value = stock.quantity * stock.purchase_price
             stock_current_value = (stock_purchase_value / total_purchase_value) * total_value
             
-            # Use dynamic market cap classification if available
-            cap_category = stock_info.get_market_cap_category() if stock_info.market_cap else stock_info.cap_classification
-            
-            if cap_category in ['small', 'mid']:
-                small_cap_value += stock_current_value
-            elif cap_category in ['large', 'mega']:
+            if stock_info:
+                # Use dynamic market cap classification if available
+                cap_category = stock_info.get_market_cap_category() if stock_info.market_cap else stock_info.cap_classification
+                
+                if cap_category in ['small', 'mid']:
+                    small_cap_value += stock_current_value
+                else:
+                    # Default to large cap for: large, mega, ETFs, mutual funds, and unknown classifications
+                    large_cap_value += stock_current_value
+            else:
+                # No StockInfo record - default to large cap (common for ETFs, mutual funds)
                 large_cap_value += stock_current_value
-            # Unknown/missing classification doesn't count toward either category
     
     if total_value == 0:
         return 0.0, 0.0
