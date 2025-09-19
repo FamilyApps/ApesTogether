@@ -8491,7 +8491,7 @@ def update_leaderboard_chunk_cron():
         logger.error(f"Automated leaderboard chunk update error: {str(e)}")
         return jsonify({'error': f'Leaderboard chunk update error: {str(e)}'}), 500
 
-@app.route('/admin/add-html-cache-column', methods=['POST'])
+@app.route('/admin/add-html-cache-column', methods=['GET', 'POST'])
 @login_required
 def admin_add_html_cache_column():
     """Add rendered_html column to leaderboard_cache table for Phase 5 HTML pre-rendering"""
