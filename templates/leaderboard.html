@@ -91,24 +91,24 @@
                                         {% endif %}
                                     </td>
                                     <td>
-                                        <span class="{% if entry.performance_percent >= 0 %}text-success{% else %}text-danger{% endif %}">
-                                            {% if entry.performance_percent >= 0 %}+{% endif %}{{ "%.2f"|format(entry.performance_percent) }}%
+                                        <span class="{% if (entry.performance_percent or 0) >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                            {% if (entry.performance_percent or 0) >= 0 %}+{% endif %}{{ "%.2f"|format(entry.performance_percent or 0) }}%
                                         </span>
                                     </td>
-                                    <td>${{ "{:,.2f}"|format(entry.portfolio_value) }}</td>
+                                    <td>${{ "{:,.2f}"|format(entry.portfolio_value or 0) }}</td>
                                     <td>
                                         <div class="progress" style="height: 20px;">
                                             <div class="progress-bar bg-info" role="progressbar" 
-                                                 style="width: {{ entry.small_cap_percent }}%">
-                                                {{ "%.1f"|format(entry.small_cap_percent) }}%
+                                                 style="width: {{ entry.small_cap_percent or 0 }}%">
+                                                {{ "%.1f"|format(entry.small_cap_percent or 0) }}%
                                             </div>
                                         </div>
                                     </td>
                                     <td>
                                         <div class="progress" style="height: 20px;">
                                             <div class="progress-bar bg-primary" role="progressbar" 
-                                                 style="width: {{ entry.large_cap_percent }}%">
-                                                {{ "%.1f"|format(entry.large_cap_percent) }}%
+                                                 style="width: {{ entry.large_cap_percent or 0 }}%">
+                                                {{ "%.1f"|format(entry.large_cap_percent or 0) }}%
                                             </div>
                                         </div>
                                     </td>
@@ -126,7 +126,7 @@
                                         {% else %}
                                         <a href="{{ url_for('profile', username=entry.username) }}" 
                                            class="btn btn-primary btn-sm">
-                                            Subscribe for ${{ "%.0f"|format(entry.subscription_price) }}/mo
+                                            Subscribe for ${{ "%.0f"|format(entry.subscription_price or 4) }}/mo
                                         </a>
                                         {% endif %}
                                     </td>

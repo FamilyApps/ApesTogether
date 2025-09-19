@@ -417,8 +417,8 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
             continue
         
         # Calculate performance from actual portfolio start, not arbitrary period start
-        current_value = latest_snapshot.total_value
-        start_value = start_snapshot.total_value
+        current_value = latest_snapshot.total_value or 0.0
+        start_value = start_snapshot.total_value or 0.0
         
         if start_value > 0:
             performance_percent = ((current_value - start_value) / start_value) * 100
