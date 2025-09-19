@@ -71,6 +71,7 @@
                                     <th>Small Cap %</th>
                                     <th>Large Cap %</th>
                                     <th>Avg Trades/Week</th>
+                                    <th>Subscribers</th>
                                     <th>Subscription</th>
                                 </tr>
                             </thead>
@@ -113,6 +114,9 @@
                                     </td>
                                     <td>{{ "%.1f"|format(entry.get('avg_trades_per_week', 0)) }}</td>
                                     <td>
+                                        <span class="badge bg-info">{{ entry.get('subscriber_count', 0) }}</span>
+                                    </td>
+                                    <td>
                                         {% if entry.is_current_user %}
                                         <span class="text-muted">Your Portfolio</span>
                                         {% elif entry.is_subscribed %}
@@ -122,7 +126,7 @@
                                         {% else %}
                                         <a href="{{ url_for('profile', username=entry.username) }}" 
                                            class="btn btn-primary btn-sm">
-                                            Subscribe for ${{ "%.0f"|format(entry.subscription_price) }}
+                                            Subscribe for ${{ "%.0f"|format(entry.subscription_price) }}/mo
                                         </a>
                                         {% endif %}
                                     </td>

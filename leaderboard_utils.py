@@ -434,6 +434,25 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
         elif category == 'large_cap' and large_cap_percent < 60:  # Must be 60%+ large cap focused
             continue
         
+        # Calculate subscriber count
+        from models import Subscription
+        subscriber_count = Subscription.query.filter_by(
+            subscribed_to_id=user.id, 
+            status='active'
+        ).count()
+        
+        # Calculate average trades per day (last 30 days)
+        from models import Transaction
+        thirty_days_ago = today - timedelta(days=30)
+        recent_trades = Transaction.query.filter(
+            Transaction.user_id == user.id,
+            Transaction.timestamp >= thirty_days_ago
+        ).count()
+        avg_trades_per_day = round(recent_trades / 30, 1)
+        
+        # Convert to trades per week for display
+        avg_trades_per_week = round(avg_trades_per_day * 7, 1)
+        
         leaderboard_data.append({
             'user_id': user.id,
             'username': user.username,
@@ -441,7 +460,10 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
             'small_cap_percent': small_cap_percent,
             'large_cap_percent': large_cap_percent,
             'portfolio_value': round(current_value, 2),
-            'subscription_price': user.subscription_price,
+            'subscription_price': user.subscription_price or 4.0,  # Default to $4 if not set
+            'subscriber_count': subscriber_count,
+            'avg_trades_per_day': avg_trades_per_day,
+            'avg_trades_per_week': avg_trades_per_week,
             'calculated_at': datetime.now().isoformat(),
             'category': category
         })
