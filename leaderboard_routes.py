@@ -16,16 +16,15 @@ def leaderboard_home():
     period = request.args.get('period', '7D')  # Default to 7D for homepage
     category = request.args.get('category', 'all')  # all, small_cap, large_cap
     
-    # TODO: Enable HTML pre-rendering after database migration
     # Try to serve pre-rendered HTML for maximum performance (1-5ms response time)
-    # from models import LeaderboardCache
-    # cache_key = f"{period}_{category}"
-    # cache_entry = LeaderboardCache.query.filter_by(period=cache_key).first()
-    # 
-    # if cache_entry and hasattr(cache_entry, 'rendered_html') and cache_entry.rendered_html:
-    #     # Serve pre-rendered HTML directly - maximum performance!
-    #     from flask import Response
-    #     return Response(cache_entry.rendered_html, mimetype='text/html')
+    from models import LeaderboardCache
+    cache_key = f"{period}_{category}"
+    cache_entry = LeaderboardCache.query.filter_by(period=cache_key).first()
+    
+    if cache_entry and cache_entry.rendered_html:
+        # Serve pre-rendered HTML directly - maximum performance!
+        from flask import Response
+        return Response(cache_entry.rendered_html, mimetype='text/html')
     
     # Fallback to dynamic rendering if no pre-rendered HTML available
     leaderboard_data = get_leaderboard_data(period, limit=50)
