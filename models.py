@@ -139,6 +139,7 @@ class LeaderboardCache(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     period = db.Column(db.String(20), nullable=False)  # '1D_all', '1D_small_cap', '1D_large_cap', etc.
     leaderboard_data = db.Column(db.Text, nullable=False)  # JSON string of leaderboard data
+    rendered_html = db.Column(db.Text, nullable=True)  # Pre-rendered HTML for maximum performance
     generated_at = db.Column(db.DateTime, nullable=False)
     
     # Ensure one cache entry per period

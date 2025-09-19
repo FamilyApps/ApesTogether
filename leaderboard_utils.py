@@ -550,7 +550,7 @@ def generate_user_portfolio_chart(user_id, period):
 def update_leaderboard_cache(periods=None):
     """
     Update cached leaderboard data for specified periods and categories, pre-generate charts for top users
-    Called at market close to pre-generate leaderboard data and charts
+    Called at market close to pre-generate leaderboard data, charts, and HTML
     
     Args:
         periods: List of periods to update (e.g., ['7D', '1D', '5D']). If None, updates all periods.
@@ -558,6 +558,7 @@ def update_leaderboard_cache(periods=None):
     import json
     from datetime import datetime
     from models import db, LeaderboardCache, UserPortfolioChartCache
+    from flask import render_template
     
     # Use provided periods or default to all periods
     if periods is None:
@@ -591,16 +592,38 @@ def update_leaderboard_cache(periods=None):
                 cache_key = f"{period}_{category}"
                 
                 # Update or create cache entry
+                # Pre-render HTML for maximum performance
+                try:
+                    from flask import current_app
+                    with current_app.app_context():
+                        rendered_html = render_template('leaderboard.html',
+                            leaderboard_data=leaderboard_data,
+                            current_period=period,
+                            current_category=category,
+                            periods=['1D', '5D', '7D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX'],
+                            categories=[
+                                ('all', 'All Portfolios'),
+                                ('small_cap', 'Small Cap Focus'),
+                                ('large_cap', 'Large Cap Focus')
+                            ],
+                            now=datetime.now()
+                        )
+                except Exception as e:
+                    print(f"  Warning: HTML pre-rendering failed for {cache_key}: {str(e)}")
+                    rendered_html = None
+                
                 cache_entry = LeaderboardCache.query.filter_by(period=cache_key).first()
                 if cache_entry:
                     print(f"  Updating existing cache entry for {cache_key}")
                     cache_entry.leaderboard_data = json.dumps(leaderboard_data)
+                    cache_entry.rendered_html = rendered_html
                     cache_entry.generated_at = datetime.now()
                 else:
                     print(f"  Creating new cache entry for {cache_key}")
                     cache_entry = LeaderboardCache(
                         period=cache_key,
                         leaderboard_data=json.dumps(leaderboard_data),
+                        rendered_html=rendered_html,
                         generated_at=datetime.now()
                     )
                     db.session.add(cache_entry)

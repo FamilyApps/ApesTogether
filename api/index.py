@@ -8491,6 +8491,52 @@ def update_leaderboard_chunk_cron():
         logger.error(f"Automated leaderboard chunk update error: {str(e)}")
         return jsonify({'error': f'Leaderboard chunk update error: {str(e)}'}), 500
 
+@app.route('/admin/add-html-cache-column', methods=['POST'])
+@login_required
+def admin_add_html_cache_column():
+    """Add rendered_html column to leaderboard_cache table for Phase 5 HTML pre-rendering"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import db
+        from sqlalchemy import text
+        
+        # Check if column already exists
+        result = db.session.execute(text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'leaderboard_cache' 
+            AND column_name = 'rendered_html'
+        """))
+        
+        if result.fetchone():
+            return jsonify({
+                'success': True,
+                'message': 'rendered_html column already exists',
+                'action': 'none'
+            }), 200
+        
+        # Add the column
+        db.session.execute(text("""
+            ALTER TABLE leaderboard_cache 
+            ADD COLUMN rendered_html TEXT
+        """))
+        db.session.commit()
+        
+        logger.info("Successfully added rendered_html column to leaderboard_cache table")
+        
+        return jsonify({
+            'success': True,
+            'message': 'rendered_html column added to leaderboard_cache table',
+            'action': 'column_added'
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error adding rendered_html column: {str(e)}")
+        return jsonify({'error': f'Migration error: {str(e)}'}), 500
+
 @app.route('/admin/debug-user-data/<username>')
 @login_required
 def debug_user_data(username):
