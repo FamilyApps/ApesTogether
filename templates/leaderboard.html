@@ -95,7 +95,14 @@
                                             {% if (entry.performance_percent or 0) >= 0 %}+{% endif %}{{ "%.2f"|format(entry.performance_percent or 0) }}%
                                         </span>
                                     </td>
-                                    <td>${{ "{:,.2f}"|format(entry.portfolio_value or 0) }}</td>
+                                    <td>
+                                        {% set pv = entry.portfolio_value %}
+                                        {% if pv is number %}
+                                            ${{ "{:,.2f}"|format(pv) }}
+                                        {% else %}
+                                            $0.00
+                                        {% endif %}
+                                    </td>
                                     <td>
                                         <div class="progress" style="height: 20px;">
                                             <div class="progress-bar bg-info" role="progressbar" 

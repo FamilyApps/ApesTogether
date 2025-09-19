@@ -453,14 +453,21 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
         # Convert to trades per week for display
         avg_trades_per_week = round(avg_trades_per_day * 7, 1)
         
+        # Ensure all numeric values are properly typed and not None
+        portfolio_value = float(current_value) if current_value is not None else 0.0
+        performance_percent = float(performance_percent) if performance_percent is not None else 0.0
+        small_cap_percent = float(small_cap_percent) if small_cap_percent is not None else 0.0
+        large_cap_percent = float(large_cap_percent) if large_cap_percent is not None else 0.0
+        subscription_price = float(user.subscription_price) if user.subscription_price is not None else 4.0
+        
         leaderboard_data.append({
             'user_id': user.id,
             'username': user.username,
             'performance_percent': round(performance_percent, 2),
-            'small_cap_percent': small_cap_percent,
-            'large_cap_percent': large_cap_percent,
-            'portfolio_value': round(current_value, 2),
-            'subscription_price': user.subscription_price or 4.0,  # Default to $4 if not set
+            'small_cap_percent': round(small_cap_percent, 2),
+            'large_cap_percent': round(large_cap_percent, 2),
+            'portfolio_value': round(portfolio_value, 2),
+            'subscription_price': subscription_price,
             'subscriber_count': subscriber_count,
             'avg_trades_per_day': avg_trades_per_day,
             'avg_trades_per_week': avg_trades_per_week,
