@@ -1,11 +1,12 @@
 """
 SMS-related routes for phone verification and SMS management
 """
-from flask import Blueprint, request, jsonify, render_template, flash, redirect, url_for
+from flask import Blueprint, render_template, request, flash, redirect, url_for
 from flask_login import login_required, current_user
 from models import db, SMSNotification
-from sms_utils import send_verification_sms, verify_phone_number, get_user_sms_settings
+from datetime import datetime
 import re
+from sms_utils import send_verification_sms, verify_phone_number, get_user_sms_settings
 
 sms_bp = Blueprint('sms', __name__, url_prefix='/sms')
 
@@ -14,7 +15,7 @@ sms_bp = Blueprint('sms', __name__, url_prefix='/sms')
 def sms_settings():
     """Display SMS settings page"""
     settings = get_user_sms_settings(current_user.id)
-    return render_template('sms_settings.html', settings=settings)
+    return render_template('sms_settings.html', settings=settings, now=datetime.now())
 
 @sms_bp.route('/send-verification', methods=['POST'])
 @login_required
