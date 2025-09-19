@@ -9,42 +9,50 @@
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <h2><i class="fas fa-trophy"></i> Performance Leaderboard</h2>
                 <div class="btn-group" role="group">
-                    <a href="{{ url_for('sms.sms_settings') }}" class="btn btn-outline-primary">
+                    <a href="{{ url_for('sms.sms_settings') }}" class="btn btn-outline-primary" 
+                       data-bs-toggle="tooltip" title="Set up SMS notifications for trades and portfolio updates">
                         <i class="fas fa-sms"></i> SMS Settings
                     </a>
-                    <a href="{{ url_for('debug_env') }}" class="btn btn-outline-secondary">
+                    <a href="{{ url_for('debug_env') }}" class="btn btn-outline-secondary"
+                       data-bs-toggle="tooltip" title="System diagnostics and troubleshooting (Admin only)">
                         <i class="fas fa-bug"></i> Debug
                     </a>
                 </div>
             </div>
             
-            <!-- Period and Category Filters -->
-            <div class="card mb-4">
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <label class="form-label">Time Period:</label>
-                            <div class="btn-group d-block" role="group">
-                                {% for period in periods %}
-                                <a href="{{ url_for('leaderboard.leaderboard_home', period=period, category=current_category) }}" 
-                                   class="btn btn-sm {% if period == current_period %}btn-primary{% else %}btn-outline-primary{% endif %}">
-                                    {{ period }}
-                                </a>
-                                {% endfor %}
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label">Category:</label>
-                            <div class="btn-group d-block" role="group">
-                                {% for cat_key, cat_name in categories %}
-                                <a href="{{ url_for('leaderboard.leaderboard_home', period=current_period, category=cat_key) }}" 
-                                   class="btn btn-sm {% if cat_key == current_category %}btn-success{% else %}btn-outline-success{% endif %}">
-                                    {{ cat_name }}
-                                </a>
-                                {% endfor %}
-                            </div>
-                        </div>
-                    </div>
+            <!-- Modern Navigation -->
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <!-- Time Period Tab Bar -->
+                <ul class="nav nav-pills" id="periodTabs" role="tablist">
+                    {% for period in periods %}
+                    <li class="nav-item" role="presentation">
+                        <a class="nav-link {% if period == current_period %}active{% endif %}" 
+                           href="?period={{ period }}&category={{ current_category }}"
+                           role="tab">
+                            {{ period }}
+                        </a>
+                    </li>
+                    {% endfor %}
+                </ul>
+                
+                <!-- Category Dropdown -->
+                <div class="dropdown">
+                    <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="categoryDropdown" data-bs-toggle="dropdown">
+                        <i class="fas fa-filter me-1"></i>
+                        {% for cat_id, cat_name in categories %}
+                            {% if cat_id == current_category %}{{ cat_name }}{% endif %}
+                        {% endfor %}
+                    </button>
+                    <ul class="dropdown-menu">
+                        {% for cat_id, cat_name in categories %}
+                        <li>
+                            <a class="dropdown-item {% if cat_id == current_category %}active{% endif %}" 
+                               href="?period={{ current_period }}&category={{ cat_id }}">
+                                {{ cat_name }}
+                            </a>
+                        </li>
+                        {% endfor %}
+                    </ul>
                 </div>
             </div>
             
