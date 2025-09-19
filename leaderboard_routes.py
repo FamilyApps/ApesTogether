@@ -1,11 +1,12 @@
 """
 Leaderboard routes for displaying performance rankings and subscription buttons
 """
-from flask import Blueprint, render_template, jsonify, request
+from flask import Blueprint, render_template, jsonify, request, current_app
 from flask_login import login_required, current_user
 from models import db, User, Subscription
 from leaderboard_utils import get_leaderboard_data, update_leaderboard_entry, update_all_user_leaderboards
 from subscription_utils import get_subscription_tier_info
+from datetime import datetime
 
 leaderboard_bp = Blueprint('leaderboard', __name__, url_prefix='/leaderboard')
 
@@ -49,7 +50,8 @@ def leaderboard_home():
                              ('all', 'All Portfolios'),
                              ('small_cap', 'Small Cap Focus'),
                              ('large_cap', 'Large Cap Focus')
-                         ])
+                         ],
+                         now=datetime.now())
 
 @leaderboard_bp.route('/api/data')
 def api_leaderboard_data():
