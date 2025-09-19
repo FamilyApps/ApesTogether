@@ -2970,7 +2970,7 @@ def cleanup_intraday_data():
         else:
             flash(f'Cleanup successful: {results["snapshots_deleted"]} snapshots deleted, {results["market_close_preserved"]} market close snapshots preserved', 'success')
         
-        return render_template('admin_debug.html', 
+        return render_template_with_defaults('admin_debug.html', 
                              title='Intraday Data Cleanup Results',
                              results=results)
     
@@ -3019,7 +3019,7 @@ def admin_dashboard():
         recent_users = []
         problematic_users = []
     
-    return render_template('admin/dashboard.html',
+    return render_template_with_defaults('admin/dashboard.html',
         user_count=user_count,
         stock_count=stock_count,
         transaction_count=transaction_count,
