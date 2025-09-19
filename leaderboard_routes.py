@@ -10,10 +10,9 @@ from subscription_utils import get_subscription_tier_info
 leaderboard_bp = Blueprint('leaderboard', __name__, url_prefix='/leaderboard')
 
 @leaderboard_bp.route('/')
-@login_required
 def leaderboard_home():
-    """Main leaderboard page"""
-    period = request.args.get('period', 'YTD')
+    """Main leaderboard page - public access, no login required"""
+    period = request.args.get('period', '7D')  # Default to 7D for homepage
     category = request.args.get('category', 'all')  # all, small_cap, large_cap
     
     # Get leaderboard data
@@ -25,9 +24,11 @@ def leaderboard_home():
     elif category == 'large_cap':
         leaderboard_data = [entry for entry in leaderboard_data if entry['large_cap_percent'] > 50]
     
-    # Check which users current user is already subscribed to
+    # Check which users current user is already subscribed to (if logged in)
     subscribed_to_ids = set()
+    current_user_id = None
     if current_user.is_authenticated:
+        current_user_id = current_user.id
         subscriptions = Subscription.query.filter_by(
             subscriber_id=current_user.id, 
             status='active'
@@ -37,13 +38,13 @@ def leaderboard_home():
     # Add subscription status to leaderboard data
     for entry in leaderboard_data:
         entry['is_subscribed'] = entry['user_id'] in subscribed_to_ids
-        entry['is_current_user'] = entry['user_id'] == current_user.id
+        entry['is_current_user'] = entry['user_id'] == current_user_id
     
     return render_template('leaderboard.html', 
                          leaderboard_data=leaderboard_data,
                          current_period=period,
                          current_category=category,
-                         periods=['1D', '5D', '3M', 'YTD', '1Y', '5Y', 'MAX'],
+                         periods=['1D', '5D', '7D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX'],
                          categories=[
                              ('all', 'All Portfolios'),
                              ('small_cap', 'Small Cap Focus'),

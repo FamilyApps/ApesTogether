@@ -7,12 +7,32 @@ on:
   workflow_dispatch: # Allow manual trigger for testing
 
 jobs:
-  update-leaderboard:
+  update-priority-leaderboards:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Update Leaderboard Cache
+    - name: Update Homepage Priority (7D) + Short-term Leaderboards
       run: |
-        curl -X POST https://apestogether.ai/api/cron/update-leaderboard \
+        curl -X POST "https://apestogether.ai/api/cron/update-leaderboard-chunk?periods=7D,1D,5D" \
+          -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+          -H "Content-Type: application/json"
+
+  update-medium-leaderboards:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Update Medium-term Leaderboards
+      run: |
+        curl -X POST "https://apestogether.ai/api/cron/update-leaderboard-chunk?periods=3M,YTD" \
+          -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+          -H "Content-Type: application/json"
+
+  update-long-leaderboards:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Update Long-term Leaderboards
+      run: |
+        curl -X POST "https://apestogether.ai/api/cron/update-leaderboard-chunk?periods=1Y,5Y,MAX" \
           -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
           -H "Content-Type: application/json"

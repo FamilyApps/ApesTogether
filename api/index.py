@@ -2402,25 +2402,15 @@ def root_health_check():
 
 @app.route('/')
 def index():
-    """Main landing page"""
+    """Main landing page - redirect to 7D leaderboard for public access"""
     try:
-        logger.info("Rendering index page")
-        logger.info(f"Template folder: {app.template_folder}")
-        logger.info(f"Template exists: {os.path.exists(os.path.join(app.template_folder, 'index.html'))}")
-        
-        # Try to list template files
-        try:
-            template_files = os.listdir(app.template_folder)
-            logger.info(f"Template files: {template_files}")
-        except Exception as e:
-            logger.error(f"Error listing template files: {str(e)}")
-        
-        # Use the helper function to ensure consistent template variables
-        return render_template_with_defaults('index.html')
+        # Redirect to 7D leaderboard as the default homepage
+        return redirect(url_for('leaderboard.leaderboard_home', period='7D', category='all'))
     except Exception as e:
-        logger.error(f"Error in index route: {str(e)}")
+        logger.error(f"Error in index route redirect: {str(e)}")
         logger.error(traceback.format_exc())
-        return render_template_string("""<html><body><h1>Error rendering index page</h1><p>{{ error }}</p></body></html>""", error=str(e))
+        # Fallback to direct leaderboard URL if blueprint routing fails
+        return redirect('/leaderboard/?period=7D&category=all')
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -8421,7 +8411,7 @@ def cleanup_intraday_data_cron():
 
 @app.route('/api/cron/update-leaderboard', methods=['POST'])
 def update_leaderboard_cron():
-    """Automated cron endpoint to update leaderboard cache"""
+    """Automated cron endpoint to update leaderboard cache - legacy endpoint for backward compatibility"""
     try:
         # Verify authorization token
         auth_header = request.headers.get('Authorization', '')
@@ -8437,7 +8427,7 @@ def update_leaderboard_cron():
         
         from leaderboard_utils import update_leaderboard_cache
         
-        # Update leaderboard cache
+        # Update leaderboard cache (all periods)
         updated_count = update_leaderboard_cache()
         
         logger.info(f"Automated leaderboard update completed: {updated_count} entries updated")
@@ -8451,6 +8441,55 @@ def update_leaderboard_cron():
     except Exception as e:
         logger.error(f"Automated leaderboard update error: {str(e)}")
         return jsonify({'error': f'Leaderboard update error: {str(e)}'}), 500
+
+@app.route('/api/cron/update-leaderboard-chunk', methods=['POST'])
+def update_leaderboard_chunk_cron():
+    """Chunked cron endpoint to update specific leaderboard periods for better reliability"""
+    try:
+        # Verify authorization token
+        auth_header = request.headers.get('Authorization', '')
+        expected_token = os.environ.get('CRON_SECRET')
+        
+        if not expected_token:
+            logger.error("CRON_SECRET not configured")
+            return jsonify({'error': 'Server configuration error'}), 500
+        
+        if not auth_header.startswith('Bearer ') or auth_header[7:] != expected_token:
+            logger.warning(f"Unauthorized leaderboard chunk update attempt")
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        # Get periods from query parameter
+        periods_param = request.args.get('periods', '')
+        if not periods_param:
+            return jsonify({'error': 'periods parameter required (e.g., ?periods=7D,1D,5D)'}), 400
+        
+        periods = [p.strip() for p in periods_param.split(',') if p.strip()]
+        if not periods:
+            return jsonify({'error': 'No valid periods provided'}), 400
+        
+        # Validate periods
+        valid_periods = ['1D', '5D', '7D', '3M', 'YTD', '1Y', '5Y', 'MAX']
+        invalid_periods = [p for p in periods if p not in valid_periods]
+        if invalid_periods:
+            return jsonify({'error': f'Invalid periods: {invalid_periods}. Valid: {valid_periods}'}), 400
+        
+        from leaderboard_utils import update_leaderboard_cache
+        
+        # Update leaderboard cache for specified periods only
+        updated_count = update_leaderboard_cache(periods=periods)
+        
+        logger.info(f"Automated leaderboard chunk update completed: {updated_count} entries updated for periods {periods}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Leaderboard cache updated for periods: {", ".join(periods)}',
+            'periods_processed': periods,
+            'entries_updated': updated_count
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Automated leaderboard chunk update error: {str(e)}")
+        return jsonify({'error': f'Leaderboard chunk update error: {str(e)}'}), 500
 
 @app.route('/admin/debug-user-data/<username>')
 @login_required

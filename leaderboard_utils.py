@@ -369,6 +369,10 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
         start_date = today - timedelta(days=1)
     elif period == '5D':
         start_date = today - timedelta(days=5)
+    elif period == '7D':
+        start_date = today - timedelta(days=7)
+    elif period == '1M':
+        start_date = today - timedelta(days=30)
     elif period == '3M':
         start_date = today - timedelta(days=90)
     elif period == 'YTD':
@@ -507,16 +511,22 @@ def generate_user_portfolio_chart(user_id, period):
         print(f"Error generating chart for user {user_id}, period {period}: {str(e)}")
         return None
 
-def update_leaderboard_cache():
+def update_leaderboard_cache(periods=None):
     """
-    Update cached leaderboard data for all periods and categories, pre-generate charts for top users
+    Update cached leaderboard data for specified periods and categories, pre-generate charts for top users
     Called at market close to pre-generate leaderboard data and charts
+    
+    Args:
+        periods: List of periods to update (e.g., ['7D', '1D', '5D']). If None, updates all periods.
     """
     import json
     from datetime import datetime
     from models import db, LeaderboardCache, UserPortfolioChartCache
     
-    periods = ['1D', '5D', '3M', 'YTD', '1Y', '5Y', 'MAX']
+    # Use provided periods or default to all periods
+    if periods is None:
+        periods = ['1D', '5D', '7D', '3M', 'YTD', '1Y', '5Y', 'MAX']
+    
     categories = ['all', 'small_cap', 'large_cap']
     updated_count = 0
     charts_generated = 0
