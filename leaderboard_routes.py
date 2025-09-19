@@ -18,15 +18,6 @@ def leaderboard_home():
     # Get leaderboard data
     leaderboard_data = get_leaderboard_data(period, limit=50)
     
-    # DEBUG: Log the actual data structure to identify the issue
-    if leaderboard_data:
-        first_entry = leaderboard_data[0]
-        print(f"DEBUG: First leaderboard entry: {first_entry}")
-        print(f"DEBUG: portfolio_value type: {type(first_entry.get('portfolio_value'))}")
-        print(f"DEBUG: portfolio_value value: {first_entry.get('portfolio_value')}")
-    else:
-        print("DEBUG: No leaderboard data returned")
-    
     # Filter by category if specified
     if category == 'small_cap':
         leaderboard_data = [entry for entry in leaderboard_data if entry['small_cap_percent'] > 50]

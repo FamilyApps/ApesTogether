@@ -453,9 +453,12 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
         # Convert to trades per week for display
         avg_trades_per_week = round(avg_trades_per_day * 7, 1)
         
-        # Ensure all numeric values are properly typed and not None
-        portfolio_value = float(current_value) if current_value is not None else 0.0
-        performance_percent = float(performance_percent) if performance_percent is not None else 0.0
+        # Ensure all numeric values are properly typed - only include users with real data
+        if current_value is None or performance_percent is None:
+            continue  # Skip users without real portfolio data
+            
+        portfolio_value = float(current_value)
+        performance_percent = float(performance_percent)
         small_cap_percent = float(small_cap_percent) if small_cap_percent is not None else 0.0
         large_cap_percent = float(large_cap_percent) if large_cap_percent is not None else 0.0
         subscription_price = float(user.subscription_price) if user.subscription_price is not None else 4.0
