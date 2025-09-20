@@ -8777,6 +8777,137 @@ def admin_trigger_market_close_test():
             "error": str(e)
         }), 500
 
+@app.route('/admin/debug-performance-data')
+@login_required
+def admin_debug_performance_data():
+    """Debug portfolio performance and chart data issues"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from datetime import datetime, date, timedelta
+        from models import db, User, PortfolioSnapshot, LeaderboardCache, UserPortfolioChartCache, MarketData
+        import json
+        
+        debug_info = {
+            "timestamp": datetime.now().isoformat(),
+            "issues_found": [],
+            "data_analysis": {}
+        }
+        
+        # 1. Check leaderboard data for 0% performance
+        leaderboard_1d = LeaderboardCache.query.filter_by(period='1D_all').first()
+        if leaderboard_1d:
+            try:
+                data = json.loads(leaderboard_1d.leaderboard_data)
+                zero_performance_count = sum(1 for entry in data if entry.get('performance_percent', 0) == 0)
+                debug_info["data_analysis"]["leaderboard_1d"] = {
+                    "total_entries": len(data),
+                    "zero_performance_entries": zero_performance_count,
+                    "last_updated": leaderboard_1d.generated_at.isoformat(),
+                    "sample_entry": data[0] if data else None
+                }
+                if zero_performance_count == len(data):
+                    debug_info["issues_found"].append("All 1D leaderboard entries show 0% performance")
+            except Exception as e:
+                debug_info["issues_found"].append(f"Failed to parse 1D leaderboard data: {str(e)}")
+        else:
+            debug_info["issues_found"].append("No 1D leaderboard cache found")
+        
+        # 2. Check portfolio snapshots for recent data
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+        friday = today - timedelta(days=2) if today.weekday() == 6 else (today - timedelta(days=1) if today.weekday() == 0 else yesterday)
+        
+        snapshots_today = PortfolioSnapshot.query.filter_by(date=today).count()
+        snapshots_yesterday = PortfolioSnapshot.query.filter_by(date=yesterday).count()
+        snapshots_friday = PortfolioSnapshot.query.filter_by(date=friday).count()
+        
+        debug_info["data_analysis"]["portfolio_snapshots"] = {
+            "today": snapshots_today,
+            "yesterday": snapshots_yesterday,
+            "last_market_day": snapshots_friday,
+            "weekend_issue": today.weekday() >= 5  # Saturday=5, Sunday=6
+        }
+        
+        # 3. Check market data (SPY) for recent updates
+        recent_market_data = MarketData.query.filter(
+            MarketData.ticker == 'SPY',
+            MarketData.date >= today - timedelta(days=7)
+        ).order_by(MarketData.date.desc()).limit(5).all()
+        
+        debug_info["data_analysis"]["market_data"] = {
+            "recent_spy_data_count": len(recent_market_data),
+            "latest_spy_date": recent_market_data[0].date.isoformat() if recent_market_data else None,
+            "latest_spy_price": recent_market_data[0].close_price if recent_market_data else None
+        }
+        
+        # 4. Check user chart cache
+        sample_user = User.query.first()
+        if sample_user:
+            user_charts = UserPortfolioChartCache.query.filter_by(user_id=sample_user.id).all()
+            debug_info["data_analysis"]["user_charts"] = {
+                "sample_user_id": sample_user.id,
+                "chart_periods": [chart.period for chart in user_charts],
+                "chart_count": len(user_charts),
+                "latest_chart_update": max([chart.generated_at for chart in user_charts]).isoformat() if user_charts else None
+            }
+            
+            # Check a sample chart for data quality
+            if user_charts:
+                sample_chart = user_charts[0]
+                try:
+                    chart_data = json.loads(sample_chart.chart_data)
+                    debug_info["data_analysis"]["sample_chart"] = {
+                        "period": sample_chart.period,
+                        "data_points": len(chart_data.get('dates', [])),
+                        "has_portfolio_data": len(chart_data.get('portfolio_values', [])) > 0,
+                        "has_sp500_data": len(chart_data.get('sp500_values', [])) > 0,
+                        "sample_portfolio_values": chart_data.get('portfolio_values', [])[:3],
+                        "sample_sp500_values": chart_data.get('sp500_values', [])[:3]
+                    }
+                except Exception as e:
+                    debug_info["issues_found"].append(f"Failed to parse sample chart data: {str(e)}")
+        
+        # 5. Check performance calculation endpoints
+        try:
+            # Test the performance API endpoint
+            from portfolio_performance import PortfolioPerformanceCalculator
+            calculator = PortfolioPerformanceCalculator()
+            
+            if sample_user:
+                test_performance = calculator.calculate_performance(sample_user.id, '1D')
+                debug_info["data_analysis"]["performance_calculation"] = {
+                    "sample_user_1d_performance": test_performance,
+                    "calculation_working": test_performance is not None
+                }
+                
+                if test_performance is None or test_performance == 0:
+                    debug_info["issues_found"].append("Performance calculation returning None or 0 for sample user")
+        
+        except Exception as e:
+            debug_info["issues_found"].append(f"Performance calculation error: {str(e)}")
+        
+        # 6. Weekend data handling check
+        debug_info["data_analysis"]["weekend_handling"] = {
+            "current_day": today.strftime('%A'),
+            "is_weekend": today.weekday() >= 5,
+            "should_show_friday_data": today.weekday() >= 5,
+            "recommendation": "Weekend should show last market day data, not 0% performance"
+        }
+        
+        return jsonify({
+            "success": True,
+            "debug_info": debug_info
+        })
+        
+    except Exception as e:
+        logger.error(f"Performance debug error: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
 @app.route('/admin/debug-user-data/<username>')
 @login_required
 def debug_user_data(username):

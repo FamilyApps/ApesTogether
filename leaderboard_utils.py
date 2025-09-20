@@ -562,7 +562,7 @@ def update_leaderboard_cache(periods=None):
     
     # Use provided periods or default to all periods
     if periods is None:
-        periods = ['1D', '5D', '7D', '3M', 'YTD', '1Y', '5Y', 'MAX']
+        periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']
     
     categories = ['all', 'small_cap', 'large_cap']
     updated_count = 0
@@ -600,7 +600,7 @@ def update_leaderboard_cache(periods=None):
                             leaderboard_data=leaderboard_data,
                             current_period=period,
                             current_category=category,
-                            periods=['1D', '5D', '7D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX'],
+                            periods=['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX'],
                             categories=[
                                 ('all', 'All Portfolios'),
                                 ('small_cap', 'Small Cap Focus'),

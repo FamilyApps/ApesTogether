@@ -13,7 +13,7 @@ leaderboard_bp = Blueprint('leaderboard', __name__, url_prefix='/leaderboard')
 @leaderboard_bp.route('/')
 def leaderboard_home():
     """Main leaderboard page - public access, no login required"""
-    period = request.args.get('period', '7D')  # Default to 7D for homepage
+    period = request.args.get('period', '5D')  # Default to 5D for homepage (trading standard)
     category = request.args.get('category', 'all')  # all, small_cap, large_cap
     
     # Try to serve pre-rendered HTML for maximum performance (1-5ms response time)
@@ -55,7 +55,7 @@ def leaderboard_home():
                          leaderboard_data=leaderboard_data,
                          current_period=period,
                          current_category=category,
-                         periods=['1D', '5D', '7D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX'],
+                         periods=['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX'],
                          categories=[
                              ('all', 'All Portfolios'),
                              ('small_cap', 'Small Cap Focus'),

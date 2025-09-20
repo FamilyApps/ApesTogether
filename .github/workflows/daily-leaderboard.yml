@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Update Homepage Priority (7D) + Short-term Leaderboards
+    - name: Update Homepage Priority (5D) + Short-term Leaderboards
       run: |
-        curl -X POST "https://apestogether.ai/api/cron/update-leaderboard-chunk?periods=7D,1D,5D" \
+        curl -X POST "https://apestogether.ai/api/cron/update-leaderboard-chunk?periods=1D,5D" \
           -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
           -H "Content-Type: application/json"
 
@@ -23,7 +23,7 @@ jobs:
     steps:
     - name: Update Medium-term Leaderboards
       run: |
-        curl -X POST "https://apestogether.ai/api/cron/update-leaderboard-chunk?periods=3M,YTD" \
+        curl -X POST "https://apestogether.ai/api/cron/update-leaderboard-chunk?periods=1M,3M,YTD" \
           -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
           -H "Content-Type: application/json"
 
