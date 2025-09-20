@@ -8908,6 +8908,86 @@ def admin_debug_performance_data():
             "error": str(e)
         }), 500
 
+@app.route('/admin/force-refresh-leaderboard', methods=['GET', 'POST'])
+@login_required
+def admin_force_refresh_leaderboard():
+    """Force refresh leaderboard cache with new weekend logic and populate missing data"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from datetime import datetime, date, timedelta
+        from models import db, LeaderboardCache, MarketData
+        from leaderboard_utils import update_leaderboard_cache
+        
+        results = {
+            "timestamp": datetime.now().isoformat(),
+            "actions_taken": [],
+            "errors": []
+        }
+        
+        # 1. Clear old leaderboard cache (including 7D entries)
+        try:
+            deleted_count = LeaderboardCache.query.delete()
+            db.session.commit()
+            results["actions_taken"].append(f"Cleared {deleted_count} old leaderboard cache entries")
+        except Exception as e:
+            results["errors"].append(f"Failed to clear cache: {str(e)}")
+        
+        # 2. Check and populate SPY market data if missing
+        try:
+            spy_count = MarketData.query.filter_by(ticker='SPY').count()
+            if spy_count == 0:
+                # Populate basic SPY data for the last week
+                from portfolio_performance import PortfolioPerformanceCalculator
+                calculator = PortfolioPerformanceCalculator()
+                
+                # Try to fetch recent SPY data
+                end_date = date.today()
+                start_date = end_date - timedelta(days=7)
+                
+                spy_data = calculator.get_sp500_data(start_date, end_date)
+                results["actions_taken"].append(f"Attempted to populate SPY data for {len(spy_data)} days")
+            else:
+                results["actions_taken"].append(f"SPY data exists: {spy_count} entries")
+        except Exception as e:
+            results["errors"].append(f"SPY data population error: {str(e)}")
+        
+        # 3. Force regenerate leaderboard cache with new logic
+        try:
+            # Update with new periods (no 7D)
+            updated_count = update_leaderboard_cache(periods=['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX'])
+            results["actions_taken"].append(f"Regenerated leaderboard cache: {updated_count} entries updated")
+        except Exception as e:
+            results["errors"].append(f"Leaderboard regeneration error: {str(e)}")
+        
+        # 4. Check results
+        try:
+            new_1d_cache = LeaderboardCache.query.filter_by(period='1D_all').first()
+            if new_1d_cache:
+                import json
+                data = json.loads(new_1d_cache.leaderboard_data)
+                zero_performance = sum(1 for entry in data if entry.get('performance_percent', 0) == 0)
+                results["actions_taken"].append(f"New 1D cache: {len(data)} entries, {zero_performance} with 0% performance")
+                results["sample_new_entry"] = data[0] if data else None
+            else:
+                results["errors"].append("No 1D cache found after regeneration")
+        except Exception as e:
+            results["errors"].append(f"Cache verification error: {str(e)}")
+        
+        return jsonify({
+            "success": True,
+            "message": "Leaderboard refresh completed",
+            "results": results
+        })
+        
+    except Exception as e:
+        logger.error(f"Force refresh error: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
 @app.route('/admin/debug-user-data/<username>')
 @login_required
 def debug_user_data(username):
