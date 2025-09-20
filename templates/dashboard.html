@@ -376,19 +376,39 @@ function loadPerformanceData(period) {
         : `/api/portfolio/performance/${period}`;
     
     fetch(apiEndpoint)
-        .then(response => response.json())
+        .then(response => {
+            console.log(`API Response Status: ${response.status} for ${apiEndpoint}`);
+            return response.json();
+        })
         .then(data => {
+            console.log(`API Response Data for ${period}:`, data);
+            
             if (data.error) {
-                console.error('Error loading performance data:', data.error);
+                console.error('API returned error:', data.error);
+                document.getElementById('portfolio-return').textContent = 'API Error';
+                document.getElementById('sp500-return').textContent = 'API Error';
                 return;
             }
+            
+            // Check if required fields exist
+            if (data.portfolio_return === undefined || data.sp500_return === undefined) {
+                console.error('Missing required fields in API response:', {
+                    has_portfolio_return: data.portfolio_return !== undefined,
+                    has_sp500_return: data.sp500_return !== undefined,
+                    actual_data: data
+                });
+                document.getElementById('portfolio-return').textContent = 'Missing Data';
+                document.getElementById('sp500-return').textContent = 'Missing Data';
+                return;
+            }
+            
             updatePerformanceDisplay(data);
             updatePerformanceChart(data);
         })
         .catch(error => {
-            console.error('Error fetching performance data:', error);
-            document.getElementById('portfolio-return').textContent = 'Error';
-            document.getElementById('sp500-return').textContent = 'Error';
+            console.error('Network/Parse error fetching performance data:', error);
+            document.getElementById('portfolio-return').textContent = 'Network Error';
+            document.getElementById('sp500-return').textContent = 'Network Error';
         });
 }
 
@@ -405,18 +425,29 @@ function updatePerformanceDisplay(data) {
 }
 
 function updatePerformanceChart(data) {
-    const ctx = document.getElementById('performance-chart').getContext('2d');
-    
-    if (!data.chart_data || data.chart_data.length === 0) {
-        // Show message for no data
-        if (performanceChart) {
-            performanceChart.destroy();
-            performanceChart = null;
+    try {
+        const ctx = document.getElementById('performance-chart').getContext('2d');
+        
+        console.log('Chart data received:', {
+            has_chart_data: !!data.chart_data,
+            chart_data_length: data.chart_data ? data.chart_data.length : 0,
+            sample_data: data.chart_data ? data.chart_data.slice(0, 3) : null
+        });
+        
+        if (!data.chart_data || data.chart_data.length === 0) {
+            // Show message for no data
+            if (performanceChart) {
+                performanceChart.destroy();
+                performanceChart = null;
+            }
+            ctx.font = '16px Arial';
+            ctx.fillStyle = '#6c757d';
+            ctx.textAlign = 'center';
+            ctx.fillText('No performance data available for this period', ctx.canvas.width / 2, ctx.canvas.height / 2);
+            return;
         }
-        ctx.font = '16px Arial';
-        ctx.fillStyle = '#6c757d';
-        ctx.textAlign = 'center';
-        ctx.fillText('No performance data available for this period', ctx.canvas.width / 2, ctx.canvas.height / 2);
+    } catch (error) {
+        console.error('Error in updatePerformanceChart:', error);
         return;
     }
     
