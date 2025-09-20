@@ -6025,10 +6025,51 @@ def get_portfolio_performance(period):
         
         period_upper = period.upper()
         
-        # Skip cached chart data for dashboard API - it's in Chart.js format, not dashboard format
-        # Dashboard needs {portfolio_return, sp500_return, chart_data} format
-        # Cached data is in {datasets, labels} Chart.js format for pre-rendering
-        logger.info(f"Dashboard API call - skipping Chart.js cache for user {user_id}, period {period_upper}")
+        # Try to use pre-rendered chart data for leaderboard users (much faster!)
+        chart_cache = UserPortfolioChartCache.query.filter_by(
+            user_id=user_id, period=period_upper
+        ).first()
+        
+        if chart_cache:
+            try:
+                # Convert Chart.js format to dashboard format
+                cached_data = json.loads(chart_cache.chart_data)
+                
+                # Extract performance percentages from Chart.js data
+                portfolio_data = cached_data.get('datasets', [{}])[0].get('data', [])
+                sp500_data = cached_data.get('datasets', [{}])[1].get('data', []) if len(cached_data.get('datasets', [])) > 1 else []
+                
+                if portfolio_data and sp500_data:
+                    # Calculate returns from first to last data point
+                    portfolio_return = ((portfolio_data[-1] - portfolio_data[0]) / portfolio_data[0] * 100) if portfolio_data[0] > 0 else 0
+                    sp500_return = ((sp500_data[-1] - sp500_data[0]) / sp500_data[0] * 100) if sp500_data[0] > 0 else 0
+                    
+                    # Convert Chart.js format to dashboard chart_data format
+                    labels = cached_data.get('labels', [])
+                    chart_data = []
+                    for i, label in enumerate(labels):
+                        if i < len(portfolio_data) and i < len(sp500_data):
+                            chart_data.append({
+                                'date': label,
+                                'portfolio': round(((portfolio_data[i] - portfolio_data[0]) / portfolio_data[0] * 100) if portfolio_data[0] > 0 else 0, 2),
+                                'sp500': round(((sp500_data[i] - sp500_data[0]) / sp500_data[0] * 100) if sp500_data[0] > 0 else 0, 2)
+                            })
+                    
+                    dashboard_format = {
+                        'portfolio_return': round(portfolio_return, 2),
+                        'sp500_return': round(sp500_return, 2),
+                        'chart_data': chart_data,
+                        'period': period,
+                        'data_source': 'pre_rendered_cache'
+                    }
+                    
+                    logger.info(f"Using pre-rendered chart data (converted to dashboard format) for user {user_id}, period {period_upper}")
+                    return jsonify(dashboard_format)
+                    
+            except Exception as e:
+                logger.warning(f"Failed to convert pre-rendered chart data to dashboard format: {e}")
+        
+        logger.info(f"No pre-rendered cache available - using live calculation for user {user_id}, period {period_upper}")
         
         # Fallback: Check session cache (5 minutes)
         cache_key = f"perf_{user_id}_{period}"
@@ -9006,6 +9047,77 @@ def admin_force_refresh_leaderboard():
             "success": False,
             "error": str(e)
         }), 500
+
+@app.route('/api/portfolio/chart/<username>/<period>')
+def get_public_portfolio_chart(username, period):
+    """Get portfolio chart data for public portfolio views (blurred/unblurred)"""
+    try:
+        from models import User, UserPortfolioChartCache
+        import json
+        
+        # Find user by username
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        period_upper = period.upper()
+        
+        # Try to use pre-rendered chart data (Chart.js format for direct use)
+        chart_cache = UserPortfolioChartCache.query.filter_by(
+            user_id=user.id, period=period_upper
+        ).first()
+        
+        if chart_cache:
+            try:
+                # Return Chart.js format directly for public portfolio pages
+                cached_data = json.loads(chart_cache.chart_data)
+                cached_data['data_source'] = 'pre_rendered_cache'
+                cached_data['username'] = username
+                
+                logger.info(f"Using pre-rendered chart data for public view: {username}, period {period_upper}")
+                return jsonify(cached_data)
+                
+            except Exception as e:
+                logger.warning(f"Failed to parse pre-rendered chart data for {username}: {e}")
+        
+        # Fallback: Generate chart on-demand for non-leaderboard users
+        from portfolio_performance import PortfolioPerformanceCalculator
+        calculator = PortfolioPerformanceCalculator()
+        
+        logger.info(f"Generating chart on-demand for public view: {username}, period {period_upper}")
+        performance_data = calculator.get_performance_data(user.id, period_upper)
+        
+        # Convert to Chart.js format for consistency
+        if 'chart_data' in performance_data:
+            chart_js_format = {
+                'labels': [item['date'] for item in performance_data['chart_data']],
+                'datasets': [
+                    {
+                        'label': f'{username} Portfolio',
+                        'data': [item['portfolio'] for item in performance_data['chart_data']],
+                        'borderColor': 'rgb(75, 192, 192)',
+                        'backgroundColor': 'rgba(75, 192, 192, 0.2)',
+                        'tension': 0.1
+                    },
+                    {
+                        'label': 'S&P 500',
+                        'data': [item['sp500'] for item in performance_data['chart_data']],
+                        'borderColor': 'rgb(255, 99, 132)',
+                        'backgroundColor': 'rgba(255, 99, 132, 0.2)',
+                        'tension': 0.1
+                    }
+                ],
+                'period': period,
+                'username': username,
+                'data_source': 'live_calculation'
+            }
+            return jsonify(chart_js_format)
+        
+        return jsonify({'error': 'No chart data available'}), 404
+        
+    except Exception as e:
+        logger.error(f"Public portfolio chart error for {username}: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/debug-dashboard-apis')
 @login_required
