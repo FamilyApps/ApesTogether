@@ -449,6 +449,22 @@ class Subscription(db.Model):
     def __repr__(self):
         return f'<Subscription {self.subscriber_id} to {self.subscribed_to_id} - {self.status}>'
 
+class UserPortfolioChartCache(db.Model):
+    """Pre-generated portfolio charts for leaderboard users only"""
+    __tablename__ = 'user_portfolio_chart_cache'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    period = db.Column(db.String(10), nullable=False)  # '1D', '5D', '3M', 'YTD', '1Y', '5Y', 'MAX'
+    chart_data = db.Column(db.Text, nullable=False)  # JSON string of chart data
+    generated_at = db.Column(db.DateTime, nullable=False)
+    
+    # Ensure one cache entry per user per period
+    __table_args__ = (db.UniqueConstraint('user_id', 'period', name='unique_user_period_chart'),)
+    
+    def __repr__(self):
+        return f"<UserPortfolioChartCache user_id={self.user_id} {self.period} generated at {self.generated_at}>"
+
 # Secret key is already set in app.config
 
 # Check if we're running on Vercel
@@ -6018,7 +6034,6 @@ def get_portfolio_performance(period):
         # Note: Removed signal-based timeout as it doesn't work in serverless environments
         # Vercel handles timeouts automatically
         from datetime import datetime, timedelta
-        from models import UserPortfolioChartCache
         import json
         
         user_id = session.get('user_id')
