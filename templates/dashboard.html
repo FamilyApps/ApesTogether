@@ -94,6 +94,8 @@
                     </div>
                 </div>
                 <div style="position: relative; height: 400px;">
+                    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+                    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
                     <canvas id="performance-chart"></canvas>
                 </div>
             </div>
@@ -476,6 +478,7 @@ function updatePerformanceChart(data) {
     // Destroy existing chart if it exists
     if (performanceChart) {
         performanceChart.destroy();
+        performanceChart = null;
     }
     
     performanceChart = new Chart(ctx, {

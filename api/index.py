@@ -6015,15 +6015,8 @@ def populate_stock_info():
 def get_portfolio_performance(period):
     """Get portfolio performance data for a specific time period - uses cached data for leaderboard users"""
     try:
-        # Add timeout protection for large datasets
-        import signal
-        
-        def timeout_handler(signum, frame):
-            raise TimeoutError("Performance calculation timed out")
-        
-        # Set 25 second timeout (Vercel has 30s limit)
-        signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(25)
+        # Note: Removed signal-based timeout as it doesn't work in serverless environments
+        # Vercel handles timeouts automatically
         from datetime import datetime, timedelta
         from models import UserPortfolioChartCache
         import json
@@ -6122,16 +6115,9 @@ def get_portfolio_performance(period):
         session[cache_key] = performance_data
         session[f"{cache_key}_time"] = datetime.now().isoformat()
         
-        # Clear timeout
-        signal.alarm(0)
         return jsonify(performance_data)
         
-    except TimeoutError as e:
-        signal.alarm(0)
-        logger.error(f"Performance calculation timeout for user {user_id}, period {period}: {e}")
-        return jsonify({'error': 'Calculation timed out - try a shorter time period'}), 408
     except Exception as e:
-        signal.alarm(0)
         logger.error(f"Performance calculation error: {e}")
         return jsonify({'error': str(e)}), 500
 
