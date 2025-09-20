@@ -1,8 +1,9 @@
 {% extends "base.html" %}
 
 {% block extra_head %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/date-fns@2.30.0/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <style>
     .stock-card {
         transition: transform 0.2s;
@@ -346,6 +347,7 @@ function generateColors(count) {
 // Performance chart functionality
 let performanceChart = null;
 let currentPeriod = '1Y';
+let isUpdatingChart = false;
 
 function initializePerformanceChart() {
     loadPerformanceData(currentPeriod);
@@ -441,6 +443,14 @@ function updatePerformanceDisplay(data) {
 }
 
 function updatePerformanceChart(data) {
+    // Prevent concurrent chart updates
+    if (isUpdatingChart) {
+        console.log('Chart update already in progress, skipping...');
+        return;
+    }
+    
+    isUpdatingChart = true;
+    
     try {
         const ctx = document.getElementById('performance-chart').getContext('2d');
         
@@ -453,13 +463,18 @@ function updatePerformanceChart(data) {
         if (!data.chart_data || data.chart_data.length === 0) {
             // Show message for no data
             if (performanceChart) {
-                performanceChart.destroy();
+                try {
+                    performanceChart.destroy();
+                } catch (e) {
+                    console.warn('Error destroying chart:', e);
+                }
                 performanceChart = null;
             }
             ctx.font = '16px Arial';
             ctx.fillStyle = '#6c757d';
             ctx.textAlign = 'center';
             ctx.fillText('No performance data available for this period', ctx.canvas.width / 2, ctx.canvas.height / 2);
+            isUpdatingChart = false;
             return;
         }
         
@@ -475,16 +490,22 @@ function updatePerformanceChart(data) {
     const portfolioData = data.chart_data.map(item => item.portfolio);
     const sp500Data = data.chart_data.map(item => item.sp500);
     
-    // Destroy existing chart if it exists
+    // Destroy existing chart if it exists with better cleanup
     if (performanceChart) {
-        performanceChart.destroy();
+        try {
+            performanceChart.destroy();
+        } catch (e) {
+            console.warn('Error destroying chart:', e);
+        }
         performanceChart = null;
     }
     
-    // Clear the canvas
+    // Clear the canvas completely
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     
-    performanceChart = new Chart(ctx, {
+    // Small delay to ensure cleanup is complete
+    setTimeout(() => {
+        performanceChart = new Chart(ctx, {
         type: 'line',
         data: {
             labels: labels,
@@ -582,8 +603,8 @@ function updatePerformanceChart(data) {
                     }
                 }
             }
-        }
-    });
+        });
+    }, 50); // 50ms delay to ensure cleanup
     
     } catch (error) {
         console.error('Error in updatePerformanceChart:', error);
@@ -592,6 +613,11 @@ function updatePerformanceChart(data) {
         ctx.fillStyle = '#dc3545';
         ctx.textAlign = 'center';
         ctx.fillText('Error rendering chart', ctx.canvas.width / 2, ctx.canvas.height / 2);
+    } finally {
+        // Reset the flag after a delay to ensure chart creation is complete
+        setTimeout(() => {
+            isUpdatingChart = false;
+        }, 100);
     }
 }
 </script>
