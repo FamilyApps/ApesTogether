@@ -9016,6 +9016,114 @@ def admin_force_refresh_leaderboard():
             "error": str(e)
         }), 500
 
+@app.route('/admin/debug-dashboard-apis')
+@login_required
+def admin_debug_dashboard_apis():
+    """Debug the specific API endpoints that dashboard calls"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from datetime import datetime
+        import requests
+        
+        debug_info = {
+            "timestamp": datetime.now().isoformat(),
+            "user_id": current_user.id,
+            "api_tests": {},
+            "issues_found": []
+        }
+        
+        # Test the exact endpoints dashboard calls
+        periods_to_test = ['1D', '5D', '1M', '3M', 'YTD', '1Y']
+        
+        for period in periods_to_test:
+            try:
+                # Determine which endpoint dashboard would call
+                if period in ['1D', '5D']:
+                    endpoint = f'/api/portfolio/performance-intraday/{period}'
+                else:
+                    endpoint = f'/api/portfolio/performance/{period}'
+                
+                # Make internal API call
+                from flask import url_for
+                import json
+                
+                # Simulate the API call internally
+                if period in ['1D', '5D']:
+                    # Test intraday endpoint
+                    with app.test_client() as client:
+                        # Login as current user
+                        with client.session_transaction() as sess:
+                            sess['user_id'] = current_user.id
+                        
+                        response = client.get(endpoint)
+                        response_data = json.loads(response.data) if response.data else {}
+                        
+                        debug_info["api_tests"][f"{period}_intraday"] = {
+                            "endpoint": endpoint,
+                            "status_code": response.status_code,
+                            "has_portfolio_return": "portfolio_return" in response_data,
+                            "has_sp500_return": "sp500_return" in response_data,
+                            "has_chart_data": "chart_data" in response_data,
+                            "portfolio_return_value": response_data.get("portfolio_return"),
+                            "sp500_return_value": response_data.get("sp500_return"),
+                            "chart_data_length": len(response_data.get("chart_data", [])),
+                            "error": response_data.get("error"),
+                            "sample_response": response_data
+                        }
+                        
+                        if response.status_code != 200:
+                            debug_info["issues_found"].append(f"{period} intraday API returned {response.status_code}")
+                        if "portfolio_return" not in response_data:
+                            debug_info["issues_found"].append(f"{period} intraday API missing portfolio_return field")
+                        if response_data.get("portfolio_return") is None:
+                            debug_info["issues_found"].append(f"{period} intraday API portfolio_return is None")
+                
+                else:
+                    # Test regular performance endpoint
+                    with app.test_client() as client:
+                        with client.session_transaction() as sess:
+                            sess['user_id'] = current_user.id
+                        
+                        response = client.get(endpoint)
+                        response_data = json.loads(response.data) if response.data else {}
+                        
+                        debug_info["api_tests"][f"{period}_regular"] = {
+                            "endpoint": endpoint,
+                            "status_code": response.status_code,
+                            "has_portfolio_return": "portfolio_return" in response_data,
+                            "has_sp500_return": "sp500_return" in response_data,
+                            "has_chart_data": "chart_data" in response_data,
+                            "portfolio_return_value": response_data.get("portfolio_return"),
+                            "sp500_return_value": response_data.get("sp500_return"),
+                            "chart_data_length": len(response_data.get("chart_data", [])),
+                            "error": response_data.get("error"),
+                            "sample_response": response_data
+                        }
+                        
+                        if response.status_code != 200:
+                            debug_info["issues_found"].append(f"{period} regular API returned {response.status_code}")
+                        if "portfolio_return" not in response_data:
+                            debug_info["issues_found"].append(f"{period} regular API missing portfolio_return field")
+                        if response_data.get("portfolio_return") is None:
+                            debug_info["issues_found"].append(f"{period} regular API portfolio_return is None")
+                            
+            except Exception as e:
+                debug_info["issues_found"].append(f"Error testing {period}: {str(e)}")
+        
+        return jsonify({
+            "success": True,
+            "debug_info": debug_info
+        })
+        
+    except Exception as e:
+        logger.error(f"Dashboard API debug error: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
 @app.route('/admin/debug-user-data/<username>')
 @login_required
 def debug_user_data(username):
@@ -9381,14 +9489,23 @@ def portfolio_performance_intraday(period):
         from models import PortfolioSnapshotIntraday, MarketData
         from sqlalchemy import func
         
-        # Calculate date range based on period
+        # Calculate date range based on period - use last market day for weekends
         today = date.today()
+        
+        # Use last market day for weekend handling
+        if today.weekday() == 5:  # Saturday
+            market_day = today - timedelta(days=1)  # Friday
+        elif today.weekday() == 6:  # Sunday
+            market_day = today - timedelta(days=2)  # Friday
+        else:
+            market_day = today  # Monday-Friday
+        
         if period == '1D':
-            start_date = today
-            end_date = today
+            start_date = market_day
+            end_date = market_day
         elif period == '5D':
-            start_date = today - timedelta(days=7)  # Include weekends to get 5 business days
-            end_date = today
+            start_date = market_day - timedelta(days=7)  # Include weekends to get 5 business days
+            end_date = market_day
         else:
             # Fallback to regular performance API for other periods
             from portfolio_performance import PortfolioPerformanceCalculator
