@@ -6015,6 +6015,15 @@ def populate_stock_info():
 def get_portfolio_performance(period):
     """Get portfolio performance data for a specific time period - uses cached data for leaderboard users"""
     try:
+        # Add timeout protection for large datasets
+        import signal
+        
+        def timeout_handler(signum, frame):
+            raise TimeoutError("Performance calculation timed out")
+        
+        # Set 25 second timeout (Vercel has 30s limit)
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(25)
         from datetime import datetime, timedelta
         from models import UserPortfolioChartCache
         import json
@@ -6036,8 +6045,21 @@ def get_portfolio_performance(period):
                 cached_data = json.loads(chart_cache.chart_data)
                 
                 # Extract performance percentages from Chart.js data
-                portfolio_data = cached_data.get('datasets', [{}])[0].get('data', [])
-                sp500_data = cached_data.get('datasets', [{}])[1].get('data', []) if len(cached_data.get('datasets', [])) > 1 else []
+                datasets = cached_data.get('datasets', [])
+                if not datasets:
+                    logger.warning(f"No datasets in cached data for user {user_id}, period {period_upper}")
+                    raise ValueError("No datasets in cached chart data")
+                
+                portfolio_data = datasets[0].get('data', []) if len(datasets) > 0 else []
+                sp500_data = datasets[1].get('data', []) if len(datasets) > 1 else []
+                
+                if not portfolio_data:
+                    logger.warning(f"No portfolio data in cached chart for user {user_id}, period {period_upper}")
+                    raise ValueError("No portfolio data in cached chart")
+                
+                if not sp500_data:
+                    logger.warning(f"No S&P 500 data in cached chart for user {user_id}, period {period_upper}")
+                    raise ValueError("No S&P 500 data in cached chart")
                 
                 if portfolio_data and sp500_data:
                     # Calculate returns from first to last data point
@@ -6047,13 +6069,20 @@ def get_portfolio_performance(period):
                     # Convert Chart.js format to dashboard chart_data format
                     labels = cached_data.get('labels', [])
                     chart_data = []
-                    for i, label in enumerate(labels):
-                        if i < len(portfolio_data) and i < len(sp500_data):
+                    
+                    # Limit processing to avoid timeouts on large datasets
+                    max_points = min(len(labels), len(portfolio_data), len(sp500_data), 500)  # Limit to 500 points
+                    
+                    for i in range(max_points):
+                        try:
                             chart_data.append({
-                                'date': label,
+                                'date': labels[i],
                                 'portfolio': round(((portfolio_data[i] - portfolio_data[0]) / portfolio_data[0] * 100) if portfolio_data[0] > 0 else 0, 2),
                                 'sp500': round(((sp500_data[i] - sp500_data[0]) / sp500_data[0] * 100) if sp500_data[0] > 0 else 0, 2)
                             })
+                        except (IndexError, ZeroDivisionError, TypeError) as e:
+                            logger.warning(f"Error processing chart data point {i}: {e}")
+                            continue
                     
                     dashboard_format = {
                         'portfolio_return': round(portfolio_return, 2),
@@ -6093,8 +6122,16 @@ def get_portfolio_performance(period):
         session[cache_key] = performance_data
         session[f"{cache_key}_time"] = datetime.now().isoformat()
         
+        # Clear timeout
+        signal.alarm(0)
         return jsonify(performance_data)
+        
+    except TimeoutError as e:
+        signal.alarm(0)
+        logger.error(f"Performance calculation timeout for user {user_id}, period {period}: {e}")
+        return jsonify({'error': 'Calculation timed out - try a shorter time period'}), 408
     except Exception as e:
+        signal.alarm(0)
         logger.error(f"Performance calculation error: {e}")
         return jsonify({'error': str(e)}), 500
 
