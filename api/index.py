@@ -8965,24 +8965,21 @@ def admin_force_refresh_leaderboard():
         except Exception as e:
             results["errors"].append(f"Failed to clear cache: {str(e)}")
         
-        # 2. Check and populate SPY market data if missing
+        # 2. Check SPY market data status (don't populate - data exists!)
         try:
-            spy_count = MarketData.query.filter_by(ticker='SPY').count()
-            if spy_count == 0:
-                # Populate basic SPY data for the last week
-                from portfolio_performance import PortfolioPerformanceCalculator
-                calculator = PortfolioPerformanceCalculator()
-                
-                # Try to fetch recent SPY data
-                end_date = date.today()
-                start_date = end_date - timedelta(days=7)
-                
-                spy_data = calculator.get_sp500_data(start_date, end_date)
-                results["actions_taken"].append(f"Attempted to populate SPY data for {len(spy_data)} days")
+            spy_regular = MarketData.query.filter_by(ticker='SPY').count()
+            spy_sp500 = MarketData.query.filter_by(ticker='SPY_SP500').count()
+            spy_intraday = MarketData.query.filter_by(ticker='SPY_INTRADAY').count()
+            total_spy = spy_regular + spy_sp500 + spy_intraday
+            
+            results["actions_taken"].append(f"SPY data confirmed: {total_spy} total records (SPY: {spy_regular}, SPY_SP500: {spy_sp500}, SPY_INTRADAY: {spy_intraday})")
+            
+            if total_spy == 0:
+                results["errors"].append("WARNING: No SPY data found - charts will be empty")
             else:
-                results["actions_taken"].append(f"SPY data exists: {spy_count} entries")
+                results["actions_taken"].append("SPY data exists - skipping population to avoid duplicates")
         except Exception as e:
-            results["errors"].append(f"SPY data population error: {str(e)}")
+            results["errors"].append(f"SPY data check error: {str(e)}")
         
         # 3. Force regenerate leaderboard cache with new logic
         try:

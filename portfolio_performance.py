@@ -610,7 +610,17 @@ class PortfolioPerformanceCalculator:
 
     def get_performance_data(self, user_id: int, period: str) -> Dict:
         """Get performance data for a specific period"""
-        end_date = date.today()
+        # Use last market day for weekend handling
+        from datetime import timedelta
+        today = date.today()
+        
+        # If it's Saturday (5) or Sunday (6), go back to Friday
+        if today.weekday() == 5:  # Saturday
+            end_date = today - timedelta(days=1)  # Friday
+        elif today.weekday() == 6:  # Sunday
+            end_date = today - timedelta(days=2)  # Friday
+        else:
+            end_date = today  # Monday-Friday
         
         # Define period mappings
         period_days = {
