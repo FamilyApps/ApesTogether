@@ -378,6 +378,20 @@ function loadPerformanceData(period) {
     fetch(apiEndpoint)
         .then(response => {
             console.log(`API Response Status: ${response.status} for ${apiEndpoint}`);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            // Check if response is actually JSON
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                console.error(`Expected JSON but got: ${contentType}`);
+                return response.text().then(text => {
+                    console.error('Response body:', text.substring(0, 500));
+                    throw new Error('Server returned HTML instead of JSON');
+                });
+            }
+            
             return response.json();
         })
         .then(data => {
@@ -446,19 +460,15 @@ function updatePerformanceChart(data) {
             ctx.fillText('No performance data available for this period', ctx.canvas.width / 2, ctx.canvas.height / 2);
             return;
         }
-    } catch (error) {
-        console.error('Error in updatePerformanceChart:', error);
-        return;
-    }
-    
-    const labels = data.chart_data.map(item => {
-        const date = new Date(item.date);
-        return date.toLocaleDateString('en-US', { 
-            month: 'short', 
-            day: 'numeric',
-            year: data.period === '5Y' ? 'numeric' : undefined
+        
+        const labels = data.chart_data.map(item => {
+            const date = new Date(item.date);
+            return date.toLocaleDateString('en-US', { 
+                month: 'short', 
+                day: 'numeric',
+                year: data.period === '5Y' ? 'numeric' : undefined
+            });
         });
-    });
     
     const portfolioData = data.chart_data.map(item => item.portfolio);
     const sp500Data = data.chart_data.map(item => item.sp500);
@@ -568,6 +578,15 @@ function updatePerformanceChart(data) {
             }
         }
     });
+    
+    } catch (error) {
+        console.error('Error in updatePerformanceChart:', error);
+        const ctx = document.getElementById('performance-chart').getContext('2d');
+        ctx.font = '16px Arial';
+        ctx.fillStyle = '#dc3545';
+        ctx.textAlign = 'center';
+        ctx.fillText('Error rendering chart', ctx.canvas.width / 2, ctx.canvas.height / 2);
+    }
 }
 </script>
 {% endblock %}
