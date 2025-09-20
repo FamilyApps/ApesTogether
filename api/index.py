@@ -8826,16 +8826,47 @@ def admin_debug_performance_data():
             "weekend_issue": today.weekday() >= 5  # Saturday=5, Sunday=6
         }
         
-        # 3. Check market data (SPY) for recent updates
+        # 3. Check market data (SPY) for recent updates - check all SPY variants
+        spy_regular = MarketData.query.filter(MarketData.ticker == 'SPY').count()
+        spy_sp500 = MarketData.query.filter(MarketData.ticker == 'SPY_SP500').count()
+        spy_intraday = MarketData.query.filter(MarketData.ticker == 'SPY_INTRADAY').count()
+        
         recent_market_data = MarketData.query.filter(
-            MarketData.ticker == 'SPY',
+            MarketData.ticker.in_(['SPY', 'SPY_SP500', 'SPY_INTRADAY']),
             MarketData.date >= today - timedelta(days=7)
-        ).order_by(MarketData.date.desc()).limit(5).all()
+        ).order_by(MarketData.date.desc()).limit(10).all()
+        
+        # Get total SPY data across all time
+        total_spy_data = MarketData.query.filter(
+            MarketData.ticker.in_(['SPY', 'SPY_SP500', 'SPY_INTRADAY'])
+        ).count()
+        
+        # Get date range of existing data
+        oldest_spy = MarketData.query.filter(
+            MarketData.ticker.in_(['SPY', 'SPY_SP500', 'SPY_INTRADAY'])
+        ).order_by(MarketData.date.asc()).first()
+        
+        latest_spy = MarketData.query.filter(
+            MarketData.ticker.in_(['SPY', 'SPY_SP500', 'SPY_INTRADAY'])
+        ).order_by(MarketData.date.desc()).first()
         
         debug_info["data_analysis"]["market_data"] = {
+            "spy_regular_count": spy_regular,
+            "spy_sp500_count": spy_sp500,
+            "spy_intraday_count": spy_intraday,
+            "total_spy_records": total_spy_data,
             "recent_spy_data_count": len(recent_market_data),
-            "latest_spy_date": recent_market_data[0].date.isoformat() if recent_market_data else None,
-            "latest_spy_price": recent_market_data[0].close_price if recent_market_data else None
+            "oldest_spy_date": oldest_spy.date.isoformat() if oldest_spy else None,
+            "latest_spy_date": latest_spy.date.isoformat() if latest_spy else None,
+            "latest_spy_price": latest_spy.close_price if latest_spy else None,
+            "recent_entries_sample": [
+                {
+                    "ticker": entry.ticker,
+                    "date": entry.date.isoformat(),
+                    "price": entry.close_price,
+                    "timestamp": entry.timestamp.isoformat() if entry.timestamp else None
+                } for entry in recent_market_data[:5]
+            ]
         }
         
         # 4. Check user chart cache
