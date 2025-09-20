@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 
 {% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <style>
     .stock-card {
         transition: transform 0.2s;
@@ -94,8 +96,6 @@
                     </div>
                 </div>
                 <div style="position: relative; height: 400px;">
-                    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-                    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
                     <canvas id="performance-chart"></canvas>
                 </div>
             </div>
@@ -480,6 +480,9 @@ function updatePerformanceChart(data) {
         performanceChart.destroy();
         performanceChart = null;
     }
+    
+    // Clear the canvas
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     
     performanceChart = new Chart(ctx, {
         type: 'line',
