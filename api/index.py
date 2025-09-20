@@ -6051,13 +6051,11 @@ def get_portfolio_performance(period):
                 return jsonify(cached_response)
         
         # Last resort: Live calculation (slow for non-leaderboard users)
-        import sys
-        import os
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        from portfolio_performance import performance_calculator
+        from portfolio_performance import PortfolioPerformanceCalculator
+        calculator = PortfolioPerformanceCalculator()
         
         logger.info(f"Performing live calculation for user {user_id}, period {period_upper}")
-        performance_data = performance_calculator.get_performance_data(user_id, period_upper)
+        performance_data = calculator.get_performance_data(user_id, period_upper)
         
         # Cache the response in session
         session[cache_key] = performance_data
@@ -6074,16 +6072,14 @@ def create_portfolio_snapshot():
     """Create a portfolio snapshot for today"""
     try:
         # Import here to avoid circular imports
-        import sys
-        import os
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        from portfolio_performance import performance_calculator
+        from portfolio_performance import PortfolioPerformanceCalculator
+        calculator = PortfolioPerformanceCalculator()
         
         user_id = session.get('user_id')
         if not user_id:
             return jsonify({'error': 'User not authenticated'}), 401
             
-        performance_calculator.create_daily_snapshot(user_id)
+        calculator.create_daily_snapshot(user_id)
         return jsonify({'success': True})
     except Exception as e:
         logger.error(f"Snapshot creation error: {e}")
@@ -8876,14 +8872,18 @@ def admin_debug_performance_data():
             calculator = PortfolioPerformanceCalculator()
             
             if sample_user:
-                test_performance = calculator.calculate_performance(sample_user.id, '1D')
+                test_performance = calculator.get_performance_data(sample_user.id, '1D')
                 debug_info["data_analysis"]["performance_calculation"] = {
                     "sample_user_1d_performance": test_performance,
-                    "calculation_working": test_performance is not None
+                    "calculation_working": test_performance is not None,
+                    "has_portfolio_return": test_performance.get('portfolio_return') if test_performance else None,
+                    "has_sp500_return": test_performance.get('sp500_return') if test_performance else None
                 }
                 
-                if test_performance is None or test_performance == 0:
-                    debug_info["issues_found"].append("Performance calculation returning None or 0 for sample user")
+                if test_performance is None:
+                    debug_info["issues_found"].append("Performance calculation returning None for sample user")
+                elif test_performance.get('portfolio_return') == 0:
+                    debug_info["issues_found"].append("Performance calculation returning 0% for sample user")
         
         except Exception as e:
             debug_info["issues_found"].append(f"Performance calculation error: {str(e)}")

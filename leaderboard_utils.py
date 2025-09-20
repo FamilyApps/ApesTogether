@@ -354,6 +354,20 @@ def get_user_chart_data(user_id, period):
     # Fallback: generate on-demand if not cached
     return generate_user_portfolio_chart(user_id, period)
 
+def get_last_market_day():
+    """Get the last market day (Monday-Friday, excluding weekends)"""
+    from datetime import date, timedelta
+    
+    today = date.today()
+    
+    # If it's Saturday (5) or Sunday (6), go back to Friday
+    if today.weekday() == 5:  # Saturday
+        return today - timedelta(days=1)  # Friday
+    elif today.weekday() == 6:  # Sunday
+        return today - timedelta(days=2)  # Friday
+    else:
+        return today  # Monday-Friday
+
 def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
     """
     Calculate leaderboard data directly from portfolio snapshots
@@ -366,13 +380,20 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
     """
     from datetime import datetime, date, timedelta
     
-    # Calculate date range for the period
-    today = date.today()
+    # Calculate date range for the period - use last market day for end date
+    today = get_last_market_day()  # Use last market day instead of actual today
     
     if period == '1D':
         start_date = today - timedelta(days=1)
     elif period == '5D':
-        start_date = today - timedelta(days=5)
+        # Get 5 business days back (excluding weekends)
+        business_days_back = 0
+        check_date = today
+        while business_days_back < 5:
+            check_date = check_date - timedelta(days=1)
+            if check_date.weekday() < 5:  # Monday=0, Friday=4
+                business_days_back += 1
+        start_date = check_date
     elif period == '7D':
         start_date = today - timedelta(days=7)
     elif period == '1M':
