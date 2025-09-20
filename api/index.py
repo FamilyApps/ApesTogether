@@ -6025,19 +6025,10 @@ def get_portfolio_performance(period):
         
         period_upper = period.upper()
         
-        # First, try to get cached chart data for leaderboard users
-        chart_cache = UserPortfolioChartCache.query.filter_by(
-            user_id=user_id, period=period_upper
-        ).first()
-        
-        if chart_cache:
-            try:
-                # Use cached data - super fast for leaderboard users
-                cached_data = json.loads(chart_cache.chart_data)
-                logger.info(f"Using cached chart data for user {user_id}, period {period_upper}")
-                return jsonify(cached_data)
-            except Exception as e:
-                logger.warning(f"Failed to parse cached chart data: {e}")
+        # Skip cached chart data for dashboard API - it's in Chart.js format, not dashboard format
+        # Dashboard needs {portfolio_return, sp500_return, chart_data} format
+        # Cached data is in {datasets, labels} Chart.js format for pre-rendering
+        logger.info(f"Dashboard API call - skipping Chart.js cache for user {user_id}, period {period_upper}")
         
         # Fallback: Check session cache (5 minutes)
         cache_key = f"perf_{user_id}_{period}"
