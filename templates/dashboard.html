@@ -461,8 +461,16 @@ function updatePerformanceChart(data) {
         console.log('Chart data received:', {
             has_chart_data: !!data.chart_data,
             chart_data_length: data.chart_data ? data.chart_data.length : 0,
-            sample_data: data.chart_data ? data.chart_data.slice(0, 3) : null
+            sample_data: data.chart_data ? data.chart_data.slice(0, 3) : null,
+            portfolio_return: data.portfolio_return,
+            sp500_return: data.sp500_return
         });
+        
+        // Debug the actual chart data points
+        if (data.chart_data && data.chart_data.length > 0) {
+            console.log('First 5 chart data points:', data.chart_data.slice(0, 5));
+            console.log('Last 5 chart data points:', data.chart_data.slice(-5));
+        }
         
         if (!data.chart_data || data.chart_data.length === 0) {
             // Show message for no data
@@ -491,8 +499,23 @@ function updatePerformanceChart(data) {
             });
         });
     
-    const portfolioData = data.chart_data.map(item => item.portfolio);
-    const sp500Data = data.chart_data.map(item => item.sp500);
+        const portfolioData = data.chart_data.map(item => item.portfolio);
+        const sp500Data = data.chart_data.map(item => item.sp500);
+        
+        // Debug the processed chart arrays
+        console.log('Processed chart arrays:', {
+            labels_count: labels.length,
+            portfolio_data_sample: portfolioData.slice(0, 5),
+            portfolio_data_range: {
+                min: Math.min(...portfolioData),
+                max: Math.max(...portfolioData)
+            },
+            sp500_data_sample: sp500Data.slice(0, 5),
+            sp500_data_range: {
+                min: Math.min(...sp500Data),
+                max: Math.max(...sp500Data)
+            }
+        });
     
     // Destroy existing chart if it exists with better cleanup
     if (performanceChart) {
