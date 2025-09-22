@@ -194,7 +194,9 @@
 
 {% block scripts %}
 <script>
+console.log('=== DASHBOARD SCRIPT VERSION 2.1 LOADED ===');
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('=== DOM CONTENT LOADED ===');
     const usernameInput = document.getElementById('username');
     const saveUsernameBtn = document.getElementById('saveUsernameBtn');
     let initialUsername = usernameInput.value;
@@ -442,6 +444,8 @@ function updatePerformanceDisplay(data) {
 }
 
 function updatePerformanceChart(data) {
+    console.log('=== updatePerformanceChart called ===', data);
+    
     // Prevent concurrent chart updates
     if (isUpdatingChart) {
         console.log('Chart update already in progress, skipping...');
@@ -449,6 +453,7 @@ function updatePerformanceChart(data) {
     }
     
     isUpdatingChart = true;
+    console.log('Starting chart update process...');
     
     try {
         const ctx = document.getElementById('performance-chart').getContext('2d');
@@ -503,7 +508,9 @@ function updatePerformanceChart(data) {
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     
     // Small delay to ensure cleanup is complete
+    console.log('About to create chart with setTimeout...');
     setTimeout(() => {
+        console.log('Inside setTimeout, creating chart...');
         try {
             performanceChart = new Chart(ctx, {
         type: 'line',
@@ -604,8 +611,9 @@ function updatePerformanceChart(data) {
                 }
             }
             });
+            console.log('Chart created successfully');
         } catch (error) {
-            console.error('Error creating chart:', error);
+            console.error('Error creating chart inside setTimeout:', error);
             const ctx = document.getElementById('performance-chart').getContext('2d');
             ctx.font = '16px Arial';
             ctx.fillStyle = '#dc3545';
