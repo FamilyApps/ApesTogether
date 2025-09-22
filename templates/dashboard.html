@@ -513,103 +513,104 @@ function updatePerformanceChart(data) {
         console.log('Inside setTimeout, creating chart...');
         try {
             performanceChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [
-                {
-                    label: 'Your Portfolio',
-                    data: portfolioData,
-                    borderColor: '#28a745',
-                    backgroundColor: 'rgba(40, 167, 69, 0.1)',
-                    borderWidth: 3,
-                    fill: false,
-                    tension: 0.1,
-                    pointRadius: 0,
-                    pointHoverRadius: 4
-                },
-                {
-                    label: 'S&P 500',
-                    data: sp500Data,
-                    borderColor: '#6c757d',
-                    backgroundColor: 'rgba(108, 117, 125, 0.1)',
-                    borderWidth: 2,
-                    fill: false,
-                    tension: 0.1,
-                    borderDash: [5, 5],
-                    pointRadius: 0,
-                    pointHoverRadius: 4
-                }
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: {
-                intersect: false,
-                mode: 'index'
-            },
-            plugins: {
-                legend: {
-                    position: 'top',
-                    align: 'end'
-                },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            return context.dataset.label + ': ' + (context.parsed.y >= 0 ? '+' : '') + context.parsed.y.toFixed(2) + '%';
-                        }
-                    }
-                }
-            },
-            scales: {
-                x: {
-                    type: 'time',
-                    display: true,
-                    title: {
-                        display: true,
-                        text: currentPeriod === '1D' ? 'Time' : 'Date'
-                    },
-                    time: {
-                        displayFormats: {
-                            hour: 'h:mm a',
-                            day: 'MMM dd'
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Your Portfolio',
+                            data: portfolioData,
+                            borderColor: '#28a745',
+                            backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                            borderWidth: 3,
+                            fill: false,
+                            tension: 0.1,
+                            pointRadius: 0,
+                            pointHoverRadius: 4
                         },
-                        tooltipFormat: currentPeriod === '1D' ? 'h:mm a' : 'MMM dd, yyyy'
-                    },
-                    ticks: {
-                        maxTicksLimit: currentPeriod === '1D' ? 8 : (currentPeriod === '5D' ? 5 : 10),
-                        maxRotation: 45,
-                        minRotation: 0
-                    }
+                        {
+                            label: 'S&P 500',
+                            data: sp500Data,
+                            borderColor: '#6c757d',
+                            backgroundColor: 'rgba(108, 117, 125, 0.1)',
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.1,
+                            borderDash: [5, 5],
+                            pointRadius: 0,
+                            pointHoverRadius: 4
+                        }
+                    ]
                 },
-                y: {
-                    display: true,
-                    title: {
-                        display: true,
-                        text: 'Return (%)'
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
                     },
-                    ticks: {
-                        callback: function(value) {
-                            return (value >= 0 ? '+' : '') + value + '%';
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            align: 'end'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return context.dataset.label + ': ' + (context.parsed.y >= 0 ? '+' : '') + context.parsed.y.toFixed(2) + '%';
+                                }
+                            }
                         }
                     },
-                    grid: {
-                        color: function(context) {
-                            if (context.tick.value === 0) {
-                                return '#000000';
+                    scales: {
+                        x: {
+                            type: 'time',
+                            display: true,
+                            title: {
+                                display: true,
+                                text: currentPeriod === '1D' ? 'Time' : 'Date'
+                            },
+                            time: {
+                                displayFormats: {
+                                    hour: 'h:mm a',
+                                    day: 'MMM dd'
+                                },
+                                tooltipFormat: currentPeriod === '1D' ? 'h:mm a' : 'MMM dd, yyyy'
+                            },
+                            ticks: {
+                                maxTicksLimit: currentPeriod === '1D' ? 8 : (currentPeriod === '5D' ? 5 : 10),
+                                maxRotation: 45,
+                                minRotation: 0
                             }
-                            return '#e9ecef';
                         },
-                        lineWidth: function(context) {
-                            if (context.tick.value === 0) {
-                                return 2;
+                        y: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Return (%)'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return (value >= 0 ? '+' : '') + value + '%';
+                                }
+                            },
+                            grid: {
+                                color: function(context) {
+                                    if (context.tick.value === 0) {
+                                        return '#000000';
+                                    }
+                                    return '#e9ecef';
+                                },
+                                lineWidth: function(context) {
+                                    if (context.tick.value === 0) {
+                                        return 2;
+                                    }
+                                    return 1;
+                                }
                             }
-                            return 1;
                         }
                     }
                 }
-            }
             });
             console.log('Chart created successfully');
         } catch (error) {
