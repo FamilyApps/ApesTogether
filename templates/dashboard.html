@@ -490,13 +490,10 @@ function updatePerformanceChart(data) {
             return;
         }
         
+        // For Chart.js time scale, we need to keep dates as Date objects, not strings
         const labels = data.chart_data.map(item => {
             const date = new Date(item.date);
-            return date.toLocaleDateString('en-US', { 
-                month: 'short', 
-                day: 'numeric',
-                year: data.period === '5Y' ? 'numeric' : undefined
-            });
+            return date;  // Keep as Date object for Chart.js time scale
         });
     
         const portfolioData = data.chart_data.map(item => item.portfolio);
@@ -505,6 +502,7 @@ function updatePerformanceChart(data) {
         // DETAILED DEBUG: Check what's happening in the mapping
         console.log('=== DETAILED DATA MAPPING DEBUG ===');
         console.log('Raw chart_data sample:', data.chart_data.slice(0, 3));
+        console.log('Parsed labels sample:', labels.slice(0, 3));
         console.log('Mapped portfolioData sample:', portfolioData.slice(0, 3));
         console.log('Mapped sp500Data sample:', sp500Data.slice(0, 3));
         
@@ -541,19 +539,34 @@ function updatePerformanceChart(data) {
     // Clear the canvas completely
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     
-    // Small delay to ensure cleanup is complete
     console.log('About to create chart with setTimeout...');
     setTimeout(() => {
         console.log('Inside setTimeout, creating chart...');
+        
+        // Create data points with x,y coordinates for time scale
+        const portfolioDataPoints = data.chart_data.map(item => ({
+            x: new Date(item.date),
+            y: item.portfolio
+        }));
+        
+        const sp500DataPoints = data.chart_data.map(item => ({
+            x: new Date(item.date),
+            y: item.sp500
+        }));
+        
+        console.log('Chart data points sample:', {
+            portfolio: portfolioDataPoints.slice(0, 3),
+            sp500: sp500DataPoints.slice(0, 3)
+        });
+
         try {
             performanceChart = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: labels,
                     datasets: [
                         {
                             label: 'Your Portfolio',
-                            data: portfolioData,
+                            data: portfolioDataPoints,
                             borderColor: '#28a745',
                             backgroundColor: 'rgba(40, 167, 69, 0.1)',
                             borderWidth: 3,
@@ -564,7 +577,7 @@ function updatePerformanceChart(data) {
                         },
                         {
                             label: 'S&P 500',
-                            data: sp500Data,
+                            data: sp500DataPoints,
                             borderColor: '#6c757d',
                             backgroundColor: 'rgba(108, 117, 125, 0.1)',
                             borderWidth: 2,
