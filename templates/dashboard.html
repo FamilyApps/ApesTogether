@@ -502,6 +502,17 @@ function updatePerformanceChart(data) {
         const portfolioData = data.chart_data.map(item => item.portfolio);
         const sp500Data = data.chart_data.map(item => item.sp500);
         
+        // DETAILED DEBUG: Check what's happening in the mapping
+        console.log('=== DETAILED DATA MAPPING DEBUG ===');
+        console.log('Raw chart_data sample:', data.chart_data.slice(0, 3));
+        console.log('Mapped portfolioData sample:', portfolioData.slice(0, 3));
+        console.log('Mapped sp500Data sample:', sp500Data.slice(0, 3));
+        
+        // Check for null/undefined values
+        const portfolioNulls = portfolioData.filter(val => val === null || val === undefined).length;
+        const sp500Nulls = sp500Data.filter(val => val === null || val === undefined).length;
+        console.log('Null/undefined counts:', { portfolioNulls, sp500Nulls });
+        
         // Debug the processed chart arrays
         console.log('Processed chart arrays:', {
             labels_count: labels.length,
