@@ -53,10 +53,14 @@ def get_intraday_performance_data(user_id: int, period: str):
             return {'error': f'Invalid period. Must be one of: {", ".join(valid_periods)}'}
         
         # Get pre-generated S&P 500 chart data
+        logger.info(f"Attempting to get cached S&P 500 chart for period {period}")
         sp500_chart = get_cached_sp500_chart(period)
         if not sp500_chart:
             # Fallback to generating chart on-demand
+            logger.warning(f"Cache miss for {period}, falling back to live generation (this will make Alpha Vantage API calls)")
             sp500_chart = generate_sp500_chart_fallback(period)
+        else:
+            logger.info(f"Successfully using cached S&P 500 data for {period} - no API calls needed")
         
         # Get user portfolio data
         portfolio_data = get_user_portfolio_data(user_id, period)
@@ -87,8 +91,15 @@ def get_cached_sp500_chart(period: str):
     try:
         cache_entry = SP500ChartCache.query.filter_by(period=period).first()
         
-        if cache_entry and cache_entry.expires_at > datetime.now():
-            return json.loads(cache_entry.chart_data)
+        if cache_entry:
+            logger.info(f"Found S&P 500 cache for {period}: generated={cache_entry.generated_at}, expires={cache_entry.expires_at}")
+            if cache_entry.expires_at > datetime.now():
+                logger.info(f"Using cached S&P 500 data for {period} (valid until {cache_entry.expires_at})")
+                return json.loads(cache_entry.chart_data)
+            else:
+                logger.warning(f"S&P 500 cache for {period} expired at {cache_entry.expires_at}")
+        else:
+            logger.warning(f"No S&P 500 cache found for period {period}")
         
         return None
     
@@ -138,6 +149,11 @@ def get_user_portfolio_data(user_id: int, period: str):
                 PortfolioSnapshotIntraday.timestamp >= start_time,
                 PortfolioSnapshotIntraday.timestamp <= end_time
             ).order_by(PortfolioSnapshotIntraday.timestamp).all()
+            
+            logger.info(f"Found {len(snapshots)} intraday snapshots for user {user_id} period {period} ({start_time} to {end_time})")
+            if snapshots:
+                logger.info(f"Intraday snapshot range: {snapshots[0].timestamp} to {snapshots[-1].timestamp}")
+                logger.info(f"Sample values: {[s.total_value for s in snapshots[:3]]}")
             
             return [(s.timestamp, s.total_value) for s in snapshots]
         else:
