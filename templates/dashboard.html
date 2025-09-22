@@ -1,9 +1,8 @@
 {% extends "base.html" %}
 
 {% block extra_head %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/date-fns@2.30.0/index.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <style>
     .stock-card {
         transition: transform 0.2s;
@@ -505,7 +504,8 @@ function updatePerformanceChart(data) {
     
     // Small delay to ensure cleanup is complete
     setTimeout(() => {
-        performanceChart = new Chart(ctx, {
+        try {
+            performanceChart = new Chart(ctx, {
         type: 'line',
         data: {
             labels: labels,
@@ -603,7 +603,15 @@ function updatePerformanceChart(data) {
                     }
                 }
             }
-        });
+            });
+        } catch (error) {
+            console.error('Error creating chart:', error);
+            const ctx = document.getElementById('performance-chart').getContext('2d');
+            ctx.font = '16px Arial';
+            ctx.fillStyle = '#dc3545';
+            ctx.textAlign = 'center';
+            ctx.fillText('Error rendering chart', ctx.canvas.width / 2, ctx.canvas.height / 2);
+        }
     }, 50); // 50ms delay to ensure cleanup
     
     } catch (error) {
