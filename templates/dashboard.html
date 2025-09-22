@@ -436,11 +436,11 @@ function updatePerformanceDisplay(data) {
     const portfolioReturn = document.getElementById('portfolio-return');
     const sp500Return = document.getElementById('sp500-return');
     
-    portfolioReturn.textContent = `${data.portfolio_return >= 0 ? '+' : ''}${data.portfolio_return}%`;
-    portfolioReturn.className = `h5 mb-0 ${data.portfolio_return >= 0 ? 'text-success' : 'text-danger'}`;
+    portfolioReturn.textContent = (data.portfolio_return >= 0 ? '+' : '') + data.portfolio_return + '%';
+    portfolioReturn.className = 'h5 mb-0 ' + (data.portfolio_return >= 0 ? 'text-success' : 'text-danger');
     
-    sp500Return.textContent = `${data.sp500_return >= 0 ? '+' : ''}${data.sp500_return}%`;
-    sp500Return.className = `h5 mb-0 ${data.sp500_return >= 0 ? 'text-success' : 'text-danger'}`;
+    sp500Return.textContent = (data.sp500_return >= 0 ? '+' : '') + data.sp500_return + '%';
+    sp500Return.className = 'h5 mb-0 ' + (data.sp500_return >= 0 ? 'text-success' : 'text-danger');
 }
 
 function updatePerformanceChart(data) {
@@ -557,7 +557,7 @@ function updatePerformanceChart(data) {
                 tooltip: {
                     callbacks: {
                         label: function(context) {
-                            return `${context.dataset.label}: ${context.parsed.y >= 0 ? '+' : ''}${context.parsed.y.toFixed(2)}%`;
+                            return context.dataset.label + ': ' + (context.parsed.y >= 0 ? '+' : '') + context.parsed.y.toFixed(2) + '%';
                         }
                     }
                 }
@@ -591,7 +591,7 @@ function updatePerformanceChart(data) {
                     },
                     ticks: {
                         callback: function(value) {
-                            return `${value >= 0 ? '+' : ''}${value}%`;
+                            return (value >= 0 ? '+' : '') + value + '%';
                         }
                     },
                     grid: {
