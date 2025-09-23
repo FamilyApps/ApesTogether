@@ -206,7 +206,13 @@ def get_user_portfolio_data(user_id: int, period: str):
                 total_snapshots = PortfolioSnapshotIntraday.query.filter_by(user_id=user_id).count()
                 logger.info(f"Total intraday snapshots for user {user_id}: {total_snapshots}")
             
-            return [(s.timestamp, s.total_value) for s in snapshots]
+            # For 5D charts, sample data more evenly to avoid clustering
+            if period == '5D' and len(snapshots) > 20:
+                sampled_snapshots = sample_intraday_data_for_5d(snapshots)
+                logger.info(f"Sampled {len(snapshots)} snapshots down to {len(sampled_snapshots)} for smoother 5D chart")
+                return [(s.timestamp, s.total_value) for s in sampled_snapshots]
+            else:
+                return [(s.timestamp, s.total_value) for s in snapshots]
         else:
             # Use daily snapshots for longer periods
             calculator = PortfolioPerformanceCalculator()
@@ -226,6 +232,45 @@ def get_user_portfolio_data(user_id: int, period: str):
     except Exception as e:
         logger.error(f"Error getting user portfolio data: {str(e)}")
         return []
+
+
+def sample_intraday_data_for_5d(snapshots):
+    """Sample intraday data to create smoother 5D charts with evenly distributed points"""
+    from collections import defaultdict
+    
+    # Group snapshots by day
+    daily_snapshots = defaultdict(list)
+    for snapshot in snapshots:
+        day_key = snapshot.timestamp.date()
+        daily_snapshots[day_key].append(snapshot)
+    
+    sampled_snapshots = []
+    
+    # For each day, take key snapshots: market open, mid-day, market close
+    for day, day_snapshots in daily_snapshots.items():
+        if not day_snapshots:
+            continue
+            
+        # Sort by time
+        day_snapshots.sort(key=lambda s: s.timestamp)
+        
+        # Take market open (first), mid-day (middle), and market close (last)
+        if len(day_snapshots) == 1:
+            sampled_snapshots.extend(day_snapshots)
+        elif len(day_snapshots) == 2:
+            sampled_snapshots.extend(day_snapshots)
+        elif len(day_snapshots) >= 3:
+            # Take first, middle, and last
+            mid_index = len(day_snapshots) // 2
+            sampled_snapshots.extend([
+                day_snapshots[0],      # Market open
+                day_snapshots[mid_index],  # Mid-day
+                day_snapshots[-1]      # Market close
+            ])
+    
+    # Sort by timestamp
+    sampled_snapshots.sort(key=lambda s: s.timestamp)
+    return sampled_snapshots
 
 
 def combine_chart_data(sp500_chart, portfolio_data, period):

@@ -6036,7 +6036,9 @@ def get_portfolio_performance(period):
         import json
         
         user_id = session.get('user_id')
+        logger.info(f"Performance API called for period {period}, user_id in session: {user_id}")
         if not user_id:
+            logger.warning(f"No user_id in session for performance API. Session keys: {list(session.keys())}")
             return jsonify({'error': 'User not authenticated'}), 401
         
         period_upper = period.upper()

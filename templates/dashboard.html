@@ -619,6 +619,7 @@ function updatePerformanceChart(data) {
                             },
                             time: {
                                 unit: currentPeriod === '1D' ? 'hour' : (currentPeriod === '5D' ? 'day' : 'day'),
+                                stepSize: currentPeriod === '5D' ? 1 : undefined,
                                 displayFormats: {
                                     hour: 'h:mm a',
                                     day: currentPeriod === '5D' ? 'ddd' : 'MMM dd',
@@ -630,7 +631,8 @@ function updatePerformanceChart(data) {
                             ticks: {
                                 maxTicksLimit: currentPeriod === '1D' ? 8 : (currentPeriod === '5D' ? 5 : 10),
                                 maxRotation: 45,
-                                minRotation: 0
+                                minRotation: 0,
+                                source: currentPeriod === '5D' ? 'labels' : 'auto'
                             }
                         },
                         y: {
