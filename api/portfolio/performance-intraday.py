@@ -1,6 +1,7 @@
 """
 Portfolio performance API with intraday data support.
 Combines pre-generated S&P 500 charts with user portfolio overlays.
+Updated: 2025-09-22 - Fixed 5D chart distribution
 """
 import json
 from datetime import datetime, timedelta, date
