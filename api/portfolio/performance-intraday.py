@@ -206,13 +206,8 @@ def get_user_portfolio_data(user_id: int, period: str):
                 total_snapshots = PortfolioSnapshotIntraday.query.filter_by(user_id=user_id).count()
                 logger.info(f"Total intraday snapshots for user {user_id}: {total_snapshots}")
             
-            # For 5D charts, sample data more evenly to avoid clustering
-            if period == '5D' and len(snapshots) > 20:
-                sampled_snapshots = sample_intraday_data_for_5d(snapshots)
-                logger.info(f"Sampled {len(snapshots)} snapshots down to {len(sampled_snapshots)} for smoother 5D chart")
-                return [(s.timestamp, s.total_value) for s in sampled_snapshots]
-            else:
-                return [(s.timestamp, s.total_value) for s in snapshots]
+            # Keep all snapshots - Chart.js will handle the distribution
+            return [(s.timestamp, s.total_value) for s in snapshots]
         else:
             # Use daily snapshots for longer periods
             calculator = PortfolioPerformanceCalculator()

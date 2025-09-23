@@ -618,21 +618,19 @@ function updatePerformanceChart(data) {
                                 text: currentPeriod === '1D' ? 'Time' : 'Date'
                             },
                             time: {
-                                unit: currentPeriod === '1D' ? 'hour' : (currentPeriod === '5D' ? 'day' : 'day'),
-                                stepSize: currentPeriod === '5D' ? 1 : undefined,
+                                unit: currentPeriod === '1D' ? 'hour' : (currentPeriod === '5D' ? 'hour' : 'day'),
                                 displayFormats: {
-                                    hour: 'h:mm a',
-                                    day: currentPeriod === '5D' ? 'ddd' : 'MMM dd',
+                                    hour: currentPeriod === '5D' ? 'ddd h a' : 'h:mm a',
+                                    day: 'MMM dd',
                                     week: 'MMM dd',
                                     month: 'MMM yyyy'
                                 },
-                                tooltipFormat: currentPeriod === '1D' ? 'h:mm a' : 'MMM dd, yyyy'
+                                tooltipFormat: currentPeriod === '1D' ? 'h:mm a' : 'ddd MMM dd, h:mm a'
                             },
                             ticks: {
-                                maxTicksLimit: currentPeriod === '1D' ? 8 : (currentPeriod === '5D' ? 5 : 10),
+                                maxTicksLimit: currentPeriod === '1D' ? 8 : (currentPeriod === '5D' ? 10 : 10),
                                 maxRotation: 45,
-                                minRotation: 0,
-                                source: currentPeriod === '5D' ? 'labels' : 'auto'
+                                minRotation: 0
                             }
                         },
                         y: {
