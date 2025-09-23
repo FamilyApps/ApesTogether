@@ -9620,6 +9620,84 @@ def snapshot_diagnostics():
         <p><a href="/admin">Back to Admin</a></p>
         """
 
+@app.route('/api/debug/intraday-snapshots')
+def debug_intraday_snapshots():
+    """Debug endpoint to check actual intraday snapshot data"""
+    try:
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'User not authenticated'}), 401
+        
+        from datetime import datetime, date, timedelta
+        from models import PortfolioSnapshotIntraday
+        
+        # Get today's snapshots
+        today = date.today()
+        today_snapshots = PortfolioSnapshotIntraday.query.filter(
+            PortfolioSnapshotIntraday.user_id == user_id,
+            PortfolioSnapshotIntraday.timestamp >= datetime.combine(today, datetime.min.time()),
+            PortfolioSnapshotIntraday.timestamp < datetime.combine(today, datetime.min.time()) + timedelta(days=1)
+        ).order_by(PortfolioSnapshotIntraday.timestamp).all()
+        
+        # Get last 5 days of snapshots for comparison
+        five_days_ago = today - timedelta(days=5)
+        recent_snapshots = PortfolioSnapshotIntraday.query.filter(
+            PortfolioSnapshotIntraday.user_id == user_id,
+            PortfolioSnapshotIntraday.timestamp >= datetime.combine(five_days_ago, datetime.min.time())
+        ).order_by(PortfolioSnapshotIntraday.timestamp).all()
+        
+        # Analyze the data
+        today_data = []
+        for snapshot in today_snapshots:
+            today_data.append({
+                'timestamp': snapshot.timestamp.isoformat(),
+                'time': snapshot.timestamp.strftime('%H:%M'),
+                'total_value': snapshot.total_value
+            })
+        
+        # Group by day for analysis
+        from collections import defaultdict
+        daily_analysis = defaultdict(list)
+        for snapshot in recent_snapshots:
+            day_key = snapshot.timestamp.date().isoformat()
+            daily_analysis[day_key].append({
+                'time': snapshot.timestamp.strftime('%H:%M'),
+                'value': snapshot.total_value
+            })
+        
+        # Check for identical values within each day
+        daily_summary = {}
+        for day, snapshots in daily_analysis.items():
+            values = [s['value'] for s in snapshots]
+            unique_values = list(set(values))
+            daily_summary[day] = {
+                'snapshot_count': len(snapshots),
+                'unique_values': len(unique_values),
+                'all_identical': len(unique_values) == 1,
+                'value_range': {
+                    'min': min(values) if values else 0,
+                    'max': max(values) if values else 0
+                },
+                'sample_snapshots': snapshots[:5]  # First 5 snapshots
+            }
+        
+        return jsonify({
+            'user_id': user_id,
+            'today': today.isoformat(),
+            'today_snapshots': today_data,
+            'daily_analysis': daily_summary,
+            'total_recent_snapshots': len(recent_snapshots),
+            'diagnosis': {
+                'today_has_data': len(today_data) > 0,
+                'today_all_identical': len(set([s['total_value'] for s in today_data])) <= 1 if today_data else True,
+                'market_is_open': datetime.now().weekday() < 5 and 9 <= datetime.now().hour <= 16
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in debug intraday snapshots: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/portfolio/performance-intraday/<period>')
 def portfolio_performance_intraday(period):
     """Get intraday portfolio performance data using actual intraday snapshots"""
