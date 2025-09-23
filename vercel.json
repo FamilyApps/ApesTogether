@@ -1,32 +1,17 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "api/vercel.py",
-      "use": "@vercel/python",
-      "config": { 
-        "maxLambdaSize": "50mb"
-      }
-    },
-    {
-      "src": "static/**",
-      "use": "@vercel/static"
+  "functions": {
+    "api/vercel.py": {
+      "maxDuration": 30
     }
-  ],
-  "routes": [
+  },
+  "rewrites": [
     {
-      "src": "/favicon.png",
-      "dest": "/static/favicon.png",
-      "headers": { "cache-control": "public, max-age=86400" }
+      "source": "/static/(.*)",
+      "destination": "/static/$1"
     },
     {
-      "src": "/static/(.*)",
-      "dest": "/static/$1",
-      "headers": { "cache-control": "public, max-age=86400" }
-    },
-    {
-      "src": "/(.*)",
-      "dest": "api/vercel.py"
+      "source": "/(.*)",
+      "destination": "/api/vercel.py"
     }
   ],
   "crons": [
