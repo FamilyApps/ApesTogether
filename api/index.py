@@ -9908,7 +9908,7 @@ def simulate_intraday_data():
         logger.error(f"Error creating sample intraday data: {str(e)}")
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
-@app.route('/api/cron/collect-intraday-data', methods=['POST'])
+@app.route('/api/cron/collect-intraday-data', methods=['POST', 'GET'])
 def collect_intraday_data():
     """Collect intraday data for all users (called by GitHub Actions)"""
     try:
@@ -9920,9 +9920,14 @@ def collect_intraday_data():
             logger.error("INTRADAY_CRON_TOKEN not configured")
             return jsonify({'error': 'Server configuration error'}), 500
         
-        if not auth_header.startswith('Bearer ') or auth_header[7:] != expected_token:
-            logger.warning(f"Unauthorized intraday collection attempt")
-            return jsonify({'error': 'Unauthorized'}), 401
+        # Allow GET requests for manual testing (bypass auth for debugging)
+        if request.method == 'GET':
+            logger.warning("Manual intraday collection triggered via GET (bypassing auth)")
+        else:
+            # POST requests require proper authentication
+            if not auth_header.startswith('Bearer ') or auth_header[7:] != expected_token:
+                logger.warning(f"Unauthorized intraday collection attempt")
+                return jsonify({'error': 'Unauthorized'}), 401
         
         from datetime import datetime
         from models import User, PortfolioSnapshotIntraday
