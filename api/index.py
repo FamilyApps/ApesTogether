@@ -8102,6 +8102,38 @@ def create_tables():
         logger.error(f"Unexpected error in market close: {str(e)}")
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
+@app.route('/admin/test-market-close')
+@login_required  
+def test_market_close():
+    """Admin endpoint to manually trigger market close for testing"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        flash('Admin access required', 'danger')
+        return redirect(url_for('login'))
+    
+    try:
+        # Call the market close endpoint internally
+        import requests
+        import os
+        
+        token = os.environ.get('MARKET_CLOSE_TOKEN', 'test-token')
+        url = "https://apestogether.ai/api/cron/market-close"
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json'
+        }
+        
+        response = requests.post(url, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            flash('Market close test successful!', 'success')
+        else:
+            flash(f'Market close test failed: {response.status_code} - {response.text}', 'danger')
+            
+    except Exception as e:
+        flash(f'Error testing market close: {str(e)}', 'danger')
+    
+    return redirect(url_for('admin_dashboard'))
+
 @app.route('/admin/manual-intraday-collection')
 @login_required  
 def manual_intraday_collection():
