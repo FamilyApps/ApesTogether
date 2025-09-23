@@ -91,7 +91,8 @@ def handler(request):
                 }
                 
                 try:
-                    # Calculate current portfolio value
+                    # Calculate current portfolio value (respects 90-second cache for efficiency)
+                    # Cache prevents redundant API calls while still getting reasonably fresh prices
                     portfolio_value = calculator.calculate_portfolio_value(user.id)
                     user_result['portfolio_value'] = portfolio_value
                     
