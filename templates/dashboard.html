@@ -618,9 +618,12 @@ function updatePerformanceChart(data) {
                                 text: currentPeriod === '1D' ? 'Time' : 'Date'
                             },
                             time: {
+                                unit: currentPeriod === '1D' ? 'hour' : (currentPeriod === '5D' ? 'day' : 'day'),
                                 displayFormats: {
                                     hour: 'h:mm a',
-                                    day: 'MMM dd'
+                                    day: currentPeriod === '5D' ? 'ddd' : 'MMM dd',
+                                    week: 'MMM dd',
+                                    month: 'MMM yyyy'
                                 },
                                 tooltipFormat: currentPeriod === '1D' ? 'h:mm a' : 'MMM dd, yyyy'
                             },

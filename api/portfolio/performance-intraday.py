@@ -120,27 +120,65 @@ def generate_sp500_chart_fallback(period: str):
         return None
 
 
+def get_last_market_day_end():
+    """Get the end time (4 PM ET) of the last market day"""
+    now = datetime.now()
+    
+    # If it's Saturday (5) or Sunday (6), go back to Friday
+    if now.weekday() == 5:  # Saturday
+        last_market_day = now - timedelta(days=1)  # Friday
+    elif now.weekday() == 6:  # Sunday
+        last_market_day = now - timedelta(days=2)  # Friday
+    else:
+        # Monday-Friday: if it's before 4 PM, use previous day; if after 4 PM, use today
+        if now.hour < 16:  # Before 4 PM
+            if now.weekday() == 0:  # Monday
+                last_market_day = now - timedelta(days=3)  # Previous Friday
+            else:
+                last_market_day = now - timedelta(days=1)  # Previous day
+        else:
+            last_market_day = now  # Today after market close
+    
+    # Set to 4 PM ET (market close)
+    return last_market_day.replace(hour=16, minute=0, second=0, microsecond=0)
+
+
 def get_user_portfolio_data(user_id: int, period: str):
     """Get user portfolio snapshots for the specified period"""
     try:
-        end_time = datetime.now()
-        
-        # Define period mappings
-        period_hours = {
-            '1D': 24,
-            '5D': 120,  # 5 days
-            '1M': 720,  # 30 days
-            '3M': 2160,  # 90 days
-            'YTD': None,  # Special handling
-            '1Y': 8760,  # 365 days
-            '5Y': 43800   # 5 years
-        }
-        
-        if period == 'YTD':
-            start_time = datetime(end_time.year, 1, 1)
+        # For 1D and 5D, use current time (market may be open today)
+        if period in ['1D', '5D']:
+            end_time = datetime.now()
+            if period == '1D':
+                # For 1D, show today if market day, otherwise last market day
+                if datetime.now().weekday() < 5:  # Monday-Friday
+                    start_time = end_time.replace(hour=9, minute=30, second=0, microsecond=0)  # Today's market open
+                else:
+                    # Weekend: use last Friday
+                    last_friday = get_last_market_day_end()
+                    start_time = last_friday.replace(hour=9, minute=30, second=0, microsecond=0)
+                    end_time = last_friday
+            else:
+                # For 5D, go back 5 market days
+                start_time = end_time - timedelta(days=7)  # Go back a week to catch 5 market days
         else:
-            hours_back = period_hours.get(period, 24)
-            start_time = end_time - timedelta(hours=hours_back)
+            # For longer periods, use current time
+            end_time = datetime.now()
+            
+            # Define period mappings
+            period_hours = {
+                '1M': 720,  # 30 days
+                '3M': 2160,  # 90 days
+                'YTD': None,  # Special handling
+                '1Y': 8760,  # 365 days
+                '5Y': 43800   # 5 years
+            }
+            
+            if period == 'YTD':
+                start_time = datetime(end_time.year, 1, 1)
+            else:
+                hours_back = period_hours.get(period, 24)
+                start_time = end_time - timedelta(hours=hours_back)
         
         # Get intraday snapshots for short periods, daily for longer periods
         if period in ['1D', '5D']:
@@ -154,6 +192,19 @@ def get_user_portfolio_data(user_id: int, period: str):
             if snapshots:
                 logger.info(f"Intraday snapshot range: {snapshots[0].timestamp} to {snapshots[-1].timestamp}")
                 logger.info(f"Sample values: {[s.total_value for s in snapshots[:3]]}")
+                
+                # Check if we have today's data specifically
+                today = datetime.now().date()
+                today_snapshots = [s for s in snapshots if s.timestamp.date() == today]
+                logger.info(f"Snapshots for today ({today}): {len(today_snapshots)}")
+                if today_snapshots:
+                    logger.info(f"Today's snapshot times: {[s.timestamp.strftime('%H:%M') for s in today_snapshots[:5]]}")
+            else:
+                logger.warning(f"No intraday snapshots found for user {user_id} in period {period}")
+                
+                # Check if ANY intraday snapshots exist for this user
+                total_snapshots = PortfolioSnapshotIntraday.query.filter_by(user_id=user_id).count()
+                logger.info(f"Total intraday snapshots for user {user_id}: {total_snapshots}")
             
             return [(s.timestamp, s.total_value) for s in snapshots]
         else:
