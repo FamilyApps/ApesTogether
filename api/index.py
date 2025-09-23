@@ -6027,7 +6027,6 @@ def populate_stock_info():
 
 # Portfolio performance API endpoints
 @app.route('/api/portfolio/performance/<period>')
-@login_required
 def get_portfolio_performance(period):
     """Get portfolio performance data for a specific time period - uses cached data for leaderboard users"""
     try:
@@ -9620,11 +9619,12 @@ def snapshot_diagnostics():
         """
 
 @app.route('/api/portfolio/performance-intraday/<period>')
-@login_required
 def portfolio_performance_intraday(period):
     """Get intraday portfolio performance data using actual intraday snapshots"""
     try:
-        user_id = current_user.id
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'User not authenticated'}), 401
         
         from datetime import datetime, date, timedelta
         from models import PortfolioSnapshotIntraday, MarketData
