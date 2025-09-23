@@ -8102,6 +8102,65 @@ def create_tables():
         logger.error(f"Unexpected error in market close: {str(e)}")
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
+@app.route('/admin/manual-intraday-collection')
+@login_required  
+def manual_intraday_collection():
+    """Admin endpoint to manually trigger intraday collection"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        flash('Admin access required', 'danger')
+        return redirect(url_for('login'))
+    
+    try:
+        from datetime import datetime
+        from models import User, PortfolioSnapshotIntraday
+        from portfolio_performance import PortfolioPerformanceCalculator
+        
+        calculator = PortfolioPerformanceCalculator()
+        current_time = datetime.now()
+        
+        # Get all users with portfolios
+        users = User.query.all()
+        results = {
+            'timestamp': current_time.isoformat(),
+            'snapshots_created': 0,
+            'users_processed': 0,
+            'errors': []
+        }
+        
+        for user in users:
+            try:
+                # Calculate current portfolio value
+                portfolio_value = calculator.calculate_portfolio_value(user.id)
+                
+                if portfolio_value > 0:  # Only create snapshots for users with portfolios
+                    # Create intraday snapshot
+                    snapshot = PortfolioSnapshotIntraday(
+                        user_id=user.id,
+                        timestamp=current_time,
+                        total_value=portfolio_value
+                    )
+                    db.session.add(snapshot)
+                    results['snapshots_created'] += 1
+                    
+                results['users_processed'] += 1
+                
+            except Exception as e:
+                error_msg = f"Error processing user {user.id}: {str(e)}"
+                logger.error(error_msg)
+                results['errors'].append(error_msg)
+        
+        # Commit all snapshots
+        db.session.commit()
+        
+        flash(f'Manual intraday collection completed: {results["snapshots_created"]} snapshots created for {results["users_processed"]} users', 'success')
+        return redirect(url_for('admin_dashboard'))
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error in manual intraday collection: {str(e)}")
+        flash(f'Error in manual collection: {str(e)}', 'danger')
+        return redirect(url_for('admin_dashboard'))
+
 @app.route('/admin/test-intraday-collection')
 @login_required
 def test_intraday_collection():
