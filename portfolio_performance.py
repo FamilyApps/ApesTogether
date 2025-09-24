@@ -544,42 +544,95 @@ class PortfolioPerformanceCalculator:
             current_date += timedelta(days=1)
     
     def get_intraday_performance_data(self, user_id: int, start_date: date, end_date: date) -> Dict:
-        """Get performance data for 1D charts - shows only today's data"""
-        # Use only today's date for 1D charts
+        """Get performance data for 1D charts - shows intraday snapshots from today"""
+        from models import PortfolioSnapshotIntraday
+        
         today = date.today()
         
-        # Ensure we have snapshots for today
-        self.ensure_snapshots_exist(user_id, today, today)
-        
-        # Calculate portfolio return for today only
-        portfolio_return = self.calculate_modified_dietz_return(user_id, today, today)
-        
-        # Calculate S&P 500 return for today only
-        sp500_return = self.calculate_sp500_return(today, today)
-        
-        # Get portfolio snapshot for today only
-        snapshot = PortfolioSnapshot.query.filter(
+        # Get all intraday snapshots for today
+        intraday_snapshots = PortfolioSnapshotIntraday.query.filter(
             and_(
-                PortfolioSnapshot.user_id == user_id,
-                PortfolioSnapshot.date == today
+                PortfolioSnapshotIntraday.user_id == user_id,
+                func.date(PortfolioSnapshotIntraday.timestamp) == today
             )
-        ).first()
+        ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
         
-        # Get S&P 500 data for today only
-        sp500_data = self.get_cached_sp500_data(today, today)
+        logger.info(f"Found {len(intraday_snapshots)} intraday snapshots for user {user_id} on {today}")
         
+        # If no intraday snapshots, ensure we have at least EOD snapshot
+        if not intraday_snapshots:
+            self.ensure_snapshots_exist(user_id, today, today)
+            # Try to get EOD snapshot as fallback
+            eod_snapshot = PortfolioSnapshot.query.filter(
+                and_(
+                    PortfolioSnapshot.user_id == user_id,
+                    PortfolioSnapshot.date == today
+                )
+            ).first()
+            
+            if eod_snapshot:
+                # Calculate single point performance
+                portfolio_return = self.calculate_modified_dietz_return(user_id, today, today)
+                sp500_return = self.calculate_sp500_return(today, today)
+                
+                chart_data = [{
+                    'date': today.isoformat(),
+                    'portfolio': round(portfolio_return * 100, 2),
+                    'sp500': round(sp500_return * 100, 2)
+                }]
+                
+                return {
+                    'portfolio_return': round(portfolio_return * 100, 2),
+                    'sp500_return': round(sp500_return * 100, 2),
+                    'chart_data': chart_data,
+                    'period': '1D',
+                    'start_date': today.isoformat(),
+                    'end_date': today.isoformat()
+                }
+        
+        # Process intraday snapshots for chart
         chart_data = []
-        if snapshot and sp500_data:
-            # For 1D, show single point (today's performance)
+        portfolio_start_value = None
+        sp500_start_value = None
+        
+        # Get S&P 500 data for today
+        sp500_data = self.get_cached_sp500_data(today, today)
+        if sp500_data:
+            sp500_start_value = list(sp500_data.values())[0]
+        
+        # Get user's first snapshot to calculate percentage returns
+        if intraday_snapshots:
+            portfolio_start_value = intraday_snapshots[0].total_value
+        
+        for snapshot in intraday_snapshots:
+            # Calculate portfolio percentage return from start of day
+            portfolio_pct = 0.0
+            if portfolio_start_value and portfolio_start_value > 0:
+                portfolio_pct = ((snapshot.total_value - portfolio_start_value) / portfolio_start_value) * 100
+            
+            # Calculate S&P 500 percentage return (use same value for intraday - we collect SPY once per collection)
+            sp500_pct = 0.0
+            if sp500_start_value and sp500_data:
+                current_sp500 = list(sp500_data.values())[0]  # Use today's SPY value
+                sp500_pct = ((current_sp500 - sp500_start_value) / sp500_start_value) * 100
+            
             chart_data.append({
-                'date': today.isoformat(),
-                'portfolio': round(portfolio_return * 100, 2),
-                'sp500': round(sp500_return * 100, 2)
+                'date': snapshot.timestamp.isoformat(),
+                'portfolio': round(portfolio_pct, 2),
+                'sp500': round(sp500_pct, 2)
             })
         
+        # Calculate overall returns for display
+        portfolio_return = 0.0
+        sp500_return = 0.0
+        
+        if chart_data:
+            portfolio_return = chart_data[-1]['portfolio']  # Last data point
+            sp500_return = chart_data[-1]['sp500']
+        
         return {
-            'portfolio_return': round(portfolio_return * 100, 2),
-            'sp500_return': round(sp500_return * 100, 2),
+            'portfolio_return': portfolio_return,
+            'sp500_return': sp500_return,
             'chart_data': chart_data,
             'period': '1D',
             'start_date': today.isoformat(),
