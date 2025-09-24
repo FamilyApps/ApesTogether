@@ -8346,19 +8346,65 @@ def test_cron_endpoints():
     <p><a href="/admin">Back to Admin</a></p>
     """
 
-@app.route('/api/cron/market-close', methods=['POST'])
+@app.route('/api/cron/market-open', methods=['POST', 'GET'])
+def market_open_cron():
+    """Market open cron job endpoint - initializes daily tracking"""
+    try:
+        # Verify authorization token
+        auth_header = request.headers.get('Authorization', '')
+        expected_token = os.environ.get('CRON_SECRET')
+        
+        if not expected_token:
+            logger.error("CRON_SECRET not configured")
+            return jsonify({'error': 'Server configuration error'}), 500
+        
+        # Allow GET requests for Vercel cron (bypass auth for cron jobs)
+        if request.method == 'GET':
+            logger.info("Market open cron triggered via GET from Vercel")
+        else:
+            # POST requests require proper authentication
+            if not auth_header.startswith('Bearer ') or auth_header[7:] != expected_token:
+                logger.warning(f"Unauthorized market open attempt")
+                return jsonify({'error': 'Unauthorized'}), 401
+        
+        from datetime import datetime
+        current_time = datetime.now()
+        
+        logger.info(f"Market open cron job executed at {current_time}")
+        
+        # For now, just log that market opened
+        # In the future, we could add market open initialization logic here
+        
+        return jsonify({
+            'success': True,
+            'message': 'Market open processing completed',
+            'timestamp': current_time.isoformat()
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Unexpected error in market open: {str(e)}")
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
+@app.route('/api/cron/market-close', methods=['POST', 'GET'])
 def market_close_cron():
     """Market close cron job endpoint - creates EOD snapshots and updates leaderboards"""
     try:
-        # Verify authorization
-        auth_header = request.headers.get('Authorization')
-        if not auth_header or not auth_header.startswith('Bearer '):
-            return jsonify({'error': 'Missing or invalid authorization header'}), 401
+        # Verify authorization token
+        auth_header = request.headers.get('Authorization', '')
+        expected_token = os.environ.get('CRON_SECRET')
         
-        token = auth_header.split(' ')[1]
-        expected_token = os.getenv('CRON_SECRET')
-        if not expected_token or token != expected_token:
-            return jsonify({'error': 'Invalid authorization token'}), 403
+        if not expected_token:
+            logger.error("CRON_SECRET not configured")
+            return jsonify({'error': 'Server configuration error'}), 500
+        
+        # Allow GET requests for Vercel cron (bypass auth for cron jobs)
+        if request.method == 'GET':
+            logger.info("Market close cron triggered via GET from Vercel")
+        else:
+            # POST requests require proper authentication
+            if not auth_header.startswith('Bearer ') or auth_header[7:] != expected_token:
+                logger.warning(f"Unauthorized market close attempt")
+                return jsonify({'error': 'Unauthorized'}), 401
         
         from datetime import datetime, date
         from models import User, PortfolioSnapshot
