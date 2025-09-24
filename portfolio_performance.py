@@ -431,6 +431,25 @@ class PortfolioPerformanceCalculator:
         else:
             return dates
     
+    def _filter_business_days(self, chart_data: List[dict]) -> List[dict]:
+        """Filter out weekend data points for cleaner chart visualization"""
+        if not chart_data:
+            return chart_data
+        
+        business_days_data = []
+        for item in chart_data:
+            try:
+                # Parse the date string to check day of week
+                item_date = datetime.strptime(item['date'], '%Y-%m-%d').date()
+                # Monday=0, Sunday=6. Keep Monday-Friday (0-4)
+                if item_date.weekday() < 5:
+                    business_days_data.append(item)
+            except (ValueError, KeyError):
+                # If date parsing fails, keep the item
+                business_days_data.append(item)
+        
+        return business_days_data
+    
     def calculate_sp500_return(self, start_date: date, end_date: date) -> float:
         """Calculate S&P 500 return for a period"""
         sp500_data = self.get_sp500_data(start_date, end_date)
@@ -725,6 +744,9 @@ class PortfolioPerformanceCalculator:
                             'portfolio': 0,  # No portfolio data available
                             'sp500': round(sp500_pct, 2)
                         })
+        
+        # Filter out weekends from chart data for cleaner visualization
+        chart_data = self._filter_business_days(chart_data)
         
         return {
             'portfolio_return': round(portfolio_return * 100, 2),
