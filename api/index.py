@@ -3440,6 +3440,8 @@ def admin_detailed_intraday_debug():
         
         debug_report = {
             'timestamp': datetime.now().isoformat(),
+            'current_time_et': datetime.now().strftime('%Y-%m-%d %H:%M:%S ET'),
+            'market_status': 'CLOSED' if datetime.now().hour >= 16 else 'OPEN',
             'test_type': 'comprehensive_intraday_debug',
             'steps': {
                 'step_1_unique_stocks': {},
@@ -3695,12 +3697,12 @@ def admin_detailed_intraday_debug():
                     chart_prerendering_results[user.username] = {
                         '1D_chart': {
                             'existing_cache': existing_1d_cache is not None,
-                            'cache_timestamp': existing_1d_cache.created_at.isoformat() if existing_1d_cache else None,
+                            'cache_timestamp': existing_1d_cache.generated_at.isoformat() if existing_1d_cache else None,
                             'would_regenerate': True  # Since we added new data
                         },
                         '5D_chart': {
                             'existing_cache': existing_5d_cache is not None,
-                            'cache_timestamp': existing_5d_cache.created_at.isoformat() if existing_5d_cache else None,
+                            'cache_timestamp': existing_5d_cache.generated_at.isoformat() if existing_5d_cache else None,
                             'would_regenerate': True  # Since we added new data
                         }
                     }
@@ -3726,6 +3728,87 @@ def admin_detailed_intraday_debug():
         except Exception as e:
             db.session.rollback()
             debug_report['database_commit'] = f'failed: {str(e)}'
+        
+        # INVESTIGATE: What triggered the recent API calls at 5:33 PM?
+        debug_report['api_call_investigation'] = {
+            'description': 'Investigating what triggered API calls after market close'
+        }
+        try:
+            from datetime import timedelta
+            
+            # Look for API calls in the last 10 minutes
+            recent_cutoff = current_time - timedelta(minutes=10)
+            recent_api_calls = AlphaVantageAPILog.query.filter(
+                AlphaVantageAPILog.timestamp >= recent_cutoff
+            ).order_by(AlphaVantageAPILog.timestamp.desc()).all()
+            
+            # Group by minute to see patterns
+            api_calls_by_minute = {}
+            for call in recent_api_calls:
+                minute_key = call.timestamp.strftime('%H:%M')
+                if minute_key not in api_calls_by_minute:
+                    api_calls_by_minute[minute_key] = []
+                api_calls_by_minute[minute_key].append({
+                    'symbol': call.symbol,
+                    'status': call.response_status,
+                    'timestamp': call.timestamp.strftime('%H:%M:%S'),
+                    'endpoint': call.endpoint
+                })
+            
+            # Check if there are any recent intraday snapshots that might indicate what triggered this
+            recent_snapshots = PortfolioSnapshotIntraday.query.filter(
+                PortfolioSnapshotIntraday.timestamp >= recent_cutoff
+            ).order_by(PortfolioSnapshotIntraday.timestamp.desc()).all()
+            
+            # Check for any recent chart cache updates
+            recent_chart_cache = UserPortfolioChartCache.query.filter(
+                UserPortfolioChartCache.generated_at >= recent_cutoff
+            ).order_by(UserPortfolioChartCache.generated_at.desc()).all()
+            
+            debug_report['api_call_investigation']['results'] = {
+                'recent_api_calls_count': len(recent_api_calls),
+                'api_calls_by_minute': api_calls_by_minute,
+                'recent_snapshots_created': [
+                    {
+                        'user_id': snap.user_id,
+                        'timestamp': snap.timestamp.strftime('%H:%M:%S'),
+                        'total_value': snap.total_value
+                    } for snap in recent_snapshots
+                ],
+                'recent_chart_cache_updates': [
+                    {
+                        'user_id': cache.user_id,
+                        'period': cache.period,
+                        'generated_at': cache.generated_at.strftime('%H:%M:%S')
+                    } for cache in recent_chart_cache
+                ],
+                'possible_triggers': []
+            }
+            
+            # Analyze possible triggers
+            if len(recent_api_calls) == 22:  # All stocks fetched
+                debug_report['api_call_investigation']['results']['possible_triggers'].append(
+                    "🎯 FULL STOCK REFRESH - All 22 stocks fetched simultaneously (likely admin dashboard or user portfolio view)"
+                )
+            
+            if recent_snapshots:
+                debug_report['api_call_investigation']['results']['possible_triggers'].append(
+                    f"📊 INTRADAY SNAPSHOTS - {len(recent_snapshots)} snapshots created (suggests cron job or manual collection)"
+                )
+            
+            if recent_chart_cache:
+                debug_report['api_call_investigation']['results']['possible_triggers'].append(
+                    f"📈 CHART CACHE UPDATES - {len(recent_chart_cache)} charts regenerated"
+                )
+            
+            # Check if this matches admin dashboard access pattern
+            if len(recent_api_calls) == 22 and not recent_snapshots:
+                debug_report['api_call_investigation']['results']['possible_triggers'].append(
+                    "🔍 LIKELY CAUSE: Admin dashboard access - fetched all stock prices for display but didn't create snapshots"
+                )
+            
+        except Exception as e:
+            debug_report['api_call_investigation']['error'] = str(e)
         
         # Generate summary
         debug_report['summary'] = {
