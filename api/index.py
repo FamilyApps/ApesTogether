@@ -3158,6 +3158,53 @@ def admin_intraday_diagnostics():
             'current_et_time': datetime.now().strftime('%I:%M %p ET')
         }
         
+        # 7. Analyze snapshot value uniqueness and fluctuation
+        try:
+            snapshot_analysis = {}
+            for user_detail in diagnostics['user_analysis']['user_details']:
+                user_id = user_detail['id']
+                username = user_detail['username']
+                
+                # Get all today's snapshots for this user
+                user_snapshots = PortfolioSnapshotIntraday.query.filter(
+                    PortfolioSnapshotIntraday.user_id == user_id,
+                    func.date(PortfolioSnapshotIntraday.timestamp) == today
+                ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
+                
+                if user_snapshots:
+                    values = [s.total_value for s in user_snapshots]
+                    unique_values = list(set(values))
+                    
+                    snapshot_analysis[username] = {
+                        'total_snapshots': len(user_snapshots),
+                        'unique_values_count': len(unique_values),
+                        'value_range': {
+                            'min': min(values),
+                            'max': max(values),
+                            'difference': max(values) - min(values),
+                            'percentage_change': round(((max(values) - min(values)) / min(values)) * 100, 2) if min(values) > 0 else 0
+                        },
+                        'first_value': values[0],
+                        'last_value': values[-1],
+                        'all_same_value': len(unique_values) == 1,
+                        'sample_values': values[:5] + (['...'] if len(values) > 5 else []) + values[-3:] if len(values) > 8 else values,
+                        'timestamps': [s.timestamp.strftime('%H:%M:%S') for s in user_snapshots[:3]] + (['...'] if len(user_snapshots) > 6 else []) + [s.timestamp.strftime('%H:%M:%S') for s in user_snapshots[-3:]] if len(user_snapshots) > 6 else [s.timestamp.strftime('%H:%M:%S') for s in user_snapshots]
+                    }
+            
+            diagnostics['snapshot_value_analysis'] = snapshot_analysis
+            
+            # Generate recommendations based on value analysis
+            stale_users = [username for username, data in snapshot_analysis.items() if data['all_same_value']]
+            if stale_users:
+                diagnostics['recommendations'].append(f"⚠️ STALE DATA DETECTED - Users with identical values all day: {', '.join(stale_users)}")
+            
+            low_fluctuation_users = [username for username, data in snapshot_analysis.items() if data['value_range']['percentage_change'] < 0.1 and not data['all_same_value']]
+            if low_fluctuation_users:
+                diagnostics['recommendations'].append(f"📊 LOW FLUCTUATION - Users with <0.1% daily change: {', '.join(low_fluctuation_users)}")
+                
+        except Exception as e:
+            diagnostics['snapshot_value_analysis'] = {'error': str(e)}
+
         return f"""
         <h1>Intraday Data Collection Diagnostics</h1>
         <pre>{json.dumps(diagnostics, indent=2)}</pre>
