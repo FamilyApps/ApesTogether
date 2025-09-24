@@ -555,8 +555,11 @@ function updatePerformanceChart(data) {
         }));
         
         console.log('Chart data points sample:', {
+            useLinearScale,
+            currentPeriod,
             portfolio: portfolioDataPoints.slice(0, 3),
-            sp500: sp500DataPoints.slice(0, 3)
+            sp500: sp500DataPoints.slice(0, 3),
+            raw_data: data.chart_data.slice(0, 3)
         });
 
         try {
@@ -635,14 +638,14 @@ function updatePerformanceChart(data) {
                                 text: currentPeriod === '1D' ? 'Time' : 'Date'
                             },
                             time: useLinearScale ? undefined : {
-                                unit: currentPeriod === '1D' ? 'hour' : (currentPeriod === '5D' ? 'hour' : 'day'),
+                                unit: currentPeriod === '1D' ? 'hour' : (currentPeriod === '5D' ? 'day' : 'day'),
                                 displayFormats: {
-                                    hour: currentPeriod === '5D' ? 'ddd h a' : 'h:mm a',
-                                    day: 'MMM dd',
+                                    hour: 'h:mm a',
+                                    day: currentPeriod === '5D' ? 'ddd' : 'MMM dd',
                                     week: 'MMM dd',
                                     month: 'MMM yyyy'
                                 },
-                                tooltipFormat: currentPeriod === '1D' ? 'h:mm a' : 'ddd MMM dd, h:mm a'
+                                tooltipFormat: currentPeriod === '1D' ? 'h:mm a' : 'ddd MMM dd'
                             },
                             ticks: {
                                 maxTicksLimit: currentPeriod === '1D' ? 8 : (currentPeriod === '5D' ? 10 : 10),

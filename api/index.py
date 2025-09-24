@@ -10315,7 +10315,9 @@ def collect_intraday_data():
         from datetime import datetime
         from models import User, PortfolioSnapshotIntraday
         from portfolio_performance import PortfolioPerformanceCalculator
+        import time
         
+        start_time = time.time()
         calculator = PortfolioPerformanceCalculator()
         current_time = datetime.now()
         
@@ -10325,7 +10327,8 @@ def collect_intraday_data():
             'users_processed': 0,
             'snapshots_created': 0,
             'charts_generated': 0,
-            'errors': []
+            'errors': [],
+            'execution_time_seconds': 0
         }
         
         # Step 1: Collect SPY data
@@ -10361,19 +10364,23 @@ def collect_intraday_data():
         # Check if this is the 4:00 PM collection (market close)
         is_market_close = current_time.hour == 16 and current_time.minute == 0  # 4:00 PM ET
         
+        # Batch processing for better performance
+        intraday_snapshots = []
+        
         for user in users:
             try:
                 # Calculate current portfolio value
                 portfolio_value = calculator.calculate_portfolio_value(user.id)
                 
-                # Always create intraday snapshot
-                intraday_snapshot = PortfolioSnapshotIntraday(
-                    user_id=user.id,
-                    timestamp=current_time,
-                    total_value=portfolio_value
-                )
-                db.session.add(intraday_snapshot)
-                results['snapshots_created'] += 1
+                if portfolio_value > 0:  # Only create snapshots for users with portfolios
+                    # Create intraday snapshot (add to batch)
+                    intraday_snapshot = PortfolioSnapshotIntraday(
+                        user_id=user.id,
+                        timestamp=current_time,
+                        total_value=portfolio_value
+                    )
+                    intraday_snapshots.append(intraday_snapshot)
+                    results['snapshots_created'] += 1
                 
                 # If this is market close time, also create EOD snapshot
                 if is_market_close:
@@ -10417,8 +10424,12 @@ def collect_intraday_data():
                 results['errors'].append(error_msg)
                 logger.error(error_msg)
         
-        # Commit all snapshots
+        # Batch commit all intraday snapshots
         try:
+            if intraday_snapshots:
+                db.session.bulk_save_objects(intraday_snapshots)
+                logger.info(f"Batch saved {len(intraday_snapshots)} intraday snapshots")
+            
             db.session.commit()
             logger.info(f"Intraday collection completed: {results['snapshots_created']} snapshots created")
         except Exception as e:
@@ -10426,6 +10437,11 @@ def collect_intraday_data():
             error_msg = f"Database commit failed: {str(e)}"
             results['errors'].append(error_msg)
             logger.error(error_msg)
+        
+        # Add execution timing
+        execution_time = time.time() - start_time
+        results['execution_time_seconds'] = round(execution_time, 2)
+        logger.info(f"Intraday collection completed in {execution_time:.2f} seconds")
         
         return jsonify({
             'success': len(results['errors']) == 0,

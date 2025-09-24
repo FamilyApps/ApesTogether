@@ -621,13 +621,16 @@ class PortfolioPerformanceCalculator:
             
             # Calculate S&P 500 percentage return using matching intraday data
             sp500_pct = 0.0
-            if sp500_start_value and i < len(sp500_intraday_data):
-                current_sp500 = sp500_intraday_data[i].close_price
-                sp500_pct = ((current_sp500 - sp500_start_value) / sp500_start_value) * 100
-            elif sp500_start_value and sp500_intraday_data:
-                # Fallback to latest SPY data if we don't have matching timestamp
-                current_sp500 = sp500_intraday_data[-1].close_price
-                sp500_pct = ((current_sp500 - sp500_start_value) / sp500_start_value) * 100
+            if sp500_start_value and sp500_start_value > 0:
+                if i < len(sp500_intraday_data):
+                    current_sp500 = sp500_intraday_data[i].close_price
+                    sp500_pct = ((current_sp500 - sp500_start_value) / sp500_start_value) * 100
+                elif sp500_intraday_data:
+                    # Fallback to latest SPY data if we don't have matching timestamp
+                    current_sp500 = sp500_intraday_data[-1].close_price
+                    sp500_pct = ((current_sp500 - sp500_start_value) / sp500_start_value) * 100
+            
+            logger.debug(f"Snapshot {i}: Portfolio {portfolio_pct:.2f}%, S&P500 {sp500_pct:.2f}% (start: {sp500_start_value}, current: {sp500_intraday_data[i].close_price if i < len(sp500_intraday_data) else 'N/A'})")
             
             chart_data.append({
                 'date': snapshot.timestamp.isoformat(),
