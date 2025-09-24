@@ -436,18 +436,30 @@ class PortfolioPerformanceCalculator:
         if not chart_data:
             return chart_data
         
+        logger.info(f"WEEKEND FILTER: Processing {len(chart_data)} data points")
+        
         business_days_data = []
+        weekend_count = 0
+        
         for item in chart_data:
             try:
                 # Parse the date string to check day of week
                 item_date = datetime.strptime(item['date'], '%Y-%m-%d').date()
+                weekday = item_date.weekday()
+                
                 # Monday=0, Sunday=6. Keep Monday-Friday (0-4)
-                if item_date.weekday() < 5:
+                if weekday < 5:
                     business_days_data.append(item)
-            except (ValueError, KeyError):
+                else:
+                    weekend_count += 1
+                    logger.info(f"WEEKEND FILTER: Removing {item['date']} (weekday={weekday})")
+                    
+            except (ValueError, KeyError) as e:
                 # If date parsing fails, keep the item
+                logger.warning(f"WEEKEND FILTER: Date parsing failed for {item}: {e}")
                 business_days_data.append(item)
         
+        logger.info(f"WEEKEND FILTER: Kept {len(business_days_data)} business days, removed {weekend_count} weekends")
         return business_days_data
     
     def calculate_sp500_return(self, start_date: date, end_date: date) -> float:
