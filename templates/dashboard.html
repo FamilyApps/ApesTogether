@@ -603,6 +603,23 @@ function updatePerformanceChart(data) {
                         },
                         tooltip: {
                             callbacks: {
+                                title: function(context) {
+                                    // For linear scale, show the actual date instead of index
+                                    if (useLinearScale && context[0] && data.chart_data) {
+                                        const dataIndex = context[0].dataIndex;
+                                        if (data.chart_data[dataIndex]) {
+                                            const date = new Date(data.chart_data[dataIndex].date);
+                                            return date.toLocaleDateString('en-US', { 
+                                                weekday: 'short',
+                                                month: 'short', 
+                                                day: 'numeric',
+                                                year: 'numeric'
+                                            });
+                                        }
+                                    }
+                                    // For time scale, use default behavior
+                                    return Chart.defaults.plugins.tooltip.callbacks.title(context);
+                                },
                                 label: function(context) {
                                     return context.dataset.label + ': ' + (context.parsed.y >= 0 ? '+' : '') + context.parsed.y.toFixed(2) + '%';
                                 }
