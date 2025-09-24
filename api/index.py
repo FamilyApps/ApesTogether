@@ -2995,6 +2995,313 @@ def cleanup_intraday_data():
         flash(f'Intraday cleanup error: {str(e)}', 'danger')
         return redirect(url_for('admin_dashboard'))
 
+@app.route('/admin/intraday-diagnostics')
+@login_required
+def admin_intraday_diagnostics():
+    """Comprehensive intraday data collection diagnostics"""
+    if not current_user.is_admin:
+        return redirect(url_for('index'))
+    
+    try:
+        from datetime import datetime, date, timedelta
+        from models import db, User, PortfolioSnapshotIntraday, PortfolioSnapshot, MarketData
+        from sqlalchemy import func, text
+        import json
+        
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+        
+        diagnostics = {
+            'timestamp': datetime.now().isoformat(),
+            'database_status': {},
+            'user_analysis': {},
+            'snapshot_analysis': {},
+            'cron_schedule': {},
+            'market_data': {},
+            'recommendations': []
+        }
+        
+        # 1. Database connectivity
+        try:
+            user_count = User.query.count()
+            diagnostics['database_status'] = {
+                'connected': True,
+                'total_users': user_count
+            }
+        except Exception as e:
+            diagnostics['database_status'] = {
+                'connected': False,
+                'error': str(e)
+            }
+            
+        # 2. User analysis
+        try:
+            users = User.query.all()
+            user_details = []
+            
+            for user in users:
+                user_info = {
+                    'id': user.id,
+                    'username': user.username,
+                    'has_transactions': False,
+                    'portfolio_value': 0,
+                    'intraday_snapshots_today': 0,
+                    'intraday_snapshots_yesterday': 0,
+                    'eod_snapshot_today': False
+                }
+                
+                # Check transactions
+                from models import Transaction
+                transaction_count = Transaction.query.filter_by(user_id=user.id).count()
+                user_info['has_transactions'] = transaction_count > 0
+                
+                # Calculate portfolio value
+                try:
+                    from portfolio_performance import PortfolioPerformanceCalculator
+                    calculator = PortfolioPerformanceCalculator()
+                    user_info['portfolio_value'] = calculator.calculate_portfolio_value(user.id)
+                except Exception as e:
+                    user_info['portfolio_value_error'] = str(e)
+                
+                # Count intraday snapshots
+                user_info['intraday_snapshots_today'] = PortfolioSnapshotIntraday.query.filter(
+                    PortfolioSnapshotIntraday.user_id == user.id,
+                    func.date(PortfolioSnapshotIntraday.timestamp) == today
+                ).count()
+                
+                user_info['intraday_snapshots_yesterday'] = PortfolioSnapshotIntraday.query.filter(
+                    PortfolioSnapshotIntraday.user_id == user.id,
+                    func.date(PortfolioSnapshotIntraday.timestamp) == yesterday
+                ).count()
+                
+                # Check EOD snapshot
+                eod_snapshot = PortfolioSnapshot.query.filter_by(
+                    user_id=user.id, date=today
+                ).first()
+                user_info['eod_snapshot_today'] = eod_snapshot is not None
+                
+                user_details.append(user_info)
+            
+            diagnostics['user_analysis'] = {
+                'total_users': len(user_details),
+                'users_with_transactions': sum(1 for u in user_details if u['has_transactions']),
+                'users_with_portfolio_value': sum(1 for u in user_details if u['portfolio_value'] > 0),
+                'total_intraday_today': sum(u['intraday_snapshots_today'] for u in user_details),
+                'total_intraday_yesterday': sum(u['intraday_snapshots_yesterday'] for u in user_details),
+                'user_details': user_details
+            }
+            
+        except Exception as e:
+            diagnostics['user_analysis']['error'] = str(e)
+        
+        # 3. Snapshot analysis
+        try:
+            # Total snapshots by type
+            total_intraday = PortfolioSnapshotIntraday.query.count()
+            total_eod = PortfolioSnapshot.query.count()
+            
+            # Recent intraday snapshots
+            recent_intraday = PortfolioSnapshotIntraday.query.filter(
+                PortfolioSnapshotIntraday.timestamp >= datetime.combine(yesterday, datetime.min.time())
+            ).order_by(PortfolioSnapshotIntraday.timestamp.desc()).limit(10).all()
+            
+            diagnostics['snapshot_analysis'] = {
+                'total_intraday_all_time': total_intraday,
+                'total_eod_all_time': total_eod,
+                'recent_intraday_snapshots': [
+                    {
+                        'user_id': s.user_id,
+                        'timestamp': s.timestamp.isoformat(),
+                        'value': s.total_value
+                    } for s in recent_intraday
+                ]
+            }
+            
+        except Exception as e:
+            diagnostics['snapshot_analysis']['error'] = str(e)
+        
+        # 4. Market data analysis
+        try:
+            spy_data_today = MarketData.query.filter(
+                MarketData.ticker == 'SPY_INTRADAY',
+                MarketData.date == today
+            ).count()
+            
+            spy_data_yesterday = MarketData.query.filter(
+                MarketData.ticker == 'SPY_INTRADAY', 
+                MarketData.date == yesterday
+            ).count()
+            
+            diagnostics['market_data'] = {
+                'spy_intraday_today': spy_data_today,
+                'spy_intraday_yesterday': spy_data_yesterday
+            }
+            
+        except Exception as e:
+            diagnostics['market_data']['error'] = str(e)
+        
+        # 5. Generate recommendations
+        if diagnostics['user_analysis'].get('total_intraday_today', 0) == 0:
+            diagnostics['recommendations'].append("❌ NO INTRADAY SNAPSHOTS TODAY - Check cron job execution")
+        
+        if diagnostics['user_analysis'].get('total_intraday_today', 0) < 13 * diagnostics['user_analysis'].get('total_users', 0):
+            diagnostics['recommendations'].append("⚠️ INSUFFICIENT INTRADAY SNAPSHOTS - Expected 13 per user per day")
+        
+        if diagnostics['market_data'].get('spy_intraday_today', 0) == 0:
+            diagnostics['recommendations'].append("❌ NO SPY DATA TODAY - Market data collection failing")
+        
+        # 6. Cron schedule info
+        diagnostics['cron_schedule'] = {
+            'vercel_schedule': "0,30 13-20 * * 1-5 (UTC)",
+            'expected_et_times': ["9:30 AM", "10:00 AM", "10:30 AM", "11:00 AM", "11:30 AM", "12:00 PM", "12:30 PM", "1:00 PM", "1:30 PM", "2:00 PM", "2:30 PM", "3:00 PM", "3:30 PM", "4:00 PM"],
+            'expected_collections_per_day': 14,
+            'current_et_time': datetime.now().strftime('%I:%M %p ET')
+        }
+        
+        return f"""
+        <h1>Intraday Data Collection Diagnostics</h1>
+        <pre>{json.dumps(diagnostics, indent=2)}</pre>
+        <p><a href="/admin">Back to Admin</a></p>
+        """
+        
+    except Exception as e:
+        return f"""
+        <h1>Diagnostics Error</h1>
+        <p><strong>Error:</strong> {str(e)}</p>
+        <p><a href="/admin">Back to Admin</a></p>
+        """
+
+@app.route('/admin/test-intraday-collection')
+@login_required
+def admin_test_intraday_collection():
+    """Manually test intraday collection with detailed logging"""
+    if not current_user.is_admin:
+        return redirect(url_for('index'))
+    
+    try:
+        from datetime import datetime
+        from models import db, User, PortfolioSnapshotIntraday, MarketData
+        from portfolio_performance import PortfolioPerformanceCalculator
+        import json
+        
+        calculator = PortfolioPerformanceCalculator()
+        current_time = datetime.now()
+        
+        test_results = {
+            'timestamp': current_time.isoformat(),
+            'test_type': 'manual_admin_trigger',
+            'steps': [],
+            'users_processed': [],
+            'errors': [],
+            'summary': {}
+        }
+        
+        # Step 1: Test SPY data collection
+        test_results['steps'].append("1. Testing SPY data collection...")
+        try:
+            spy_data = calculator.get_stock_data('SPY')
+            if spy_data and spy_data.get('price'):
+                spy_price = spy_data['price']
+                sp500_value = spy_price * 10
+                
+                # Store test SPY data
+                market_data = MarketData(
+                    ticker='SPY_INTRADAY_TEST',
+                    date=current_time.date(),
+                    timestamp=current_time,
+                    close_price=sp500_value
+                )
+                db.session.add(market_data)
+                
+                test_results['steps'].append(f"✅ SPY data collected: ${spy_price} (S&P 500: ${sp500_value})")
+                test_results['summary']['spy_collection'] = 'success'
+            else:
+                test_results['steps'].append("❌ Failed to fetch SPY data")
+                test_results['summary']['spy_collection'] = 'failed'
+                test_results['errors'].append("SPY data fetch failed")
+        except Exception as e:
+            error_msg = f"❌ SPY collection error: {str(e)}"
+            test_results['steps'].append(error_msg)
+            test_results['errors'].append(error_msg)
+            test_results['summary']['spy_collection'] = 'error'
+        
+        # Step 2: Process each user
+        test_results['steps'].append("2. Processing users...")
+        users = User.query.all()
+        snapshots_created = 0
+        
+        for user in users:
+            user_result = {
+                'user_id': user.id,
+                'username': user.username,
+                'portfolio_value': 0,
+                'snapshot_created': False,
+                'error': None
+            }
+            
+            try:
+                # Calculate portfolio value
+                portfolio_value = calculator.calculate_portfolio_value(user.id)
+                user_result['portfolio_value'] = portfolio_value
+                
+                if portfolio_value > 0:
+                    # Create test intraday snapshot
+                    test_snapshot = PortfolioSnapshotIntraday(
+                        user_id=user.id,
+                        timestamp=current_time,
+                        total_value=portfolio_value
+                    )
+                    db.session.add(test_snapshot)
+                    user_result['snapshot_created'] = True
+                    snapshots_created += 1
+                    
+                    test_results['steps'].append(f"✅ User {user.username}: ${portfolio_value:.2f} snapshot created")
+                else:
+                    test_results['steps'].append(f"⚠️ User {user.username}: $0 portfolio value - no snapshot created")
+                    
+            except Exception as e:
+                error_msg = f"❌ User {user.username} error: {str(e)}"
+                user_result['error'] = str(e)
+                test_results['steps'].append(error_msg)
+                test_results['errors'].append(error_msg)
+            
+            test_results['users_processed'].append(user_result)
+        
+        # Step 3: Commit to database
+        test_results['steps'].append("3. Committing to database...")
+        try:
+            db.session.commit()
+            test_results['steps'].append(f"✅ Database commit successful - {snapshots_created} snapshots created")
+            test_results['summary']['database_commit'] = 'success'
+        except Exception as e:
+            db.session.rollback()
+            error_msg = f"❌ Database commit failed: {str(e)}"
+            test_results['steps'].append(error_msg)
+            test_results['errors'].append(error_msg)
+            test_results['summary']['database_commit'] = 'failed'
+        
+        # Summary
+        test_results['summary'].update({
+            'total_users': len(users),
+            'snapshots_created': snapshots_created,
+            'users_with_portfolios': sum(1 for u in test_results['users_processed'] if u['portfolio_value'] > 0),
+            'success_rate': f"{snapshots_created}/{len(users)}" if users else "0/0"
+        })
+        
+        return f"""
+        <h1>Intraday Collection Test Results</h1>
+        <pre>{json.dumps(test_results, indent=2)}</pre>
+        <p><a href="/admin">Back to Admin</a></p>
+        <p><a href="/admin/intraday-diagnostics">View Full Diagnostics</a></p>
+        """
+        
+    except Exception as e:
+        return f"""
+        <h1>Test Collection Error</h1>
+        <p><strong>Error:</strong> {str(e)}</p>
+        <p><a href="/admin">Back to Admin</a></p>
+        """
+
 @app.route('/admin/clear-chart-cache')
 @login_required
 def admin_clear_chart_cache():
