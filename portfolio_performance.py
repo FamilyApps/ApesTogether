@@ -40,8 +40,11 @@ class PortfolioPerformanceCalculator:
                 logger.warning("Alpha Vantage API key not found, cannot fetch stock price")
                 return None
             
-            # Use Alpha Vantage API
-            url = f'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker_symbol}&apikey={api_key}'
+            # Use Alpha Vantage API with real-time entitlement and slight delay to avoid rate limiting
+            import time
+            time.sleep(0.1)  # 100ms delay between API calls
+            
+            url = f'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker_symbol}&entitlement=realtime&apikey={api_key}'
             response = requests.get(url, timeout=5)
             data = response.json()
             

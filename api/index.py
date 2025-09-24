@@ -3132,13 +3132,46 @@ def admin_intraday_diagnostics():
                 MarketData.date == yesterday
             ).count()
             
+            # Check Alpha Vantage API call logs
+            from models import AlphaVantageAPILog
+            api_calls_today = AlphaVantageAPILog.query.filter(
+                func.date(AlphaVantageAPILog.timestamp) == today
+            ).count()
+            
+            successful_api_calls = AlphaVantageAPILog.query.filter(
+                func.date(AlphaVantageAPILog.timestamp) == today,
+                AlphaVantageAPILog.response_status == 'success'
+            ).count()
+            
+            failed_api_calls = AlphaVantageAPILog.query.filter(
+                func.date(AlphaVantageAPILog.timestamp) == today,
+                AlphaVantageAPILog.response_status == 'error'
+            ).count()
+            
+            # Get recent API calls for analysis
+            recent_api_calls = AlphaVantageAPILog.query.filter(
+                func.date(AlphaVantageAPILog.timestamp) == today
+            ).order_by(AlphaVantageAPILog.timestamp.desc()).limit(10).all()
+            
             diagnostics['market_data'] = {
                 'spy_intraday_today': spy_data_today,
-                'spy_intraday_yesterday': spy_data_yesterday
+                'spy_intraday_yesterday': spy_data_yesterday,
+                'api_calls_today': api_calls_today,
+                'successful_api_calls': successful_api_calls,
+                'failed_api_calls': failed_api_calls,
+                'recent_api_calls': [
+                    {
+                        'symbol': call.symbol,
+                        'endpoint': call.endpoint,
+                        'status': call.response_status,
+                        'timestamp': call.timestamp.strftime('%H:%M:%S'),
+                        'response_size': len(call.response_data) if call.response_data else 0
+                    } for call in recent_api_calls
+                ]
             }
             
         except Exception as e:
-            diagnostics['market_data']['error'] = str(e)
+            diagnostics['market_data'] = {'error': str(e)}
         
         # 5. Generate recommendations
         if diagnostics['user_analysis'].get('total_intraday_today', 0) == 0:
@@ -3201,6 +3234,18 @@ def admin_intraday_diagnostics():
             low_fluctuation_users = [username for username, data in snapshot_analysis.items() if data['value_range']['percentage_change'] < 0.1 and not data['all_same_value']]
             if low_fluctuation_users:
                 diagnostics['recommendations'].append(f"📊 LOW FLUCTUATION - Users with <0.1% daily change: {', '.join(low_fluctuation_users)}")
+            
+            # Check for mostly duplicate values (indicating stale price data)
+            mostly_duplicate_users = [username for username, data in snapshot_analysis.items() if data['unique_values_count'] <= 3 and data['total_snapshots'] > 10]
+            if mostly_duplicate_users:
+                diagnostics['recommendations'].append(f"🚨 MOSTLY DUPLICATE VALUES - Users with ≤3 unique values despite many snapshots: {', '.join(mostly_duplicate_users)} - Check Alpha Vantage API calls")
+            
+            # Check if API calls are insufficient
+            if diagnostics['market_data'].get('api_calls_today', 0) < 20:
+                diagnostics['recommendations'].append(f"📞 INSUFFICIENT API CALLS - Only {diagnostics['market_data'].get('api_calls_today', 0)} API calls today - Cron jobs may not be running automatically")
+            
+            if diagnostics['market_data'].get('failed_api_calls', 0) > diagnostics['market_data'].get('successful_api_calls', 0):
+                diagnostics['recommendations'].append(f"❌ API FAILURES EXCEED SUCCESSES - {diagnostics['market_data'].get('failed_api_calls', 0)} failed vs {diagnostics['market_data'].get('successful_api_calls', 0)} successful - Check Alpha Vantage API key/limits")
                 
         except Exception as e:
             diagnostics['snapshot_value_analysis'] = {'error': str(e)}
@@ -3214,6 +3259,496 @@ def admin_intraday_diagnostics():
     except Exception as e:
         return f"""
         <h1>Diagnostics Error</h1>
+        <p><strong>Error:</strong> {str(e)}</p>
+        <p><a href="/admin">Back to Admin</a></p>
+        """
+
+@app.route('/admin/snapshot-uniqueness-report')
+@login_required
+def admin_snapshot_uniqueness_report():
+    """Detailed report on snapshot uniqueness and stock diversity"""
+    if not current_user.is_admin:
+        return redirect(url_for('index'))
+    
+    try:
+        from datetime import datetime, date, timedelta
+        from models import db, User, PortfolioSnapshotIntraday, Stock, Transaction
+        from sqlalchemy import func, distinct
+        import json
+        
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+        
+        report = {
+            'timestamp': datetime.now().isoformat(),
+            'date_analyzed': today.isoformat(),
+            'unique_stocks_analysis': {},
+            'snapshot_uniqueness': {},
+            'api_efficiency_analysis': {},
+            'recommendations': []
+        }
+        
+        # 1. Analyze unique stocks across all users
+        try:
+            # Get all unique stock tickers from user holdings
+            unique_stocks = db.session.query(distinct(Stock.ticker)).all()
+            unique_tickers = [stock[0] for stock in unique_stocks]
+            
+            # Get stock holdings per user
+            users = User.query.all()
+            user_stocks = {}
+            total_holdings = 0
+            
+            for user in users:
+                user_holdings = Stock.query.filter_by(user_id=user.id).all()
+                user_stocks[user.username] = [stock.ticker for stock in user_holdings]
+                total_holdings += len(user_holdings)
+            
+            report['unique_stocks_analysis'] = {
+                'total_unique_tickers': len(unique_tickers),
+                'unique_tickers_list': sorted(unique_tickers),
+                'total_stock_holdings_all_users': total_holdings,
+                'user_stock_breakdown': user_stocks,
+                'expected_api_calls_per_collection': len(unique_tickers)
+            }
+            
+        except Exception as e:
+            report['unique_stocks_analysis'] = {'error': str(e)}
+        
+        # 2. Analyze snapshot uniqueness for today
+        try:
+            snapshot_analysis = {}
+            
+            for user in users:
+                # Get all today's snapshots
+                user_snapshots = PortfolioSnapshotIntraday.query.filter(
+                    PortfolioSnapshotIntraday.user_id == user.id,
+                    func.date(PortfolioSnapshotIntraday.timestamp) == today
+                ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
+                
+                if user_snapshots:
+                    values = [float(s.total_value) for s in user_snapshots]
+                    unique_values = list(set(values))
+                    
+                    # Calculate time gaps between snapshots
+                    time_gaps = []
+                    for i in range(1, len(user_snapshots)):
+                        gap = (user_snapshots[i].timestamp - user_snapshots[i-1].timestamp).total_seconds() / 60
+                        time_gaps.append(round(gap, 1))
+                    
+                    snapshot_analysis[user.username] = {
+                        'total_snapshots': len(user_snapshots),
+                        'unique_values': len(unique_values),
+                        'uniqueness_percentage': round((len(unique_values) / len(user_snapshots)) * 100, 1),
+                        'value_range': {
+                            'min': min(values),
+                            'max': max(values),
+                            'spread_dollars': round(max(values) - min(values), 2),
+                            'spread_percentage': round(((max(values) - min(values)) / min(values)) * 100, 2) if min(values) > 0 else 0
+                        },
+                        'time_gaps_minutes': time_gaps[:10],  # First 10 gaps
+                        'average_gap_minutes': round(sum(time_gaps) / len(time_gaps), 1) if time_gaps else 0,
+                        'first_snapshot': user_snapshots[0].timestamp.strftime('%H:%M:%S'),
+                        'last_snapshot': user_snapshots[-1].timestamp.strftime('%H:%M:%S')
+                    }
+            
+            report['snapshot_uniqueness'] = snapshot_analysis
+            
+        except Exception as e:
+            report['snapshot_uniqueness'] = {'error': str(e)}
+        
+        # 3. API efficiency analysis
+        try:
+            from models import AlphaVantageAPILog
+            
+            # API calls today
+            api_calls_today = AlphaVantageAPILog.query.filter(
+                func.date(AlphaVantageAPILog.timestamp) == today
+            ).count()
+            
+            successful_calls = AlphaVantageAPILog.query.filter(
+                func.date(AlphaVantageAPILog.timestamp) == today,
+                AlphaVantageAPILog.response_status == 'success'
+            ).count()
+            
+            # Get unique symbols called today
+            unique_symbols_called = db.session.query(
+                distinct(AlphaVantageAPILog.symbol)
+            ).filter(
+                func.date(AlphaVantageAPILog.timestamp) == today
+            ).count()
+            
+            # Calculate expected vs actual calls
+            expected_collections = 16  # Vercel cron schedule
+            expected_api_calls = len(unique_tickers) * expected_collections
+            
+            report['api_efficiency_analysis'] = {
+                'total_api_calls_today': api_calls_today,
+                'successful_api_calls': successful_calls,
+                'unique_symbols_called': unique_symbols_called,
+                'expected_collections_per_day': expected_collections,
+                'expected_api_calls_per_day': expected_api_calls,
+                'actual_vs_expected_ratio': round(api_calls_today / expected_api_calls, 2) if expected_api_calls > 0 else 0,
+                'api_efficiency_percentage': round((successful_calls / api_calls_today) * 100, 1) if api_calls_today > 0 else 0
+            }
+            
+        except Exception as e:
+            report['api_efficiency_analysis'] = {'error': str(e)}
+        
+        # 4. Generate recommendations
+        if report['unique_stocks_analysis'].get('total_unique_tickers', 0) != 22:
+            report['recommendations'].append(f"⚠️ STOCK COUNT MISMATCH - Expected 22 unique stocks, found {report['unique_stocks_analysis'].get('total_unique_tickers', 0)}")
+        
+        # Check snapshot uniqueness
+        low_uniqueness_users = []
+        for username, data in report['snapshot_uniqueness'].items():
+            if data.get('uniqueness_percentage', 0) < 50:
+                low_uniqueness_users.append(f"{username} ({data.get('uniqueness_percentage', 0)}%)")
+        
+        if low_uniqueness_users:
+            report['recommendations'].append(f"🔄 LOW SNAPSHOT UNIQUENESS - Users with <50% unique values: {', '.join(low_uniqueness_users)}")
+        
+        # Check API efficiency
+        if report['api_efficiency_analysis'].get('actual_vs_expected_ratio', 0) > 1.5:
+            report['recommendations'].append(f"📞 EXCESSIVE API CALLS - Making {report['api_efficiency_analysis'].get('actual_vs_expected_ratio', 0)}x expected calls")
+        
+        return f"""
+        <h1>Snapshot Uniqueness & Stock Diversity Report</h1>
+        <pre>{json.dumps(report, indent=2)}</pre>
+        <p><a href="/admin">Back to Admin</a></p>
+        """
+        
+    except Exception as e:
+        return f"""
+        <h1>Report Generation Error</h1>
+        <p><strong>Error:</strong> {str(e)}</p>
+        <p><a href="/admin">Back to Admin</a></p>
+        """
+
+@app.route('/admin/detailed-intraday-debug')
+@login_required
+def admin_detailed_intraday_debug():
+    """Comprehensive step-by-step debugging of intraday collection process"""
+    if not current_user.is_admin:
+        return redirect(url_for('index'))
+    
+    try:
+        from datetime import datetime
+        from models import db, User, PortfolioSnapshotIntraday, Stock, MarketData, AlphaVantageAPILog, UserPortfolioChartCache
+        from portfolio_performance import PortfolioPerformanceCalculator, stock_price_cache
+        import json
+        
+        debug_report = {
+            'timestamp': datetime.now().isoformat(),
+            'test_type': 'comprehensive_intraday_debug',
+            'steps': {
+                'step_1_unique_stocks': {},
+                'step_2_cache_analysis': {},
+                'step_3_api_calls': {},
+                'step_4_price_caching': {},
+                'step_5_portfolio_calculations': {},
+                'step_6_chart_prerendering': {}
+            },
+            'summary': {},
+            'errors': []
+        }
+        
+        calculator = PortfolioPerformanceCalculator()
+        current_time = datetime.now()
+        
+        # STEP 1: Analyze unique stocks across all users
+        debug_report['steps']['step_1_unique_stocks']['description'] = "Identifying all unique stock tickers"
+        try:
+            from sqlalchemy import distinct
+            unique_stocks = db.session.query(distinct(Stock.ticker)).all()
+            unique_tickers = sorted([stock[0] for stock in unique_stocks])
+            
+            # Get stock holdings per user
+            users = User.query.all()
+            user_stock_breakdown = {}
+            
+            for user in users:
+                user_holdings = Stock.query.filter_by(user_id=user.id).all()
+                user_stock_breakdown[user.username] = {
+                    'tickers': [stock.ticker for stock in user_holdings],
+                    'quantities': {stock.ticker: stock.quantity for stock in user_holdings}
+                }
+            
+            debug_report['steps']['step_1_unique_stocks']['results'] = {
+                'unique_tickers': unique_tickers,
+                'total_unique_count': len(unique_tickers),
+                'user_stock_breakdown': user_stock_breakdown
+            }
+            
+        except Exception as e:
+            debug_report['steps']['step_1_unique_stocks']['error'] = str(e)
+            debug_report['errors'].append(f"Step 1 error: {e}")
+        
+        # STEP 2: Cache analysis - which stocks have cached values
+        debug_report['steps']['step_2_cache_analysis']['description'] = "Checking which stocks have cached prices within 90 seconds"
+        try:
+            cached_stocks = []
+            non_cached_stocks = []
+            cache_details = {}
+            
+            for ticker in unique_tickers:
+                ticker_upper = ticker.upper()
+                if ticker_upper in stock_price_cache:
+                    cached_data = stock_price_cache[ticker_upper]
+                    cache_time = cached_data.get('timestamp')
+                    if cache_time and (current_time - cache_time).total_seconds() < 90:
+                        cached_stocks.append(ticker)
+                        cache_details[ticker] = {
+                            'cached': True,
+                            'price': cached_data['price'],
+                            'cache_age_seconds': round((current_time - cache_time).total_seconds(), 1),
+                            'cache_timestamp': cache_time.isoformat()
+                        }
+                    else:
+                        non_cached_stocks.append(ticker)
+                        cache_details[ticker] = {
+                            'cached': False,
+                            'reason': 'expired_cache' if cache_time else 'no_cache',
+                            'cache_age_seconds': round((current_time - cache_time).total_seconds(), 1) if cache_time else None
+                        }
+                else:
+                    non_cached_stocks.append(ticker)
+                    cache_details[ticker] = {
+                        'cached': False,
+                        'reason': 'no_cache_entry'
+                    }
+            
+            debug_report['steps']['step_2_cache_analysis']['results'] = {
+                'cached_stocks': cached_stocks,
+                'non_cached_stocks': non_cached_stocks,
+                'cache_details': cache_details,
+                'cached_count': len(cached_stocks),
+                'non_cached_count': len(non_cached_stocks)
+            }
+            
+        except Exception as e:
+            debug_report['steps']['step_2_cache_analysis']['error'] = str(e)
+            debug_report['errors'].append(f"Step 2 error: {e}")
+        
+        # STEP 3: Make API calls for non-cached stocks
+        debug_report['steps']['step_3_api_calls']['description'] = "Making Alpha Vantage API calls for non-cached stocks"
+        try:
+            api_call_results = {}
+            
+            for ticker in non_cached_stocks:
+                api_start_time = datetime.now()
+                try:
+                    stock_data = calculator.get_stock_data(ticker)
+                    api_end_time = datetime.now()
+                    
+                    api_call_results[ticker] = {
+                        'api_call_made': True,
+                        'api_start_time': api_start_time.isoformat(),
+                        'api_end_time': api_end_time.isoformat(),
+                        'api_duration_ms': round((api_end_time - api_start_time).total_seconds() * 1000, 1),
+                        'success': stock_data is not None,
+                        'price_fetched': stock_data.get('price') if stock_data else None,
+                        'error': None
+                    }
+                    
+                except Exception as e:
+                    api_call_results[ticker] = {
+                        'api_call_made': True,
+                        'success': False,
+                        'error': str(e),
+                        'price_fetched': None
+                    }
+            
+            debug_report['steps']['step_3_api_calls']['results'] = {
+                'api_call_results': api_call_results,
+                'successful_calls': sum(1 for r in api_call_results.values() if r['success']),
+                'failed_calls': sum(1 for r in api_call_results.values() if not r['success'])
+            }
+            
+        except Exception as e:
+            debug_report['steps']['step_3_api_calls']['error'] = str(e)
+            debug_report['errors'].append(f"Step 3 error: {e}")
+        
+        # STEP 4: Analyze final price caching state
+        debug_report['steps']['step_4_price_caching']['description'] = "Analyzing final cached price state after API calls"
+        try:
+            final_cached_prices = {}
+            successfully_cached = []
+            cache_failures = []
+            
+            for ticker in unique_tickers:
+                ticker_upper = ticker.upper()
+                if ticker_upper in stock_price_cache:
+                    cached_data = stock_price_cache[ticker_upper]
+                    cache_time = cached_data.get('timestamp')
+                    if cache_time and (current_time - cache_time).total_seconds() < 90:
+                        successfully_cached.append(ticker)
+                        final_cached_prices[ticker] = {
+                            'price': cached_data['price'],
+                            'cache_timestamp': cache_time.isoformat(),
+                            'source': 'api_call' if ticker in non_cached_stocks else 'existing_cache'
+                        }
+                    else:
+                        cache_failures.append(ticker)
+                else:
+                    cache_failures.append(ticker)
+            
+            debug_report['steps']['step_4_price_caching']['results'] = {
+                'final_cached_prices': final_cached_prices,
+                'successfully_cached': successfully_cached,
+                'cache_failures': cache_failures,
+                'cache_success_rate': f"{len(successfully_cached)}/{len(unique_tickers)}"
+            }
+            
+        except Exception as e:
+            debug_report['steps']['step_4_price_caching']['error'] = str(e)
+            debug_report['errors'].append(f"Step 4 error: {e}")
+        
+        # STEP 5: Calculate portfolio values for each user
+        debug_report['steps']['step_5_portfolio_calculations']['description'] = "Calculating portfolio values using cached prices"
+        try:
+            user_portfolio_calculations = {}
+            intraday_snapshots_created = []
+            
+            for user in users:
+                try:
+                    user_stocks = Stock.query.filter_by(user_id=user.id).all()
+                    portfolio_breakdown = {}
+                    total_value = 0
+                    
+                    for stock in user_stocks:
+                        ticker = stock.ticker
+                        quantity = stock.quantity
+                        
+                        if ticker in final_cached_prices:
+                            price = final_cached_prices[ticker]['price']
+                            stock_value = price * quantity
+                            total_value += stock_value
+                            
+                            portfolio_breakdown[ticker] = {
+                                'quantity': quantity,
+                                'price_used': price,
+                                'stock_value': round(stock_value, 2),
+                                'price_source': final_cached_prices[ticker]['source']
+                            }
+                        else:
+                            portfolio_breakdown[ticker] = {
+                                'quantity': quantity,
+                                'price_used': None,
+                                'stock_value': 0,
+                                'error': 'no_cached_price'
+                            }
+                    
+                    # Create intraday snapshot
+                    if total_value > 0:
+                        intraday_snapshot = PortfolioSnapshotIntraday(
+                            user_id=user.id,
+                            timestamp=current_time,
+                            total_value=total_value
+                        )
+                        db.session.add(intraday_snapshot)
+                        intraday_snapshots_created.append({
+                            'user_id': user.id,
+                            'username': user.username,
+                            'snapshot_created': True,
+                            'total_value': round(total_value, 2)
+                        })
+                    
+                    user_portfolio_calculations[user.username] = {
+                        'total_portfolio_value': round(total_value, 2),
+                        'portfolio_breakdown': portfolio_breakdown,
+                        'calculation_successful': total_value > 0
+                    }
+                    
+                except Exception as e:
+                    user_portfolio_calculations[user.username] = {
+                        'error': str(e),
+                        'calculation_successful': False
+                    }
+            
+            debug_report['steps']['step_5_portfolio_calculations']['results'] = {
+                'user_portfolio_calculations': user_portfolio_calculations,
+                'intraday_snapshots_created': intraday_snapshots_created,
+                'successful_calculations': sum(1 for calc in user_portfolio_calculations.values() if calc.get('calculation_successful', False))
+            }
+            
+        except Exception as e:
+            debug_report['steps']['step_5_portfolio_calculations']['error'] = str(e)
+            debug_report['errors'].append(f"Step 5 error: {e}")
+        
+        # STEP 6: Chart pre-rendering analysis
+        debug_report['steps']['step_6_chart_prerendering']['description'] = "Analyzing 1D and 5D chart pre-rendering"
+        try:
+            chart_prerendering_results = {}
+            
+            for user in users:
+                try:
+                    # Check existing chart cache
+                    existing_1d_cache = UserPortfolioChartCache.query.filter_by(
+                        user_id=user.id, period='1D'
+                    ).first()
+                    
+                    existing_5d_cache = UserPortfolioChartCache.query.filter_by(
+                        user_id=user.id, period='5D'
+                    ).first()
+                    
+                    chart_prerendering_results[user.username] = {
+                        '1D_chart': {
+                            'existing_cache': existing_1d_cache is not None,
+                            'cache_timestamp': existing_1d_cache.created_at.isoformat() if existing_1d_cache else None,
+                            'would_regenerate': True  # Since we added new data
+                        },
+                        '5D_chart': {
+                            'existing_cache': existing_5d_cache is not None,
+                            'cache_timestamp': existing_5d_cache.created_at.isoformat() if existing_5d_cache else None,
+                            'would_regenerate': True  # Since we added new data
+                        }
+                    }
+                    
+                except Exception as e:
+                    chart_prerendering_results[user.username] = {
+                        'error': str(e)
+                    }
+            
+            debug_report['steps']['step_6_chart_prerendering']['results'] = {
+                'chart_prerendering_results': chart_prerendering_results,
+                'note': 'Charts would be regenerated on next access due to new intraday data'
+            }
+            
+        except Exception as e:
+            debug_report['steps']['step_6_chart_prerendering']['error'] = str(e)
+            debug_report['errors'].append(f"Step 6 error: {e}")
+        
+        # Commit the test snapshots
+        try:
+            db.session.commit()
+            debug_report['database_commit'] = 'successful'
+        except Exception as e:
+            db.session.rollback()
+            debug_report['database_commit'] = f'failed: {str(e)}'
+        
+        # Generate summary
+        debug_report['summary'] = {
+            'total_unique_stocks': len(unique_tickers) if 'unique_tickers' in locals() else 0,
+            'stocks_cached_initially': len(cached_stocks) if 'cached_stocks' in locals() else 0,
+            'api_calls_needed': len(non_cached_stocks) if 'non_cached_stocks' in locals() else 0,
+            'api_calls_successful': debug_report['steps']['step_3_api_calls']['results'].get('successful_calls', 0) if 'results' in debug_report['steps']['step_3_api_calls'] else 0,
+            'final_cached_stocks': len(successfully_cached) if 'successfully_cached' in locals() else 0,
+            'portfolio_calculations_successful': debug_report['steps']['step_5_portfolio_calculations']['results'].get('successful_calculations', 0) if 'results' in debug_report['steps']['step_5_portfolio_calculations'] else 0,
+            'intraday_snapshots_created': len(intraday_snapshots_created) if 'intraday_snapshots_created' in locals() else 0,
+            'total_errors': len(debug_report['errors'])
+        }
+        
+        return f"""
+        <h1>Detailed Intraday Collection Debug Report</h1>
+        <pre>{json.dumps(debug_report, indent=2)}</pre>
+        <p><a href="/admin">Back to Admin</a></p>
+        <p><a href="/admin/intraday-diagnostics">View Standard Diagnostics</a></p>
+        """
+        
+    except Exception as e:
+        return f"""
+        <h1>Debug Report Generation Error</h1>
         <p><strong>Error:</strong> {str(e)}</p>
         <p><a href="/admin">Back to Admin</a></p>
         """
