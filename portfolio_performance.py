@@ -595,25 +595,38 @@ class PortfolioPerformanceCalculator:
         portfolio_start_value = None
         sp500_start_value = None
         
-        # Get S&P 500 data for today
-        sp500_data = self.get_cached_sp500_data(today, today)
-        if sp500_data:
-            sp500_start_value = list(sp500_data.values())[0]
+        # Get S&P 500 intraday data for today
+        sp500_intraday_data = MarketData.query.filter(
+            and_(
+                MarketData.ticker == 'SPY_INTRADAY',
+                MarketData.date == today
+            )
+        ).order_by(MarketData.timestamp.asc()).all()
+        
+        logger.info(f"Found {len(sp500_intraday_data)} SPY intraday data points for {today}")
+        
+        sp500_start_value = None
+        if sp500_intraday_data:
+            sp500_start_value = sp500_intraday_data[0].close_price
         
         # Get user's first snapshot to calculate percentage returns
         if intraday_snapshots:
             portfolio_start_value = intraday_snapshots[0].total_value
         
-        for snapshot in intraday_snapshots:
+        for i, snapshot in enumerate(intraday_snapshots):
             # Calculate portfolio percentage return from start of day
             portfolio_pct = 0.0
             if portfolio_start_value and portfolio_start_value > 0:
                 portfolio_pct = ((snapshot.total_value - portfolio_start_value) / portfolio_start_value) * 100
             
-            # Calculate S&P 500 percentage return (use same value for intraday - we collect SPY once per collection)
+            # Calculate S&P 500 percentage return using matching intraday data
             sp500_pct = 0.0
-            if sp500_start_value and sp500_data:
-                current_sp500 = list(sp500_data.values())[0]  # Use today's SPY value
+            if sp500_start_value and i < len(sp500_intraday_data):
+                current_sp500 = sp500_intraday_data[i].close_price
+                sp500_pct = ((current_sp500 - sp500_start_value) / sp500_start_value) * 100
+            elif sp500_start_value and sp500_intraday_data:
+                # Fallback to latest SPY data if we don't have matching timestamp
+                current_sp500 = sp500_intraday_data[-1].close_price
                 sp500_pct = ((current_sp500 - sp500_start_value) / sp500_start_value) * 100
             
             chart_data.append({
