@@ -650,8 +650,8 @@ function updatePerformanceChart(data) {
                                 minRotation: 0,
                                 // For linear scale, show date labels from actual data points
                                 callback: useLinearScale ? function(value, index) {
-                                    if (data.chart_data && data.chart_data[index]) {
-                                        const date = new Date(data.chart_data[index].date);
+                                    if (data.chart_data && data.chart_data[Math.floor(value)]) {
+                                        const date = new Date(data.chart_data[Math.floor(value)].date);
                                         return date.toLocaleDateString('en-US', { 
                                             month: 'short', 
                                             day: 'numeric' 
@@ -659,7 +659,10 @@ function updatePerformanceChart(data) {
                                     }
                                     return '';
                                 } : undefined
-                            }
+                            },
+                            // For linear scale, ensure chart extends to full width
+                            min: useLinearScale ? 0 : undefined,
+                            max: useLinearScale ? (data.chart_data ? data.chart_data.length - 1 : undefined) : undefined
                         },
                         y: {
                             display: true,
