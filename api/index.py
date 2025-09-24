@@ -3836,6 +3836,180 @@ def admin_detailed_intraday_debug():
         <p><a href="/admin">Back to Admin</a></p>
         """
 
+@app.route('/admin/intraday-collection-logs')
+@login_required
+def admin_intraday_collection_logs():
+    """View recent intraday collection logs with detailed analysis"""
+    if not current_user.is_admin:
+        return redirect(url_for('index'))
+    
+    try:
+        from datetime import datetime, date, timedelta
+        from models import db, AlphaVantageAPILog, PortfolioSnapshotIntraday
+        from sqlalchemy import func, distinct
+        import json
+        
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+        
+        # Get today's intraday snapshots grouped by timestamp (collection runs)
+        intraday_collections = db.session.query(
+            PortfolioSnapshotIntraday.timestamp,
+            func.count(PortfolioSnapshotIntraday.id).label('snapshot_count'),
+            func.avg(PortfolioSnapshotIntraday.total_value).label('avg_portfolio_value')
+        ).filter(
+            func.date(PortfolioSnapshotIntraday.timestamp) == today
+        ).group_by(
+            PortfolioSnapshotIntraday.timestamp
+        ).order_by(
+            PortfolioSnapshotIntraday.timestamp.desc()
+        ).limit(20).all()
+        
+        collection_logs = []
+        
+        for collection in intraday_collections:
+            collection_time = collection.timestamp
+            
+            # Get API calls within 2 minutes of this collection
+            api_window_start = collection_time - timedelta(minutes=2)
+            api_window_end = collection_time + timedelta(minutes=2)
+            
+            api_calls = AlphaVantageAPILog.query.filter(
+                AlphaVantageAPILog.timestamp >= api_window_start,
+                AlphaVantageAPILog.timestamp <= api_window_end
+            ).order_by(AlphaVantageAPILog.timestamp.asc()).all()
+            
+            # Get unique symbols called
+            unique_symbols = list(set([call.symbol for call in api_calls]))
+            successful_calls = [call for call in api_calls if call.response_status == 'success']
+            failed_calls = [call for call in api_calls if call.response_status == 'error']
+            
+            # Get all snapshots for this collection time
+            snapshots = PortfolioSnapshotIntraday.query.filter(
+                PortfolioSnapshotIntraday.timestamp == collection_time
+            ).all()
+            
+            collection_logs.append({
+                'collection_time': collection_time.strftime('%H:%M:%S'),
+                'collection_time_full': collection_time.isoformat(),
+                'snapshots_created': len(snapshots),
+                'api_calls_total': len(api_calls),
+                'api_calls_successful': len(successful_calls),
+                'api_calls_failed': len(failed_calls),
+                'unique_stocks_called': len(unique_symbols),
+                'stocks_called': sorted(unique_symbols),
+                'avg_portfolio_value': round(collection.avg_portfolio_value, 2) if collection.avg_portfolio_value else 0,
+                'api_call_details': [
+                    {
+                        'symbol': call.symbol,
+                        'status': call.response_status,
+                        'timestamp': call.timestamp.strftime('%H:%M:%S.%f')[:-3],
+                        'endpoint': call.endpoint
+                    } for call in api_calls
+                ],
+                'portfolio_snapshots': [
+                    {
+                        'user_id': snap.user_id,
+                        'total_value': round(snap.total_value, 2)
+                    } for snap in snapshots
+                ]
+            })
+        
+        # Summary statistics
+        total_collections_today = len(collection_logs)
+        total_api_calls_today = AlphaVantageAPILog.query.filter(
+            func.date(AlphaVantageAPILog.timestamp) == today
+        ).count()
+        
+        successful_api_calls_today = AlphaVantageAPILog.query.filter(
+            func.date(AlphaVantageAPILog.timestamp) == today,
+            AlphaVantageAPILog.response_status == 'success'
+        ).count()
+        
+        summary = {
+            'date': today.isoformat(),
+            'total_collections': total_collections_today,
+            'total_api_calls': total_api_calls_today,
+            'successful_api_calls': successful_api_calls_today,
+            'api_success_rate': round((successful_api_calls_today / total_api_calls_today) * 100, 1) if total_api_calls_today > 0 else 0,
+            'expected_collections': 16,  # Vercel cron schedule
+            'collection_efficiency': round((total_collections_today / 16) * 100, 1) if total_collections_today <= 16 else f"{total_collections_today}/16 (over-collecting)"
+        }
+        
+        report = {
+            'summary': summary,
+            'collection_logs': collection_logs,
+            'generated_at': datetime.now().isoformat()
+        }
+        
+        # Generate simplified text format for easy copying
+        simplified_text = f"""INTRADAY COLLECTION LOGS - {today}
+
+SUMMARY:
+- Collections: {summary['total_collections']}/{summary['expected_collections']} ({summary['collection_efficiency']}% efficiency)
+- API Calls: {summary['total_api_calls']} ({summary['successful_api_calls']} successful, {summary['api_success_rate']}% success rate)
+
+RECENT COLLECTIONS:"""
+
+        for log in collection_logs[:10]:  # Show top 10 for readability
+            simplified_text += f"""
+{log['collection_time']} - {log['snapshots_created']} snapshots, {log['api_calls_total']} API calls
+  └─ Stocks called: {', '.join(log['stocks_called']) if log['stocks_called'] else 'None (all cached)'}
+  └─ Success rate: {log['api_calls_successful']}/{log['api_calls_total']} calls successful"""
+
+        return f"""
+        <h1>Intraday Collection Logs - {today}</h1>
+        
+        <h2>Summary</h2>
+        <ul>
+            <li><strong>Collections Today:</strong> {summary['total_collections']} / {summary['expected_collections']} expected ({summary['collection_efficiency']}% efficiency)</li>
+            <li><strong>API Calls Today:</strong> {summary['total_api_calls']} ({summary['successful_api_calls']} successful, {summary['api_success_rate']}% success rate)</li>
+        </ul>
+        
+        <h2>📋 Copy-Paste Format for Chat Analysis</h2>
+        <div style="background: #f5f5f5; padding: 15px; border: 1px solid #ddd; margin: 10px 0;">
+            <button onclick="copyToClipboard()" style="background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-bottom: 10px;">📋 Copy to Clipboard</button>
+            <pre id="simplified-logs" style="font-family: monospace; font-size: 12px; white-space: pre-wrap; margin: 0;">{simplified_text}</pre>
+        </div>
+        
+        <h2>📊 Full JSON Data (for detailed analysis)</h2>
+        <details>
+            <summary>Click to expand full data</summary>
+            <div style="font-family: monospace; font-size: 11px; max-height: 400px; overflow-y: auto;">
+                <pre>{json.dumps(report, indent=2)}</pre>
+            </div>
+        </details>
+        
+        <script>
+        function copyToClipboard() {{
+            const text = document.getElementById('simplified-logs').textContent;
+            navigator.clipboard.writeText(text).then(function() {{
+                const button = document.querySelector('button');
+                const originalText = button.textContent;
+                button.textContent = '✅ Copied!';
+                button.style.background = '#28a745';
+                setTimeout(() => {{
+                    button.textContent = originalText;
+                    button.style.background = '#007bff';
+                }}, 2000);
+            }}).catch(function(err) {{
+                alert('Failed to copy: ' + err);
+            }});
+        }}
+        </script>
+        
+        <p><a href="/admin">Back to Admin</a></p>
+        <p><a href="/admin/detailed-intraday-debug">Run Live Debug</a></p>
+        <p><a href="/admin/intraday-collection-logs">🔄 Refresh Logs</a></p>
+        """
+        
+    except Exception as e:
+        return f"""
+        <h1>Log Viewer Error</h1>
+        <p><strong>Error:</strong> {str(e)}</p>
+        <p><a href="/admin">Back to Admin</a></p>
+        """
+
 @app.route('/admin/test-intraday-collection')
 @login_required
 def admin_test_intraday_collection():
@@ -10988,12 +11162,20 @@ def collect_intraday_data():
         
         results = {
             'timestamp': current_time.isoformat(),
+            'current_time_et': current_time.strftime('%Y-%m-%d %H:%M:%S ET'),
+            'market_status': 'CLOSED' if current_time.hour >= 16 else 'OPEN',
             'spy_data_collected': False,
             'users_processed': 0,
             'snapshots_created': 0,
             'charts_generated': 0,
             'errors': [],
-            'execution_time_seconds': 0
+            'execution_time_seconds': 0,
+            'detailed_logging': {
+                'unique_stocks_analysis': {},
+                'api_call_tracking': {},
+                'cache_efficiency': {},
+                'portfolio_calculations': {}
+            }
         }
         
         # Step 1: Collect SPY data
