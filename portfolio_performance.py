@@ -63,9 +63,14 @@ class PortfolioPerformanceCalculator:
             if 'Global Quote' in data and '05. price' in data['Global Quote']:
                 price = float(data['Global Quote']['05. price'])
                 stock_price_cache[ticker_upper] = {'price': price, 'timestamp': current_time}
+                
+                # Enhanced logging for debugging stale data
+                logger.info(f"✅ Alpha Vantage API: {ticker_symbol} = ${price} at {current_time.strftime('%H:%M:%S')}")
+                logger.debug(f"Full API response for {ticker_symbol}: {data}")
+                
                 return {'price': price}
             else:
-                logger.warning(f"Could not get price for {ticker_symbol} from API")
+                logger.warning(f"❌ Could not get price for {ticker_symbol} from API - Response: {data}")
                 return None
                 
         except Exception as e:
@@ -308,8 +313,10 @@ class PortfolioPerformanceCalculator:
                         total_data_points += chunk_data_points
                         chunks_processed += 1
                         logger.info(f"Committed chunk {chunks_processed}: {chunk_data_points} new data points")
-                    else:
-                        logger.info(f"Skipped chunk {chunks_processed + 1}: no new data")
+                        # Log successful API call with timestamp for debugging
+                        current_time = datetime.now().strftime('%H:%M:%S')
+                        logger.info(f"Successfully fetched {ticker_symbol} price: ${price} from Alpha Vantage at {current_time}")
+                        logger.debug(f"Alpha Vantage raw response for {ticker_symbol}: {data}")
                         chunks_processed += 1
                 except Exception as e:
                     error_msg = f"Error committing chunk {chunks_processed + 1}: {e}"

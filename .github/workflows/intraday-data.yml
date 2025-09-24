@@ -1,10 +1,11 @@
-name: Collect Intraday Data
+name: Collect Intraday Data (DISABLED - Using Vercel Cron)
 on:
-  schedule:
-    # Every 30 minutes during market hours (9:30 AM - 4:00 PM ET)
-    # Converted to UTC: 1:30 PM - 8:00 PM UTC (13:30 - 20:00)
-    - cron: '0,30 13-19 * * 1-5'
-    - cron: '0 20 * * 1-5'  # Final 4:00 PM ET collection
+  # DISABLED: Duplicate of Vercel cron causing 2x collections
+  # schedule:
+  #   # Every 30 minutes during market hours (9:30 AM - 4:00 PM ET)
+  #   # Converted to UTC: 1:30 PM - 8:00 PM UTC (13:30 - 20:00)
+  #   - cron: '0,30 13-19 * * 1-5'
+  #   - cron: '0 20 * * 1-5'  # Final 4:00 PM ET collection
   workflow_dispatch:  # Allow manual triggering for testing
 
 jobs:
