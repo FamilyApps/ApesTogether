@@ -536,19 +536,21 @@ function updatePerformanceChart(data) {
     
     // Clear the canvas completely
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-    
     console.log('About to create chart with setTimeout...');
     setTimeout(() => {
         console.log('Inside setTimeout, creating chart...');
         
-        // Create data points with x,y coordinates for time scale
-        const portfolioDataPoints = data.chart_data.map(item => ({
-            x: new Date(item.date),
+        // For longer periods, use linear scale to avoid weekend gaps
+        // For 1D/5D, use time scale for proper hour/day formatting
+        const useLinearScale = !['1D', '5D'].includes(currentPeriod);
+        
+        const portfolioDataPoints = data.chart_data.map((item, index) => ({
+            x: useLinearScale ? index : new Date(item.date),
             y: item.portfolio
         }));
         
-        const sp500DataPoints = data.chart_data.map(item => ({
-            x: new Date(item.date),
+        const sp500DataPoints = data.chart_data.map((item, index) => ({
+            x: useLinearScale ? index : new Date(item.date),
             y: item.sp500
         }));
         
@@ -609,13 +611,13 @@ function updatePerformanceChart(data) {
                     },
                     scales: {
                         x: {
-                            type: 'time',
+                            type: useLinearScale ? 'linear' : 'time',
                             display: true,
                             title: {
                                 display: true,
                                 text: currentPeriod === '1D' ? 'Time' : 'Date'
                             },
-                            time: {
+                            time: useLinearScale ? undefined : {
                                 unit: currentPeriod === '1D' ? 'hour' : (currentPeriod === '5D' ? 'hour' : 'day'),
                                 displayFormats: {
                                     hour: currentPeriod === '5D' ? 'ddd h a' : 'h:mm a',
@@ -628,7 +630,18 @@ function updatePerformanceChart(data) {
                             ticks: {
                                 maxTicksLimit: currentPeriod === '1D' ? 8 : (currentPeriod === '5D' ? 10 : 10),
                                 maxRotation: 45,
-                                minRotation: 0
+                                minRotation: 0,
+                                // For linear scale, show date labels from actual data points
+                                callback: useLinearScale ? function(value, index) {
+                                    if (data.chart_data && data.chart_data[index]) {
+                                        const date = new Date(data.chart_data[index].date);
+                                        return date.toLocaleDateString('en-US', { 
+                                            month: 'short', 
+                                            day: 'numeric' 
+                                        });
+                                    }
+                                    return '';
+                                } : undefined
                             }
                         },
                         y: {
