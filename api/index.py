@@ -2995,6 +2995,37 @@ def cleanup_intraday_data():
         flash(f'Intraday cleanup error: {str(e)}', 'danger')
         return redirect(url_for('admin_dashboard'))
 
+@app.route('/admin/clear-chart-cache')
+@login_required
+def admin_clear_chart_cache():
+    """Clear chart cache to force regeneration with weekend filter"""
+    if not current_user.is_admin:
+        return redirect(url_for('index'))
+    
+    try:
+        from models import db, UserPortfolioChartCache
+        
+        # Clear chart cache (this will force regeneration with weekend filter)
+        chart_count = UserPortfolioChartCache.query.count()
+        UserPortfolioChartCache.query.delete()
+        
+        db.session.commit()
+        
+        return f"""
+        <h1>Chart Cache Cleared</h1>
+        <p><strong>Chart cache:</strong> {chart_count} entries cleared</p>
+        <p><strong>Result:</strong> Charts will regenerate with weekend filter applied</p>
+        <p><strong>Note:</strong> Next chart load will be slower as data regenerates</p>
+        <p><a href="/admin">Back to Admin</a></p>
+        """
+        
+    except Exception as e:
+        return f"""
+        <h1>Cache Clear Error</h1>
+        <p><strong>Error:</strong> {str(e)}</p>
+        <p><a href="/admin">Back to Admin</a></p>
+        """
+
 @app.route('/admin')
 @login_required
 def admin_dashboard():
