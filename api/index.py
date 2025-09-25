@@ -3848,6 +3848,11 @@ def admin_intraday_collection_logs():
         from models import db, AlphaVantageAPILog, PortfolioSnapshotIntraday
         from sqlalchemy import func, distinct
         import json
+        import pytz
+        
+        # Set up timezone conversion
+        utc = pytz.UTC
+        eastern = pytz.timezone('US/Eastern')
         
         today = date.today()
         yesterday = today - timedelta(days=1)
@@ -3889,9 +3894,12 @@ def admin_intraday_collection_logs():
                 PortfolioSnapshotIntraday.timestamp == collection_time
             ).all()
             
+            # Convert UTC to Eastern Time
+            collection_time_et = utc.localize(collection_time).astimezone(eastern)
+            
             collection_logs.append({
-                'collection_time': collection_time.strftime('%H:%M:%S'),
-                'collection_time_full': collection_time.isoformat(),
+                'collection_time': collection_time_et.strftime('%H:%M:%S'),
+                'collection_time_full': collection_time_et.isoformat(),
                 'snapshots_created': len(snapshots),
                 'api_calls_total': len(api_calls),
                 'api_calls_successful': len(successful_calls),
@@ -3903,7 +3911,7 @@ def admin_intraday_collection_logs():
                     {
                         'symbol': call.symbol,
                         'status': call.response_status,
-                        'timestamp': call.timestamp.strftime('%H:%M:%S.%f')[:-3],
+                        'timestamp': utc.localize(call.timestamp).astimezone(eastern).strftime('%H:%M:%S.%f')[:-3],
                         'endpoint': call.endpoint
                     } for call in api_calls
                 ],
@@ -3932,8 +3940,8 @@ def admin_intraday_collection_logs():
             'total_api_calls': total_api_calls_today,
             'successful_api_calls': successful_api_calls_today,
             'api_success_rate': round((successful_api_calls_today / total_api_calls_today) * 100, 1) if total_api_calls_today > 0 else 0,
-            'expected_collections': 16,  # Vercel cron schedule
-            'collection_efficiency': round((total_collections_today / 16) * 100, 1) if total_collections_today <= 16 else f"{total_collections_today}/16 (over-collecting)"
+            'expected_collections': 14,  # Vercel cron schedule (9:30 AM - 4:00 PM ET)
+            'collection_efficiency': round((total_collections_today / 14) * 100, 1) if total_collections_today <= 14 else f"{total_collections_today}/14 (over-collecting)"
         }
         
         report = {
@@ -3958,7 +3966,7 @@ RECENT COLLECTIONS:"""
   └─ Success rate: {log['api_calls_successful']}/{log['api_calls_total']} calls successful"""
 
         return f"""
-        <h1>Intraday Collection Logs - {today}</h1>
+        <h1>Intraday Collection Logs - {today} (Eastern Time)</h1>
         
         <h2>Summary</h2>
         <ul>
@@ -10933,7 +10941,10 @@ def portfolio_performance_intraday(period):
         from sqlalchemy import func
         
         # Calculate date range based on period - use last market day for weekends
-        today = date.today()
+        # Use UTC date for consistency with database timestamps
+        from datetime import timezone
+        utc_now = datetime.now(timezone.utc)
+        today = utc_now.date()
         
         # Use last market day for weekend handling
         if today.weekday() == 5:  # Saturday
@@ -10942,13 +10953,18 @@ def portfolio_performance_intraday(period):
             market_day = today - timedelta(days=2)  # Friday
         else:
             market_day = today  # Monday-Friday
+            
+        logger.info(f"Date calculation: UTC now={utc_now}, today={today}, market_day={market_day}")
         
         if period == '1D':
             start_date = market_day
             end_date = market_day
         elif period == '5D':
-            start_date = market_day - timedelta(days=7)  # Include weekends to get 5 business days
+            # For 5D, we want the last 5 business days including today
+            # Go back 7 calendar days to ensure we capture 5 business days
+            start_date = market_day - timedelta(days=7)
             end_date = market_day
+            logger.info(f"5D Date Range: {start_date} to {end_date} (market_day: {market_day}, today: {today})")
         else:
             # Fallback to regular performance API for other periods
             from portfolio_performance import PortfolioPerformanceCalculator
@@ -10961,6 +10977,40 @@ def portfolio_performance_intraday(period):
             func.date(PortfolioSnapshotIntraday.timestamp) >= start_date,
             func.date(PortfolioSnapshotIntraday.timestamp) <= end_date
         ).order_by(PortfolioSnapshotIntraday.timestamp).all()
+        
+        # Debug logging for 5D chart issue
+        logger.info(f"5D Chart Debug - Period: {period}, User: {user_id}")
+        logger.info(f"Date range: {start_date} to {end_date}")
+        logger.info(f"Found {len(snapshots)} snapshots")
+        
+        # Check what today's date looks like in the database
+        today_snapshots = PortfolioSnapshotIntraday.query.filter(
+            PortfolioSnapshotIntraday.user_id == user_id,
+            func.date(PortfolioSnapshotIntraday.timestamp) == today
+        ).count()
+        logger.info(f"Snapshots specifically for today ({today}): {today_snapshots}")
+        
+        # Also check yesterday for comparison
+        yesterday = today - timedelta(days=1)
+        yesterday_snapshots = PortfolioSnapshotIntraday.query.filter(
+            PortfolioSnapshotIntraday.user_id == user_id,
+            func.date(PortfolioSnapshotIntraday.timestamp) == yesterday
+        ).count()
+        logger.info(f"Snapshots for yesterday ({yesterday}): {yesterday_snapshots}")
+        
+        if snapshots:
+            logger.info(f"First snapshot: {snapshots[0].timestamp}")
+            logger.info(f"Last snapshot: {snapshots[-1].timestamp}")
+            # Group by date to see distribution
+            from collections import defaultdict
+            by_date = defaultdict(int)
+            for snap in snapshots:
+                by_date[snap.timestamp.date()] += 1
+            logger.info(f"Snapshots by date: {dict(by_date)}")
+            
+            # Check if we have any snapshots from today
+            today_in_results = any(snap.timestamp.date() == today for snap in snapshots)
+            logger.info(f"Today's data in results: {today_in_results}")
         
         if not snapshots:
             return jsonify({
@@ -11040,6 +11090,12 @@ def portfolio_performance_intraday(period):
         
         portfolio_return = ((final_portfolio_value - first_portfolio_value) / first_portfolio_value * 100) if first_portfolio_value > 0 else 0
         sp500_return = ((final_spy_value - first_spy_value) / first_spy_value * 100) if first_spy_value > 0 else 0
+        
+        # Debug the final chart data
+        logger.info(f"Final chart data: {len(chart_data)} points")
+        if chart_data:
+            logger.info(f"First chart point: {chart_data[0]}")
+            logger.info(f"Last chart point: {chart_data[-1]}")
         
         return jsonify({
             'portfolio_return': round(portfolio_return, 2),

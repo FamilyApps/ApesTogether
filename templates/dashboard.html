@@ -635,7 +635,16 @@ function updatePerformanceChart(data) {
                             display: true,
                             title: {
                                 display: true,
-                                text: currentPeriod === '1D' ? 'Time' : 'Date'
+                                text: currentPeriod === '1D' ? 'Time (ET)' : 'Date'
+                            },
+                            time: useLinearScale ? undefined : {
+                                displayFormats: {
+                                    hour: 'h:mm a',
+                                    day: 'MMM dd',
+                                    week: 'MMM dd',
+                                    month: 'MMM yyyy'
+                                },
+                                tooltipFormat: currentPeriod === '1D' ? 'MMM dd, h:mm a' : 'MMM dd, yyyy'
                             },
                             time: useLinearScale ? undefined : {
                                 unit: currentPeriod === '1D' ? 'hour' : (currentPeriod === '5D' ? 'day' : 'day'),
