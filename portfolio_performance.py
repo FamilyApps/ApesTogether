@@ -486,20 +486,12 @@ class PortfolioPerformanceCalculator:
         start_price = None
         end_price = None
         
-        # Find start price (closest date >= start_date, but skip if price is 0)
-        # For YTD, be more aggressive about finding a valid start price
+        # Find start price (closest date >= start_date)
         for d in available_dates:
-            if d >= start_date and sp500_data[d] > 0:
+            if d >= start_date:
                 start_price = sp500_data[d]
+                logger.info(f"YTD S&P 500 start price: {start_price} on {d}")
                 break
-        
-        # If no valid start price found, use the first non-zero price in the dataset
-        if start_price is None or start_price == 0:
-            for d in available_dates:
-                if sp500_data[d] > 0:
-                    start_price = sp500_data[d]
-                    logger.info(f"Using fallback start price from {d}: {start_price}")
-                    break
         
         # Find end price (closest date <= end_date)
         for d in reversed(available_dates):
