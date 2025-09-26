@@ -10932,7 +10932,7 @@ def debug_intraday_snapshots():
         logger.error(f"Error in debug intraday snapshots: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/portfolio/performance-intraday/<period>')
+@app.route('/api/portfolio/intraday/<period>', methods=['GET'])
 def portfolio_performance_intraday(period):
     """Get intraday portfolio performance data using actual intraday snapshots"""
     try:
