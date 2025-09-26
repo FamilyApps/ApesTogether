@@ -252,10 +252,12 @@ try:
             # Log but don't fail the request
             logger.error(f"Error in before_request handler: {str(e)}")
             logger.error(traceback.format_exc())
-            # Only clear problematic session data if there's a critical error
-            # that would prevent proper authentication
-            if '_user_id' in session and str(e).startswith('Critical'):
-                session.pop('_user_id', None)
+        
+        
+        # Add request logging for debugging (moved from separate handler)
+        if request.path.startswith('/api/portfolio/'):
+            logger.info(f"REQUEST: {request.method} {request.path}")
+            logger.info(f"User-Agent: {request.headers.get('User-Agent', 'Unknown')}")
 
     @login_manager.user_loader
     def load_user(user_id):
@@ -11142,13 +11144,6 @@ def debug_routes():
         'intraday_routes': [r for r in routes if 'intraday' in r['rule']],
         'performance_routes': [r for r in routes if 'performance' in r['rule']]
     })
-
-@app.before_request
-def log_request_info():
-    """Log all incoming requests for debugging"""
-    if request.path.startswith('/api/portfolio/'):
-        logger.info(f"REQUEST: {request.method} {request.path}")
-        logger.info(f"User-Agent: {request.headers.get('User-Agent', 'Unknown')}")
 
 @app.route('/admin/simulate-intraday-data')
 @login_required
