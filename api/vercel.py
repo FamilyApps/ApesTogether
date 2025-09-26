@@ -12,6 +12,7 @@ error_info = None
 try:
     from index import app
     print("Successfully imported app from index.py")
+    print(f"App routes: {[rule.rule for rule in app.url_map.iter_rules()]}")
 except Exception as e:
     import traceback
     error_message = str(e)

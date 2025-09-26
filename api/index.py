@@ -7215,6 +7215,10 @@ def populate_stock_info():
 def get_portfolio_performance(period):
     """Get portfolio performance data for a specific time period - uses cached data for leaderboard users"""
     try:
+        logger.info(f"ROUTE HIT: /api/portfolio/performance/{period}")
+        logger.info(f"Request method: {request.method}")
+        logger.info(f"Request headers: {dict(request.headers)}")
+        logger.info(f"Session user_id: {session.get('user_id')}")
         # Note: Removed signal-based timeout as it doesn't work in serverless environments
         # Vercel handles timeouts automatically
         from datetime import datetime, timedelta
