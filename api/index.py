@@ -10955,6 +10955,7 @@ def portfolio_performance_intraday(period):
             market_day = today  # Monday-Friday
             
         logger.info(f"Date calculation: UTC now={utc_now}, today={today}, market_day={market_day}")
+        logger.info(f"Forcing Vercel redeploy - timestamp: {utc_now.isoformat()}")
         
         if period == '1D':
             start_date = market_day
