@@ -6,7 +6,7 @@ from sqlalchemy import desc
 import stripe
 from datetime import datetime
 from models import db, User, Stock, Transaction, Subscription
-from api.index import get_stock_data
+# Removed circular import - get_stock_data will be imported locally when needed
 
 # Admin credentials from environment variables
 ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
@@ -116,7 +116,8 @@ def user_list():
         
         for stock in user_stocks:
             try:
-                # Use existing AlphaVantage function
+                # Import locally to avoid circular import
+                from api.index import get_stock_data
                 stock_data = get_stock_data(stock.ticker)
                 current_price = stock_data.get('price', 150.0)
                 portfolio_value += current_price * stock.quantity
