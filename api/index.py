@@ -10935,6 +10935,9 @@ def debug_intraday_snapshots():
 @app.route('/api/portfolio/intraday/<period>', methods=['GET'])
 def portfolio_performance_intraday(period):
     """Get intraday portfolio performance data using actual intraday snapshots"""
+    logger.info(f"INTRADAY ROUTE HIT: /api/portfolio/intraday/{period}")
+    logger.info(f"Request method: {request.method}")
+    logger.info(f"Request headers: {dict(request.headers)}")
     try:
         user_id = session.get('user_id')
         if not user_id:
@@ -11122,6 +11125,30 @@ def portfolio_performance_intraday(period):
     except Exception as e:
         logger.error(f"Error in performance-intraday API: {str(e)}")
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+
+@app.route('/debug/routes')
+def debug_routes():
+    """Debug endpoint to list all registered routes"""
+    routes = []
+    for rule in app.url_map.iter_rules():
+        routes.append({
+            'endpoint': rule.endpoint,
+            'methods': list(rule.methods),
+            'rule': rule.rule
+        })
+    return jsonify({
+        'total_routes': len(routes),
+        'routes': sorted(routes, key=lambda x: x['rule']),
+        'intraday_routes': [r for r in routes if 'intraday' in r['rule']],
+        'performance_routes': [r for r in routes if 'performance' in r['rule']]
+    })
+
+@app.before_request
+def log_request_info():
+    """Log all incoming requests for debugging"""
+    if request.path.startswith('/api/portfolio/'):
+        logger.info(f"REQUEST: {request.method} {request.path}")
+        logger.info(f"User-Agent: {request.headers.get('User-Agent', 'Unknown')}")
 
 @app.route('/admin/simulate-intraday-data')
 @login_required
