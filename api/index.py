@@ -2418,15 +2418,15 @@ def root_health_check():
 
 @app.route('/')
 def index():
-    """Main landing page - redirect to 7D leaderboard for public access"""
+    """Main landing page - redirect to 5D leaderboard for public access"""
     try:
-        # Redirect to 7D leaderboard as the default homepage
-        return redirect(url_for('leaderboard.leaderboard_home', period='7D', category='all'))
+        # Redirect to 5D leaderboard as the default homepage
+        return redirect(url_for('leaderboard.leaderboard_home', period='5D', category='all'))
     except Exception as e:
         logger.error(f"Error in index route redirect: {str(e)}")
         logger.error(traceback.format_exc())
         # Fallback to direct leaderboard URL if blueprint routing fails
-        return redirect('/leaderboard/?period=7D&category=all')
+        return redirect('/leaderboard/?period=5D&category=all')
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
