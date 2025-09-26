@@ -375,8 +375,8 @@ function loadPerformanceData(period) {
     document.getElementById('portfolio-return').textContent = 'Loading...';
     document.getElementById('sp500-return').textContent = 'Loading...';
     
-    // Use intraday API for 1D and 5D periods to get all intraday data points
-    const apiEndpoint = (period === '1D' || period === '5D') 
+    // Use intraday API for 5D period only, regular API for others (1D was working fine)
+    const apiEndpoint = (period === '5D') 
         ? `/api/portfolio/performance-intraday/${period}`
         : `/api/portfolio/performance/${period}`;
     

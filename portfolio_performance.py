@@ -477,6 +477,7 @@ class PortfolioPerformanceCalculator:
         sp500_data = self.get_sp500_data(start_date, end_date)
         
         if not sp500_data:
+            logger.warning(f"No S&P 500 data found for period {start_date} to {end_date}")
             return 0.0
         
         # Get closest dates to start and end
@@ -485,9 +486,9 @@ class PortfolioPerformanceCalculator:
         start_price = None
         end_price = None
         
-        # Find start price (closest date >= start_date)
+        # Find start price (closest date >= start_date, but skip if price is 0)
         for d in available_dates:
-            if d >= start_date:
+            if d >= start_date and sp500_data[d] > 0:
                 start_price = sp500_data[d]
                 break
         
@@ -498,9 +499,12 @@ class PortfolioPerformanceCalculator:
                 break
         
         if start_price is None or end_price is None or start_price == 0:
+            logger.warning(f"S&P 500 calculation failed: start_price={start_price}, end_price={end_price}, available_dates={len(available_dates)} dates from {available_dates[0] if available_dates else 'None'} to {available_dates[-1] if available_dates else 'None'}")
             return 0.0
         
-        return (end_price - start_price) / start_price
+        sp500_return = (end_price - start_price) / start_price
+        logger.info(f"S&P 500 return calculated: {sp500_return:.4f} ({sp500_return*100:.2f}%) from {start_price:.2f} to {end_price:.2f}")
+        return sp500_return
     
     def _sample_dates_for_period(self, dates: List[date], period: str) -> List[date]:
         """Sample dates appropriately for chart display based on period"""
