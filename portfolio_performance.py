@@ -5,9 +5,8 @@ import requests
 import os
 from datetime import datetime, date, timedelta
 import logging
-from models import PortfolioSnapshot, MarketData, Stock, Transaction, User
+from models import PortfolioSnapshot, MarketData, Stock, Transaction, User, db
 from sqlalchemy import func, and_, or_
-from database import db
 try:
     from timezone_utils import get_market_timezone, is_market_hours
 except ImportError:
@@ -76,6 +75,10 @@ class PortfolioPerformanceCalculator:
             try:
                 from models import AlphaVantageAPILog, db
                 success = 'Global Quote' in data and '05. price' in data.get('Global Quote', {})
+                
+                # Add extra logging for weekend API calls to track source
+                if current_time.weekday() >= 5:
+                    logger.warning(f"WEEKEND API CALL DETECTED: {ticker_symbol} - This should not happen!")
                 api_log = AlphaVantageAPILog(
                     endpoint='GLOBAL_QUOTE',
                     symbol=ticker_symbol,

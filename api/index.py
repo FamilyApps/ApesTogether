@@ -11149,6 +11149,37 @@ def portfolio_performance_intraday(period):
         logger.error(f"Error in performance-intraday API: {str(e)}")
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
+@app.route('/admin/test-weekend-protection')
+@login_required
+def admin_test_weekend_protection():
+    """Test weekend protection by attempting an API call"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime
+        from portfolio_performance import PortfolioPerformanceCalculator
+        
+        calculator = PortfolioPerformanceCalculator()
+        current_time = datetime.now()
+        
+        # Test API call
+        result = calculator.get_stock_data('AAPL')
+        
+        return jsonify({
+            'current_time': current_time.isoformat(),
+            'weekday': current_time.weekday(),
+            'is_weekend': current_time.weekday() >= 5,
+            'api_call_result': result,
+            'protection_working': result is None if current_time.weekday() >= 5 else result is not None
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in weekend protection test: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/debug-ytd-sp500')
 @login_required
 def admin_debug_ytd_sp500():
