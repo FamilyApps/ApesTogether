@@ -11277,6 +11277,105 @@ def admin_debug_chart_data():
         logger.error(f"Error in chart data debug: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/debug-snapshot-dates')
+@login_required
+def admin_debug_snapshot_dates():
+    """Debug missing Friday snapshot issue"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime, date, timedelta
+        from models import db, PortfolioSnapshot, PortfolioSnapshotIntraday
+        from sqlalchemy import func, desc
+        
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'User not authenticated'}), 401
+        
+        today = date.today()
+        
+        # Check recent portfolio snapshots (daily)
+        recent_snapshots = PortfolioSnapshot.query.filter(
+            PortfolioSnapshot.user_id == user_id,
+            PortfolioSnapshot.date >= today - timedelta(days=7)
+        ).order_by(desc(PortfolioSnapshot.date)).all()
+        
+        # Check recent intraday snapshots
+        recent_intraday = PortfolioSnapshotIntraday.query.filter(
+            PortfolioSnapshotIntraday.user_id == user_id,
+            func.date(PortfolioSnapshotIntraday.timestamp) >= today - timedelta(days=7)
+        ).order_by(desc(PortfolioSnapshotIntraday.timestamp)).limit(20).all()
+        
+        # Expected dates (weekdays only)
+        expected_dates = []
+        check_date = today - timedelta(days=7)
+        while check_date <= today:
+            if check_date.weekday() < 5:  # Monday-Friday
+                expected_dates.append(check_date)
+            check_date += timedelta(days=1)
+        
+        # Analyze snapshots
+        snapshot_analysis = {
+            'today': today.isoformat(),
+            'expected_trading_days': [d.isoformat() for d in expected_dates],
+            'daily_snapshots': [],
+            'intraday_snapshots': [],
+            'missing_dates': [],
+            'friday_status': {}
+        }
+        
+        # Daily snapshots analysis
+        snapshot_dates = set()
+        for snapshot in recent_snapshots:
+            snapshot_dates.add(snapshot.date)
+            snapshot_analysis['daily_snapshots'].append({
+                'date': snapshot.date.isoformat(),
+                'portfolio_value': float(snapshot.portfolio_value),
+                'created_at': snapshot.created_at.isoformat() if snapshot.created_at else None
+            })
+        
+        # Find missing dates
+        for expected_date in expected_dates:
+            if expected_date not in snapshot_dates and expected_date < today:
+                snapshot_analysis['missing_dates'].append(expected_date.isoformat())
+        
+        # Intraday snapshots analysis
+        intraday_by_date = {}
+        for intraday in recent_intraday:
+            snapshot_date = intraday.timestamp.date()
+            if snapshot_date not in intraday_by_date:
+                intraday_by_date[snapshot_date] = []
+            intraday_by_date[snapshot_date].append({
+                'timestamp': intraday.timestamp.isoformat(),
+                'portfolio_value': float(intraday.portfolio_value)
+            })
+        
+        for date_key, snapshots in intraday_by_date.items():
+            snapshot_analysis['intraday_snapshots'].append({
+                'date': date_key.isoformat(),
+                'count': len(snapshots),
+                'snapshots': snapshots[:3]  # First 3 for brevity
+            })
+        
+        # Special focus on Friday 9/26/2025
+        friday_date = date(2025, 9, 26)
+        snapshot_analysis['friday_status'] = {
+            'date': friday_date.isoformat(),
+            'is_trading_day': friday_date.weekday() < 5,
+            'has_daily_snapshot': friday_date in snapshot_dates,
+            'has_intraday_snapshots': friday_date in intraday_by_date,
+            'intraday_count': len(intraday_by_date.get(friday_date, []))
+        }
+        
+        return jsonify(snapshot_analysis)
+        
+    except Exception as e:
+        logger.error(f"Error in snapshot dates debug: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/test-weekend-protection')
 @login_required
 def admin_test_weekend_protection():
