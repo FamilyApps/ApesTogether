@@ -38,9 +38,19 @@ class PortfolioPerformanceCalculator:
     
     def get_stock_data(self, ticker_symbol: str) -> Dict:
         """Fetches stock data using AlphaVantage API with caching (same as existing system)"""
+        # Check if it's weekend - don't make API calls on weekends
+        current_time = datetime.now()
+        if current_time.weekday() >= 5:  # Saturday = 5, Sunday = 6
+            logger.info(f"Weekend detected - skipping API call for {ticker_symbol}, using cache only")
+            # Return cached data if available, otherwise return None
+            ticker_upper = ticker_symbol.upper()
+            if ticker_upper in stock_price_cache:
+                cached_data = stock_price_cache[ticker_upper]
+                return {'price': cached_data['price']}
+            return None
+        
         # Check cache first
         ticker_upper = ticker_symbol.upper()
-        current_time = datetime.now()
         
         if ticker_upper in stock_price_cache:
             cached_data = stock_price_cache[ticker_upper]
@@ -380,7 +390,8 @@ class PortfolioPerformanceCalculator:
             today = date.today()
             recent_missing = [d for d in missing_dates if (today - d).days <= 7]
             
-            if recent_missing:
+            # Don't make API calls on weekends
+            if recent_missing and today.weekday() < 5:  # Monday-Friday only
                 try:
                     # Single API call for current SPY price (used for all recent missing dates)
                     stock_data = self.get_stock_data('SPY')

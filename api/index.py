@@ -3941,14 +3941,21 @@ def admin_intraday_collection_logs():
             AlphaVantageAPILog.response_status == 'success'
         ).count()
         
+        # Calculate expected collections based on day of week
+        # Saturday = 5, Sunday = 6 (no market)
+        if today.weekday() >= 5:  # Weekend
+            expected_collections = 0
+        else:  # Weekday
+            expected_collections = 14  # Vercel cron schedule (9:30 AM - 4:00 PM ET)
+        
         summary = {
             'date': today.isoformat(),
             'total_collections': total_collections_today,
             'total_api_calls': total_api_calls_today,
             'successful_api_calls': successful_api_calls_today,
             'api_success_rate': round((successful_api_calls_today / total_api_calls_today) * 100, 1) if total_api_calls_today > 0 else 0,
-            'expected_collections': 14,  # Vercel cron schedule (9:30 AM - 4:00 PM ET)
-            'collection_efficiency': round((total_collections_today / 14) * 100, 1) if total_collections_today <= 14 else f"{total_collections_today}/14 (over-collecting)"
+            'expected_collections': expected_collections,
+            'collection_efficiency': round((total_collections_today / expected_collections) * 100, 1) if expected_collections > 0 else 0
         }
         
         report = {
@@ -6436,8 +6443,11 @@ def admin_diagnose_snapshot_creation():
         
         try:
             from portfolio_performance import PortfolioPerformanceCalculator
+            calculator = PortfolioPerformanceCalculator()
         except ImportError as e:
             return jsonify({'error': f'Portfolio performance module import failed: {str(e)}'}), 500
+        except Exception as e:
+            return jsonify({'error': f'Portfolio performance calculator initialization failed: {str(e)}'}), 500
         
         diagnosis = {
             'api_status': {},
@@ -6451,8 +6461,6 @@ def admin_diagnose_snapshot_creation():
             api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
             diagnosis['api_status']['api_key_present'] = bool(api_key)
             diagnosis['api_status']['api_key_length'] = len(api_key) if api_key else 0
-            
-            calculator = PortfolioPerformanceCalculator()
             
             # Test API call for a common stock
             test_stock = Stock.query.first()
@@ -11154,6 +11162,7 @@ def admin_debug_ytd_sp500():
         from datetime import datetime, date, timedelta
         from models import db, MarketData
         from sqlalchemy import and_
+        from portfolio_performance import PortfolioPerformanceCalculator
         
         calculator = PortfolioPerformanceCalculator()
         today = date.today()
@@ -11397,9 +11406,20 @@ def collect_intraday_data():
         from portfolio_performance import PortfolioPerformanceCalculator
         import time
         
+        current_time = datetime.now()
+        
+        # Don't collect data on weekends
+        if current_time.weekday() >= 5:  # Saturday = 5, Sunday = 6
+            logger.info(f"Weekend detected ({current_time.strftime('%A')}) - skipping intraday data collection")
+            return jsonify({
+                'success': True,
+                'message': f'Skipped collection - market closed on {current_time.strftime("%A")}',
+                'timestamp': current_time.isoformat(),
+                'weekend': True
+            })
+        
         start_time = time.time()
         calculator = PortfolioPerformanceCalculator()
-        current_time = datetime.now()
         
         results = {
             'timestamp': current_time.isoformat(),
