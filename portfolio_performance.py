@@ -4,10 +4,11 @@ Portfolio performance calculation using Modified Dietz method and market benchma
 import requests
 import os
 from datetime import datetime, date, timedelta
-from typing import Dict, List, Tuple, Optional
-from models import db, PortfolioSnapshot, MarketData, Transaction, Stock, User
-from sqlalchemy import func, and_
 import logging
+from models import PortfolioSnapshot, MarketData, Stock, Transaction, User
+from sqlalchemy import func, and_, or_
+from database import db
+from timezone_utils import get_market_timezone, is_market_hours
 
 logger = logging.getLogger(__name__)
 
@@ -724,9 +725,11 @@ class PortfolioPerformanceCalculator:
             return {'success': False, 'error': str(e)}
 
     def get_performance_data(self, user_id: int, period: str) -> Dict:
-        """Get performance data for a specific period"""
-        # Use last market day for weekend handling
-        from datetime import timedelta
+        """Get performance data"""
+        # Calculate date range based on period - use last market day for weekends
+        # Use timezone-aware calculations for DST handling
+        from datetime import timezone, timedelta
+        eastern_tz = get_market_timezone()
         today = date.today()
         
         # If it's Saturday (5) or Sunday (6), go back to Friday
