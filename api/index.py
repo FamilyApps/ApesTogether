@@ -11378,6 +11378,124 @@ def admin_debug_snapshot_dates():
         logger.error(f"Error in snapshot dates debug: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/debug-leaderboard-calculations')
+@login_required
+def admin_debug_leaderboard_calculations():
+    """Debug leaderboard calculation issues - why only 1 user on 1D, wrong percentages on 5D"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime, date, timedelta
+        from models import db, User, LeaderboardCache
+        from portfolio_performance import PortfolioPerformanceCalculator
+        from sqlalchemy import desc
+        
+        calculator = PortfolioPerformanceCalculator()
+        
+        # Get all users with stocks for testing
+        users_with_stocks = User.query.join(User.stocks).distinct().limit(5).all()
+        
+        results = {
+            'timestamp': datetime.now().isoformat(),
+            'periods_tested': ['1D', '5D'],
+            'users_analyzed': [],
+            'leaderboard_cache_status': {},
+            'calculation_comparison': {}
+        }
+        
+        # Check leaderboard cache for each period
+        for period in ['1D', '5D']:
+            cache_entries = LeaderboardCache.query.filter_by(period=period).all()
+            results['leaderboard_cache_status'][period] = {
+                'total_entries': len(cache_entries),
+                'entries': []
+            }
+            
+            for entry in cache_entries[:3]:  # First 3 entries
+                results['leaderboard_cache_status'][period]['entries'].append({
+                    'user_id': entry.user_id,
+                    'return_percent': float(entry.return_percent) if entry.return_percent else None,
+                    'updated_at': entry.updated_at.isoformat() if entry.updated_at else None
+                })
+        
+        # Test calculations for each user
+        for user in users_with_stocks:
+            user_analysis = {
+                'user_id': user.id,
+                'username': user.username,
+                'stock_count': len(user.stocks.all()),
+                'calculations': {}
+            }
+            
+            for period in ['1D', '5D']:
+                try:
+                    # Get performance data using the same method as charts
+                    perf_data = calculator.get_performance_data(user.id, period)
+                    
+                    user_analysis['calculations'][period] = {
+                        'success': True,
+                        'portfolio_return': perf_data.get('portfolio_return'),
+                        'sp500_return': perf_data.get('sp500_return'),
+                        'chart_data_points': len(perf_data.get('chart_data', [])),
+                        'has_chart_data': bool(perf_data.get('chart_data')),
+                        'first_data_point': perf_data.get('chart_data', [{}])[0] if perf_data.get('chart_data') else None,
+                        'last_data_point': perf_data.get('chart_data', [{}])[-1] if perf_data.get('chart_data') else None
+                    }
+                    
+                except Exception as e:
+                    user_analysis['calculations'][period] = {
+                        'success': False,
+                        'error': str(e)
+                    }
+            
+            results['users_analyzed'].append(user_analysis)
+        
+        # Compare with actual leaderboard cache
+        for period in ['1D', '5D']:
+            cache_data = {}
+            live_data = {}
+            
+            for user in users_with_stocks:
+                # Get cached data
+                cache_entry = LeaderboardCache.query.filter_by(
+                    user_id=user.id, period=period
+                ).first()
+                if cache_entry:
+                    cache_data[user.id] = float(cache_entry.return_percent) if cache_entry.return_percent else 0.0
+                
+                # Get live calculation
+                user_calc = next((u for u in results['users_analyzed'] if u['user_id'] == user.id), None)
+                if user_calc and user_calc['calculations'].get(period, {}).get('success'):
+                    live_data[user.id] = user_calc['calculations'][period]['portfolio_return']
+            
+            results['calculation_comparison'][period] = {
+                'cached_data': cache_data,
+                'live_data': live_data,
+                'discrepancies': []
+            }
+            
+            # Find discrepancies
+            for user_id in set(list(cache_data.keys()) + list(live_data.keys())):
+                cached_val = cache_data.get(user_id, 'missing')
+                live_val = live_data.get(user_id, 'missing')
+                
+                if cached_val != live_val:
+                    results['calculation_comparison'][period]['discrepancies'].append({
+                        'user_id': user_id,
+                        'cached': cached_val,
+                        'live': live_val,
+                        'difference': abs(float(cached_val or 0) - float(live_val or 0)) if cached_val != 'missing' and live_val != 'missing' else 'N/A'
+                    })
+        
+        return jsonify(results)
+        
+    except Exception as e:
+        logger.error(f"Error in leaderboard debug: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/test-weekend-protection')
 @login_required
 def admin_test_weekend_protection():
