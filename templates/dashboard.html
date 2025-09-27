@@ -553,15 +553,41 @@ function updatePerformanceChart(data) {
         // For 1D/5D, use time scale for proper hour/day formatting
         const useLinearScale = !['1D', '5D'].includes(currentPeriod);
         
-        const portfolioDataPoints = data.chart_data.map((item, index) => ({
-            x: useLinearScale ? index : new Date(item.date),
-            y: item.portfolio
-        }));
+        const portfolioDataPoints = data.chart_data.map((item, index) => {
+            let xValue;
+            if (useLinearScale) {
+                xValue = index;
+            } else {
+                // For time scale, parse date more carefully
+                const dateStr = item.date;
+                if (dateStr.includes('T')) {
+                    // Already has time component
+                    xValue = new Date(dateStr);
+                } else {
+                    // Add time component to avoid timezone issues
+                    xValue = new Date(dateStr + 'T12:00:00');
+                }
+            }
+            return { x: xValue, y: item.portfolio };
+        });
         
-        const sp500DataPoints = data.chart_data.map((item, index) => ({
-            x: useLinearScale ? index : new Date(item.date),
-            y: item.sp500
-        }));
+        const sp500DataPoints = data.chart_data.map((item, index) => {
+            let xValue;
+            if (useLinearScale) {
+                xValue = index;
+            } else {
+                // For time scale, parse date more carefully
+                const dateStr = item.date;
+                if (dateStr.includes('T')) {
+                    // Already has time component
+                    xValue = new Date(dateStr);
+                } else {
+                    // Add time component to avoid timezone issues
+                    xValue = new Date(dateStr + 'T12:00:00');
+                }
+            }
+            return { x: xValue, y: item.sp500 };
+        });
         
         console.log('Chart data points sample:', {
             useLinearScale,
