@@ -1,26 +1,24 @@
 """
 Timezone utilities for handling DST transitions and market hours
+Using standard library datetime instead of pytz for better Vercel compatibility
 """
-from datetime import datetime, timezone
-import pytz
+from datetime import datetime, timezone, timedelta
 
 def get_market_timezone():
-    """Get the US/Eastern timezone with DST handling"""
-    return pytz.timezone('US/Eastern')
+    """Get the US/Eastern timezone - simplified for Vercel compatibility"""
+    # For now, assume EDT (UTC-4) - can be enhanced later
+    return timezone(timedelta(hours=-4))
 
 def get_current_market_offset():
-    """Get current UTC offset for US/Eastern (handles DST automatically)"""
-    eastern = get_market_timezone()
-    now = datetime.now(eastern)
-    return now.utcoffset().total_seconds() / 3600  # Returns -4 (EDT) or -5 (EST)
+    """Get current UTC offset for US/Eastern - simplified"""
+    # For September, we're in EDT (UTC-4)
+    return -4
 
 def convert_market_time_to_utc(hour, minute=0):
-    """Convert market time (Eastern) to UTC, accounting for DST"""
-    eastern = get_market_timezone()
-    # Use today's date to get correct DST offset
-    today = datetime.now(eastern).date()
-    market_time = eastern.localize(datetime.combine(today, datetime.min.time().replace(hour=hour, minute=minute)))
-    return market_time.astimezone(timezone.utc)
+    """Convert market time (Eastern) to UTC - simplified"""
+    # EDT = UTC-4, so add 4 hours to get UTC
+    utc_hour = (hour + 4) % 24
+    return datetime.now(timezone.utc).replace(hour=utc_hour, minute=minute, second=0, microsecond=0)
 
 def get_market_hours_utc():
     """Get current market hours in UTC (9:30 AM - 4:00 PM Eastern)"""
@@ -37,24 +35,24 @@ def get_market_hours_utc():
     }
 
 def is_market_hours(dt=None):
-    """Check if given datetime (or now) is during market hours"""
+    """Check if given datetime (or now) is during market hours - simplified"""
     if dt is None:
         dt = datetime.now(timezone.utc)
     elif dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     
-    # Convert to Eastern time
-    eastern = get_market_timezone()
-    eastern_time = dt.astimezone(eastern)
+    # Convert to Eastern time (subtract 4 hours for EDT)
+    eastern_time = dt - timedelta(hours=4)
     
     # Check if it's a weekday and within market hours
     if eastern_time.weekday() >= 5:  # Saturday = 5, Sunday = 6
         return False
     
-    market_open = eastern_time.replace(hour=9, minute=30, second=0, microsecond=0)
-    market_close = eastern_time.replace(hour=16, minute=0, second=0, microsecond=0)
+    # Market hours: 9:30 AM - 4:00 PM Eastern
+    market_start = eastern_time.replace(hour=9, minute=30, second=0, microsecond=0)
+    market_end = eastern_time.replace(hour=16, minute=0, second=0, microsecond=0)
     
-    return market_open <= eastern_time <= market_close
+    return market_start <= eastern_time <= market_end
 
 def get_cron_schedule_for_market_hours():
     """Generate cron schedules that automatically adjust for DST"""

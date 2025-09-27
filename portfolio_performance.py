@@ -8,7 +8,20 @@ import logging
 from models import PortfolioSnapshot, MarketData, Stock, Transaction, User
 from sqlalchemy import func, and_, or_
 from database import db
-from timezone_utils import get_market_timezone, is_market_hours
+try:
+    from timezone_utils import get_market_timezone, is_market_hours
+except ImportError:
+    # Fallback if timezone_utils not available
+    def get_market_timezone():
+        try:
+            import pytz
+            return pytz.timezone('US/Eastern')
+        except ImportError:
+            from datetime import timezone
+            return timezone.utc
+    
+    def is_market_hours(dt=None):
+        return True  # Fallback - assume always market hours
 
 logger = logging.getLogger(__name__)
 

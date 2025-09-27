@@ -3850,10 +3850,13 @@ def admin_intraday_collection_logs():
         from models import db, AlphaVantageAPILog, PortfolioSnapshotIntraday
         from sqlalchemy import func, distinct
         import json
-        import pytz
-        
-        # Set up timezone conversion
-        utc = pytz.UTC
+        try:
+            import pytz
+            # Set up timezone conversion
+            utc = pytz.UTC
+        except ImportError:
+            logger.error("pytz module not available - timezone features disabled")
+            return jsonify({'error': 'Timezone module not available'}), 500
         eastern = pytz.timezone('US/Eastern')
         
         today = date.today()
@@ -8442,10 +8445,14 @@ def implement_1d_chart_alternatives():
     
     try:
         from datetime import datetime, time
-        import pytz
-        
-        # Check if markets are currently open (approximate)
-        eastern = pytz.timezone('US/Eastern')
+        try:
+            import pytz
+            # Check if markets are currently open (approximate)
+            eastern = pytz.timezone('US/Eastern')
+        except ImportError:
+            logger.error("pytz module not available - using UTC fallback")
+            from datetime import timezone
+            eastern = timezone.utc  # Fallback to UTC
         now_eastern = datetime.now(eastern)
         market_open = time(9, 30)  # 9:30 AM
         market_close = time(16, 0)  # 4:00 PM
