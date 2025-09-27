@@ -11149,6 +11149,57 @@ def portfolio_performance_intraday(period):
         logger.error(f"Error in performance-intraday API: {str(e)}")
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
+@app.route('/admin/test-imports')
+@login_required
+def admin_test_imports():
+    """Test that all imports work correctly"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        results = {
+            'timestamp': datetime.now().isoformat(),
+            'tests': {}
+        }
+        
+        # Test 1: Basic imports
+        try:
+            from datetime import datetime, date, timedelta
+            from typing import Dict, List
+            results['tests']['basic_imports'] = {'status': 'success', 'message': 'Basic imports working'}
+        except Exception as e:
+            results['tests']['basic_imports'] = {'status': 'error', 'message': str(e)}
+        
+        # Test 2: Models import
+        try:
+            from models import db, MarketData, PortfolioSnapshot
+            results['tests']['models_import'] = {'status': 'success', 'message': 'Models import working'}
+        except Exception as e:
+            results['tests']['models_import'] = {'status': 'error', 'message': str(e)}
+        
+        # Test 3: Portfolio performance import
+        try:
+            from portfolio_performance import PortfolioPerformanceCalculator
+            results['tests']['portfolio_performance_import'] = {'status': 'success', 'message': 'Portfolio performance import working'}
+        except Exception as e:
+            results['tests']['portfolio_performance_import'] = {'status': 'error', 'message': str(e)}
+        
+        # Test 4: Calculator instantiation
+        try:
+            from portfolio_performance import PortfolioPerformanceCalculator
+            calculator = PortfolioPerformanceCalculator()
+            results['tests']['calculator_instantiation'] = {'status': 'success', 'message': 'Calculator instantiation working'}
+        except Exception as e:
+            results['tests']['calculator_instantiation'] = {'status': 'error', 'message': str(e)}
+        
+        return jsonify(results)
+        
+    except Exception as e:
+        logger.error(f"Error in import test: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/test-weekend-protection')
 @login_required
 def admin_test_weekend_protection():

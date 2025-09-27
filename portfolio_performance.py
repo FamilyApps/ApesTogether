@@ -5,6 +5,7 @@ import requests
 import os
 from datetime import datetime, date, timedelta
 import logging
+from typing import Dict, List
 from models import PortfolioSnapshot, MarketData, Stock, Transaction, User, db
 from sqlalchemy import func, and_, or_
 try:
