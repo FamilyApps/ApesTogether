@@ -11333,7 +11333,7 @@ def admin_debug_snapshot_dates():
             snapshot_dates.add(snapshot.date)
             snapshot_analysis['daily_snapshots'].append({
                 'date': snapshot.date.isoformat(),
-                'portfolio_value': float(snapshot.portfolio_value),
+                'total_value': float(snapshot.total_value),
                 'created_at': snapshot.created_at.isoformat() if snapshot.created_at else None
             })
         
@@ -11350,7 +11350,7 @@ def admin_debug_snapshot_dates():
                 intraday_by_date[snapshot_date] = []
             intraday_by_date[snapshot_date].append({
                 'timestamp': intraday.timestamp.isoformat(),
-                'portfolio_value': float(intraday.portfolio_value)
+                'total_value': float(intraday.total_value)
             })
         
         for date_key, snapshots in intraday_by_date.items():
