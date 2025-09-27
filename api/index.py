@@ -11159,8 +11159,10 @@ def admin_test_imports():
         if email != ADMIN_EMAIL:
             return jsonify({'error': 'Admin access required'}), 403
         
+        from datetime import datetime as dt
+        
         results = {
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': dt.now().isoformat(),
             'tests': {}
         }
         

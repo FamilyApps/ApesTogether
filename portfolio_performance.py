@@ -503,7 +503,12 @@ class PortfolioPerformanceCalculator:
     
     def calculate_sp500_return(self, start_date: date, end_date: date) -> float:
         """Calculate S&P 500 return for a period"""
-        sp500_data = self.get_sp500_data(start_date, end_date)
+        # Use cached data only on weekends to avoid API call issues
+        current_time = datetime.now()
+        if current_time.weekday() >= 5:  # Weekend
+            sp500_data = self.get_cached_sp500_data(start_date, end_date)
+        else:
+            sp500_data = self.get_sp500_data(start_date, end_date)
         
         if not sp500_data:
             logger.warning(f"No S&P 500 data found for period {start_date} to {end_date}")
