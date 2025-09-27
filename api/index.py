@@ -11202,6 +11202,81 @@ def admin_test_imports():
         logger.error(f"Error in import test: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/debug-chart-data')
+@login_required
+def admin_debug_chart_data():
+    """Debug chart data format to understand timestamp issue"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime
+        from portfolio_performance import PortfolioPerformanceCalculator
+        
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'User not authenticated'}), 401
+        
+        calculator = PortfolioPerformanceCalculator()
+        
+        # Test both 1D and 5D data
+        results = {}
+        
+        for period in ['1D', '5D']:
+            try:
+                data = calculator.get_performance_data(user_id, period)
+                
+                # Sample the first few data points
+                sample_data = data.get('chart_data', [])[:3] if data.get('chart_data') else []
+                
+                results[period] = {
+                    'success': True,
+                    'total_points': len(data.get('chart_data', [])),
+                    'sample_data': sample_data,
+                    'sample_analysis': []
+                }
+                
+                # Analyze each sample point
+                for i, item in enumerate(sample_data):
+                    analysis = {
+                        'index': i,
+                        'raw_date': item.get('date'),
+                        'date_type': type(item.get('date')).__name__,
+                        'portfolio_value': item.get('portfolio'),
+                        'sp500_value': item.get('sp500')
+                    }
+                    
+                    # Try to parse the date
+                    try:
+                        if isinstance(item.get('date'), str):
+                            parsed_date = datetime.fromisoformat(item['date'].replace('Z', '+00:00'))
+                            analysis['parsed_date'] = parsed_date.isoformat()
+                            analysis['timestamp_ms'] = int(parsed_date.timestamp() * 1000)
+                        else:
+                            analysis['parse_error'] = 'Date is not a string'
+                    except Exception as e:
+                        analysis['parse_error'] = str(e)
+                    
+                    results[period]['sample_analysis'].append(analysis)
+                    
+            except Exception as e:
+                results[period] = {
+                    'success': False,
+                    'error': str(e)
+                }
+        
+        return jsonify({
+            'timestamp': datetime.now().isoformat(),
+            'user_id': user_id,
+            'results': results
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in chart data debug: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/test-weekend-protection')
 @login_required
 def admin_test_weekend_protection():
