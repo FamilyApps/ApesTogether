@@ -9184,7 +9184,7 @@ def create_tables():
             return jsonify({'error': 'Admin access required'}), 403
         
         # Create the new tables
-        from models import db, User, Stock, Transaction, PortfolioSnapshot, StockInfo, SubscriptionTier, UserSubscription, SMSNotification, LeaderboardCache, UserPortfolioChartCache, AlphaVantageAPILog, PlatformMetrics, UserActivity
+        from models import db, User, Stock, Transaction, PortfolioSnapshot, StockInfo, SubscriptionTier, Subscription, SMSNotification, LeaderboardCache, UserPortfolioChartCache, AlphaVantageAPILog, PlatformMetrics, UserActivity
         
         current_time = datetime.now()
         

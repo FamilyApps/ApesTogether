@@ -7,14 +7,14 @@ Checks intraday snapshots, end-of-day snapshots, chart data, and leaderboard upd
 import os
 import sys
 from datetime import datetime, timedelta
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, func
 from sqlalchemy.orm import sessionmaker
 import json
 
 # Add the project root to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from models import db, User, Transaction, PortfolioSnapshot, IntradaySnapshot, LeaderboardEntry
+from models import db, User, Transaction, PortfolioSnapshot, PortfolioSnapshotIntraday, LeaderboardEntry
 from portfolio_performance import PortfolioPerformanceCalculator
 
 def get_db_connection():
@@ -65,9 +65,9 @@ def test_cron_execution():
         print("\n--- CHECKING INTRADAY SNAPSHOTS ---")
         for user in users:
             # Check intraday snapshots for today
-            intraday_today = session.query(IntradaySnapshot).filter(
-                IntradaySnapshot.user_id == user.id,
-                IntradaySnapshot.date == today
+            intraday_today = session.query(PortfolioSnapshotIntraday).filter(
+                PortfolioSnapshotIntraday.user_id == user.id,
+                func.date(PortfolioSnapshotIntraday.timestamp) == today
             ).all()
             
             if intraday_today:
