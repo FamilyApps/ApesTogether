@@ -7231,6 +7231,7 @@ def populate_stock_info():
 
 # Portfolio performance API endpoints
 @app.route('/api/portfolio/performance/<period>')
+@login_required
 def get_portfolio_performance(period):
     """Get portfolio performance data for a specific time period - uses cached data for leaderboard users"""
     try:
@@ -10956,6 +10957,7 @@ def debug_intraday_snapshots():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/portfolio/intraday/<period>', methods=['GET'])
+@login_required
 def portfolio_performance_intraday(period):
     """Get intraday portfolio performance data using actual intraday snapshots"""
     logger.info(f"INTRADAY ROUTE HIT: /api/portfolio/intraday/{period}")
