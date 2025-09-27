@@ -11389,9 +11389,10 @@ def admin_debug_leaderboard_calculations():
             return jsonify({'error': 'Admin access required'}), 403
         
         from datetime import datetime, date, timedelta
-        from models import db, User, LeaderboardCache
+        from models import db, User, LeaderboardCache, LeaderboardEntry
         from portfolio_performance import PortfolioPerformanceCalculator
         from sqlalchemy import desc
+        import json
         
         calculator = PortfolioPerformanceCalculator()
         
@@ -11408,17 +11409,31 @@ def admin_debug_leaderboard_calculations():
         
         # Check leaderboard cache for each period
         for period in ['1D', '5D']:
-            cache_entries = LeaderboardCache.query.filter_by(period=period).all()
+            # Check LeaderboardCache (JSON cache)
+            cache_entry = LeaderboardCache.query.filter_by(period=period).first()
+            cache_data = None
+            if cache_entry:
+                try:
+                    cache_data = json.loads(cache_entry.leaderboard_data)
+                except:
+                    cache_data = None
+            
+            # Check LeaderboardEntry (individual user records)
+            entry_records = LeaderboardEntry.query.filter_by(period=period).all()
+            
             results['leaderboard_cache_status'][period] = {
-                'total_entries': len(cache_entries),
-                'entries': []
+                'cache_exists': cache_entry is not None,
+                'cache_generated_at': cache_entry.generated_at.isoformat() if cache_entry else None,
+                'cache_user_count': len(cache_data) if cache_data else 0,
+                'entry_records_count': len(entry_records),
+                'entry_records': []
             }
             
-            for entry in cache_entries[:3]:  # First 3 entries
-                results['leaderboard_cache_status'][period]['entries'].append({
+            for entry in entry_records[:3]:  # First 3 entries
+                results['leaderboard_cache_status'][period]['entry_records'].append({
                     'user_id': entry.user_id,
-                    'return_percent': float(entry.return_percent) if entry.return_percent else None,
-                    'updated_at': entry.updated_at.isoformat() if entry.updated_at else None
+                    'performance_percent': float(entry.performance_percent) if entry.performance_percent else None,
+                    'calculated_at': entry.calculated_at.isoformat() if entry.calculated_at else None
                 })
         
         # Test calculations for each user
@@ -11459,12 +11474,12 @@ def admin_debug_leaderboard_calculations():
             live_data = {}
             
             for user in users_with_stocks:
-                # Get cached data
-                cache_entry = LeaderboardCache.query.filter_by(
+                # Get cached data from LeaderboardEntry
+                entry_record = LeaderboardEntry.query.filter_by(
                     user_id=user.id, period=period
                 ).first()
-                if cache_entry:
-                    cache_data[user.id] = float(cache_entry.return_percent) if cache_entry.return_percent else 0.0
+                if entry_record:
+                    cache_data[user.id] = float(entry_record.performance_percent) if entry_record.performance_percent else 0.0
                 
                 # Get live calculation
                 user_calc = next((u for u in results['users_analyzed'] if u['user_id'] == user.id), None)
