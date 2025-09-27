@@ -3854,10 +3854,12 @@ def admin_intraday_collection_logs():
             import pytz
             # Set up timezone conversion
             utc = pytz.UTC
+            eastern = pytz.timezone('US/Eastern')
         except ImportError:
-            logger.error("pytz module not available - timezone features disabled")
-            return jsonify({'error': 'Timezone module not available'}), 500
-        eastern = pytz.timezone('US/Eastern')
+            logger.warning("pytz module not available - using UTC fallback")
+            from datetime import timezone, timedelta
+            utc = timezone.utc
+            eastern = timezone(timedelta(hours=-4))  # EDT fallback
         
         today = date.today()
         yesterday = today - timedelta(days=1)
@@ -6430,8 +6432,12 @@ def admin_diagnose_snapshot_creation():
         
         from datetime import datetime, date, timedelta
         from models import db, PortfolioSnapshot, User, Stock
-        from portfolio_performance import PortfolioPerformanceCalculator
         import os
+        
+        try:
+            from portfolio_performance import PortfolioPerformanceCalculator
+        except ImportError as e:
+            return jsonify({'error': f'Portfolio performance module import failed: {str(e)}'}), 500
         
         diagnosis = {
             'api_status': {},
