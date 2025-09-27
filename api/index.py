@@ -11141,6 +11141,151 @@ def portfolio_performance_intraday(period):
         logger.error(f"Error in performance-intraday API: {str(e)}")
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
+@app.route('/admin/debug-ytd-sp500')
+@login_required
+def admin_debug_ytd_sp500():
+    """Debug YTD S&P 500 calculation vs other periods"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime, date, timedelta
+        from models import db, MarketData
+        from sqlalchemy import and_
+        
+        calculator = PortfolioPerformanceCalculator()
+        today = date.today()
+        
+        # Calculate end_date (same logic as portfolio_performance.py)
+        if today.weekday() == 5:  # Saturday
+            end_date = today - timedelta(days=1)  # Friday
+        elif today.weekday() == 6:  # Sunday
+            end_date = today - timedelta(days=2)  # Friday
+        else:
+            end_date = today  # Monday-Friday
+        
+        # Define periods to compare
+        periods = {
+            'YTD': {
+                'start_date': date(end_date.year, 1, 1),
+                'description': f"January 1, {end_date.year} to {end_date}"
+            },
+            '3M': {
+                'start_date': end_date - timedelta(days=90),
+                'description': f"90 days ago to {end_date}"
+            },
+            '1Y': {
+                'start_date': end_date - timedelta(days=365),
+                'description': f"365 days ago to {end_date}"
+            }
+        }
+        
+        results = {
+            'today': today.isoformat(),
+            'end_date': end_date.isoformat(),
+            'periods': {}
+        }
+        
+        # Analyze each period
+        for period_name, period_info in periods.items():
+            start_date = period_info['start_date']
+            
+            # Get S&P 500 data for this period
+            sp500_data = MarketData.query.filter(
+                and_(
+                    MarketData.ticker == 'SPY_SP500',
+                    MarketData.date >= start_date,
+                    MarketData.date <= end_date
+                )
+            ).order_by(MarketData.date).all()
+            
+            period_result = {
+                'start_date': start_date.isoformat(),
+                'end_date': end_date.isoformat(),
+                'days': (end_date - start_date).days,
+                'description': period_info['description'],
+                'data_points': len(sp500_data),
+                'start_price': None,
+                'end_price': None,
+                'return_percent': 0.0,
+                'calculation_status': 'failed'
+            }
+            
+            if sp500_data:
+                # Find start and end prices using same logic as portfolio_performance.py
+                available_dates = [data.date for data in sp500_data]
+                sp500_dict = {data.date: data.close_price for data in sp500_data}
+                
+                start_price = None
+                end_price = None
+                
+                # Find start price (closest date >= start_date)
+                for d in sorted(available_dates):
+                    if d >= start_date:
+                        start_price = sp500_dict[d]
+                        period_result['start_price'] = start_price
+                        period_result['start_date_actual'] = d.isoformat()
+                        break
+                
+                # Find end price (closest date <= end_date)
+                for d in reversed(sorted(available_dates)):
+                    if d <= end_date:
+                        end_price = sp500_dict[d]
+                        period_result['end_price'] = end_price
+                        period_result['end_date_actual'] = d.isoformat()
+                        break
+                
+                if start_price and end_price and start_price > 0:
+                    sp500_return = (end_price - start_price) / start_price
+                    period_result['return_percent'] = round(sp500_return * 100, 2)
+                    period_result['calculation_status'] = 'success'
+                    
+                    # Add warnings for suspicious data
+                    if start_price < 100:
+                        period_result['warning'] = f"Start price ${start_price:.2f} seems unusually low"
+                    if sp500_return == 0:
+                        period_result['warning'] = "Zero return calculated"
+                else:
+                    period_result['error'] = f"Invalid prices: start={start_price}, end={end_price}"
+            else:
+                period_result['error'] = "No S&P 500 data found for this period"
+            
+            # Test calculator method
+            try:
+                calc_return = calculator.calculate_sp500_return(start_date, end_date)
+                period_result['calculator_return_percent'] = round(calc_return * 100, 2)
+            except Exception as e:
+                period_result['calculator_error'] = str(e)
+            
+            results['periods'][period_name] = period_result
+        
+        # Add data quality checks
+        all_sp500_count = MarketData.query.filter(MarketData.ticker == 'SPY_SP500').count()
+        zero_prices_count = MarketData.query.filter(
+            and_(MarketData.ticker == 'SPY_SP500', MarketData.close_price == 0)
+        ).count()
+        low_prices_count = MarketData.query.filter(
+            and_(
+                MarketData.ticker == 'SPY_SP500',
+                MarketData.close_price < 100,
+                MarketData.close_price > 0
+            )
+        ).count()
+        
+        results['data_quality'] = {
+            'total_sp500_records': all_sp500_count,
+            'zero_prices': zero_prices_count,
+            'suspiciously_low_prices': low_prices_count
+        }
+        
+        return jsonify(results)
+        
+    except Exception as e:
+        logger.error(f"Error in YTD S&P 500 debug: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/debug/routes')
 def debug_routes():
     """Debug endpoint to list all registered routes"""
