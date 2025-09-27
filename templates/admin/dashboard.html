@@ -293,11 +293,20 @@ function displayApiStatus(diagnosis) {
     const badge = document.getElementById('apiStatusBadge');
     const text = document.getElementById('apiStatusText');
     
+    // Check if it's weekend (Saturday = 6, Sunday = 0)
+    const today = new Date();
+    const isWeekend = today.getDay() === 0 || today.getDay() === 6;
+    
     // Check if API is working properly
     const apiTest = diagnosis.api_status?.test_api_call;
     const calculations = diagnosis.calculation_tests || [];
     
-    if (apiTest && apiTest.success && apiTest.current_price > 0) {
+    if (isWeekend) {
+        // Weekend - API calls are intentionally blocked
+        badge.textContent = 'Weekend';
+        badge.className = 'badge bg-info';
+        text.textContent = 'API calls disabled (market closed)';
+    } else if (apiTest && apiTest.success && apiTest.current_price > 0) {
         // API is working and returning real prices
         badge.textContent = 'Healthy';
         badge.className = 'badge bg-success';
