@@ -53,15 +53,10 @@ def comprehensive_data_flow_debug():
     # Get all users with stocks
     users_with_stocks = User.query.join(User.stocks).distinct().all()
     print(f"\n👥 Found {len(users_with_stocks)} users with stocks")
-    
-    # STEP 0: Portfolio Assets Analysis - Track actual user holdings
     print(f"\n🏦 STEP 0: Portfolio Assets Analysis")
     print("-" * 50)
     
     from models import Stock, StockInfo
-    from stock_data_manager import StockDataManager
-    
-    stock_manager = StockDataManager()
     
     for user in users_with_stocks:
         print(f"\n  User: {user.username} (ID: {user.id})")
@@ -76,37 +71,23 @@ def comprehensive_data_flow_debug():
         for stock in user_stocks:
             print(f"      {stock.ticker}: {stock.quantity} shares @ ${stock.purchase_price:.2f}")
             
-            # Get current stock price from cache/API
-            try:
-                current_price = stock_manager.get_current_price(stock.ticker)
-                current_value = stock.quantity * current_price
-                total_calculated_value += current_value
-                
-                # Get stock info for cap classification
-                stock_info = StockInfo.query.filter_by(ticker=stock.ticker).first()
-                
-                assets_data[stock.ticker] = {
-                    'quantity': stock.quantity,
-                    'purchase_price': float(stock.purchase_price),
-                    'current_price': current_price,
-                    'current_value': current_value,
-                    'cap_classification': stock_info.cap_classification if stock_info else 'unknown',
-                    'price_source': 'api_cache'
+            # Get stock info for cap classification
+            stock_info = StockInfo.query.filter_by(ticker=stock.ticker).first()
+            
+            # Use purchase price as placeholder (diagnostic focus is on data flow, not pricing)
+            current_value = stock.quantity * float(stock.purchase_price)
+            total_calculated_value += current_value
+            
+            assets_data[stock.ticker] = {
+                'quantity': stock.quantity,
+                'purchase_price': float(stock.purchase_price),
+                'current_price': float(stock.purchase_price),  # Placeholder for diagnostic
+                'current_value': current_value,
+                'cap_classification': stock_info.cap_classification if stock_info else 'unknown',
+                'price_source': 'diagnostic_placeholder'
                 }
                 
-                print(f"        Current: ${current_price:.2f} = ${current_value:.2f} value")
-                
-            except Exception as e:
-                print(f"        ❌ Price lookup failed: {str(e)}")
-                assets_data[stock.ticker] = {
-                    'quantity': stock.quantity,
-                    'purchase_price': float(stock.purchase_price),
-                    'current_price': None,
-                    'current_value': 0,
-                    'cap_classification': 'unknown',
-                    'price_source': 'failed',
-                    'error': str(e)
-                }
+            print(f"        Current: ${float(stock.purchase_price):.2f} = ${current_value:.2f} value")
         
         print(f"    Total Calculated Portfolio Value: ${total_calculated_value:.2f}")
         
