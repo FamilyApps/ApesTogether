@@ -1120,3 +1120,65 @@ def comprehensive_data_flow_debug():
             'error': str(e),
             'message': 'Failed to complete comprehensive data flow analysis'
         }), 500
+
+@admin_bp.route('/regenerate-chart-cache-from-snapshots')
+@login_required
+@admin_required
+def regenerate_chart_cache_from_snapshots():
+    """Regenerate all chart cache using snapshot-based approach"""
+    try:
+        from leaderboard_utils import generate_chart_from_snapshots, update_user_chart_cache
+        from models import db, User
+        
+        current_app.logger.info("Starting chart cache regeneration from snapshots...")
+        
+        results = {
+            'users_processed': 0,
+            'cache_entries_updated': 0,
+            'errors': []
+        }
+        
+        # Get all users with stocks
+        users_with_stocks = User.query.join(User.stocks).distinct().all()
+        
+        for user in users_with_stocks:
+            results['users_processed'] += 1
+            
+            for period in ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']:
+                try:
+                    success = update_user_chart_cache(user.id, period)
+                    if success:
+                        results['cache_entries_updated'] += 1
+                        current_app.logger.info(f"Updated chart cache for {user.username} {period}")
+                    else:
+                        error_msg = f"Failed to update {user.username} {period}"
+                        results['errors'].append(error_msg)
+                        current_app.logger.warning(error_msg)
+                except Exception as e:
+                    error_msg = f"Error updating {user.username} {period}: {str(e)}"
+                    results['errors'].append(error_msg)
+                    current_app.logger.error(error_msg)
+        
+        # Commit all changes
+        try:
+            db.session.commit()
+            current_app.logger.info(f"Chart cache regeneration completed. Updated {results['cache_entries_updated']} entries")
+        except Exception as e:
+            db.session.rollback()
+            error_msg = f"Database commit failed: {str(e)}"
+            results['errors'].append(error_msg)
+            current_app.logger.error(error_msg)
+        
+        return jsonify({
+            'success': len(results['errors']) == 0,
+            'message': f"Processed {results['users_processed']} users, updated {results['cache_entries_updated']} cache entries",
+            'results': results
+        })
+        
+    except Exception as e:
+        current_app.logger.error(f"Error in chart cache regeneration: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'message': 'Failed to regenerate chart cache from snapshots'
+        }), 500

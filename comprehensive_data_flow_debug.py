@@ -192,7 +192,7 @@ def comprehensive_data_flow_debug():
             try:
                 # Time the chart generation
                 start_time = time.time()
-                calculator = PortfolioPerformanceCalculator(sample_user.id)
+                calculator = PortfolioPerformanceCalculator()
                 chart_data = calculator.get_performance_data(period)
                 gen_time = time.time() - start_time
                 
@@ -391,10 +391,10 @@ def comprehensive_data_flow_debug():
             # Test portfolio allocation calculation (should use current holdings + stock info)
             start_time = time.time()
             
-            from models import UserStock, StockInfo
+            from models import Stock, StockInfo
             
             # Get user's current stock holdings
-            user_stocks = UserStock.query.filter_by(user_id=sample_user.id).all()
+            user_stocks = sample_user.stocks.all()
             
             allocation_data = {}
             total_value = 0
@@ -572,7 +572,7 @@ def comprehensive_data_flow_debug():
     
     # Check calculation success
     calc_success = sum(1 for period in ['1D', '5D', '1M', 'YTD'] 
-                      if results['step2_calculations'][period]['success'])
+                      if results['step2_leaderboard_calculations'][period]['success'])
     
     print(f"Calculation Success: {calc_success}/4 periods")
     
@@ -584,7 +584,7 @@ def comprehensive_data_flow_debug():
     
     # Check retrieval success
     retrieval_success = sum(1 for period in ['1D', '5D', '1M', 'YTD'] 
-                           if results['step4_cache_retrieval'][period]['success'])
+                           if results['step4_leaderboard_cache_retrieval'][period]['success'])
     
     print(f"Cache Retrieval: {retrieval_success}/4 periods")
     
