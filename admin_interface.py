@@ -665,6 +665,364 @@ def comprehensive_leaderboard_fix():
             'message': 'Failed to run comprehensive leaderboard fix'
         }), 500
 
+@admin_bp.route('/debug-performance-calculations')
+@login_required
+@admin_required
+def debug_performance_calculations():
+    """Debug why performance calculations are broken (1D no data, 5D returns 0%)"""
+    try:
+        from datetime import datetime, date, timedelta
+        from models import db, User, PortfolioSnapshot, PortfolioSnapshotIntraday, MarketData
+        from portfolio_performance import PortfolioPerformanceCalculator
+        from sqlalchemy import func, and_
+        
+        current_app.logger.info("Starting performance calculation debug...")
+        
+        results = {
+            'timestamp': datetime.now().isoformat(),
+            'test_user': {},
+            'snapshot_data': {},
+            'market_data': {},
+            'calculation_tests': {},
+            'detailed_analysis': {}
+        }
+        
+        # Get a test user
+        test_user = User.query.join(User.stocks).distinct().first()
+        if not test_user:
+            return jsonify({
+                'success': False,
+                'error': 'No users with stocks found',
+                'results': results
+            }), 400
+        
+        results['test_user'] = {
+            'id': test_user.id,
+            'username': test_user.username
+        }
+        
+        # Check portfolio snapshots
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+        five_days_ago = today - timedelta(days=5)
+        
+        # Check regular snapshots
+        total_snapshots = PortfolioSnapshot.query.filter_by(user_id=test_user.id).count()
+        recent_snapshots = PortfolioSnapshot.query.filter(
+            and_(
+                PortfolioSnapshot.user_id == test_user.id,
+                PortfolioSnapshot.date >= five_days_ago
+            )
+        ).order_by(PortfolioSnapshot.date.desc()).all()
+        
+        # Check intraday snapshots
+        intraday_count = PortfolioSnapshotIntraday.query.filter(
+            and_(
+                PortfolioSnapshotIntraday.user_id == test_user.id,
+                func.date(PortfolioSnapshotIntraday.timestamp) == today
+            )
+        ).count()
+        
+        results['snapshot_data'] = {
+            'total_snapshots': total_snapshots,
+            'recent_snapshots_count': len(recent_snapshots),
+            'recent_snapshots': [
+                {'date': s.date.isoformat(), 'value': float(s.total_value)}
+                for s in recent_snapshots[:5]
+            ],
+            'intraday_snapshots_today': intraday_count
+        }
+        
+        # Check S&P 500 data
+        sp500_daily = MarketData.query.filter(
+            and_(
+                MarketData.ticker == 'SPY_SP500',
+                MarketData.date >= five_days_ago
+            )
+        ).order_by(MarketData.date.desc()).all()
+        
+        sp500_intraday = MarketData.query.filter(
+            and_(
+                MarketData.ticker == 'SPY_INTRADAY',
+                MarketData.date == today
+            )
+        ).count()
+        
+        results['market_data'] = {
+            'sp500_daily_count': len(sp500_daily),
+            'sp500_daily': [
+                {'date': d.date.isoformat(), 'price': float(d.close_price)}
+                for d in sp500_daily[:5]
+            ],
+            'sp500_intraday_today': sp500_intraday
+        }
+        
+        # Test performance calculations
+        calculator = PortfolioPerformanceCalculator()
+        
+        for period in ['1D', '5D']:
+            try:
+                perf_data = calculator.get_performance_data(test_user.id, period)
+                
+                portfolio_return = perf_data.get('portfolio_return')
+                sp500_return = perf_data.get('sp500_return')
+                chart_data = perf_data.get('chart_data', [])
+                
+                test_result = {
+                    'portfolio_return': portfolio_return,
+                    'sp500_return': sp500_return,
+                    'chart_data_points': len(chart_data),
+                    'first_point': chart_data[0] if chart_data else None,
+                    'last_point': chart_data[-1] if chart_data else None,
+                    'issues': []
+                }
+                
+                # Check for specific issues
+                if period == '1D' and len(chart_data) == 0:
+                    test_result['issues'].append('1D ISSUE: No chart data - likely missing intraday snapshots')
+                
+                if period == '5D' and portfolio_return == 0.0 and len(chart_data) > 0:
+                    test_result['issues'].append('5D ISSUE: 0% return despite chart data - calculation problem')
+                
+                results['calculation_tests'][period] = test_result
+                
+            except Exception as e:
+                results['calculation_tests'][period] = {
+                    'error': str(e)
+                }
+        
+        # Detailed analysis for 5D
+        try:
+            start_date = today - timedelta(days=5)
+            end_date = today
+            
+            dietz_return = calculator.calculate_modified_dietz_return(test_user.id, start_date, end_date)
+            
+            # Check snapshots in period
+            period_snapshots = PortfolioSnapshot.query.filter(
+                and_(
+                    PortfolioSnapshot.user_id == test_user.id,
+                    PortfolioSnapshot.date >= start_date,
+                    PortfolioSnapshot.date <= end_date
+                )
+            ).order_by(PortfolioSnapshot.date).all()
+            
+            simple_return = None
+            if len(period_snapshots) >= 2:
+                start_value = period_snapshots[0].total_value
+                end_value = period_snapshots[-1].total_value
+                simple_return = ((end_value - start_value) / start_value) * 100
+            
+            sp500_return = calculator.calculate_sp500_return(start_date, end_date)
+            
+            results['detailed_analysis'] = {
+                'modified_dietz_return': float(dietz_return * 100),
+                'snapshots_in_period': len(period_snapshots),
+                'simple_return_check': float(simple_return) if simple_return else None,
+                'sp500_return': float(sp500_return * 100),
+                'period_snapshots': [
+                    {'date': s.date.isoformat(), 'value': float(s.total_value)}
+                    for s in period_snapshots
+                ]
+            }
+            
+        except Exception as e:
+            results['detailed_analysis'] = {
+                'error': str(e)
+            }
+        
+        current_app.logger.info("Performance calculation debug completed")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Performance calculation debug completed',
+            'results': results
+        })
+        
+    except Exception as e:
+        current_app.logger.error(f"Error in performance calculation debug: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'message': 'Failed to run performance calculation debug'
+        }), 500
+
+@admin_bp.route('/fix-leaderboard-to-use-cache')
+@login_required
+@admin_required
+def fix_leaderboard_to_use_cache():
+    """Fix leaderboard to use cached chart data instead of broken live calculations"""
+    try:
+        from datetime import datetime, date, timedelta
+        from models import db, User, UserPortfolioChartCache, LeaderboardCache, LeaderboardEntry
+        import json
+        
+        current_app.logger.info("Starting leaderboard cache fix...")
+        
+        results = {
+            'timestamp': datetime.now().isoformat(),
+            'cache_status': {},
+            'generated_leaderboards': {},
+            'verification': {}
+        }
+        
+        # Check cached chart data availability
+        users_with_stocks = User.query.join(User.stocks).distinct().all()
+        results['users_with_stocks'] = len(users_with_stocks)
+        
+        cache_status = {}
+        for period in ['1D', '5D', '1M', '3M', 'YTD', '1Y']:
+            cached_users = UserPortfolioChartCache.query.filter_by(period=period).count()
+            cache_status[period] = cached_users
+        
+        results['cache_status'] = cache_status
+        
+        # Generate leaderboard data from cached charts
+        successful_periods = []
+        
+        for period in ['1D', '5D']:  # Start with critical periods
+            # Get all users with cached chart data for this period
+            cached_charts = UserPortfolioChartCache.query.filter_by(period=period).all()
+            
+            if not cached_charts:
+                results['generated_leaderboards'][period] = {
+                    'success': False,
+                    'error': 'No cached chart data available'
+                }
+                continue
+            
+            leaderboard_entries = []
+            
+            for chart_cache in cached_charts:
+                try:
+                    # Parse the cached Chart.js data
+                    chart_data = json.loads(chart_cache.chart_data)
+                    datasets = chart_data.get('datasets', [])
+                    
+                    if len(datasets) < 1:
+                        continue
+                    
+                    # Get portfolio performance data
+                    portfolio_data = datasets[0].get('data', [])
+                    if not portfolio_data or len(portfolio_data) < 2:
+                        continue
+                    
+                    # Calculate performance from first to last data point
+                    start_value = portfolio_data[0]
+                    end_value = portfolio_data[-1]
+                    
+                    if start_value > 0:
+                        performance_percent = ((end_value - start_value) / start_value) * 100
+                    else:
+                        performance_percent = 0.0
+                    
+                    # Get user info
+                    user = User.query.get(chart_cache.user_id)
+                    if not user:
+                        continue
+                    
+                    leaderboard_entries.append({
+                        'user_id': user.id,
+                        'username': user.username,
+                        'performance_percent': performance_percent,
+                        'portfolio_value': float(end_value),
+                        'small_cap_percent': 50.0,  # Default for now
+                        'large_cap_percent': 50.0,   # Default for now
+                        'avg_trades_per_week': 5.0   # Default for now
+                    })
+                    
+                except Exception as e:
+                    current_app.logger.warning(f"Failed to process cache for user {chart_cache.user_id}: {str(e)}")
+                    continue
+            
+            # Sort by performance
+            leaderboard_entries.sort(key=lambda x: x['performance_percent'], reverse=True)
+            
+            results['generated_leaderboards'][period] = {
+                'success': True,
+                'entries_count': len(leaderboard_entries),
+                'top_3': leaderboard_entries[:3] if leaderboard_entries else []
+            }
+            
+            if len(leaderboard_entries) > 0:
+                try:
+                    # Clear existing cache
+                    LeaderboardCache.query.filter_by(period=period).delete()
+                    
+                    # Create new cache entry
+                    cache_entry = LeaderboardCache(
+                        period=period,
+                        leaderboard_data=json.dumps(leaderboard_entries),
+                        generated_at=datetime.now()
+                    )
+                    db.session.add(cache_entry)
+                    
+                    # Update individual LeaderboardEntry records
+                    LeaderboardEntry.query.filter_by(period=period).delete()
+                    
+                    for entry_data in leaderboard_entries:
+                        entry = LeaderboardEntry(
+                            user_id=entry_data['user_id'],
+                            period=period,
+                            performance_percent=entry_data['performance_percent'],
+                            small_cap_percent=entry_data['small_cap_percent'],
+                            large_cap_percent=entry_data['large_cap_percent'],
+                            avg_trades_per_week=entry_data['avg_trades_per_week'],
+                            calculated_at=datetime.now()
+                        )
+                        db.session.add(entry)
+                    
+                    db.session.commit()
+                    successful_periods.append(period)
+                    
+                except Exception as e:
+                    db.session.rollback()
+                    results['generated_leaderboards'][period]['cache_update_error'] = str(e)
+        
+        # Verify the fix
+        for period in successful_periods:
+            cache_entry = LeaderboardCache.query.filter_by(period=period).first()
+            entry_count = LeaderboardEntry.query.filter_by(period=period).count()
+            
+            verification_data = {
+                'cache_entries': 0,
+                'db_entries': entry_count,
+                'top_performer': None
+            }
+            
+            if cache_entry:
+                try:
+                    cache_data = json.loads(cache_entry.leaderboard_data)
+                    verification_data['cache_entries'] = len(cache_data)
+                    if cache_data:
+                        verification_data['top_performer'] = {
+                            'username': cache_data[0]['username'],
+                            'performance_percent': cache_data[0]['performance_percent']
+                        }
+                except:
+                    pass
+            
+            results['verification'][period] = verification_data
+        
+        success = len(successful_periods) > 0
+        
+        current_app.logger.info(f"Leaderboard cache fix completed. Success: {success}, Periods: {successful_periods}")
+        
+        return jsonify({
+            'success': success,
+            'message': f'Fixed leaderboards for periods: {successful_periods}' if success else 'No periods were successfully fixed',
+            'results': results,
+            'successful_periods': successful_periods
+        })
+        
+    except Exception as e:
+        current_app.logger.error(f"Error in leaderboard cache fix: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'message': 'Failed to run leaderboard cache fix'
+        }), 500
+
 # Register the blueprint in your app.py
 # Add this line to app.py:
 # from admin_interface import admin_bp
