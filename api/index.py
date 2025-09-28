@@ -11535,11 +11535,20 @@ def admin_debug_leaderboard_calculations():
                 live_val = live_data.get(user_id, 'missing')
                 
                 if cached_val != live_val:
+                    # Calculate difference safely, handling string values
+                    difference = 'N/A'
+                    if (cached_val not in ['missing', 'db_error'] and live_val not in ['missing', 'db_error'] 
+                        and cached_val is not None and live_val is not None):
+                        try:
+                            difference = abs(float(cached_val) - float(live_val))
+                        except (ValueError, TypeError):
+                            difference = 'conversion_error'
+                    
                     results['calculation_comparison'][period]['discrepancies'].append({
                         'user_id': user_id,
                         'cached': cached_val,
                         'live': live_val,
-                        'difference': abs(float(cached_val or 0) - float(live_val or 0)) if cached_val != 'missing' and live_val != 'missing' else 'N/A'
+                        'difference': difference
                     })
         
         return jsonify(results)
@@ -11547,6 +11556,59 @@ def admin_debug_leaderboard_calculations():
     except Exception as e:
         db.session.rollback()
         logger.error(f"Error in leaderboard debug: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/check-leaderboard-schema')
+@login_required
+def admin_check_leaderboard_schema():
+    """Check actual database schema for leaderboard tables"""
+    from sqlalchemy import inspect
+    from models import db
+    
+    try:
+        db.session.rollback()
+        
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        inspector = inspect(db.engine)
+        
+        # Check if tables exist
+        tables = inspector.get_table_names()
+        
+        result = {
+            'timestamp': datetime.now().isoformat(),
+            'all_tables': tables,
+            'leaderboard_tables': {}
+        }
+        
+        # Check leaderboard_entry table
+        if 'leaderboard_entry' in tables:
+            columns = inspector.get_columns('leaderboard_entry')
+            result['leaderboard_tables']['leaderboard_entry'] = {
+                'exists': True,
+                'columns': [{'name': col['name'], 'type': str(col['type'])} for col in columns]
+            }
+        else:
+            result['leaderboard_tables']['leaderboard_entry'] = {'exists': False}
+        
+        # Check leaderboard_cache table
+        if 'leaderboard_cache' in tables:
+            columns = inspector.get_columns('leaderboard_cache')
+            result['leaderboard_tables']['leaderboard_cache'] = {
+                'exists': True,
+                'columns': [{'name': col['name'], 'type': str(col['type'])} for col in columns]
+            }
+        else:
+            result['leaderboard_tables']['leaderboard_cache'] = {'exists': False}
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error checking schema: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/test-weekend-protection')
