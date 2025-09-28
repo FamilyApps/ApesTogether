@@ -11404,8 +11404,24 @@ def admin_debug_leaderboard_calculations():
             'periods_tested': ['1D', '5D'],
             'users_analyzed': [],
             'leaderboard_cache_status': {},
-            'calculation_comparison': {}
+            'calculation_comparison': {},
+            'database_schema_check': {}
         }
+        
+        # Check database schema for LeaderboardEntry table
+        try:
+            from sqlalchemy import inspect
+            inspector = inspect(db.engine)
+            leaderboard_columns = [col['name'] for col in inspector.get_columns('leaderboard_entry')]
+            results['database_schema_check'] = {
+                'leaderboard_entry_columns': leaderboard_columns,
+                'has_period_column': 'period' in leaderboard_columns,
+                'has_performance_percent_column': 'performance_percent' in leaderboard_columns
+            }
+        except Exception as e:
+            results['database_schema_check'] = {
+                'error': f'Schema check failed: {str(e)}'
+            }
         
         # Check leaderboard cache for each period
         for period in ['1D', '5D']:
@@ -11419,7 +11435,17 @@ def admin_debug_leaderboard_calculations():
                     cache_data = None
             
             # Check LeaderboardEntry (individual user records)
-            entry_records = LeaderboardEntry.query.filter_by(period=period).all()
+            # Handle case where period column might not exist in database yet
+            try:
+                entry_records = LeaderboardEntry.query.filter_by(period=period).all()
+            except Exception as e:
+                logger.warning(f"LeaderboardEntry period filter failed: {str(e)}")
+                # Try to get all records if period column doesn't exist
+                try:
+                    entry_records = LeaderboardEntry.query.all()
+                except Exception as e2:
+                    logger.error(f"LeaderboardEntry query failed entirely: {str(e2)}")
+                    entry_records = []
             
             results['leaderboard_cache_status'][period] = {
                 'cache_exists': cache_entry is not None,
@@ -11475,11 +11501,16 @@ def admin_debug_leaderboard_calculations():
             
             for user in users_with_stocks:
                 # Get cached data from LeaderboardEntry
-                entry_record = LeaderboardEntry.query.filter_by(
-                    user_id=user.id, period=period
-                ).first()
-                if entry_record:
-                    cache_data[user.id] = float(entry_record.performance_percent) if entry_record.performance_percent else 0.0
+                try:
+                    entry_record = LeaderboardEntry.query.filter_by(
+                        user_id=user.id, period=period
+                    ).first()
+                    if entry_record:
+                        cache_data[user.id] = float(entry_record.performance_percent) if entry_record.performance_percent else 0.0
+                except Exception as e:
+                    logger.warning(f"LeaderboardEntry lookup failed for user {user.id}, period {period}: {str(e)}")
+                    # If period column doesn't exist, skip cached data comparison
+                    cache_data[user.id] = 'db_error'
                 
                 # Get live calculation
                 user_calc = next((u for u in results['users_analyzed'] if u['user_id'] == user.id), None)
