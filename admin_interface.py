@@ -639,6 +639,32 @@ def update_user_subscription():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+@admin_bp.route('/comprehensive-leaderboard-fix')
+@login_required
+@admin_required
+def comprehensive_leaderboard_fix():
+    """Comprehensive leaderboard diagnosis and fix - addresses the core data population issues"""
+    try:
+        # Import and run the fix script
+        from comprehensive_leaderboard_fix import run_fix_and_return_json
+        
+        current_app.logger.info("Starting comprehensive leaderboard fix via admin interface...")
+        
+        # Run the fix and get results
+        result = run_fix_and_return_json()
+        
+        current_app.logger.info(f"Comprehensive leaderboard fix completed. Success: {result['success']}")
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        current_app.logger.error(f"Error in comprehensive leaderboard fix: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'message': 'Failed to run comprehensive leaderboard fix'
+        }), 500
+
 # Register the blueprint in your app.py
 # Add this line to app.py:
 # from admin_interface import admin_bp
