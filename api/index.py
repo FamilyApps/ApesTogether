@@ -9638,73 +9638,244 @@ def market_close_cron():
             'snapshots_created': 0,
             'snapshots_updated': 0,
             'leaderboard_updated': False,
-            'errors': []
+            'chart_cache_updated': False,
+            'errors': [],
+            'pipeline_phases': []
         }
         
-        # Get all users
-        users = User.query.all()
-        
-        for user in users:
-            try:
-                # Calculate portfolio value for today using correct constructor
-                calculator = PortfolioPerformanceCalculator(user.id)
-                portfolio_value = calculator.calculate_portfolio_value(today)
-                
-                # Check if snapshot already exists for today
-                existing_snapshot = PortfolioSnapshot.query.filter_by(
-                    user_id=user.id, 
-                    date=today
-                ).first()
-                
-                if existing_snapshot:
-                    existing_snapshot.total_value = portfolio_value
-                    results['snapshots_updated'] += 1
-                else:
-                    # Create new EOD snapshot
-                    snapshot = PortfolioSnapshot(
-                        user_id=user.id,
-                        date=today,
-                        total_value=portfolio_value,
-                        cash_flow=0  # Calculate if needed
-                    )
-                    db.session.add(snapshot)
-                    results['snapshots_created'] += 1
-                
-                results['users_processed'] += 1
-                
-            except Exception as e:
-                error_msg = f"Error processing user {user.id}: {str(e)}"
-                results['errors'].append(error_msg)
-                logger.error(f"Market close user {user.id} error: {e}")
-        
-        # Update leaderboard cache
+        # ATOMIC MARKET CLOSE PIPELINE - All phases must succeed or all rollback
         try:
+            # PHASE 1: Create/Update Portfolio Snapshots
+            logger.info("PHASE 1: Creating portfolio snapshots...")
+            results['pipeline_phases'].append('snapshots_started')
+            
+            users = User.query.all()
+            
+            for user in users:
+                try:
+                    # Calculate portfolio value for today using correct constructor
+                    calculator = PortfolioPerformanceCalculator(user.id)
+                    portfolio_value = calculator.calculate_portfolio_value(today)
+                    
+                    # Check if snapshot already exists for today
+                    existing_snapshot = PortfolioSnapshot.query.filter_by(
+                        user_id=user.id, 
+                        date=today
+                    ).first()
+                    
+                    if existing_snapshot:
+                        existing_snapshot.total_value = portfolio_value
+                        results['snapshots_updated'] += 1
+                    else:
+                        # Create new EOD snapshot
+                        snapshot = PortfolioSnapshot(
+                            user_id=user.id,
+                            date=today,
+                            total_value=portfolio_value,
+                            cash_flow=0  # Calculate if needed
+                        )
+                        db.session.add(snapshot)
+                        results['snapshots_created'] += 1
+                    
+                    results['users_processed'] += 1
+                    
+                except Exception as e:
+                    error_msg = f"Error processing user {user.id}: {str(e)}"
+                    results['errors'].append(error_msg)
+                    logger.error(f"Market close user {user.id} error: {e}")
+                    # Don't fail the entire pipeline for individual user errors
+            
+            results['pipeline_phases'].append('snapshots_completed')
+            logger.info(f"PHASE 1 Complete: {results['snapshots_created']} created, {results['snapshots_updated']} updated")
+            
+            # PHASE 2: Update Leaderboard Cache (includes chart cache generation)
+            logger.info("PHASE 2: Updating leaderboard and chart caches...")
+            results['pipeline_phases'].append('leaderboard_started')
+            
             updated_count = update_leaderboard_cache()
             results['leaderboard_updated'] = True
             results['leaderboard_entries_updated'] = updated_count
-        except Exception as e:
-            error_msg = f"Leaderboard update error: {str(e)}"
-            results['errors'].append(error_msg)
-            logger.error(f"Market close leaderboard error: {e}")
-        
-        # Commit all changes
-        try:
+            results['chart_cache_updated'] = True  # update_leaderboard_cache also updates chart cache
+            
+            results['pipeline_phases'].append('leaderboard_completed')
+            logger.info(f"PHASE 2 Complete: {updated_count} leaderboard entries updated")
+            
+            # PHASE 3: Atomic Database Commit
+            logger.info("PHASE 3: Committing all changes atomically...")
+            results['pipeline_phases'].append('commit_started')
+            
             db.session.commit()
+            
+            results['pipeline_phases'].append('commit_completed')
+            logger.info("PHASE 3 Complete: All changes committed successfully")
+            
         except Exception as e:
+            # ROLLBACK: Any failure rolls back entire pipeline
+            logger.error(f"ATOMIC PIPELINE FAILURE: {str(e)}")
             db.session.rollback()
-            error_msg = f"Database commit failed: {str(e)}"
+            
+            error_msg = f"Atomic pipeline failure: {str(e)}"
             results['errors'].append(error_msg)
-            logger.error(error_msg)
+            results['pipeline_phases'].append('rollback_completed')
+            
+            # Return partial success info but mark as failed
+            return jsonify({
+                'success': False,
+                'message': 'Market close pipeline failed - all changes rolled back',
+                'results': results,
+                'error': error_msg
+            }), 500
         
         return jsonify({
             'success': True,
-            'message': 'Market close processing completed',
+            'message': 'Atomic market close pipeline completed successfully',
             'results': results
         }), 200
     
     except Exception as e:
         logger.error(f"Unexpected error in market close: {str(e)}")
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
+@app.route('/admin/trigger-market-close-backfill', methods=['POST'])
+@login_required
+def admin_trigger_market_close_backfill():
+    """Admin endpoint to manually trigger market close pipeline for specific date (backfill missing snapshots)"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        # Get target date from request
+        target_date_str = request.json.get('date') if request.json else None
+        if not target_date_str:
+            return jsonify({'error': 'Date parameter required (YYYY-MM-DD format)'}), 400
+        
+        from datetime import datetime, date
+        try:
+            target_date = datetime.strptime(target_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
+        
+        # Prevent future dates
+        if target_date > date.today():
+            return jsonify({'error': 'Cannot backfill future dates'}), 400
+        
+        from models import User, PortfolioSnapshot
+        from portfolio_performance import PortfolioPerformanceCalculator
+        from leaderboard_utils import update_leaderboard_cache
+        
+        current_time = datetime.now()
+        
+        results = {
+            'target_date': target_date_str,
+            'timestamp': current_time.isoformat(),
+            'users_processed': 0,
+            'snapshots_created': 0,
+            'snapshots_updated': 0,
+            'leaderboard_updated': False,
+            'errors': [],
+            'pipeline_phases': []
+        }
+        
+        logger.info(f"ADMIN BACKFILL: Starting market close backfill for {target_date}")
+        
+        # ATOMIC BACKFILL PIPELINE
+        try:
+            # PHASE 1: Create/Update Portfolio Snapshots for target date
+            logger.info(f"PHASE 1: Creating portfolio snapshots for {target_date}...")
+            results['pipeline_phases'].append('snapshots_started')
+            
+            users = User.query.all()
+            
+            for user in users:
+                try:
+                    # Calculate portfolio value for target date
+                    calculator = PortfolioPerformanceCalculator(user.id)
+                    portfolio_value = calculator.calculate_portfolio_value(target_date)
+                    
+                    # Check if snapshot already exists for target date
+                    existing_snapshot = PortfolioSnapshot.query.filter_by(
+                        user_id=user.id, 
+                        date=target_date
+                    ).first()
+                    
+                    if existing_snapshot:
+                        existing_snapshot.total_value = portfolio_value
+                        results['snapshots_updated'] += 1
+                        logger.info(f"Updated snapshot for user {user.id} on {target_date}: ${portfolio_value:.2f}")
+                    else:
+                        # Create new snapshot for target date
+                        snapshot = PortfolioSnapshot(
+                            user_id=user.id,
+                            date=target_date,
+                            total_value=portfolio_value,
+                            cash_flow=0
+                        )
+                        db.session.add(snapshot)
+                        results['snapshots_created'] += 1
+                        logger.info(f"Created snapshot for user {user.id} on {target_date}: ${portfolio_value:.2f}")
+                    
+                    results['users_processed'] += 1
+                    
+                except Exception as e:
+                    error_msg = f"Error processing user {user.id} for {target_date}: {str(e)}"
+                    results['errors'].append(error_msg)
+                    logger.error(error_msg)
+            
+            results['pipeline_phases'].append('snapshots_completed')
+            logger.info(f"PHASE 1 Complete: {results['snapshots_created']} created, {results['snapshots_updated']} updated")
+            
+            # PHASE 2: Update Leaderboard Cache (includes chart cache generation)
+            logger.info("PHASE 2: Updating leaderboard and chart caches...")
+            results['pipeline_phases'].append('leaderboard_started')
+            
+            updated_count = update_leaderboard_cache()
+            results['leaderboard_updated'] = True
+            results['leaderboard_entries_updated'] = updated_count
+            
+            results['pipeline_phases'].append('leaderboard_completed')
+            logger.info(f"PHASE 2 Complete: {updated_count} leaderboard entries updated")
+            
+            # PHASE 3: Atomic Database Commit
+            logger.info("PHASE 3: Committing all changes atomically...")
+            results['pipeline_phases'].append('commit_started')
+            
+            db.session.commit()
+            
+            results['pipeline_phases'].append('commit_completed')
+            logger.info("PHASE 3 Complete: All changes committed successfully")
+            
+        except Exception as e:
+            # ROLLBACK: Any failure rolls back entire pipeline
+            logger.error(f"BACKFILL PIPELINE FAILURE: {str(e)}")
+            db.session.rollback()
+            
+            error_msg = f"Backfill pipeline failure: {str(e)}"
+            results['errors'].append(error_msg)
+            results['pipeline_phases'].append('rollback_completed')
+            
+            return jsonify({
+                'success': False,
+                'message': f'Market close backfill failed for {target_date} - all changes rolled back',
+                'results': results,
+                'error': error_msg
+            }), 500
+        
+        return jsonify({
+            'success': True,
+            'message': f'Market close backfill completed successfully for {target_date}',
+            'results': results
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error in market close backfill: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
 
 @app.route('/api/cron/cleanup-intraday-data', methods=['POST'])
 def cleanup_intraday_data_cron():
