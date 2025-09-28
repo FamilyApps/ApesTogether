@@ -11660,6 +11660,12 @@ def admin_fix_leaderboard_schema():
         except Exception as e:
             logger.warning(f"Avg_trades_per_week column add failed: {e}")
         
+        try:
+            db.session.execute('ALTER TABLE leaderboard_entry ADD COLUMN IF NOT EXISTS calculated_at TIMESTAMP')
+            actions_performed.append('Added calculated_at column')
+        except Exception as e:
+            logger.warning(f"Calculated_at column add failed: {e}")
+        
         # Try to add unique constraint (may fail if data exists)
         try:
             db.session.execute('ALTER TABLE leaderboard_entry ADD CONSTRAINT unique_user_period_leaderboard UNIQUE (user_id, period)')
