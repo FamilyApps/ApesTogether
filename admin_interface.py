@@ -855,12 +855,19 @@ def fix_leaderboard_to_use_cache():
     try:
         from datetime import datetime, date, timedelta
         from models import db, User, UserPortfolioChartCache, LeaderboardCache, LeaderboardEntry
+        from sqlalchemy import inspect
         import json
         
         current_app.logger.info("Starting leaderboard cache fix...")
         
+        # First, check the actual database schema for LeaderboardEntry
+        inspector = inspect(db.engine)
+        leaderboard_columns = [col['name'] for col in inspector.get_columns('leaderboard_entry')]
+        current_app.logger.info(f"Actual LeaderboardEntry columns: {leaderboard_columns}")
+        
         results = {
             'timestamp': datetime.now().isoformat(),
+            'database_columns': leaderboard_columns,
             'cache_status': {},
             'generated_leaderboards': {},
             'verification': {}
@@ -960,17 +967,29 @@ def fix_leaderboard_to_use_cache():
                     # Update individual LeaderboardEntry records
                     LeaderboardEntry.query.filter_by(period=period).delete()
                     
+                    # Use raw SQL to handle schema mismatch (database has 'date' column not in model)
+                    today_date = date.today()
+                    
                     for entry_data in leaderboard_entries:
-                        entry = LeaderboardEntry(
-                            user_id=entry_data['user_id'],
-                            period=period,
-                            performance_percent=entry_data['performance_percent'],
-                            small_cap_percent=entry_data['small_cap_percent'],
-                            large_cap_percent=entry_data['large_cap_percent'],
-                            avg_trades_per_week=entry_data['avg_trades_per_week'],
-                            calculated_at=datetime.now()
+                        # Use raw SQL INSERT to handle the 'date' column that exists in DB but not model
+                        db.session.execute(
+                            """INSERT INTO leaderboard_entry 
+                               (user_id, period, performance_percent, small_cap_percent, large_cap_percent, 
+                                avg_trades_per_week, portfolio_value, calculated_at, date) 
+                               VALUES (:user_id, :period, :performance_percent, :small_cap_percent, 
+                                       :large_cap_percent, :avg_trades_per_week, :portfolio_value, :calculated_at, :date)""",
+                            {
+                                'user_id': entry_data['user_id'],
+                                'period': period,
+                                'performance_percent': entry_data['performance_percent'],
+                                'small_cap_percent': entry_data['small_cap_percent'],
+                                'large_cap_percent': entry_data['large_cap_percent'],
+                                'avg_trades_per_week': entry_data['avg_trades_per_week'],
+                                'portfolio_value': entry_data['portfolio_value'],
+                                'calculated_at': datetime.now(),
+                                'date': today_date
+                            }
                         )
-                        db.session.add(entry)
                     
                     db.session.commit()
                     successful_periods.append(period)
