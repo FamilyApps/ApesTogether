@@ -11443,11 +11443,13 @@ def admin_debug_leaderboard_calculations():
                 entry_records = LeaderboardEntry.query.filter_by(period=period).all()
             except Exception as e:
                 logger.warning(f"LeaderboardEntry period filter failed: {str(e)}")
+                db.session.rollback()  # Rollback failed transaction
                 # Try to get all records if period column doesn't exist
                 try:
                     entry_records = LeaderboardEntry.query.all()
                 except Exception as e2:
                     logger.error(f"LeaderboardEntry query failed entirely: {str(e2)}")
+                    db.session.rollback()  # Rollback failed transaction again
                     entry_records = []
             
             results['leaderboard_cache_status'][period] = {
@@ -11512,6 +11514,7 @@ def admin_debug_leaderboard_calculations():
                         cache_data[user.id] = float(entry_record.performance_percent) if entry_record.performance_percent else 0.0
                 except Exception as e:
                     logger.warning(f"LeaderboardEntry lookup failed for user {user.id}, period {period}: {str(e)}")
+                    db.session.rollback()  # Rollback failed transaction
                     # If period column doesn't exist, skip cached data comparison
                     cache_data[user.id] = 'db_error'
                 
