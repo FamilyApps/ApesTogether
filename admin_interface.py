@@ -884,6 +884,11 @@ def fix_leaderboard_to_use_cache():
         
         results['cache_status'] = cache_status
         
+        # Clear all existing LeaderboardEntry data to avoid unique constraint issues
+        current_app.logger.info("Clearing all existing LeaderboardEntry data...")
+        db.session.execute("DELETE FROM leaderboard_entry")
+        db.session.commit()
+        
         # Generate leaderboard data from cached charts
         successful_periods = []
         
@@ -964,11 +969,16 @@ def fix_leaderboard_to_use_cache():
                     )
                     db.session.add(cache_entry)
                     
-                    # Update individual LeaderboardEntry records
-                    LeaderboardEntry.query.filter_by(period=period).delete()
+                    # Data already cleared above - no need to clear again
                     
-                    # Use raw SQL to handle schema mismatch (database has 'date' column not in model)
-                    today_date = date.today()
+                    # Use different dates for different periods to avoid unique constraint (user_id, date)
+                    base_date = date.today()
+                    if period == '1D':
+                        period_date = base_date
+                    elif period == '5D':
+                        period_date = base_date - timedelta(days=1)  # Yesterday for 5D
+                    else:
+                        period_date = base_date - timedelta(days=2)  # Day before for others
                     
                     for entry_data in leaderboard_entries:
                         # Use raw SQL INSERT to handle the 'date' column that exists in DB but not model
@@ -987,7 +997,7 @@ def fix_leaderboard_to_use_cache():
                                 'avg_trades_per_week': entry_data['avg_trades_per_week'],
                                 'portfolio_value': entry_data['portfolio_value'],
                                 'calculated_at': datetime.now(),
-                                'date': today_date
+                                'date': period_date
                             }
                         )
                     
