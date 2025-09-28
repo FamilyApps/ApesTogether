@@ -9736,7 +9736,7 @@ def market_close_cron():
         logger.error(f"Unexpected error in market close: {str(e)}")
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
-@app.route('/admin/trigger-market-close-backfill', methods=['POST'])
+@app.route('/admin/trigger-market-close-backfill', methods=['GET', 'POST'])
 @login_required
 def admin_trigger_market_close_backfill():
     """Admin endpoint to manually trigger market close pipeline for specific date (backfill missing snapshots)"""
@@ -9746,7 +9746,116 @@ def admin_trigger_market_close_backfill():
         if email != ADMIN_EMAIL:
             return jsonify({'error': 'Admin access required'}), 403
         
-        # Get target date from request
+        # Handle GET request - show form
+        if request.method == 'GET':
+            return '''
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Market Close Backfill Tool</title>
+                <style>
+                    body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+                    .form-group { margin: 20px 0; }
+                    label { display: block; margin-bottom: 5px; font-weight: bold; }
+                    input[type="date"] { padding: 8px; font-size: 16px; width: 200px; }
+                    button { background: #007cba; color: white; padding: 10px 20px; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; }
+                    button:hover { background: #005a87; }
+                    .info { background: #e7f3ff; padding: 15px; border-radius: 4px; margin: 20px 0; }
+                    .warning { background: #fff3cd; padding: 15px; border-radius: 4px; margin: 20px 0; border-left: 4px solid #ffc107; }
+                    #result { margin-top: 20px; padding: 15px; border-radius: 4px; display: none; }
+                    .success { background: #d4edda; border-left: 4px solid #28a745; }
+                    .error { background: #f8d7da; border-left: 4px solid #dc3545; }
+                </style>
+            </head>
+            <body>
+                <h1>🔧 Market Close Backfill Tool</h1>
+                
+                <div class="info">
+                    <strong>Purpose:</strong> This tool manually creates portfolio snapshots for a specific trading day. 
+                    Use this to backfill missing data that should have been created by the daily market close pipeline.
+                </div>
+                
+                <div class="warning">
+                    <strong>⚠️ Important:</strong> Only use this for past trading days (Monday-Friday). 
+                    Weekend dates will be rejected. This tool calculates portfolio values using historical stock prices.
+                </div>
+                
+                <form id="backfillForm">
+                    <div class="form-group">
+                        <label for="targetDate">Target Date (YYYY-MM-DD):</label>
+                        <input type="date" id="targetDate" name="date" value="2025-09-26" required>
+                        <small>Default: Friday, September 26, 2025 (the missing trading day)</small>
+                    </div>
+                    
+                    <button type="submit">🚀 Trigger Market Close Backfill</button>
+                </form>
+                
+                <div id="result"></div>
+                
+                <script>
+                document.getElementById('backfillForm').addEventListener('submit', async function(e) {
+                    e.preventDefault();
+                    
+                    const button = e.target.querySelector('button');
+                    const resultDiv = document.getElementById('result');
+                    const targetDate = document.getElementById('targetDate').value;
+                    
+                    // Show loading state
+                    button.textContent = '⏳ Processing...';
+                    button.disabled = true;
+                    resultDiv.style.display = 'none';
+                    
+                    try {
+                        const response = await fetch('/admin/trigger-market-close-backfill', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ date: targetDate })
+                        });
+                        
+                        const data = await response.json();
+                        
+                        // Show result
+                        resultDiv.style.display = 'block';
+                        
+                        if (data.success) {
+                            resultDiv.className = 'success';
+                            resultDiv.innerHTML = `
+                                <h3>✅ Backfill Successful!</h3>
+                                <p><strong>Date:</strong> ${data.results.target_date}</p>
+                                <p><strong>Users Processed:</strong> ${data.results.users_processed}</p>
+                                <p><strong>Snapshots Created:</strong> ${data.results.snapshots_created}</p>
+                                <p><strong>Snapshots Updated:</strong> ${data.results.snapshots_updated}</p>
+                                <p><strong>Leaderboard Updated:</strong> ${data.results.leaderboard_updated ? 'Yes' : 'No'}</p>
+                                ${data.results.errors.length > 0 ? '<p><strong>Errors:</strong> ' + data.results.errors.join(', ') + '</p>' : ''}
+                            `;
+                        } else {
+                            resultDiv.className = 'error';
+                            resultDiv.innerHTML = `
+                                <h3>❌ Backfill Failed</h3>
+                                <p><strong>Error:</strong> ${data.error || data.message}</p>
+                            `;
+                        }
+                    } catch (error) {
+                        resultDiv.style.display = 'block';
+                        resultDiv.className = 'error';
+                        resultDiv.innerHTML = `
+                            <h3>❌ Request Failed</h3>
+                            <p><strong>Error:</strong> ${error.message}</p>
+                        `;
+                    }
+                    
+                    // Reset button
+                    button.textContent = '🚀 Trigger Market Close Backfill';
+                    button.disabled = false;
+                });
+                </script>
+            </body>
+            </html>
+            '''
+        
+        # Handle POST request - perform backfill
         target_date_str = request.json.get('date') if request.json else None
         if not target_date_str:
             return jsonify({'error': 'Date parameter required (YYYY-MM-DD format)'}), 400
