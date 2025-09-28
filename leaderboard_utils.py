@@ -517,50 +517,109 @@ def generate_user_portfolio_chart(user_id, period):
     from portfolio_performance import PortfolioPerformanceCalculator
     
     try:
-        calculator = PortfolioPerformanceCalculator()
-        
         # Calculate date range for the period
         today = date.today()
         
         if period == '1D':
-            start_date = today - timedelta(days=1)
-        elif period == '5D':
-            start_date = today - timedelta(days=5)
-        elif period == '3M':
-            start_date = today - timedelta(days=90)
-        elif period == 'YTD':
-            start_date = date(today.year, 1, 1)
-        elif period == '1Y':
-            start_date = today - timedelta(days=365)
-        elif period == '5Y':
-            start_date = today - timedelta(days=1825)
-        elif period == 'MAX':
-            start_date = date(2020, 1, 1)
+            # For 1D charts, use intraday snapshots with proper time formatting
+            from models import PortfolioSnapshotIntraday
+            from sqlalchemy import func, and_
+            
+            # Get intraday snapshots for today
+            intraday_snapshots = PortfolioSnapshotIntraday.query.filter(
+                and_(
+                    PortfolioSnapshotIntraday.user_id == user_id,
+                    func.date(PortfolioSnapshotIntraday.timestamp) == today
+                )
+            ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
+            
+            if not intraday_snapshots:
+                # Fallback to daily snapshot if no intraday data
+                daily_snapshot = PortfolioSnapshot.query.filter_by(
+                    user_id=user_id, 
+                    date=today
+                ).first()
+                
+                if daily_snapshot:
+                    chart_data = {
+                        'labels': [today.strftime('%Y-%m-%d')],
+                        'datasets': [{
+                            'label': 'Portfolio Value',
+                            'data': [float(daily_snapshot.total_value)],
+                            'borderColor': 'rgb(75, 192, 192)',
+                            'backgroundColor': 'rgba(75, 192, 192, 0.2)',
+                            'tension': 0.1
+                        }],
+                        'period': period,
+                        'user_id': user_id,
+                        'generated_at': datetime.now().isoformat()
+                    }
+                    return chart_data
+                else:
+                    return None
+            
+            # Format intraday chart data with proper time labels
+            chart_data = {
+                'labels': [snapshot.timestamp.strftime('%H:%M') for snapshot in intraday_snapshots],
+                'datasets': [{
+                    'label': 'Portfolio Value',
+                    'data': [float(snapshot.total_value) for snapshot in intraday_snapshots],
+                    'borderColor': 'rgb(75, 192, 192)',
+                    'backgroundColor': 'rgba(75, 192, 192, 0.2)',
+                    'tension': 0.1
+                }],
+                'period': period,
+                'user_id': user_id,
+                'generated_at': datetime.now().isoformat()
+            }
+            return chart_data
+            
         else:
-            start_date = date(today.year, 1, 1)
-        
-        # Get portfolio snapshots for the period
-        snapshots = PortfolioSnapshot.query.filter_by(user_id=user_id)\
-            .filter(PortfolioSnapshot.date >= start_date)\
-            .order_by(PortfolioSnapshot.date.asc()).all()
-        
-        if not snapshots:
-            return None
-        
-        # Format chart data
-        chart_data = {
-            'labels': [snapshot.date.strftime('%Y-%m-%d') for snapshot in snapshots],
-            'datasets': [{
-                'label': 'Portfolio Value',
-                'data': [float(snapshot.total_value) for snapshot in snapshots],
-                'borderColor': 'rgb(75, 192, 192)',
-                'backgroundColor': 'rgba(75, 192, 192, 0.2)',
-                'tension': 0.1
-            }],
-            'period': period,
-            'user_id': user_id,
-            'generated_at': datetime.now().isoformat()
-        }
+            # For multi-day periods, use daily snapshots
+            if period == '5D':
+                start_date = today - timedelta(days=7)  # Get more days to ensure 5 business days
+            elif period == '3M':
+                start_date = today - timedelta(days=90)
+            elif period == 'YTD':
+                start_date = date(today.year, 1, 1)
+            elif period == '1Y':
+                start_date = today - timedelta(days=365)
+            elif period == '5Y':
+                start_date = today - timedelta(days=1825)
+            elif period == 'MAX':
+                start_date = date(2020, 1, 1)
+            else:
+                start_date = date(today.year, 1, 1)
+            
+            # Get portfolio snapshots for the period
+            snapshots = PortfolioSnapshot.query.filter_by(user_id=user_id)\
+                .filter(PortfolioSnapshot.date >= start_date)\
+                .order_by(PortfolioSnapshot.date.asc()).all()
+            
+            if not snapshots:
+                return None
+            
+            # Format chart data with proper date labels
+            if period == '5D':
+                # For 5D, show abbreviated dates (MM/DD)
+                labels = [snapshot.date.strftime('%m/%d') for snapshot in snapshots]
+            else:
+                # For longer periods, show full dates (YYYY-MM-DD)
+                labels = [snapshot.date.strftime('%Y-%m-%d') for snapshot in snapshots]
+            
+            chart_data = {
+                'labels': labels,
+                'datasets': [{
+                    'label': 'Portfolio Value',
+                    'data': [float(snapshot.total_value) for snapshot in snapshots],
+                    'borderColor': 'rgb(75, 192, 192)',
+                    'backgroundColor': 'rgba(75, 192, 192, 0.2)',
+                    'tension': 0.1
+                }],
+                'period': period,
+                'user_id': user_id,
+                'generated_at': datetime.now().isoformat()
+            }
         
         return chart_data
         
