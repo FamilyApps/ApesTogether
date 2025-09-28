@@ -11,7 +11,7 @@ Flow: UserPortfolioSnapshot → calculate_leaderboard_data() → LeaderboardCach
 def comprehensive_data_flow_debug():
     """Debug the complete data flow for leaderboards, charts, and portfolio features with performance timing"""
     from datetime import datetime, date, timedelta
-    from models import db, User, UserPortfolioSnapshot, LeaderboardCache, UserPortfolioChartCache
+    from models import db, User, PortfolioSnapshot, LeaderboardCache, UserPortfolioChartCache
     from leaderboard_utils import calculate_leaderboard_data, get_leaderboard_data
     import json
     import time
@@ -58,7 +58,7 @@ def comprehensive_data_flow_debug():
         snapshots = {}
         for i in range(10):
             check_date = today - timedelta(days=i)
-            snapshot = UserPortfolioSnapshot.query.filter_by(
+            snapshot = PortfolioSnapshot.query.filter_by(
                 user_id=user.id,
                 date=check_date
             ).first()
@@ -346,9 +346,9 @@ def comprehensive_data_flow_debug():
             start_time = time.time()
             
             # Get current portfolio value from latest snapshot
-            latest_snapshot = UserPortfolioSnapshot.query.filter_by(
+            latest_snapshot = PortfolioSnapshot.query.filter_by(
                 user_id=sample_user.id
-            ).order_by(UserPortfolioSnapshot.date.desc()).first()
+            ).order_by(PortfolioSnapshot.date.desc()).first()
             
             summary_time = time.time() - start_time
             
