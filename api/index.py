@@ -9877,6 +9877,246 @@ def admin_trigger_market_close_backfill():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/cache-health-monitor')
+@login_required
+def admin_cache_health_monitor():
+    """Admin endpoint to monitor cache health and staleness across all systems"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime, timedelta
+        from models import LeaderboardCache, UserPortfolioChartCache, SP500ChartCache
+        
+        current_time = datetime.now()
+        
+        # Define staleness thresholds
+        staleness_thresholds = {
+            'leaderboard': {
+                '1D': timedelta(minutes=30),
+                '5D': timedelta(hours=2),
+                '1M': timedelta(hours=6),
+                '3M': timedelta(hours=12),
+                'YTD': timedelta(days=1),
+                '1Y': timedelta(days=1),
+                '5Y': timedelta(days=7),
+                'MAX': timedelta(days=7)
+            },
+            'chart': {
+                '1D': timedelta(minutes=15),
+                '5D': timedelta(hours=1),
+                '1M': timedelta(hours=4),
+                '3M': timedelta(hours=12),
+                'YTD': timedelta(days=1),
+                '1Y': timedelta(days=1),
+                '5Y': timedelta(days=7),
+                'MAX': timedelta(days=7)
+            }
+        }
+        
+        cache_health = {
+            'timestamp': current_time.isoformat(),
+            'leaderboard_cache': {},
+            'chart_cache': {},
+            'sp500_cache': {},
+            'summary': {
+                'total_entries': 0,
+                'stale_entries': 0,
+                'fresh_entries': 0,
+                'corrupted_entries': 0
+            }
+        }
+        
+        # Check Leaderboard Cache Health
+        leaderboard_entries = LeaderboardCache.query.all()
+        for entry in leaderboard_entries:
+            period = entry.period
+            cache_age = current_time - entry.generated_at
+            threshold = staleness_thresholds['leaderboard'].get(period, timedelta(hours=1))
+            
+            is_stale = cache_age > threshold
+            is_corrupted = False
+            
+            # Test if cache data is valid JSON
+            try:
+                import json
+                json.loads(entry.leaderboard_data)
+            except (json.JSONDecodeError, TypeError):
+                is_corrupted = True
+            
+            cache_health['leaderboard_cache'][period] = {
+                'generated_at': entry.generated_at.isoformat(),
+                'age_minutes': int(cache_age.total_seconds() / 60),
+                'threshold_minutes': int(threshold.total_seconds() / 60),
+                'is_stale': is_stale,
+                'is_corrupted': is_corrupted,
+                'status': 'corrupted' if is_corrupted else ('stale' if is_stale else 'fresh')
+            }
+            
+            cache_health['summary']['total_entries'] += 1
+            if is_corrupted:
+                cache_health['summary']['corrupted_entries'] += 1
+            elif is_stale:
+                cache_health['summary']['stale_entries'] += 1
+            else:
+                cache_health['summary']['fresh_entries'] += 1
+        
+        # Check Chart Cache Health (sample from top users)
+        from models import User
+        top_users = User.query.limit(5).all()  # Check top 5 users
+        
+        chart_periods = ['1D', '5D', '1M', 'YTD', '1Y']
+        for period in chart_periods:
+            period_stats = {
+                'cached_users': 0,
+                'stale_caches': 0,
+                'fresh_caches': 0,
+                'missing_caches': 0
+            }
+            
+            for user in top_users:
+                chart_cache = UserPortfolioChartCache.query.filter_by(
+                    user_id=user.id, period=period
+                ).first()
+                
+                if chart_cache:
+                    cache_age = current_time - chart_cache.generated_at
+                    threshold = staleness_thresholds['chart'].get(period, timedelta(hours=1))
+                    
+                    if cache_age > threshold:
+                        period_stats['stale_caches'] += 1
+                    else:
+                        period_stats['fresh_caches'] += 1
+                    
+                    period_stats['cached_users'] += 1
+                else:
+                    period_stats['missing_caches'] += 1
+            
+            cache_health['chart_cache'][period] = period_stats
+        
+        # Check S&P 500 Cache Health
+        sp500_entries = SP500ChartCache.query.all()
+        for entry in sp500_entries:
+            period = entry.period
+            cache_age = current_time - entry.generated_at
+            threshold = staleness_thresholds['chart'].get(period, timedelta(hours=1))
+            
+            cache_health['sp500_cache'][period] = {
+                'generated_at': entry.generated_at.isoformat(),
+                'age_minutes': int(cache_age.total_seconds() / 60),
+                'is_stale': cache_age > threshold,
+                'status': 'stale' if cache_age > threshold else 'fresh'
+            }
+        
+        # Calculate health score
+        total = cache_health['summary']['total_entries']
+        fresh = cache_health['summary']['fresh_entries']
+        health_score = (fresh / total * 100) if total > 0 else 0
+        
+        cache_health['summary']['health_score'] = round(health_score, 1)
+        cache_health['summary']['health_status'] = (
+            'excellent' if health_score >= 90 else
+            'good' if health_score >= 75 else
+            'warning' if health_score >= 50 else
+            'critical'
+        )
+        
+        return jsonify({
+            'success': True,
+            'message': 'Cache health monitoring completed',
+            'cache_health': cache_health
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error in cache health monitor: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/invalidate-stale-caches', methods=['POST'])
+@login_required
+def admin_invalidate_stale_caches():
+    """Admin endpoint to invalidate stale caches and trigger regeneration"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime, timedelta
+        from models import LeaderboardCache, UserPortfolioChartCache
+        from leaderboard_utils import update_leaderboard_cache
+        
+        current_time = datetime.now()
+        
+        results = {
+            'timestamp': current_time.isoformat(),
+            'leaderboard_caches_invalidated': 0,
+            'chart_caches_invalidated': 0,
+            'regeneration_triggered': False,
+            'errors': []
+        }
+        
+        # Define staleness thresholds
+        leaderboard_threshold = timedelta(hours=2)  # 2 hours for leaderboards
+        chart_threshold = timedelta(hours=1)        # 1 hour for charts
+        
+        # Invalidate stale leaderboard caches
+        stale_leaderboard_caches = LeaderboardCache.query.filter(
+            LeaderboardCache.generated_at < (current_time - leaderboard_threshold)
+        ).all()
+        
+        for cache in stale_leaderboard_caches:
+            db.session.delete(cache)
+            results['leaderboard_caches_invalidated'] += 1
+            logger.info(f"Invalidated stale leaderboard cache: {cache.period}")
+        
+        # Invalidate stale chart caches
+        stale_chart_caches = UserPortfolioChartCache.query.filter(
+            UserPortfolioChartCache.generated_at < (current_time - chart_threshold)
+        ).all()
+        
+        for cache in stale_chart_caches:
+            db.session.delete(cache)
+            results['chart_caches_invalidated'] += 1
+            logger.info(f"Invalidated stale chart cache: user {cache.user_id}, period {cache.period}")
+        
+        # Commit invalidations
+        db.session.commit()
+        
+        # Trigger cache regeneration if we invalidated anything
+        if results['leaderboard_caches_invalidated'] > 0:
+            try:
+                updated_count = update_leaderboard_cache()
+                results['regeneration_triggered'] = True
+                results['leaderboard_entries_regenerated'] = updated_count
+                logger.info(f"Regenerated {updated_count} leaderboard cache entries")
+            except Exception as e:
+                error_msg = f"Cache regeneration failed: {str(e)}"
+                results['errors'].append(error_msg)
+                logger.error(error_msg)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Stale cache invalidation completed',
+            'results': results
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error in cache invalidation: {str(e)}")
+        db.session.rollback()
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/api/cron/cleanup-intraday-data', methods=['POST'])
 def cleanup_intraday_data_cron():
     """Automated cron endpoint to clean up old intraday snapshots while preserving 4PM market close data"""

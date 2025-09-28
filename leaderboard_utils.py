@@ -339,20 +339,74 @@ def get_leaderboard_data(period='YTD', limit=20, category='all'):
 
 def get_user_chart_data(user_id, period):
     """
-    Get cached chart data for a specific user and period
+    Get cached chart data for a specific user and period with staleness checks and live fallback
     """
     import json
-    from models import UserPortfolioChartCache
+    import logging
+    from datetime import datetime, timedelta
+    from models import UserPortfolioChartCache, db
+    
+    logger = logging.getLogger(__name__)
     
     chart_cache = UserPortfolioChartCache.query.filter_by(
         user_id=user_id, period=period
     ).first()
     
+    # PHASE 3: Cache staleness detection
     if chart_cache:
-        return json.loads(chart_cache.chart_data)
+        cache_age = datetime.now() - chart_cache.generated_at
+        
+        # Define staleness thresholds by period
+        staleness_thresholds = {
+            '1D': timedelta(minutes=15),    # 15 minutes for intraday
+            '5D': timedelta(hours=1),       # 1 hour for short-term
+            '1M': timedelta(hours=4),       # 4 hours for medium-term
+            '3M': timedelta(hours=12),      # 12 hours for longer-term
+            'YTD': timedelta(days=1),       # 1 day for year-to-date
+            '1Y': timedelta(days=1),        # 1 day for annual
+            '5Y': timedelta(days=7),        # 1 week for long-term
+            'MAX': timedelta(days=7)        # 1 week for maximum
+        }
+        
+        threshold = staleness_thresholds.get(period, timedelta(hours=1))
+        
+        if cache_age <= threshold:
+            # Cache is fresh, use it
+            try:
+                return json.loads(chart_cache.chart_data)
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"Corrupted chart cache for user {user_id}, period {period}: {e}")
+                # Fall through to regeneration
+        else:
+            logger.info(f"Chart cache stale for user {user_id}, period {period} (age: {cache_age})")
+            # Fall through to regeneration
     
-    # Fallback: generate on-demand if not cached
-    return generate_user_portfolio_chart(user_id, period)
+    # LIVE FALLBACK: Generate fresh chart data
+    logger.info(f"Generating fresh chart data for user {user_id}, period {period}")
+    fresh_data = generate_user_portfolio_chart(user_id, period)
+    
+    if fresh_data:
+        # Update cache with fresh data
+        try:
+            if chart_cache:
+                chart_cache.chart_data = json.dumps(fresh_data)
+                chart_cache.generated_at = datetime.now()
+            else:
+                chart_cache = UserPortfolioChartCache(
+                    user_id=user_id,
+                    period=period,
+                    chart_data=json.dumps(fresh_data),
+                    generated_at=datetime.now()
+                )
+                db.session.add(chart_cache)
+            
+            db.session.commit()
+            logger.info(f"Updated chart cache for user {user_id}, period {period}")
+        except Exception as e:
+            logger.error(f"Failed to update chart cache: {e}")
+            db.session.rollback()
+    
+    return fresh_data
 
 def get_last_market_day():
     """Get the last market day (Monday-Friday, excluding weekends)"""
