@@ -11699,6 +11699,78 @@ def admin_fix_leaderboard_schema():
         logger.error(f"Error fixing leaderboard schema: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/force-calculated-at-column')
+@login_required
+def admin_force_calculated_at_column():
+    """Force add calculated_at column with direct SQL and immediate verification"""
+    from models import db
+    
+    try:
+        db.session.rollback()
+        
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        logger.info("Starting FORCE calculated_at column addition...")
+        
+        # Step 1: Check current state
+        check_result = db.session.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'leaderboard_entry' AND column_name = 'calculated_at'")
+        exists_before = check_result.fetchone() is not None
+        
+        actions = []
+        actions.append(f'calculated_at exists before: {exists_before}')
+        
+        if not exists_before:
+            # Step 2: Add column with explicit commit
+            try:
+                db.session.execute('ALTER TABLE leaderboard_entry ADD COLUMN calculated_at TIMESTAMP')
+                db.session.commit()  # Force immediate commit
+                actions.append('ALTER TABLE executed and committed')
+                
+                # Step 3: Verify immediately after commit
+                verify_result = db.session.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'leaderboard_entry' AND column_name = 'calculated_at'")
+                exists_after = verify_result.fetchone() is not None
+                actions.append(f'calculated_at exists after commit: {exists_after}')
+                
+                if exists_after:
+                    actions.append('SUCCESS: Column added and verified')
+                else:
+                    actions.append('FAILURE: Column not found after commit - possible database issue')
+                
+            except Exception as e:
+                db.session.rollback()
+                actions.append(f'ALTER TABLE failed: {str(e)}')
+                
+        else:
+            actions.append('Column already exists - no action needed')
+        
+        # Step 4: Final verification with fresh connection
+        final_check = db.session.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'leaderboard_entry' AND column_name = 'calculated_at'")
+        final_exists = final_check.fetchone() is not None
+        actions.append(f'Final verification: calculated_at exists = {final_exists}')
+        
+        # Step 5: Test a simple query
+        try:
+            test_query = db.session.execute('SELECT calculated_at FROM leaderboard_entry LIMIT 1')
+            actions.append('Test query SUCCESS: calculated_at column is queryable')
+        except Exception as e:
+            actions.append(f'Test query FAILED: {str(e)}')
+        
+        return jsonify({
+            'success': True,
+            'message': 'Force calculated_at column addition completed',
+            'timestamp': datetime.now().isoformat(),
+            'actions_performed': actions,
+            'column_exists_final': final_exists
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error in force calculated_at column: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/test-weekend-protection')
 @login_required
 def admin_test_weekend_protection():
