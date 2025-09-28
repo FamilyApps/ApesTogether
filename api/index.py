@@ -11614,7 +11614,7 @@ def admin_check_leaderboard_schema():
 @app.route('/admin/fix-leaderboard-schema')
 @login_required
 def admin_fix_leaderboard_schema():
-    """Fix the leaderboard_entry table schema by applying the migration"""
+    """Fix the leaderboard_entry table schema by adding missing columns"""
     from models import db
     
     try:
@@ -11625,42 +11625,59 @@ def admin_fix_leaderboard_schema():
         if email != ADMIN_EMAIL:
             return jsonify({'error': 'Admin access required'}), 403
         
-        logger.info("Starting leaderboard schema fix...")
+        logger.info("Starting fast leaderboard schema fix...")
         
-        # Drop the existing table with wrong schema
-        db.session.execute('DROP TABLE IF EXISTS leaderboard_entry CASCADE')
+        actions_performed = []
         
-        # Create the table with correct schema
-        create_table_sql = '''
-        CREATE TABLE leaderboard_entry (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER NOT NULL REFERENCES "user"(id),
-            period VARCHAR(10) NOT NULL,
-            performance_percent DOUBLE PRECISION NOT NULL,
-            small_cap_percent DOUBLE PRECISION,
-            large_cap_percent DOUBLE PRECISION,
-            avg_trades_per_week DOUBLE PRECISION,
-            portfolio_value DOUBLE PRECISION,
-            calculated_at TIMESTAMP,
-            CONSTRAINT unique_user_period_leaderboard UNIQUE (user_id, period)
-        )
-        '''
+        # Add missing columns one by one (faster than drop/recreate)
+        try:
+            db.session.execute('ALTER TABLE leaderboard_entry ADD COLUMN IF NOT EXISTS period VARCHAR(10)')
+            actions_performed.append('Added period column')
+        except Exception as e:
+            logger.warning(f"Period column add failed: {e}")
         
-        db.session.execute(create_table_sql)
+        try:
+            db.session.execute('ALTER TABLE leaderboard_entry ADD COLUMN IF NOT EXISTS performance_percent DOUBLE PRECISION')
+            actions_performed.append('Added performance_percent column')
+        except Exception as e:
+            logger.warning(f"Performance_percent column add failed: {e}")
+        
+        try:
+            db.session.execute('ALTER TABLE leaderboard_entry ADD COLUMN IF NOT EXISTS small_cap_percent DOUBLE PRECISION')
+            actions_performed.append('Added small_cap_percent column')
+        except Exception as e:
+            logger.warning(f"Small_cap_percent column add failed: {e}")
+        
+        try:
+            db.session.execute('ALTER TABLE leaderboard_entry ADD COLUMN IF NOT EXISTS large_cap_percent DOUBLE PRECISION')
+            actions_performed.append('Added large_cap_percent column')
+        except Exception as e:
+            logger.warning(f"Large_cap_percent column add failed: {e}")
+        
+        try:
+            db.session.execute('ALTER TABLE leaderboard_entry ADD COLUMN IF NOT EXISTS avg_trades_per_week DOUBLE PRECISION')
+            actions_performed.append('Added avg_trades_per_week column')
+        except Exception as e:
+            logger.warning(f"Avg_trades_per_week column add failed: {e}")
+        
+        # Try to add unique constraint (may fail if data exists)
+        try:
+            db.session.execute('ALTER TABLE leaderboard_entry ADD CONSTRAINT unique_user_period_leaderboard UNIQUE (user_id, period)')
+            actions_performed.append('Added unique constraint on user_id + period')
+        except Exception as e:
+            logger.warning(f"Unique constraint add failed: {e}")
+            actions_performed.append('Unique constraint add failed (may already exist or conflicting data)')
+        
         db.session.commit()
         
-        logger.info("Leaderboard schema fix completed successfully!")
+        logger.info("Fast leaderboard schema fix completed!")
         
         return jsonify({
             'success': True,
-            'message': 'LeaderboardEntry table schema fixed successfully',
+            'message': 'LeaderboardEntry table schema updated (added missing columns)',
             'timestamp': datetime.now().isoformat(),
-            'actions_performed': [
-                'Dropped old leaderboard_entry table',
-                'Created new leaderboard_entry table with correct schema',
-                'Added period and performance_percent columns',
-                'Added unique constraint on user_id + period'
-            ]
+            'actions_performed': actions_performed,
+            'note': 'Old columns (date, daily_return, etc.) still exist but new columns added'
         })
         
     except Exception as e:
