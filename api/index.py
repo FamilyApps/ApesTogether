@@ -11611,6 +11611,63 @@ def admin_check_leaderboard_schema():
         logger.error(f"Error checking schema: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/fix-leaderboard-schema')
+@login_required
+def admin_fix_leaderboard_schema():
+    """Fix the leaderboard_entry table schema by applying the migration"""
+    from models import db
+    
+    try:
+        db.session.rollback()
+        
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        logger.info("Starting leaderboard schema fix...")
+        
+        # Drop the existing table with wrong schema
+        db.session.execute('DROP TABLE IF EXISTS leaderboard_entry CASCADE')
+        
+        # Create the table with correct schema
+        create_table_sql = '''
+        CREATE TABLE leaderboard_entry (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES "user"(id),
+            period VARCHAR(10) NOT NULL,
+            performance_percent DOUBLE PRECISION NOT NULL,
+            small_cap_percent DOUBLE PRECISION,
+            large_cap_percent DOUBLE PRECISION,
+            avg_trades_per_week DOUBLE PRECISION,
+            portfolio_value DOUBLE PRECISION,
+            calculated_at TIMESTAMP,
+            CONSTRAINT unique_user_period_leaderboard UNIQUE (user_id, period)
+        )
+        '''
+        
+        db.session.execute(create_table_sql)
+        db.session.commit()
+        
+        logger.info("Leaderboard schema fix completed successfully!")
+        
+        return jsonify({
+            'success': True,
+            'message': 'LeaderboardEntry table schema fixed successfully',
+            'timestamp': datetime.now().isoformat(),
+            'actions_performed': [
+                'Dropped old leaderboard_entry table',
+                'Created new leaderboard_entry table with correct schema',
+                'Added period and performance_percent columns',
+                'Added unique constraint on user_id + period'
+            ]
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error fixing leaderboard schema: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/test-weekend-protection')
 @login_required
 def admin_test_weekend_protection():
