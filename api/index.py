@@ -11661,10 +11661,18 @@ def admin_fix_leaderboard_schema():
             logger.warning(f"Avg_trades_per_week column add failed: {e}")
         
         try:
-            db.session.execute('ALTER TABLE leaderboard_entry ADD COLUMN IF NOT EXISTS calculated_at TIMESTAMP')
-            actions_performed.append('Added calculated_at column')
+            # Check if calculated_at column exists first
+            result = db.session.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'leaderboard_entry' AND column_name = 'calculated_at'")
+            exists = result.fetchone() is not None
+            
+            if not exists:
+                db.session.execute('ALTER TABLE leaderboard_entry ADD COLUMN calculated_at TIMESTAMP')
+                actions_performed.append('Added calculated_at column (was missing)')
+            else:
+                actions_performed.append('calculated_at column already exists')
         except Exception as e:
-            logger.warning(f"Calculated_at column add failed: {e}")
+            logger.error(f"Calculated_at column add failed: {e}")
+            actions_performed.append(f'Calculated_at column add FAILED: {str(e)}')
         
         # Try to add unique constraint (may fail if data exists)
         try:
