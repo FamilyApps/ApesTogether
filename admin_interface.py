@@ -889,71 +889,79 @@ def fix_leaderboard_to_use_cache():
         db.session.execute("DELETE FROM leaderboard_entry")
         db.session.commit()
         
-        # Generate leaderboard data from cached charts
+        # Generate leaderboard data from snapshot data (same source that works for 1M/3M/YTD/1Y)
         successful_periods = []
         
         for period in ['1D', '5D']:  # Start with critical periods
             # Get all users with stocks (should be 5 users)
             all_users = User.query.join(User.stocks).distinct().all()
-            current_app.logger.info(f"Processing {len(all_users)} users for {period} leaderboard")
+            current_app.logger.info(f"Processing {len(all_users)} users for {period} leaderboard using snapshot data")
+            
+            # Calculate date range for this period
+            end_date = date.today()
+            if period == '1D':
+                start_date = end_date - timedelta(days=1)
+            elif period == '5D':
+                start_date = end_date - timedelta(days=5)
+            else:
+                start_date = end_date - timedelta(days=30)  # Default fallback
+            
+            current_app.logger.info(f"Date range for {period}: {start_date} to {end_date}")
             
             leaderboard_entries = []
             
             for user in all_users:
-                # First try to get cached chart data
-                chart_cache = UserPortfolioChartCache.query.filter_by(
-                    user_id=user.id, 
-                    period=period
-                ).first()
-                
-                if chart_cache:
-                    try:
-                        # Parse the cached Chart.js data
-                        chart_data = json.loads(chart_cache.chart_data)
-                        datasets = chart_data.get('datasets', [])
+                try:
+                    # Get start and end snapshots from UserPortfolioSnapshot
+                    from models import UserPortfolioSnapshot
+                    
+                    # Get the most recent snapshot on or before end_date
+                    end_snapshot = UserPortfolioSnapshot.query.filter(
+                        UserPortfolioSnapshot.user_id == user.id,
+                        UserPortfolioSnapshot.date <= end_date
+                    ).order_by(UserPortfolioSnapshot.date.desc()).first()
+                    
+                    # Get the most recent snapshot on or before start_date
+                    start_snapshot = UserPortfolioSnapshot.query.filter(
+                        UserPortfolioSnapshot.user_id == user.id,
+                        UserPortfolioSnapshot.date <= start_date
+                    ).order_by(UserPortfolioSnapshot.date.desc()).first()
+                    
+                    if end_snapshot and start_snapshot and start_snapshot.total_value > 0:
+                        # Calculate performance from snapshots
+                        start_value = float(start_snapshot.total_value)
+                        end_value = float(end_snapshot.total_value)
                         
-                        if len(datasets) < 1:
-                            continue
+                        performance_percent = ((end_value - start_value) / start_value) * 100
                         
-                        # Get portfolio performance data
-                        portfolio_data = datasets[0].get('data', [])
-                        if not portfolio_data or len(portfolio_data) < 2:
-                            continue
-                        
-                        # Calculate performance from first to last data point
-                        start_value = portfolio_data[0]
-                        end_value = portfolio_data[-1]
-                        
-                        if start_value > 0:
-                            performance_percent = ((end_value - start_value) / start_value) * 100
-                        else:
-                            performance_percent = 0.0
+                        current_app.logger.info(f"  {user.username}: ${start_value:.2f} -> ${end_value:.2f} = {performance_percent:.2f}%")
                         
                         leaderboard_entries.append({
                             'user_id': user.id,
                             'username': user.username,
                             'performance_percent': performance_percent,
-                            'portfolio_value': float(end_value),
+                            'portfolio_value': end_value,
                             'small_cap_percent': 50.0,  # Default for now
                             'large_cap_percent': 50.0,   # Default for now
                             'avg_trades_per_week': 5.0   # Default for now
                         })
                         
-                    except Exception as e:
-                        current_app.logger.warning(f"Failed to process cache for user {user.id}: {str(e)}")
-                        continue
-                else:
-                    # No cached data - add user with 0% performance for now
-                    current_app.logger.warning(f"No cached data for user {user.id} ({user.username}) for period {period}")
-                    leaderboard_entries.append({
-                        'user_id': user.id,
-                        'username': user.username,
-                        'performance_percent': 0.0,  # Default when no cache
-                        'portfolio_value': 0.0,
-                        'small_cap_percent': 50.0,
-                        'large_cap_percent': 50.0,
-                        'avg_trades_per_week': 5.0
-                    })
+                    else:
+                        # Missing snapshots - log the issue
+                        current_app.logger.warning(f"  {user.username}: Missing snapshots (start: {start_snapshot is not None}, end: {end_snapshot is not None})")
+                        leaderboard_entries.append({
+                            'user_id': user.id,
+                            'username': user.username,
+                            'performance_percent': 0.0,
+                            'portfolio_value': end_snapshot.total_value if end_snapshot else 0.0,
+                            'small_cap_percent': 50.0,
+                            'large_cap_percent': 50.0,
+                            'avg_trades_per_week': 5.0
+                        })
+                        
+                except Exception as e:
+                    current_app.logger.error(f"Error processing snapshots for user {user.id} ({user.username}): {str(e)}")
+                    continue
             
             # Sort by performance
             leaderboard_entries.sort(key=lambda x: x['performance_percent'], reverse=True)
@@ -1042,26 +1050,73 @@ def fix_leaderboard_to_use_cache():
             
             results['verification'][period] = verification_data
         
-        success = len(successful_periods) > 0
-        
-        current_app.logger.info(f"Leaderboard cache fix completed. Success: {success}, Periods: {successful_periods}")
-        
         return jsonify({
-            'success': success,
-            'message': f'Fixed leaderboards for periods: {successful_periods}' if success else 'No periods were successfully fixed',
-            'results': results,
-            'successful_periods': successful_periods
+            'success': total_generated > 0,
+            'message': f"Generated {total_generated} missing chart cache entries",
+            'results': results
         })
         
     except Exception as e:
-        current_app.logger.error(f"Error in leaderboard cache fix: {str(e)}")
+        current_app.logger.error(f"Error generating missing chart cache: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e),
-            'message': 'Failed to run leaderboard cache fix'
+            'message': 'Failed to generate missing chart cache'
         }), 500
 
-# Register the blueprint in your app.py
-# Add this line to app.py:
-# from admin_interface import admin_bp
-# app.register_blueprint(admin_bp)
+@admin_bp.route('/generate-missing-chart-cache')
+@login_required
+@admin_required
+def admin_generate_missing_chart_cache():
+    """Generate missing 1D/5D chart cache for users who have snapshot data but no chart cache"""
+    try:
+        from generate_missing_chart_cache import run_and_return_json
+        current_app.logger.info("Starting missing chart cache generation via admin interface...")
+        result = run_and_return_json()
+        current_app.logger.info(f"Chart cache generation completed. Success: {result['success']}")
+        return jsonify(result)
+    except Exception as e:
+        current_app.logger.error(f"Error in chart cache generation: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'message': 'Failed to generate missing chart cache'
+        }), 500
+
+@admin_bp.route('/debug-friday-snapshot-issue')
+@login_required
+@admin_required
+def debug_friday_snapshot_issue():
+    """Debug the Friday 9/26/2025 snapshot issue affecting charts and cache"""
+    try:
+        from debug_friday_snapshot_issue import run_and_return_json
+        current_app.logger.info("Starting Friday snapshot issue analysis...")
+        result = run_and_return_json()
+        current_app.logger.info(f"Friday snapshot analysis completed. Success: {result['success']}")
+        return jsonify(result)
+    except Exception as e:
+        current_app.logger.error(f"Error in Friday snapshot analysis: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'message': 'Failed to analyze Friday snapshot issue'
+        }), 500
+
+@admin_bp.route('/comprehensive-data-flow-debug')
+@login_required
+@admin_required
+def comprehensive_data_flow_debug():
+    """Comprehensive diagnostic: snapshots → calculations → cache → display"""
+    try:
+        from comprehensive_data_flow_debug import run_and_return_json
+        current_app.logger.info("Starting comprehensive data flow analysis...")
+        result = run_and_return_json()
+        current_app.logger.info(f"Data flow analysis completed. Success: {result['success']}")
+        return jsonify(result)
+    except Exception as e:
+        current_app.logger.error(f"Error in data flow analysis: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'message': 'Failed to complete comprehensive data flow analysis'
+        }), 500
