@@ -193,7 +193,7 @@ def comprehensive_data_flow_debug():
                 # Time the chart generation
                 start_time = time.time()
                 calculator = PortfolioPerformanceCalculator()
-                chart_data = calculator.get_performance_data(period)
+                chart_data = calculator.get_performance_data(sample_user.id, period)
                 gen_time = time.time() - start_time
                 
                 if chart_data and 'datasets' in chart_data:
@@ -401,13 +401,14 @@ def comprehensive_data_flow_debug():
             
             for user_stock in user_stocks:
                 stock_info = StockInfo.query.filter_by(ticker=user_stock.ticker).first()
-                if stock_info and user_stock.current_price:
-                    position_value = user_stock.shares * user_stock.current_price
+                if stock_info and user_stock.purchase_price:
+                    # Use purchase price as approximation (would need current price API for real value)
+                    position_value = user_stock.quantity * user_stock.purchase_price
                     total_value += position_value
                     
                     allocation_data[user_stock.ticker] = {
-                        'shares': user_stock.shares,
-                        'current_price': user_stock.current_price,
+                        'quantity': user_stock.quantity,
+                        'purchase_price': user_stock.purchase_price,
                         'position_value': position_value,
                         'cap_classification': stock_info.cap_classification if stock_info else 'unknown'
                     }
@@ -578,7 +579,7 @@ def comprehensive_data_flow_debug():
     
     # Check cache storage
     cache_stored = sum(1 for period in ['1D', '5D', '1M', 'YTD'] 
-                      if results['step3_cache_storage'].get(f"{period}_all", {}).get('exists', False))
+                      if results['step3_leaderboard_cache_storage'].get(f"{period}_all", {}).get('exists', False))
     
     print(f"Cache Storage: {cache_stored}/4 periods")
     
