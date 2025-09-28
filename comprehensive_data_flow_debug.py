@@ -8,6 +8,10 @@ to identify where Friday 9/26/2025 data is missing.
 Flow: UserPortfolioSnapshot → calculate_leaderboard_data() → LeaderboardCache → get_leaderboard_data() → Homepage
 """
 
+def run_comprehensive_debug():
+    """API-friendly wrapper for admin endpoint"""
+    return comprehensive_data_flow_debug()
+
 def comprehensive_data_flow_debug():
     """Debug the complete data flow for leaderboards, charts, and portfolio features with performance timing"""
     from datetime import datetime, date, timedelta
@@ -30,7 +34,9 @@ def comprehensive_data_flow_debug():
     results = {
         'friday_date': str(friday_date),
         'today': str(today),
+        'step0_portfolio_assets': {},
         'step1_snapshots': {},
+        'step1b_asset_value_calculation': {},
         'step2_leaderboard_calculations': {},
         'step3_leaderboard_cache_storage': {},
         'step4_leaderboard_cache_retrieval': {},
@@ -40,12 +46,75 @@ def comprehensive_data_flow_debug():
         'step8_portfolio_summary_flow': {},
         'step9_portfolio_allocation_flow': {},
         'step10_performance_timing': {},
-        'step11_comparison_analysis': {}
+        'step11_comparison_analysis': {},
+        'step12_asset_tracking_validation': {}
     }
     
     # Get all users with stocks
     users_with_stocks = User.query.join(User.stocks).distinct().all()
     print(f"\n👥 Found {len(users_with_stocks)} users with stocks")
+    
+    # STEP 0: Portfolio Assets Analysis - Track actual user holdings
+    print(f"\n🏦 STEP 0: Portfolio Assets Analysis")
+    print("-" * 50)
+    
+    from models import Stock, StockInfo
+    from stock_data_manager import StockDataManager
+    
+    stock_manager = StockDataManager()
+    
+    for user in users_with_stocks:
+        print(f"\n  User: {user.username} (ID: {user.id})")
+        
+        # Get user's stock holdings
+        user_stocks = user.stocks.all()
+        print(f"    Holdings: {len(user_stocks)} positions")
+        
+        assets_data = {}
+        total_calculated_value = 0
+        
+        for stock in user_stocks:
+            print(f"      {stock.ticker}: {stock.quantity} shares @ ${stock.purchase_price:.2f}")
+            
+            # Get current stock price from cache/API
+            try:
+                current_price = stock_manager.get_current_price(stock.ticker)
+                current_value = stock.quantity * current_price
+                total_calculated_value += current_value
+                
+                # Get stock info for cap classification
+                stock_info = StockInfo.query.filter_by(ticker=stock.ticker).first()
+                
+                assets_data[stock.ticker] = {
+                    'quantity': stock.quantity,
+                    'purchase_price': float(stock.purchase_price),
+                    'current_price': current_price,
+                    'current_value': current_value,
+                    'cap_classification': stock_info.cap_classification if stock_info else 'unknown',
+                    'price_source': 'api_cache'
+                }
+                
+                print(f"        Current: ${current_price:.2f} = ${current_value:.2f} value")
+                
+            except Exception as e:
+                print(f"        ❌ Price lookup failed: {str(e)}")
+                assets_data[stock.ticker] = {
+                    'quantity': stock.quantity,
+                    'purchase_price': float(stock.purchase_price),
+                    'current_price': None,
+                    'current_value': 0,
+                    'cap_classification': 'unknown',
+                    'price_source': 'failed',
+                    'error': str(e)
+                }
+        
+        print(f"    Total Calculated Portfolio Value: ${total_calculated_value:.2f}")
+        
+        results['step0_portfolio_assets'][user.username] = {
+            'holdings_count': len(user_stocks),
+            'total_calculated_value': total_calculated_value,
+            'assets': assets_data
+        }
     
     # STEP 1: Check UserPortfolioSnapshot data
     print(f"\n📊 STEP 1: UserPortfolioSnapshot Analysis")
@@ -81,6 +150,70 @@ def comprehensive_data_flow_debug():
                 print(f"    {check_date}: No snapshot {status}")
         
         results['step1_snapshots'][user.username] = snapshots
+        
+        # Compare calculated value vs snapshot value for latest snapshot
+        latest_snapshot = PortfolioSnapshot.query.filter_by(
+            user_id=user.id
+        ).order_by(PortfolioSnapshot.date.desc()).first()
+        
+        if latest_snapshot:
+            calculated_value = results['step0_portfolio_assets'][user.username]['total_calculated_value']
+            snapshot_value = float(latest_snapshot.total_value)
+            value_difference = abs(calculated_value - snapshot_value)
+            
+            print(f"    Value Comparison:")
+            print(f"      Calculated from assets: ${calculated_value:.2f}")
+            print(f"      Latest snapshot value: ${snapshot_value:.2f}")
+            print(f"      Difference: ${value_difference:.2f}")
+            if value_difference > 1.0:  # More than $1 difference
+                print(f"      ⚠️ Significant value discrepancy detected!")
+            else:
+                print(f"      ✅ Values match closely")
+    
+    # STEP 1B: Asset Value Calculation Validation
+    print(f"\n🔍 STEP 1B: Asset Value Calculation Validation")
+    print("-" * 50)
+    
+    from portfolio_performance import PortfolioPerformanceCalculator
+    
+    for user in users_with_stocks:
+        print(f"\n  User: {user.username}")
+        
+        try:
+            # Test the actual portfolio value calculation used by the system
+            calculator = PortfolioPerformanceCalculator()
+            
+            # Get current portfolio value using the same method as snapshots
+            calculated_portfolio_value = calculator.calculate_current_portfolio_value(user.id)
+            
+            # Compare with our manual calculation
+            manual_calculation = results['step0_portfolio_assets'][user.username]['total_calculated_value']
+            
+            print(f"    System calculation: ${calculated_portfolio_value:.2f}")
+            print(f"    Manual calculation: ${manual_calculation:.2f}")
+            
+            calculation_difference = abs(calculated_portfolio_value - manual_calculation)
+            
+            if calculation_difference > 1.0:
+                print(f"    ⚠️ Calculation methods differ by ${calculation_difference:.2f}")
+            else:
+                print(f"    ✅ Calculation methods match")
+            
+            results['step1b_asset_value_calculation'][user.username] = {
+                'system_calculation': calculated_portfolio_value,
+                'manual_calculation': manual_calculation,
+                'difference': calculation_difference,
+                'methods_match': calculation_difference <= 1.0
+            }
+            
+        except Exception as e:
+            print(f"    ❌ Portfolio calculation failed: {str(e)}")
+            results['step1b_asset_value_calculation'][user.username] = {
+                'system_calculation': None,
+                'manual_calculation': manual_calculation,
+                'error': str(e),
+                'methods_match': False
+            }
     
     # STEP 2: Test calculate_leaderboard_data() for each period
     print(f"\n🧮 STEP 2: Leaderboard Calculations (calculate_leaderboard_data)")
@@ -560,6 +693,94 @@ def comprehensive_data_flow_debug():
         'total_issues': total_issues,
         'system_health': 'healthy' if total_issues == 0 else 'degraded'
     }
+    
+    # STEP 12: Asset Tracking Validation
+    print(f"\n🎯 STEP 12: Asset Tracking Validation")
+    print("-" * 50)
+    
+    print("\n  Asset Value Consistency Check:")
+    
+    asset_issues = []
+    
+    for user in users_with_stocks:
+        username = user.username
+        
+        # Check if user has assets but $0 portfolio value
+        assets_data = results['step0_portfolio_assets'][username]
+        holdings_count = assets_data['holdings_count']
+        calculated_value = assets_data['total_calculated_value']
+        
+        # Check latest snapshot value
+        latest_snapshot = PortfolioSnapshot.query.filter_by(
+            user_id=user.id
+        ).order_by(PortfolioSnapshot.date.desc()).first()
+        
+        snapshot_value = float(latest_snapshot.total_value) if latest_snapshot else 0
+        
+        print(f"    {username}:")
+        print(f"      Holdings: {holdings_count} positions")
+        print(f"      Calculated Value: ${calculated_value:.2f}")
+        print(f"      Snapshot Value: ${snapshot_value:.2f}")
+        
+        # Identify issues
+        user_issues = []
+        
+        if holdings_count > 0 and calculated_value == 0:
+            user_issues.append("Has assets but calculated value is $0")
+            asset_issues.append(f"{username}: Has {holdings_count} assets but calculated value is $0")
+        
+        if holdings_count > 0 and snapshot_value == 0:
+            user_issues.append("Has assets but snapshot value is $0")
+            asset_issues.append(f"{username}: Has {holdings_count} assets but snapshot value is $0")
+        
+        if calculated_value > 0 and snapshot_value == 0:
+            user_issues.append("Calculated value > 0 but snapshot value is $0")
+            asset_issues.append(f"{username}: Calculated ${calculated_value:.2f} but snapshot is $0")
+        
+        # Check calculation method consistency
+        calc_data = results['step1b_asset_value_calculation'].get(username, {})
+        if not calc_data.get('methods_match', True):
+            user_issues.append("Calculation methods inconsistent")
+            asset_issues.append(f"{username}: System vs manual calculation mismatch")
+        
+        if user_issues:
+            print(f"      ⚠️ Issues: {', '.join(user_issues)}")
+        else:
+            print(f"      ✅ Asset tracking consistent")
+    
+    # Check for API/price data issues
+    print(f"\n  Price Data Validation:")
+    
+    price_issues = []
+    
+    for user in users_with_stocks:
+        username = user.username
+        assets = results['step0_portfolio_assets'][username]['assets']
+        
+        failed_prices = [ticker for ticker, data in assets.items() 
+                        if data.get('price_source') == 'failed']
+        
+        if failed_prices:
+            print(f"    {username}: Failed to get prices for {', '.join(failed_prices)}")
+            price_issues.extend([f"{username}:{ticker}" for ticker in failed_prices])
+        else:
+            print(f"    {username}: All prices retrieved successfully")
+    
+    results['step12_asset_tracking_validation'] = {
+        'asset_issues': asset_issues,
+        'price_issues': price_issues,
+        'total_asset_issues': len(asset_issues),
+        'total_price_issues': len(price_issues)
+    }
+    
+    if asset_issues or price_issues:
+        print(f"\n  🚨 CRITICAL ASSET TRACKING ISSUES FOUND:")
+        for issue in asset_issues:
+            print(f"    - {issue}")
+        for issue in price_issues:
+            print(f"    - Price lookup failed: {issue}")
+    else:
+        print(f"\n  ✅ Asset tracking validation passed")
     
     # SUMMARY
     print(f"\n📋 SUMMARY")

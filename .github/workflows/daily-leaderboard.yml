@@ -2,8 +2,10 @@ name: Daily Leaderboard Update
 
 on:
   schedule:
-    # Run daily at 5:00 PM ET (9:00 PM UTC) - after market close
-    - cron: '0 21 * * 1-5'
+    # Run daily at 4:05 PM ET - 5 minutes after market close to allow snapshots to complete
+    # Converted to UTC: 8:05 PM UTC (20:05) EST / 9:05 PM UTC (21:05) EDT
+    - cron: '5 20 * * 1-5'   # EST (Standard Time)
+    - cron: '5 21 * * 1-5'   # EDT (Daylight Saving Time)
   workflow_dispatch: # Allow manual trigger for testing
 
 jobs:

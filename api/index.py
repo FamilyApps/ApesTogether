@@ -7270,48 +7270,14 @@ def get_portfolio_performance(period):
                 
                 portfolio_data = datasets[0].get('data', []) if len(datasets) > 0 else []
                 sp500_data = datasets[1].get('data', []) if len(datasets) > 1 else []
-                
                 if not portfolio_data:
                     logger.warning(f"No portfolio data in cached chart for user {user_id}, period {period_upper}")
                     raise ValueError("No portfolio data in cached chart")
                 
                 if not sp500_data:
-                    logger.warning(f"No S&P 500 data in cached chart for user {user_id}, period {period_upper}")
-                    raise ValueError("No S&P 500 data in cached chart")
-                
-                if portfolio_data and sp500_data:
-                    # Calculate returns from first to last data point
-                    portfolio_return = ((portfolio_data[-1] - portfolio_data[0]) / portfolio_data[0] * 100) if portfolio_data[0] > 0 else 0
-                    sp500_return = ((sp500_data[-1] - sp500_data[0]) / sp500_data[0] * 100) if sp500_data[0] > 0 else 0
-                    
-                    # Convert Chart.js format to dashboard chart_data format
-                    labels = cached_data.get('labels', [])
-                    chart_data = []
-                    
-                    # Limit processing to avoid timeouts on large datasets
-                    max_points = min(len(labels), len(portfolio_data), len(sp500_data), 500)  # Limit to 500 points
-                    
-                    for i in range(max_points):
-                        try:
-                            chart_data.append({
-                                'date': labels[i],
-                                'portfolio': round(((portfolio_data[i] - portfolio_data[0]) / portfolio_data[0] * 100) if portfolio_data[0] > 0 else 0, 2),
-                                'sp500': round(((sp500_data[i] - sp500_data[0]) / sp500_data[0] * 100) if sp500_data[0] > 0 else 0, 2)
-                            })
-                        except (IndexError, ZeroDivisionError, TypeError) as e:
-                            logger.warning(f"Error processing chart data point {i}: {e}")
-                            continue
-                    
-                    dashboard_format = {
-                        'portfolio_return': round(portfolio_return, 2),
-                        'sp500_return': round(sp500_return, 2),
-                        'chart_data': chart_data,
-                        'period': period,
-                        'data_source': 'pre_rendered_cache'
-                    }
-                    
-                    logger.info(f"Using pre-rendered chart data (converted to dashboard format) for user {user_id}, period {period_upper}")
-                    return jsonify(dashboard_format)
+                    logger.warning(f"No S&P 500 data in cached chart for user {user_id}, period {period_upper} - falling back to live calculation")
+                    # Don't raise error - fall through to live calculation which can generate S&P 500 data
+                    raise ValueError("No S&P 500 data in cached chart - using live calculation")
                     
             except Exception as e:
                 logger.warning(f"Failed to convert pre-rendered chart data to dashboard format: {e}")
@@ -12883,13 +12849,282 @@ def test_cron_endpoint():
         except requests.exceptions.RequestException as e:
             return jsonify({
                 'success': False,
-                'error': f'Request failed: {str(e)}',
                 'message': 'Cron endpoint test failed'
             }), 500
     
     except Exception as e:
         logger.error(f"Error testing cron endpoint: {str(e)}")
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
+@app.route('/admin/populate-sp500-data')
+@login_required
+def admin_populate_sp500_data():
+    """Admin endpoint to populate S&P 500 data in all caches"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        # Import and run the S&P 500 population script
+        from populate_sp500_data import populate_all_sp500_caches
+        
+        logger.info("Starting S&P 500 data population from admin interface")
+        results = populate_all_sp500_caches()
+        
+        return jsonify({
+            'success': results['summary'].get('overall_success', False),
+            'message': 'S&P 500 data population completed',
+            'results': results,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in S&P 500 population: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/run-data-flow-diagnostic')
+@login_required
+def admin_run_data_flow_diagnostic():
+    """Admin endpoint to run comprehensive data flow diagnostic"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        # Import and run the diagnostic script
+        import sys
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        
+        from comprehensive_data_flow_debug import run_comprehensive_debug
+        
+        logger.info("Starting comprehensive data flow diagnostic from admin interface")
+        results = run_comprehensive_debug()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Data flow diagnostic completed',
+            'results': results,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in data flow diagnostic: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/fix-sp500-charts')
+@login_required
+def admin_fix_sp500_charts():
+    """Admin endpoint to run both S&P 500 population and trigger cache updates"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        results = {
+            'step1_sp500_population': {},
+            'step2_cache_update': {},
+            'step3_diagnostic': {},
+            'summary': {}
+        }
+        
+        # Step 1: Populate S&P 500 data
+        try:
+            from populate_sp500_data import populate_all_sp500_caches
+            logger.info("Step 1: Populating S&P 500 data")
+            sp500_results = populate_all_sp500_caches()
+            results['step1_sp500_population'] = sp500_results
+        except Exception as e:
+            results['step1_sp500_population'] = {'success': False, 'error': str(e)}
+        
+        # Step 2: Update leaderboard cache (includes chart cache)
+        try:
+            from leaderboard_utils import update_leaderboard_cache
+            logger.info("Step 2: Updating leaderboard and chart caches")
+            updated_count = update_leaderboard_cache()
+            results['step2_cache_update'] = {
+                'success': True,
+                'updated_count': updated_count,
+                'message': f'Updated {updated_count} cache entries'
+            }
+        except Exception as e:
+            results['step2_cache_update'] = {'success': False, 'error': str(e)}
+        
+        # Step 3: Run diagnostic to verify
+        try:
+            import sys
+            import os
+            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from comprehensive_data_flow_debug import run_comprehensive_debug
+            
+            logger.info("Step 3: Running verification diagnostic")
+            diagnostic_results = run_comprehensive_debug()
+            results['step3_diagnostic'] = diagnostic_results
+        except Exception as e:
+            results['step3_diagnostic'] = {'success': False, 'error': str(e)}
+        
+        # Summary
+        successful_steps = sum(1 for step in [
+            results['step1_sp500_population'],
+            results['step2_cache_update'], 
+            results['step3_diagnostic']
+        ] if step.get('success', False))
+        
+        results['summary'] = {
+            'overall_success': successful_steps >= 2,  # At least 2/3 steps must succeed
+            'successful_steps': successful_steps,
+            'total_steps': 3,
+            'message': f'S&P 500 chart fix completed: {successful_steps}/3 steps successful'
+        }
+        
+        return jsonify({
+            'success': results['summary']['overall_success'],
+            'message': results['summary']['message'],
+            'results': results,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in S&P 500 chart fix: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/audit-sp500-data')
+@login_required
+def admin_audit_sp500_data():
+    """Admin endpoint to audit existing S&P 500 data before making changes"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import db, MarketData
+        from datetime import date, timedelta
+        
+        results = {
+            'timestamp': datetime.now().isoformat(),
+            'sp500_tickers_found': {},
+            'data_quality': {},
+            'chart_period_coverage': {},
+            'recommendations': []
+        }
+        
+        # Check for S&P 500 data under different tickers
+        potential_tickers = ['SPY_SP500', 'SPY', 'SP500', 'SPX', 'SPY_INTRADAY']
+        
+        for ticker in potential_tickers:
+            count = MarketData.query.filter_by(ticker=ticker).count()
+            if count > 0:
+                earliest = db.session.query(MarketData.date).filter_by(ticker=ticker).order_by(MarketData.date.asc()).first()
+                latest = db.session.query(MarketData.date).filter_by(ticker=ticker).order_by(MarketData.date.desc()).first()
+                
+                # Check for data quality issues
+                zero_prices = MarketData.query.filter(
+                    MarketData.ticker == ticker,
+                    MarketData.close_price == 0
+                ).count()
+                
+                low_prices = MarketData.query.filter(
+                    MarketData.ticker == ticker,
+                    MarketData.close_price < 100,
+                    MarketData.close_price > 0
+                ).count()
+                
+                results['sp500_tickers_found'][ticker] = {
+                    'count': count,
+                    'date_range': {
+                        'earliest': earliest[0].isoformat() if earliest else None,
+                        'latest': latest[0].isoformat() if latest else None,
+                        'span_days': (latest[0] - earliest[0]).days if earliest and latest else 0
+                    },
+                    'quality_issues': {
+                        'zero_prices': zero_prices,
+                        'low_prices': low_prices,
+                        'total_issues': zero_prices + low_prices
+                    }
+                }
+        
+        # If we found SPY_SP500 data, analyze chart period coverage
+        if 'SPY_SP500' in results['sp500_tickers_found']:
+            today = date.today()
+            periods_to_check = {
+                '1M': today - timedelta(days=30),
+                '3M': today - timedelta(days=90), 
+                'YTD': date(today.year, 1, 1),
+                '1Y': today - timedelta(days=365)
+            }
+            
+            for period_name, start_date in periods_to_check.items():
+                period_count = MarketData.query.filter(
+                    MarketData.ticker == 'SPY_SP500',
+                    MarketData.date >= start_date,
+                    MarketData.date <= today
+                ).count()
+                
+                total_days = (today - start_date).days
+                expected_business_days = total_days * 5 // 7
+                coverage = (period_count / expected_business_days * 100) if expected_business_days > 0 else 0
+                
+                results['chart_period_coverage'][period_name] = {
+                    'data_points': period_count,
+                    'expected_business_days': expected_business_days,
+                    'coverage_percent': round(coverage, 1),
+                    'status': 'good' if coverage > 80 else 'fair' if coverage > 50 else 'poor'
+                }
+        
+        # Generate recommendations
+        if not results['sp500_tickers_found']:
+            results['recommendations'].append("No S&P 500 data found - need to populate from scratch")
+        elif 'SPY_SP500' not in results['sp500_tickers_found']:
+            # Check if data exists under other tickers
+            other_tickers = [t for t in results['sp500_tickers_found'].keys() if t != 'SPY_SP500']
+            if other_tickers:
+                best_ticker = max(other_tickers, key=lambda t: results['sp500_tickers_found'][t]['count'])
+                results['recommendations'].append(f"S&P 500 data found under '{best_ticker}' - consider copying to 'SPY_SP500'")
+        else:
+            sp500_data = results['sp500_tickers_found']['SPY_SP500']
+            if sp500_data['quality_issues']['total_issues'] > 0:
+                results['recommendations'].append(f"Data quality issues detected: {sp500_data['quality_issues']['total_issues']} problematic records")
+            
+            poor_coverage = [p for p, data in results['chart_period_coverage'].items() if data['status'] == 'poor']
+            if poor_coverage:
+                results['recommendations'].append(f"Poor coverage for periods: {', '.join(poor_coverage)}")
+            
+            if sp500_data['quality_issues']['total_issues'] == 0 and not poor_coverage:
+                results['recommendations'].append("✅ Existing S&P 500 data looks clean and comprehensive!")
+        
+        return jsonify({
+            'success': True,
+            'message': 'S&P 500 data audit completed',
+            'results': results
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in S&P 500 data audit: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
 
 # For local testing
 if __name__ == '__main__':

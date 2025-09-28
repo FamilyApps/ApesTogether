@@ -1,10 +1,10 @@
 name: Market Close Processing
 on:
   schedule:
-    # Run at 4:30 PM ET daily (after market close at 4:00 PM ET)
-    # Converted to UTC: 8:30 PM UTC (20:30) - accounts for EST/EDT
-    - cron: '30 20 * * 1-5'  # Monday-Friday only
-    - cron: '30 21 * * 1-5'  # Backup run during EDT (daylight saving)
+    # Run at 4:00 PM ET daily (exactly when market closes)
+    # Converted to UTC: 8:00 PM UTC (20:00) EST / 9:00 PM UTC (21:00) EDT
+    - cron: '0 20 * * 1-5'   # Monday-Friday EST (Standard Time)
+    - cron: '0 21 * * 1-5'   # Monday-Friday EDT (Daylight Saving Time)
   workflow_dispatch:  # Allow manual triggering for testing
 
 jobs:
