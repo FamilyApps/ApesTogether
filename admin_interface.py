@@ -893,59 +893,67 @@ def fix_leaderboard_to_use_cache():
         successful_periods = []
         
         for period in ['1D', '5D']:  # Start with critical periods
-            # Get all users with cached chart data for this period
-            cached_charts = UserPortfolioChartCache.query.filter_by(period=period).all()
-            
-            if not cached_charts:
-                results['generated_leaderboards'][period] = {
-                    'success': False,
-                    'error': 'No cached chart data available'
-                }
-                continue
+            # Get all users with stocks (should be 5 users)
+            all_users = User.query.join(User.stocks).distinct().all()
+            current_app.logger.info(f"Processing {len(all_users)} users for {period} leaderboard")
             
             leaderboard_entries = []
             
-            for chart_cache in cached_charts:
-                try:
-                    # Parse the cached Chart.js data
-                    chart_data = json.loads(chart_cache.chart_data)
-                    datasets = chart_data.get('datasets', [])
-                    
-                    if len(datasets) < 1:
+            for user in all_users:
+                # First try to get cached chart data
+                chart_cache = UserPortfolioChartCache.query.filter_by(
+                    user_id=user.id, 
+                    period=period
+                ).first()
+                
+                if chart_cache:
+                    try:
+                        # Parse the cached Chart.js data
+                        chart_data = json.loads(chart_cache.chart_data)
+                        datasets = chart_data.get('datasets', [])
+                        
+                        if len(datasets) < 1:
+                            continue
+                        
+                        # Get portfolio performance data
+                        portfolio_data = datasets[0].get('data', [])
+                        if not portfolio_data or len(portfolio_data) < 2:
+                            continue
+                        
+                        # Calculate performance from first to last data point
+                        start_value = portfolio_data[0]
+                        end_value = portfolio_data[-1]
+                        
+                        if start_value > 0:
+                            performance_percent = ((end_value - start_value) / start_value) * 100
+                        else:
+                            performance_percent = 0.0
+                        
+                        leaderboard_entries.append({
+                            'user_id': user.id,
+                            'username': user.username,
+                            'performance_percent': performance_percent,
+                            'portfolio_value': float(end_value),
+                            'small_cap_percent': 50.0,  # Default for now
+                            'large_cap_percent': 50.0,   # Default for now
+                            'avg_trades_per_week': 5.0   # Default for now
+                        })
+                        
+                    except Exception as e:
+                        current_app.logger.warning(f"Failed to process cache for user {user.id}: {str(e)}")
                         continue
-                    
-                    # Get portfolio performance data
-                    portfolio_data = datasets[0].get('data', [])
-                    if not portfolio_data or len(portfolio_data) < 2:
-                        continue
-                    
-                    # Calculate performance from first to last data point
-                    start_value = portfolio_data[0]
-                    end_value = portfolio_data[-1]
-                    
-                    if start_value > 0:
-                        performance_percent = ((end_value - start_value) / start_value) * 100
-                    else:
-                        performance_percent = 0.0
-                    
-                    # Get user info
-                    user = User.query.get(chart_cache.user_id)
-                    if not user:
-                        continue
-                    
+                else:
+                    # No cached data - add user with 0% performance for now
+                    current_app.logger.warning(f"No cached data for user {user.id} ({user.username}) for period {period}")
                     leaderboard_entries.append({
                         'user_id': user.id,
                         'username': user.username,
-                        'performance_percent': performance_percent,
-                        'portfolio_value': float(end_value),
-                        'small_cap_percent': 50.0,  # Default for now
-                        'large_cap_percent': 50.0,   # Default for now
-                        'avg_trades_per_week': 5.0   # Default for now
+                        'performance_percent': 0.0,  # Default when no cache
+                        'portfolio_value': 0.0,
+                        'small_cap_percent': 50.0,
+                        'large_cap_percent': 50.0,
+                        'avg_trades_per_week': 5.0
                     })
-                    
-                except Exception as e:
-                    current_app.logger.warning(f"Failed to process cache for user {chart_cache.user_id}: {str(e)}")
-                    continue
             
             # Sort by performance
             leaderboard_entries.sort(key=lambda x: x['performance_percent'], reverse=True)
@@ -958,18 +966,19 @@ def fix_leaderboard_to_use_cache():
             
             if len(leaderboard_entries) > 0:
                 try:
-                    # Clear existing cache
+                    # Clear existing cache for this period (both with and without category suffix)
                     LeaderboardCache.query.filter_by(period=period).delete()
+                    LeaderboardCache.query.filter_by(period=f"{period}_all").delete()
+                    LeaderboardCache.query.filter_by(period=f"{period}_small").delete()
+                    LeaderboardCache.query.filter_by(period=f"{period}_large").delete()
                     
-                    # Create new cache entry
+                    # Create new cache entry with correct cache key format (period_category)
                     cache_entry = LeaderboardCache(
-                        period=period,
+                        period=f"{period}_all",  # Use same format as get_leaderboard_data expects
                         leaderboard_data=json.dumps(leaderboard_entries),
                         generated_at=datetime.now()
                     )
                     db.session.add(cache_entry)
-                    
-                    # Data already cleared above - no need to clear again
                     
                     # Use different dates for different periods to avoid unique constraint (user_id, date)
                     base_date = date.today()
