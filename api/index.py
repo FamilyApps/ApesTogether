@@ -11382,6 +11382,12 @@ def admin_debug_snapshot_dates():
 @login_required
 def admin_debug_leaderboard_calculations():
     """Debug leaderboard calculation issues - why only 1 user on 1D, wrong percentages on 5D"""
+    from datetime import datetime, date, timedelta
+    from models import db, User, LeaderboardCache, LeaderboardEntry
+    from portfolio_performance import PortfolioPerformanceCalculator
+    from sqlalchemy import desc
+    import json
+    
     try:
         # Rollback any failed transaction first
         db.session.rollback()
@@ -11390,12 +11396,6 @@ def admin_debug_leaderboard_calculations():
         email = session.get('email', '')
         if email != ADMIN_EMAIL:
             return jsonify({'error': 'Admin access required'}), 403
-        
-        from datetime import datetime, date, timedelta
-        from models import db, User, LeaderboardCache, LeaderboardEntry
-        from portfolio_performance import PortfolioPerformanceCalculator
-        from sqlalchemy import desc
-        import json
         
         calculator = PortfolioPerformanceCalculator()
         
