@@ -9590,7 +9590,6 @@ def market_close_cron():
         from portfolio_performance import PortfolioPerformanceCalculator
         from leaderboard_utils import update_leaderboard_cache
         
-        calculator = PortfolioPerformanceCalculator()
         today = date.today()
         current_time = datetime.now()
         
@@ -9608,8 +9607,9 @@ def market_close_cron():
         
         for user in users:
             try:
-                # Calculate portfolio value for today
-                portfolio_value = calculator.calculate_portfolio_value(user.id, today)
+                # Calculate portfolio value for today using correct constructor
+                calculator = PortfolioPerformanceCalculator(user.id)
+                portfolio_value = calculator.calculate_portfolio_value(today)
                 
                 # Check if snapshot already exists for today
                 existing_snapshot = PortfolioSnapshot.query.filter_by(
