@@ -11383,6 +11383,9 @@ def admin_debug_snapshot_dates():
 def admin_debug_leaderboard_calculations():
     """Debug leaderboard calculation issues - why only 1 user on 1D, wrong percentages on 5D"""
     try:
+        # Rollback any failed transaction first
+        db.session.rollback()
+        
         # Check if user is admin
         email = session.get('email', '')
         if email != ADMIN_EMAIL:
@@ -11539,6 +11542,7 @@ def admin_debug_leaderboard_calculations():
         return jsonify(results)
         
     except Exception as e:
+        db.session.rollback()
         logger.error(f"Error in leaderboard debug: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
