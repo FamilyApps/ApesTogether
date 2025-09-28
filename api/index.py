@@ -1142,57 +1142,96 @@ def dashboard():
         current_hour = datetime.now().hour
         is_after_hours = current_hour < 9 or current_hour >= 16  # Before 9 AM or after 4 PM
         
-        # Use cached snapshots on weekends or after hours, live data during market hours on weekdays
-        use_cached_data = is_weekend or is_after_hours
+        # SMART CACHING STRATEGY: Use cached data by default, refresh only when requested during market hours
+        force_refresh = request.args.get('refresh') == 'true'
+        is_market_hours_weekday = not is_weekend and not is_after_hours
+        use_cached_data = not (is_market_hours_weekday and force_refresh)
         
-        if use_cached_data:
-            # Get most recent portfolio snapshot (Friday's close or latest available)
-            latest_snapshot = PortfolioSnapshot.query.filter_by(user_id=current_user.id)\
-                .order_by(PortfolioSnapshot.date.desc()).first()
+        # Always try cached data first (fastest loading)
+        from models import PortfolioSnapshotIntraday
+        
+        # Get most recent data from either intraday or daily snapshots
+        latest_daily_snapshot = PortfolioSnapshot.query.filter_by(user_id=current_user.id)\
+            .order_by(PortfolioSnapshot.date.desc()).first()
+        
+        latest_intraday_snapshot = PortfolioSnapshotIntraday.query.filter_by(user_id=current_user.id)\
+            .order_by(PortfolioSnapshotIntraday.timestamp.desc()).first()
+        
+        # Determine which snapshot is more recent
+        use_intraday = False
+        latest_snapshot = latest_daily_snapshot
+        
+        if latest_intraday_snapshot and latest_daily_snapshot:
+            # Compare intraday timestamp with daily date
+            intraday_date = latest_intraday_snapshot.timestamp.date()
+            daily_date = latest_daily_snapshot.date
             
-            if latest_snapshot:
+            if intraday_date >= daily_date:
+                use_intraday = True
+                latest_snapshot = latest_intraday_snapshot
+        elif latest_intraday_snapshot:
+            use_intraday = True
+            latest_snapshot = latest_intraday_snapshot
+        
+        if use_cached_data and latest_snapshot:
+            # Use cached data (fast loading)
+            if use_intraday:
                 total_portfolio_value = latest_snapshot.total_value
-                
-                # Get individual stock data for display (use cached prices from Friday)
-                stocks = Stock.query.filter_by(user_id=current_user.id).all()
-                
-                # For cached data, calculate individual stock values proportionally
-                # This is an approximation since we only have total portfolio value cached
-                total_cost_basis = sum(stock.quantity * stock.purchase_price for stock in stocks if stock.purchase_price)
-                
-                for stock in stocks:
-                    if total_cost_basis > 0:
-                        # Estimate current price based on proportional portfolio performance
-                        cost_basis = stock.quantity * stock.purchase_price if stock.purchase_price else 0
-                        portfolio_multiplier = total_portfolio_value / total_cost_basis if total_cost_basis > 0 else 1
-                        estimated_current_price = stock.purchase_price * portfolio_multiplier if stock.purchase_price else 0
-                        
-                        value = stock.quantity * estimated_current_price
-                        gain_loss = value - cost_basis
-                        gain_loss_percent = (gain_loss / cost_basis) * 100 if cost_basis > 0 else 0
-                        
-                        portfolio_data.append({
-                            'ticker': stock.ticker,
-                            'quantity': stock.quantity,
-                            'purchase_price': stock.purchase_price,
-                            'current_price': estimated_current_price,
-                            'value': value,
-                            'gain_loss': gain_loss,
-                            'gain_loss_percent': gain_loss_percent
-                        })
-                    else:
-                        portfolio_data.append({
-                            'ticker': stock.ticker,
-                            'quantity': stock.quantity,
-                            'purchase_price': stock.purchase_price,
-                            'current_price': 'N/A',
-                            'value': 'N/A',
-                            'gain_loss': 'N/A',
-                            'gain_loss_percent': 'N/A'
-                        })
+                data_timestamp = latest_snapshot.timestamp
+                data_source = f"Intraday snapshot from {data_timestamp.strftime('%H:%M')}"
             else:
-                # No cached data available, fall back to live data
-                use_cached_data = False
+                total_portfolio_value = latest_snapshot.total_value
+                data_timestamp = datetime.combine(latest_snapshot.date, datetime.min.time())
+                data_source = f"Market close from {latest_snapshot.date.strftime('%m/%d/%Y')}"
+            
+            # Get individual stock data for display
+            stocks = Stock.query.filter_by(user_id=current_user.id).all()
+            
+            # Calculate individual stock values proportionally
+            total_cost_basis = sum(stock.quantity * stock.purchase_price for stock in stocks if stock.purchase_price)
+            
+            for stock in stocks:
+                if total_cost_basis > 0:
+                    # Estimate current price based on proportional portfolio performance
+                    cost_basis = stock.quantity * stock.purchase_price if stock.purchase_price else 0
+                    portfolio_multiplier = total_portfolio_value / total_cost_basis if total_cost_basis > 0 else 1
+                    estimated_current_price = stock.purchase_price * portfolio_multiplier if stock.purchase_price else 0
+                    
+                    value = stock.quantity * estimated_current_price
+                    gain_loss = value - cost_basis
+                    gain_loss_percent = (gain_loss / cost_basis) * 100 if cost_basis > 0 else 0
+                    
+                    portfolio_data.append({
+                        'ticker': stock.ticker,
+                        'quantity': stock.quantity,
+                        'purchase_price': stock.purchase_price,
+                        'current_price': estimated_current_price,
+                        'value': value,
+                        'gain_loss': gain_loss,
+                        'gain_loss_percent': gain_loss_percent
+                    })
+                else:
+                    portfolio_data.append({
+                        'ticker': stock.ticker,
+                        'quantity': stock.quantity,
+                        'purchase_price': stock.purchase_price,
+                        'current_price': 'N/A',
+                        'value': 'N/A',
+                        'gain_loss': 'N/A',
+                        'gain_loss_percent': 'N/A'
+                    })
+            
+            # Smart refresh logic: Only make API calls if user requests refresh AND data is stale
+            if force_refresh and is_market_hours_weekday:
+                current_time = datetime.now()
+                data_age_seconds = (current_time - data_timestamp).total_seconds()
+                
+                if data_age_seconds > 90:  # Data is stale, refresh with API calls
+                    # Clear cached data and fall through to API refresh
+                    portfolio_data = []
+                    total_portfolio_value = 0
+                    use_cached_data = False
+                # If data is fresh (<90s), keep using cached data even though user clicked refresh
         
         if not use_cached_data:
             # Use live API data during market hours on weekdays
