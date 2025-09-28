@@ -9900,8 +9900,8 @@ def admin_trigger_market_close_backfill():
             for user in users:
                 try:
                     # Calculate portfolio value for target date
-                    calculator = PortfolioPerformanceCalculator(user.id)
-                    portfolio_value = calculator.calculate_portfolio_value(target_date)
+                    calculator = PortfolioPerformanceCalculator()
+                    portfolio_value = calculator.calculate_portfolio_value(user.id, target_date)
                     
                     # Check if snapshot already exists for target date
                     existing_snapshot = PortfolioSnapshot.query.filter_by(
