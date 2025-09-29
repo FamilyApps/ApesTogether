@@ -10933,8 +10933,8 @@ def admin_historical_price_backfill():
                                 logger.info(f"📅 {ticker} using {available_date}: ${close_price:.2f}")
                                 break
                     
-                    # Rate limiting - 5 calls per minute
-                    time.sleep(12)
+                    # Rate limiting - Premium account: 150 calls per minute
+                    time.sleep(0.5)  # 120 calls per minute (conservative)
                     
                 except Exception as e:
                     error_msg = f"Error fetching {ticker}: {str(e)}"
@@ -11443,8 +11443,8 @@ def admin_historical_price_backfill_batch():
                                 logger.info(f"📅 {ticker} using {available_date}: ${close_price:.2f}")
                                 break
                     
-                    # Rate limiting - 5 calls per minute
-                    time.sleep(12)
+                    # Rate limiting - Premium account: 150 calls per minute
+                    time.sleep(0.5)  # 120 calls per minute (conservative)
                     
                 except Exception as e:
                     error_msg = f"Error fetching {ticker}: {str(e)}"
