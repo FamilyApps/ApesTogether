@@ -15242,6 +15242,43 @@ def debug_routing_test():
         'sample_routes': [rule.rule for rule in list(app.url_map.iter_rules())[:10]]
     })
 
+@app.route('/api/debug/all-routes', methods=['GET'])
+def debug_all_routes():
+    """Comprehensive route diagnostic"""
+    all_routes = []
+    api_routes = []
+    
+    for rule in app.url_map.iter_rules():
+        route_info = {
+            'rule': rule.rule,
+            'methods': list(rule.methods),
+            'endpoint': rule.endpoint
+        }
+        all_routes.append(route_info)
+        
+        if rule.rule.startswith('/api/'):
+            api_routes.append(route_info)
+    
+    # Check specific problematic routes
+    problematic_routes = [
+        '/api/portfolio_value',
+        '/api/portfolio/performance/1Y',
+        '/api/portfolio/performance/<period>'
+    ]
+    
+    found_routes = {}
+    for route in problematic_routes:
+        found_routes[route] = any(r['rule'] == route for r in all_routes)
+    
+    return jsonify({
+        'success': True,
+        'total_routes': len(all_routes),
+        'api_routes_count': len(api_routes),
+        'api_routes': api_routes,
+        'problematic_routes_check': found_routes,
+        'timestamp': datetime.now().isoformat()
+    })
+
 if __name__ == '__main__':
     # Log app startup with structured information
     logger.info("App starting", extra={
