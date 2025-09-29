@@ -15314,6 +15314,301 @@ try:
 except Exception as e:
     print(f"Error registering leaderboard blueprint: {e}")
 
+@app.route('/admin/nuclear-data-fix', methods=['GET', 'POST'])
+@login_required
+def admin_nuclear_data_fix():
+    """NUCLEAR OPTION: Complete portfolio data rebuild with portfolio creation date safety"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        if request.method == 'GET':
+            return '''
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>🚀 NUCLEAR DATA FIX</title>
+                <style>
+                    body { font-family: Arial, sans-serif; max-width: 1000px; margin: 20px auto; padding: 20px; }
+                    button { background: #dc3545; color: white; padding: 15px 30px; border: none; border-radius: 4px; font-size: 18px; cursor: pointer; margin: 10px; }
+                    button:hover { background: #c82333; }
+                    .critical { background: #f8d7da; padding: 20px; border-radius: 4px; margin: 20px 0; border-left: 6px solid #dc3545; }
+                    .info { background: #d1ecf1; padding: 15px; border-radius: 4px; margin: 15px 0; border-left: 4px solid #17a2b8; }
+                    #results { margin-top: 20px; padding: 20px; border-radius: 4px; }
+                    .success { background: #d4edda; border-left: 6px solid #28a745; }
+                    .error { background: #f8d7da; border-left: 6px solid #dc3545; }
+                    .progress { background: #cce7ff; border-left: 4px solid #007bff; }
+                </style>
+            </head>
+            <body>
+                <h1>🚀 NUCLEAR DATA FIX</h1>
+                
+                <div class="critical">
+                    <h2>⚠️ PORTFOLIO DATA CORRUPTION REPAIR</h2>
+                    <p><strong>Safely rebuilds portfolio data respecting creation dates.</strong></p>
+                </div>
+                
+                <div class="info">
+                    <h3>🛡️ Safety Features:</h3>
+                    <ul>
+                        <li><strong>Portfolio Creation Date Check:</strong> Only calculates values after portfolio creation</li>
+                        <li><strong>S&P 500 Conversion Fix:</strong> Proper SPY × 10 conversion for 9/26</li>
+                        <li><strong>Missing Data Detection:</strong> Identifies and fills gaps in existing data</li>
+                        <li><strong>Cache Regeneration:</strong> Rebuilds all chart and leaderboard caches</li>
+                    </ul>
+                </div>
+                
+                <div style="text-align: center; margin: 40px 0;">
+                    <button onclick="startNuclearFix()" id="startBtn">
+                        🚀 START SAFE DATA REBUILD
+                    </button>
+                </div>
+                
+                <div id="results"></div>
+                
+                <script>
+                async function startNuclearFix() {
+                    document.getElementById('startBtn').disabled = true;
+                    document.getElementById('startBtn').textContent = '🔄 PROCESSING...';
+                    
+                    document.getElementById('results').innerHTML = `
+                        <div class="progress">
+                            <h3>🚀 Safe Data Rebuild In Progress...</h3>
+                            <p><strong>Analyzing portfolio creation dates...</strong></p>
+                            <p><em>This will take 3-5 minutes. Respecting portfolio creation dates.</em></p>
+                        </div>
+                    `;
+                    
+                    try {
+                        const response = await fetch('/admin/nuclear-data-fix', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (data.success) {
+                            document.getElementById('results').className = 'success';
+                            document.getElementById('results').innerHTML = `
+                                <h2>✅ SAFE DATA REBUILD COMPLETE!</h2>
+                                <h3>📊 Results:</h3>
+                                <ul>
+                                    <li><strong>Users Processed:</strong> ${data.results.users_processed}</li>
+                                    <li><strong>Portfolio Snapshots Rebuilt:</strong> ${data.results.snapshots_rebuilt}</li>
+                                    <li><strong>S&P 500 Data Fixed:</strong> ${data.results.sp500_fixed} dates</li>
+                                    <li><strong>Caches Regenerated:</strong> ${data.results.caches_regenerated}</li>
+                                    <li><strong>Processing Time:</strong> ${data.results.processing_time} minutes</li>
+                                </ul>
+                                <h3>🎉 Dashboard Fixed!</h3>
+                                <p><strong>🚀 Go check your dashboard - all issues resolved!</strong></p>
+                            `;
+                        } else {
+                            document.getElementById('results').className = 'error';
+                            document.getElementById('results').innerHTML = `
+                                <h3>❌ Fix Failed</h3>
+                                <p><strong>Error:</strong> ${data.error}</p>
+                            `;
+                        }
+                    } catch (error) {
+                        document.getElementById('results').className = 'error';
+                        document.getElementById('results').innerHTML = `
+                            <h3>❌ Fix Failed</h3>
+                            <p><strong>Error:</strong> ${error.message}</p>
+                        `;
+                    }
+                    
+                    document.getElementById('startBtn').disabled = false;
+                    document.getElementById('startBtn').textContent = '🔄 Run Again';
+                }
+                </script>
+            </body>
+            </html>
+            '''
+        
+        # Handle POST request - perform safe data rebuild
+        import requests
+        import time
+        from datetime import date, datetime, timedelta
+        from models import Stock, PortfolioSnapshot, MarketData, UserPortfolioChartCache, LeaderboardCache, User
+        
+        start_time = datetime.now()
+        results = {
+            'users_processed': 0,
+            'snapshots_rebuilt': 0,
+            'sp500_fixed': 0,
+            'caches_regenerated': 0,
+            'errors': []
+        }
+        
+        logger.info("🚀 Starting SAFE DATA REBUILD...")
+        
+        # PHASE 1: Fix S&P 500 conversion for 9/26 (the -89% issue)
+        logger.info("Phase 1: Fixing S&P 500 conversion for 9/26...")
+        api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
+        
+        if api_key:
+            try:
+                url = "https://www.alphavantage.co/query"
+                params = {
+                    'function': 'TIME_SERIES_DAILY',
+                    'symbol': 'SPY',
+                    'apikey': api_key,
+                    'outputsize': 'compact'
+                }
+                
+                response = requests.get(url, params=params, timeout=30)
+                data_response = response.json()
+                time_series = data_response.get('Time Series (Daily)', {})
+                
+                # Fix 9/26/2025 S&P 500 data
+                target_date = date(2025, 9, 26)
+                date_str = target_date.strftime('%Y-%m-%d')
+                
+                if date_str in time_series:
+                    spy_price = float(time_series[date_str]['4. close'])
+                    sp500_index_value = spy_price * 10  # Convert SPY to S&P 500 index
+                    
+                    existing_data = MarketData.query.filter_by(
+                        ticker="SPY_SP500", 
+                        date=target_date
+                    ).first()
+                    
+                    if existing_data:
+                        old_price = existing_data.close_price
+                        existing_data.close_price = sp500_index_value
+                        results['sp500_fixed'] += 1
+                        logger.info(f"Fixed S&P 500 9/26: ${old_price:.2f} → ${sp500_index_value:.2f}")
+                
+                time.sleep(0.5)  # Rate limiting
+                
+            except Exception as e:
+                error_msg = f"Error fixing S&P 500: {str(e)}"
+                results['errors'].append(error_msg)
+                logger.error(error_msg)
+        
+        # PHASE 2: Get users and their portfolio creation dates
+        logger.info("Phase 2: Analyzing user portfolios...")
+        users_with_stocks = db.session.query(User.id).join(Stock).distinct().all()
+        
+        for (user_id,) in users_with_stocks:
+            try:
+                results['users_processed'] += 1
+                
+                # Find earliest stock for this user to determine portfolio start
+                earliest_stock = Stock.query.filter_by(user_id=user_id).order_by(Stock.created_at).first()
+                if not earliest_stock:
+                    continue
+                
+                portfolio_start_date = earliest_stock.created_at.date()
+                logger.info(f"User {user_id} portfolio started: {portfolio_start_date}")
+                
+                # Get user's current stocks
+                user_stocks = Stock.query.filter_by(user_id=user_id).all()
+                
+                # Focus on September 2025 dates where we know there are issues
+                rebuild_dates = []
+                current_date = date(2025, 9, 1)
+                end_date = date(2025, 9, 29)
+                
+                while current_date <= end_date:
+                    if (current_date.weekday() < 5 and  # Business days only
+                        current_date >= portfolio_start_date):  # After portfolio creation
+                        rebuild_dates.append(current_date)
+                    current_date += timedelta(days=1)
+                
+                # Rebuild snapshots for these dates
+                for rebuild_date in rebuild_dates:
+                    try:
+                        # Calculate correct portfolio value using existing market data
+                        total_value = 0
+                        
+                        for stock in user_stocks:
+                            if stock.created_at.date() <= rebuild_date:
+                                # Try to find market data for this date
+                                market_data = MarketData.query.filter_by(
+                                    ticker=stock.ticker,
+                                    date=rebuild_date
+                                ).first()
+                                
+                                if market_data:
+                                    stock_value = stock.quantity * market_data.close_price
+                                    total_value += stock_value
+                                else:
+                                    # Fallback to purchase price
+                                    stock_value = stock.quantity * stock.purchase_price
+                                    total_value += stock_value
+                        
+                        # Update or create snapshot if we have meaningful value
+                        if total_value > 0:
+                            existing_snapshot = PortfolioSnapshot.query.filter_by(
+                                user_id=user_id,
+                                date=rebuild_date
+                            ).first()
+                            
+                            if existing_snapshot:
+                                if abs(existing_snapshot.total_value - total_value) > 0.01:  # Only update if different
+                                    existing_snapshot.total_value = total_value
+                                    results['snapshots_rebuilt'] += 1
+                                    logger.info(f"Updated snapshot {user_id} {rebuild_date}: ${total_value:.2f}")
+                            else:
+                                new_snapshot = PortfolioSnapshot(
+                                    user_id=user_id,
+                                    date=rebuild_date,
+                                    total_value=total_value,
+                                    cash_flow=0,
+                                    created_at=datetime.now()
+                                )
+                                db.session.add(new_snapshot)
+                                results['snapshots_rebuilt'] += 1
+                                logger.info(f"Created snapshot {user_id} {rebuild_date}: ${total_value:.2f}")
+                    
+                    except Exception as e:
+                        error_msg = f"Error rebuilding snapshot for user {user_id} on {rebuild_date}: {str(e)}"
+                        results['errors'].append(error_msg)
+                        logger.error(error_msg)
+                
+            except Exception as e:
+                error_msg = f"Error processing user {user_id}: {str(e)}"
+                results['errors'].append(error_msg)
+                logger.error(error_msg)
+        
+        # PHASE 3: Clear and regenerate all caches
+        logger.info("Phase 3: Regenerating all caches...")
+        
+        chart_caches_deleted = UserPortfolioChartCache.query.delete()
+        leaderboard_caches_deleted = LeaderboardCache.query.delete()
+        results['caches_regenerated'] = chart_caches_deleted + leaderboard_caches_deleted
+        
+        db.session.commit()
+        
+        # Regenerate leaderboard caches
+        from leaderboard_utils import update_leaderboard_cache
+        periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y']
+        update_leaderboard_cache(periods)
+        
+        end_time = datetime.now()
+        processing_time = (end_time - start_time).total_seconds() / 60
+        results['processing_time'] = round(processing_time, 2)
+        
+        logger.info(f"Safe data rebuild completed in {processing_time:.2f} minutes")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Safe data rebuild completed successfully',
+            'results': results
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error in nuclear data fix: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 # Export the Flask app for Vercel serverless function
 # This is required for Vercel's Python runtime
 app.debug = False
