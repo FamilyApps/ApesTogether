@@ -11033,6 +11033,134 @@ def admin_historical_price_backfill():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/debug-api-auth', methods=['GET'])
+@login_required
+def admin_debug_api_auth():
+    """Debug API authentication issues"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from flask import current_user
+        
+        debug_info = {
+            'timestamp': datetime.now().isoformat(),
+            'session_data': {
+                'user_id': session.get('user_id'),
+                'email': session.get('email'),
+                'username': session.get('username'),
+                'all_session_keys': list(session.keys())
+            },
+            'current_user_data': {
+                'is_authenticated': current_user.is_authenticated if hasattr(current_user, 'is_authenticated') else 'No current_user',
+                'user_id': getattr(current_user, 'id', 'No ID') if hasattr(current_user, 'id') else 'No current_user',
+                'email': getattr(current_user, 'email', 'No email') if hasattr(current_user, 'email') else 'No current_user'
+            },
+            'api_test_results': {}
+        }
+        
+        # Test the problematic API endpoints
+        test_endpoints = [
+            '/api/portfolio/performance/1M',
+            '/api/portfolio/intraday/1D',
+            '/api/portfolio_value'
+        ]
+        
+        for endpoint in test_endpoints:
+            try:
+                # Make internal request to test endpoint
+                with app.test_client() as client:
+                    # Copy session cookies
+                    with client.session_transaction() as sess:
+                        for key, value in session.items():
+                            sess[key] = value
+                    
+                    response = client.get(endpoint)
+                    debug_info['api_test_results'][endpoint] = {
+                        'status_code': response.status_code,
+                        'content_type': response.content_type,
+                        'is_json': response.is_json,
+                        'response_preview': response.get_data(as_text=True)[:200] if response.get_data() else 'No data'
+                    }
+            except Exception as e:
+                debug_info['api_test_results'][endpoint] = {
+                    'error': str(e)
+                }
+        
+        return f'''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>API Authentication Debug</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; max-width: 1000px; margin: 20px auto; padding: 20px; }}
+                .section {{ margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 8px; }}
+                .error {{ background: #f8d7da; border-color: #f5c6cb; }}
+                .success {{ background: #d4edda; border-color: #c3e6cb; }}
+                .warning {{ background: #fff3cd; border-color: #ffeaa7; }}
+                pre {{ background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; }}
+                table {{ width: 100%; border-collapse: collapse; }}
+                th, td {{ padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }}
+                th {{ background-color: #f2f2f2; }}
+            </style>
+        </head>
+        <body>
+            <h1>🔍 API Authentication Debug Report</h1>
+            <p><strong>Generated:</strong> {debug_info['timestamp']}</p>
+            
+            <div class="section">
+                <h2>📋 Session Data</h2>
+                <table>
+                    <tr><th>Key</th><th>Value</th></tr>
+                    <tr><td>user_id</td><td>{debug_info['session_data']['user_id']}</td></tr>
+                    <tr><td>email</td><td>{debug_info['session_data']['email']}</td></tr>
+                    <tr><td>username</td><td>{debug_info['session_data']['username']}</td></tr>
+                    <tr><td>all_keys</td><td>{', '.join(debug_info['session_data']['all_session_keys'])}</td></tr>
+                </table>
+            </div>
+            
+            <div class="section">
+                <h2>👤 Current User Data</h2>
+                <table>
+                    <tr><th>Attribute</th><th>Value</th></tr>
+                    <tr><td>is_authenticated</td><td>{debug_info['current_user_data']['is_authenticated']}</td></tr>
+                    <tr><td>user_id</td><td>{debug_info['current_user_data']['user_id']}</td></tr>
+                    <tr><td>email</td><td>{debug_info['current_user_data']['email']}</td></tr>
+                </table>
+            </div>
+            
+            <div class="section">
+                <h2>🔧 API Endpoint Tests</h2>
+                {''.join(f'''
+                    <h3>{endpoint}</h3>
+                    <table>
+                        <tr><th>Property</th><th>Value</th></tr>
+                        {''.join(f'<tr><td>{key}</td><td>{value}</td></tr>' for key, value in result.items())}
+                    </table>
+                ''' for endpoint, result in debug_info['api_test_results'].items())}
+            </div>
+            
+            <div class="section">
+                <h2>🔧 Raw Debug Data (JSON)</h2>
+                <pre>{json.dumps(debug_info, indent=2)}</pre>
+            </div>
+            
+            <p><a href="/admin">← Back to Admin Dashboard</a></p>
+        </body>
+        </html>
+        '''
+        
+    except Exception as e:
+        logger.error(f"Error in API auth debug: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/api/cron/cleanup-intraday-data', methods=['POST'])
 def cleanup_intraday_data_cron():
     """Automated cron endpoint to clean up old intraday snapshots while preserving 4PM market close data"""
