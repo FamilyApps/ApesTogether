@@ -15230,12 +15230,23 @@ def admin_audit_sp500_data():
         }), 500
 
 # For local testing
+@app.route('/api/debug/routing-test', methods=['GET'])
+def debug_routing_test():
+    """Test endpoint to verify API routing is working"""
+    return jsonify({
+        'success': True,
+        'message': 'API routing is working correctly',
+        'app_name': 'api/index.py',
+        'timestamp': datetime.now().isoformat(),
+        'routes_count': len(list(app.url_map.iter_rules())),
+        'sample_routes': [rule.rule for rule in list(app.url_map.iter_rules())[:10]]
+    })
+
 if __name__ == '__main__':
     # Log app startup with structured information
     logger.info("App starting", extra={
         'vercel_env': os.environ.get('VERCEL_ENV'),
         'vercel_region': os.environ.get('VERCEL_REGION'),
-        'template_folder': app.template_folder,
         'static_folder': app.static_folder,
         'database_type': app.config['SQLALCHEMY_DATABASE_URI'].split('://')[0] if app.config.get('SQLALCHEMY_DATABASE_URI') else 'none'
     })
