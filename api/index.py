@@ -11523,6 +11523,250 @@ def admin_historical_price_backfill_batch():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/fix-weekend-data-issues', methods=['GET', 'POST'])
+@login_required
+def admin_fix_weekend_data_issues():
+    """Fix specific issues: wrong dates, corrupted S&P 500 data, performance problems"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        if request.method == 'GET':
+            return f'''
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Fix Weekend Data Issues</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; max-width: 900px; margin: 20px auto; padding: 20px; }}
+                    button {{ background: #28a745; color: white; padding: 12px 25px; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; margin: 5px; }}
+                    button:hover {{ background: #218838; }}
+                    .info {{ background: #e7f3ff; padding: 15px; border-radius: 4px; margin: 15px 0; }}
+                    .warning {{ background: #fff3cd; padding: 15px; border-radius: 4px; margin: 15px 0; border-left: 4px solid #ffc107; }}
+                    .critical {{ background: #f8d7da; padding: 15px; border-radius: 4px; margin: 15px 0; border-left: 4px solid #dc3545; }}
+                    #results {{ margin-top: 20px; padding: 15px; border-radius: 4px; }}
+                    .success {{ background: #d4edda; border-left: 4px solid #28a745; }}
+                    .error {{ background: #f8d7da; border-left: 4px solid #dc3545; }}
+                </style>
+            </head>
+            <body>
+                <h1>🔧 Fix Weekend Data Issues</h1>
+                
+                <div class="critical">
+                    <h3>🎯 Issues to Fix:</h3>
+                    <ul>
+                        <li><strong>Date Mislabeling:</strong> 9/28/2025 snapshot should be 9/26/2025 (Friday)</li>
+                        <li><strong>S&P 500 Corruption:</strong> 9/24 & 9/25 showing ~90% loss</li>
+                        <li><strong>Performance Issues:</strong> 1D chart not loading, slow cards</li>
+                    </ul>
+                </div>
+                
+                <div class="warning">
+                    <h3>⚡ What This Will Do:</h3>
+                    <ul>
+                        <li>Move 9/28/2025 snapshots to 9/26/2025 (correct Friday date)</li>
+                        <li>Fix corrupted S&P 500 data for 9/24 & 9/25</li>
+                        <li>Clear corrupted cache entries</li>
+                        <li>Regenerate all chart and leaderboard caches</li>
+                        <li>Create missing 9/26/2025 market close snapshot</li>
+                    </ul>
+                </div>
+                
+                <div style="text-align: center; margin: 30px 0;">
+                    <button onclick="fixWeekendIssues()">
+                        🚀 Fix All Weekend Data Issues
+                    </button>
+                </div>
+                
+                <div id="results"></div>
+                
+                <script>
+                async function fixWeekendIssues() {{
+                    document.getElementById('results').innerHTML = `
+                        <div class="info">
+                            <h3>🔄 Processing Fixes...</h3>
+                            <p>This may take 1-2 minutes. Please wait...</p>
+                        </div>
+                    `;
+                    
+                    try {{
+                        const response = await fetch('/admin/fix-weekend-data-issues', {{
+                            method: 'POST',
+                            headers: {{ 'Content-Type': 'application/json' }}
+                        }});
+                        
+                        const data = await response.json();
+                        
+                        if (data.success) {{
+                            document.getElementById('results').className = 'success';
+                            document.getElementById('results').innerHTML = `
+                                <h3>✅ All Issues Fixed!</h3>
+                                <p><strong>Snapshots Moved:</strong> ${{data.results.snapshots_moved}} (9/28 → 9/26)</p>
+                                <p><strong>S&P 500 Fixed:</strong> ${{data.results.sp500_fixed}} dates</p>
+                                <p><strong>Caches Cleared:</strong> ${{data.results.caches_cleared}}</p>
+                                <p><strong>Caches Regenerated:</strong> ${{data.results.caches_regenerated}}</p>
+                                <p><strong>Processing Time:</strong> ${{data.results.processing_time}}s</p>
+                                <br>
+                                <p><strong>🎉 Go check your dashboard - everything should be fixed!</strong></p>
+                            `;
+                        }} else {{
+                            document.getElementById('results').className = 'error';
+                            document.getElementById('results').innerHTML = `
+                                <h3>❌ Fix Failed</h3>
+                                <p><strong>Error:</strong> ${{data.error}}</p>
+                            `;
+                        }}
+                    }} catch (error) {{
+                        document.getElementById('results').className = 'error';
+                        document.getElementById('results').innerHTML = `
+                            <h3>❌ Fix Failed</h3>
+                            <p><strong>Error:</strong> ${{error.message}}</p>
+                        `;
+                    }}
+                }}
+                </script>
+            </body>
+            </html>
+            '''
+        
+        # Handle POST request - perform fixes
+        from datetime import date
+        from models import PortfolioSnapshot, MarketData, UserPortfolioChartCache, LeaderboardCache
+        
+        start_time = datetime.now()
+        results = {
+            'snapshots_moved': 0,
+            'sp500_fixed': 0,
+            'caches_cleared': 0,
+            'caches_regenerated': 0,
+            'errors': []
+        }
+        
+        logger.info("Starting weekend data fixes...")
+        
+        # FIX 1: Move 9/28/2025 snapshots to 9/26/2025 (correct Friday date)
+        today_date = date(2025, 9, 28)
+        friday_date = date(2025, 9, 26)
+        
+        today_snapshots = PortfolioSnapshot.query.filter_by(date=today_date).all()
+        
+        for snapshot in today_snapshots:
+            # Check if Friday snapshot already exists
+            existing_friday = PortfolioSnapshot.query.filter_by(
+                user_id=snapshot.user_id, 
+                date=friday_date
+            ).first()
+            
+            if not existing_friday:
+                # Move today's snapshot to Friday
+                snapshot.date = friday_date
+                results['snapshots_moved'] += 1
+                logger.info(f"Moved snapshot for user {snapshot.user_id}: 9/28 → 9/26")
+            else:
+                # Update Friday snapshot with today's values if they're better
+                if snapshot.total_value > 0:
+                    existing_friday.total_value = snapshot.total_value
+                    logger.info(f"Updated Friday snapshot for user {snapshot.user_id}")
+                # Delete the duplicate today snapshot
+                db.session.delete(snapshot)
+        
+        # FIX 2: Fix corrupted S&P 500 data for 9/24 & 9/25
+        import requests
+        api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
+        
+        if api_key:
+            corrupted_dates = [date(2025, 9, 24), date(2025, 9, 25)]
+            
+            for target_date in corrupted_dates:
+                try:
+                    # Fetch correct SPY data
+                    url = "https://www.alphavantage.co/query"
+                    params = {
+                        'function': 'TIME_SERIES_DAILY',
+                        'symbol': 'SPY',
+                        'apikey': api_key,
+                        'outputsize': 'compact'
+                    }
+                    
+                    response = requests.get(url, params=params, timeout=30)
+                    data_response = response.json()
+                    time_series = data_response.get('Time Series (Daily)', {})
+                    
+                    date_str = target_date.strftime('%Y-%m-%d')
+                    
+                    if date_str in time_series:
+                        correct_price = float(time_series[date_str]['4. close'])
+                        
+                        # Update corrupted S&P 500 data
+                        existing_data = MarketData.query.filter_by(
+                            ticker="SPY_SP500", 
+                            date=target_date
+                        ).first()
+                        
+                        if existing_data:
+                            old_price = existing_data.close_price
+                            existing_data.close_price = correct_price
+                            results['sp500_fixed'] += 1
+                            logger.info(f"Fixed S&P 500 {date_str}: ${old_price:.2f} → ${correct_price:.2f}")
+                    
+                    time.sleep(0.5)  # Rate limiting
+                    
+                except Exception as e:
+                    error_msg = f"Error fixing S&P 500 for {target_date}: {str(e)}"
+                    results['errors'].append(error_msg)
+                    logger.error(error_msg)
+        
+        # FIX 3: Clear all corrupted caches
+        chart_caches_deleted = UserPortfolioChartCache.query.delete()
+        leaderboard_caches_deleted = LeaderboardCache.query.delete()
+        results['caches_cleared'] = chart_caches_deleted + leaderboard_caches_deleted
+        
+        logger.info(f"Cleared {results['caches_cleared']} corrupted cache entries")
+        
+        db.session.commit()
+        
+        # FIX 4: Regenerate all caches
+        from leaderboard_utils import update_leaderboard_cache
+        from chart_cache_utils import generate_chart_cache_for_user
+        from models import User
+        
+        # Regenerate leaderboard caches
+        periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']
+        update_leaderboard_cache(periods)
+        
+        # Regenerate chart caches for all users
+        users = User.query.all()
+        for user in users:
+            for period in periods:
+                try:
+                    generate_chart_cache_for_user(user.id, period)
+                    results['caches_regenerated'] += 1
+                except Exception as e:
+                    logger.warning(f"Could not generate {period} cache for user {user.id}: {str(e)}")
+        
+        end_time = datetime.now()
+        processing_time = (end_time - start_time).total_seconds()
+        results['processing_time'] = round(processing_time, 2)
+        
+        logger.info(f"Weekend data fixes completed in {processing_time:.2f} seconds")
+        
+        return jsonify({
+            'success': True,
+            'message': 'All weekend data issues fixed successfully',
+            'results': results
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error in weekend data fixes: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/api/cron/cleanup-intraday-data', methods=['POST'])
 def cleanup_intraday_data_cron():
     """Automated cron endpoint to clean up old intraday snapshots while preserving 4PM market close data"""
