@@ -11481,7 +11481,9 @@ def admin_historical_price_backfill_batch():
         if "SPY" in batch_tickers:
             for target_date in target_dates:
                 if "SPY" in historical_prices.get(target_date, {}):
-                    sp500_price = historical_prices[target_date]["SPY"]
+                    spy_price = historical_prices[target_date]["SPY"]
+                    # Convert SPY ETF price to S&P 500 index value (SPY × 10)
+                    sp500_index_value = spy_price * 10
                     
                     existing_data = MarketData.query.filter_by(
                         ticker="SPY_SP500", 
@@ -11489,18 +11491,18 @@ def admin_historical_price_backfill_batch():
                     ).first()
                     
                     if existing_data:
-                        existing_data.close_price = sp500_price
+                        existing_data.close_price = sp500_index_value
                     else:
                         new_data = MarketData(
                             ticker="SPY_SP500",
                             date=target_date,
-                            close_price=sp500_price,
+                            close_price=sp500_index_value,
                             volume=0
                         )
                         db.session.add(new_data)
                     
                     results['sp500_updated'] = True
-                    logger.info(f"Updated S&P 500 {target_date}: ${sp500_price:.2f}")
+                    logger.info(f"Updated S&P 500 {target_date}: ${sp500_index_value:.2f} (SPY ${spy_price:.2f} × 10)")
         
         db.session.commit()
         
@@ -11697,7 +11699,9 @@ def admin_fix_weekend_data_issues():
                     date_str = target_date.strftime('%Y-%m-%d')
                     
                     if date_str in time_series:
-                        correct_price = float(time_series[date_str]['4. close'])
+                        spy_price = float(time_series[date_str]['4. close'])
+                        # Convert SPY ETF price to S&P 500 index value (SPY × 10)
+                        sp500_index_value = spy_price * 10
                         
                         # Update corrupted S&P 500 data
                         existing_data = MarketData.query.filter_by(
@@ -11707,9 +11711,9 @@ def admin_fix_weekend_data_issues():
                         
                         if existing_data:
                             old_price = existing_data.close_price
-                            existing_data.close_price = correct_price
+                            existing_data.close_price = sp500_index_value
                             results['sp500_fixed'] += 1
-                            logger.info(f"Fixed S&P 500 {date_str}: ${old_price:.2f} → ${correct_price:.2f}")
+                            logger.info(f"Fixed S&P 500 {date_str}: ${old_price:.2f} → ${sp500_index_value:.2f} (SPY ${spy_price:.2f} × 10)")
                     
                     time.sleep(0.5)  # Rate limiting
                     
@@ -11728,8 +11732,7 @@ def admin_fix_weekend_data_issues():
         db.session.commit()
         
         # FIX 4: Regenerate all caches
-        from leaderboard_utils import update_leaderboard_cache
-        from chart_cache_utils import generate_chart_cache_for_user
+        from leaderboard_utils import update_leaderboard_cache, update_user_chart_cache
         from models import User
         
         # Regenerate leaderboard caches
@@ -11741,7 +11744,7 @@ def admin_fix_weekend_data_issues():
         for user in users:
             for period in periods:
                 try:
-                    generate_chart_cache_for_user(user.id, period)
+                    update_user_chart_cache(user.id, period)
                     results['caches_regenerated'] += 1
                 except Exception as e:
                     logger.warning(f"Could not generate {period} cache for user {user.id}: {str(e)}")
