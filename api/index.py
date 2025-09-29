@@ -15242,6 +15242,71 @@ def debug_routing_test():
         'sample_routes': [rule.rule for rule in list(app.url_map.iter_rules())[:10]]
     })
 
+@app.route('/api/debug/1Y-endpoint', methods=['GET'])
+def debug_1Y_endpoint():
+    """Specific diagnostic for the problematic 1Y endpoint"""
+    try:
+        # Simulate the exact same call that the dashboard makes
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({
+                'error': 'Not authenticated',
+                'session_keys': list(session.keys()),
+                'user_id': user_id
+            })
+        
+        # Try to call the same logic as get_portfolio_performance
+        period = '1Y'
+        period_upper = period.upper()
+        
+        # Check if user exists
+        from models import User
+        user = User.query.get(user_id)
+        
+        diagnostic_info = {
+            'success': True,
+            'user_id': user_id,
+            'user_exists': user is not None,
+            'period': period,
+            'period_upper': period_upper,
+            'session_data': dict(session),
+            'route_matched': True,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        if user:
+            diagnostic_info['user_email'] = user.email
+        
+        # Try to import the performance calculator
+        try:
+            from portfolio_performance import PortfolioPerformanceCalculator
+            calculator = PortfolioPerformanceCalculator()
+            diagnostic_info['calculator_imported'] = True
+            
+            # Try to get performance data
+            try:
+                performance_data = calculator.get_performance_data(user_id, period_upper)
+                diagnostic_info['performance_calculation'] = 'SUCCESS'
+                diagnostic_info['performance_data_keys'] = list(performance_data.keys()) if performance_data else None
+            except Exception as calc_error:
+                diagnostic_info['performance_calculation'] = 'FAILED'
+                diagnostic_info['calculation_error'] = str(calc_error)
+                
+        except Exception as import_error:
+            diagnostic_info['calculator_imported'] = False
+            diagnostic_info['import_error'] = str(import_error)
+        
+        return jsonify(diagnostic_info)
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc(),
+            'timestamp': datetime.now().isoformat()
+        })
+
 @app.route('/api/debug/all-routes', methods=['GET'])
 def debug_all_routes():
     """Comprehensive route diagnostic"""
@@ -15602,6 +15667,233 @@ def admin_nuclear_data_fix():
         
     except Exception as e:
         logger.error(f"Error in nuclear data fix: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/cache-consistency-analysis', methods=['GET'])
+@login_required
+def admin_cache_consistency_analysis():
+    """Comprehensive analysis of all cache layers and their consistency"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import date, datetime, timedelta
+        from models import (PortfolioSnapshot, UserPortfolioChartCache, LeaderboardCache, 
+                          MarketData, User, Stock)
+        import json
+        
+        analysis = {
+            'timestamp': datetime.now().isoformat(),
+            'cache_layers': {},
+            'data_sources': {},
+            'inconsistencies': [],
+            'recommendations': []
+        }
+        
+        # LAYER 1: Raw Data Sources
+        logger.info("Analyzing raw data sources...")
+        
+        # Portfolio Snapshots
+        total_snapshots = PortfolioSnapshot.query.count()
+        recent_snapshots = PortfolioSnapshot.query.filter(
+            PortfolioSnapshot.date >= date.today() - timedelta(days=7)
+        ).count()
+        
+        # Get snapshot date range and sample data
+        earliest_snapshot = PortfolioSnapshot.query.order_by(PortfolioSnapshot.date).first()
+        latest_snapshot = PortfolioSnapshot.query.order_by(PortfolioSnapshot.date.desc()).first()
+        
+        # Check for zero-value snapshots
+        zero_snapshots = PortfolioSnapshot.query.filter_by(total_value=0).count()
+        
+        analysis['data_sources']['portfolio_snapshots'] = {
+            'total_count': total_snapshots,
+            'recent_count': recent_snapshots,
+            'zero_value_count': zero_snapshots,
+            'date_range': {
+                'earliest': earliest_snapshot.date.isoformat() if earliest_snapshot else None,
+                'latest': latest_snapshot.date.isoformat() if latest_snapshot else None
+            }
+        }
+        
+        # Market Data (S&P 500)
+        sp500_data_count = MarketData.query.filter_by(ticker="SPY_SP500").count()
+        recent_sp500 = MarketData.query.filter(
+            MarketData.ticker == "SPY_SP500",
+            MarketData.date >= date.today() - timedelta(days=7)
+        ).count()
+        
+        # Check for problematic S&P 500 values (like the -89% issue)
+        problematic_sp500 = MarketData.query.filter(
+            MarketData.ticker == "SPY_SP500",
+            MarketData.close_price < 1000  # S&P 500 should be > 1000
+        ).count()
+        
+        analysis['data_sources']['sp500_data'] = {
+            'total_count': sp500_data_count,
+            'recent_count': recent_sp500,
+            'problematic_values': problematic_sp500
+        }
+        
+        # LAYER 2: Chart Caches
+        logger.info("Analyzing chart caches...")
+        
+        chart_caches = UserPortfolioChartCache.query.all()
+        chart_cache_analysis = {}
+        
+        for cache in chart_caches:
+            user_id = cache.user_id
+            period = cache.period
+            
+            if user_id not in chart_cache_analysis:
+                chart_cache_analysis[user_id] = {}
+            
+            try:
+                chart_data = json.loads(cache.chart_data)
+                data_points = len(chart_data.get('chart_data', []))
+                
+                # Check for zero portfolio values in chart data
+                portfolio_points = [point.get('portfolio', 0) for point in chart_data.get('chart_data', [])]
+                zero_portfolio_points = sum(1 for p in portfolio_points if p == 0)
+                
+                chart_cache_analysis[user_id][period] = {
+                    'generated_at': cache.generated_at.isoformat(),
+                    'data_points': data_points,
+                    'zero_portfolio_points': zero_portfolio_points,
+                    'has_real_portfolio_data': any(point.get('portfolio', 0) != 0 for point in chart_data.get('chart_data', [])),
+                    'has_sp500_data': any(point.get('sp500', 0) != 0 for point in chart_data.get('chart_data', [])),
+                    'portfolio_return': chart_data.get('portfolio_return'),
+                    'sp500_return': chart_data.get('sp500_return')
+                }
+            except Exception as e:
+                chart_cache_analysis[user_id][period] = {
+                    'error': str(e),
+                    'generated_at': cache.generated_at.isoformat()
+                }
+        
+        analysis['cache_layers']['user_portfolio_charts'] = {
+            'total_entries': len(chart_caches),
+            'users_cached': len(chart_cache_analysis),
+            'by_user': chart_cache_analysis
+        }
+        
+        # LAYER 3: Leaderboard Caches
+        logger.info("Analyzing leaderboard caches...")
+        
+        leaderboard_caches = LeaderboardCache.query.all()
+        leaderboard_analysis = {}
+        
+        for cache in leaderboard_caches:
+            try:
+                leaderboard_data = json.loads(cache.leaderboard_data)
+                
+                leaderboard_analysis[cache.period] = {
+                    'generated_at': cache.generated_at.isoformat(),
+                    'user_count': len(leaderboard_data),
+                    'users_with_zero_performance': sum(1 for user in leaderboard_data if user.get('performance_percentage', 0) == 0),
+                    'users_with_real_performance': sum(1 for user in leaderboard_data if user.get('performance_percentage', 0) != 0),
+                    'sample_performances': [user.get('performance_percentage', 0) for user in leaderboard_data[:3]],
+                    'sample_users': [user.get('username', 'unknown') for user in leaderboard_data[:3]]
+                }
+            except Exception as e:
+                leaderboard_analysis[cache.period] = {
+                    'error': str(e),
+                    'generated_at': cache.generated_at.isoformat()
+                }
+        
+        analysis['cache_layers']['leaderboards'] = leaderboard_analysis
+        
+        # INCONSISTENCY DETECTION
+        logger.info("Detecting inconsistencies...")
+        
+        # Check for users with snapshots but no chart cache
+        users_with_snapshots = set(PortfolioSnapshot.query.with_entities(PortfolioSnapshot.user_id).distinct().all())
+        users_with_snapshots = {user_id[0] for user_id in users_with_snapshots}
+        
+        users_with_chart_cache = set(chart_cache_analysis.keys())
+        
+        missing_chart_cache = users_with_snapshots - users_with_chart_cache
+        if missing_chart_cache:
+            analysis['inconsistencies'].append({
+                'type': 'missing_chart_cache',
+                'description': f'{len(missing_chart_cache)} users have snapshots but no chart cache',
+                'affected_users': list(missing_chart_cache)
+            })
+        
+        # Check for excessive zero values
+        if zero_snapshots > total_snapshots * 0.3:  # More than 30% zero snapshots
+            analysis['inconsistencies'].append({
+                'type': 'excessive_zero_snapshots',
+                'description': f'{zero_snapshots}/{total_snapshots} portfolio snapshots have zero value',
+                'zero_count': zero_snapshots,
+                'total_count': total_snapshots
+            })
+        
+        # Check for chart caches with mostly zero portfolio values
+        for user_id, periods in chart_cache_analysis.items():
+            for period, data in periods.items():
+                if isinstance(data, dict) and data.get('data_points', 0) > 0:
+                    zero_ratio = data.get('zero_portfolio_points', 0) / data.get('data_points', 1)
+                    if zero_ratio > 0.5:  # More than 50% zero values
+                        analysis['inconsistencies'].append({
+                            'type': 'chart_cache_zero_values',
+                            'description': f'User {user_id} {period} chart has {data.get("zero_portfolio_points", 0)}/{data.get("data_points", 0)} zero portfolio values',
+                            'user_id': user_id,
+                            'period': period,
+                            'zero_ratio': round(zero_ratio, 2)
+                        })
+        
+        # Check leaderboard issues
+        for period, lb_data in leaderboard_analysis.items():
+            if isinstance(lb_data, dict) and 'users_with_zero_performance' in lb_data:
+                zero_count = lb_data['users_with_zero_performance']
+                total_count = lb_data['user_count']
+                
+                if zero_count > total_count * 0.5:  # More than 50% have zero performance
+                    analysis['inconsistencies'].append({
+                        'type': 'leaderboard_zero_performance',
+                        'description': f'{period} leaderboard has {zero_count}/{total_count} users with 0% performance',
+                        'period': period,
+                        'zero_count': zero_count,
+                        'total_count': total_count
+                    })
+                
+                if total_count == 1:  # Only one user in leaderboard
+                    analysis['inconsistencies'].append({
+                        'type': 'single_user_leaderboard',
+                        'description': f'{period} leaderboard only has 1 user',
+                        'period': period
+                    })
+        
+        # Check S&P 500 data issues
+        if problematic_sp500 > 0:
+            analysis['inconsistencies'].append({
+                'type': 'problematic_sp500_data',
+                'description': f'{problematic_sp500} S&P 500 data points have unrealistic values (< 1000)',
+                'count': problematic_sp500
+            })
+        
+        # RECOMMENDATIONS
+        if analysis['inconsistencies']:
+            analysis['recommendations'].extend([
+                'Run comprehensive cache rebuild with data validation',
+                'Fix zero-value portfolio snapshots',
+                'Verify S&P 500 data conversion (SPY × 10)',
+                'Ensure consistent data sources across all cache layers',
+                'Check portfolio creation dates vs snapshot dates'
+            ])
+        
+        return jsonify(analysis)
+        
+    except Exception as e:
+        logger.error(f"Error in cache consistency analysis: {str(e)}")
         import traceback
         return jsonify({
             'success': False,
