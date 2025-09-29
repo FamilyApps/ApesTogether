@@ -10226,6 +10226,471 @@ def admin_invalidate_stale_caches():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/force-chart-cache-regeneration', methods=['GET', 'POST'])
+@login_required
+def admin_force_chart_cache_regeneration():
+    """Admin endpoint to force regeneration of all chart caches"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        # Handle GET request - show form
+        if request.method == 'GET':
+            return '''
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Force Chart Cache Regeneration</title>
+                <style>
+                    body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+                    button { background: #dc3545; color: white; padding: 10px 20px; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; }
+                    button:hover { background: #c82333; }
+                    .info { background: #e7f3ff; padding: 15px; border-radius: 4px; margin: 20px 0; }
+                    .warning { background: #fff3cd; padding: 15px; border-radius: 4px; margin: 20px 0; border-left: 4px solid #ffc107; }
+                    #result { margin-top: 20px; padding: 15px; border-radius: 4px; display: none; }
+                    .success { background: #d4edda; border-left: 4px solid #28a745; }
+                    .error { background: #f8d7da; border-left: 4px solid #dc3545; }
+                </style>
+            </head>
+            <body>
+                <h1>🔄 Force Chart Cache Regeneration</h1>
+                
+                <div class="info">
+                    <strong>Purpose:</strong> This tool clears all chart caches and regenerates them with fresh data from portfolio snapshots.
+                    Use this when chart data appears outdated or missing data points.
+                </div>
+                
+                <div class="warning">
+                    <strong>⚠️ Warning:</strong> This will clear ALL chart caches for all users and periods.
+                    Charts may load slowly for a few minutes while caches rebuild.
+                </div>
+                
+                <button onclick="regenerateCaches()">🔄 Force Regenerate All Chart Caches</button>
+                
+                <div id="result"></div>
+                
+                <script>
+                async function regenerateCaches() {
+                    const button = document.querySelector('button');
+                    const resultDiv = document.getElementById('result');
+                    
+                    button.textContent = '⏳ Regenerating...';
+                    button.disabled = true;
+                    resultDiv.style.display = 'none';
+                    
+                    try {
+                        const response = await fetch('/admin/force-chart-cache-regeneration', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                        
+                        const data = await response.json();
+                        
+                        resultDiv.style.display = 'block';
+                        
+                        if (data.success) {
+                            resultDiv.className = 'success';
+                            resultDiv.innerHTML = `
+                                <h3>✅ Cache Regeneration Successful!</h3>
+                                <p><strong>Chart Caches Cleared:</strong> ${data.results.caches_cleared}</p>
+                                <p><strong>Chart Caches Regenerated:</strong> ${data.results.caches_regenerated}</p>
+                                <p><strong>S&P 500 Caches:</strong> ${data.results.sp500_caches}</p>
+                                <p><strong>Processing Time:</strong> ${data.results.processing_time_seconds}s</p>
+                            `;
+                        } else {
+                            resultDiv.className = 'error';
+                            resultDiv.innerHTML = `
+                                <h3>❌ Regeneration Failed</h3>
+                                <p><strong>Error:</strong> ${data.error || data.message}</p>
+                            `;
+                        }
+                    } catch (error) {
+                        resultDiv.style.display = 'block';
+                        resultDiv.className = 'error';
+                        resultDiv.innerHTML = `
+                            <h3>❌ Request Failed</h3>
+                            <p><strong>Error:</strong> ${error.message}</p>
+                        `;
+                    }
+                    
+                    button.textContent = '🔄 Force Regenerate All Chart Caches';
+                    button.disabled = false;
+                }
+                </script>
+            </body>
+            </html>
+            '''
+        
+        # Handle POST request - perform regeneration
+        from datetime import datetime
+        from models import UserPortfolioChartCache, SP500ChartCache
+        from leaderboard_utils import generate_user_portfolio_chart, update_leaderboard_cache
+        
+        start_time = datetime.now()
+        
+        results = {
+            'timestamp': start_time.isoformat(),
+            'caches_cleared': 0,
+            'caches_regenerated': 0,
+            'sp500_caches': 0,
+            'errors': []
+        }
+        
+        # STEP 1: Clear all chart caches
+        logger.info("STEP 1: Clearing all chart caches...")
+        
+        user_chart_caches = UserPortfolioChartCache.query.all()
+        for cache in user_chart_caches:
+            db.session.delete(cache)
+        results['caches_cleared'] += len(user_chart_caches)
+        
+        sp500_chart_caches = SP500ChartCache.query.all()
+        for cache in sp500_chart_caches:
+            db.session.delete(cache)
+        results['caches_cleared'] += len(sp500_chart_caches)
+        
+        db.session.commit()
+        logger.info(f"Cleared {results['caches_cleared']} chart cache entries")
+        
+        # STEP 2: Regenerate user chart caches
+        logger.info("STEP 2: Regenerating user chart caches...")
+        
+        users = User.query.all()
+        periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']
+        
+        for user in users:
+            for period in periods:
+                try:
+                    chart_data = generate_user_portfolio_chart(user.id, period)
+                    if chart_data:
+                        results['caches_regenerated'] += 1
+                        logger.info(f"Generated {period} chart for {user.username}")
+                except Exception as e:
+                    error_msg = f"Error generating {period} chart for user {user.id}: {str(e)}"
+                    results['errors'].append(error_msg)
+                    logger.error(error_msg)
+        
+        # STEP 3: Regenerate S&P 500 chart caches
+        logger.info("STEP 3: Regenerating S&P 500 chart caches...")
+        
+        try:
+            from stock_data_manager import generate_sp500_chart_data
+            for period in periods:
+                try:
+                    sp500_data = generate_sp500_chart_data(period)
+                    if sp500_data:
+                        results['sp500_caches'] += 1
+                        logger.info(f"Generated S&P 500 {period} chart")
+                except Exception as e:
+                    error_msg = f"Error generating S&P 500 {period} chart: {str(e)}"
+                    results['errors'].append(error_msg)
+                    logger.error(error_msg)
+        except ImportError:
+            logger.warning("stock_data_manager not available for S&P 500 chart generation")
+        
+        # STEP 4: Update leaderboard cache (includes chart updates)
+        logger.info("STEP 4: Updating leaderboard cache...")
+        try:
+            updated_count = update_leaderboard_cache()
+            results['leaderboard_entries_updated'] = updated_count
+        except Exception as e:
+            error_msg = f"Leaderboard cache update failed: {str(e)}"
+            results['errors'].append(error_msg)
+            logger.error(error_msg)
+        
+        end_time = datetime.now()
+        results['processing_time_seconds'] = (end_time - start_time).total_seconds()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Chart cache regeneration completed',
+            'results': results
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error in chart cache regeneration: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/investigate-snapshot-data', methods=['GET'])
+@login_required
+def admin_investigate_snapshot_data():
+    """Admin endpoint to investigate what happened to 9/25 and 9/26 snapshot data"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import date
+        from models import PortfolioSnapshot, UserPortfolioChartCache, LeaderboardCache
+        import json
+        
+        investigation = {
+            'timestamp': datetime.now().isoformat(),
+            'portfolio_snapshots': {},
+            'chart_cache_analysis': {},
+            'leaderboard_cache_analysis': {},
+            'summary': {}
+        }
+        
+        # Check snapshots for key dates around the backfill
+        target_dates = [date(2025, 9, 24), date(2025, 9, 25), date(2025, 9, 26), date(2025, 9, 27)]
+        
+        print("=== INVESTIGATING SNAPSHOT DATA ===")
+        
+        for target_date in target_dates:
+            snapshots = PortfolioSnapshot.query.filter_by(date=target_date).all()
+            investigation['portfolio_snapshots'][str(target_date)] = {
+                'count': len(snapshots),
+                'users': []
+            }
+            
+            for snapshot in snapshots:
+                user = User.query.get(snapshot.user_id)
+                username = user.username if user else f"User {snapshot.user_id}"
+                
+                investigation['portfolio_snapshots'][str(target_date)]['users'].append({
+                    'user_id': snapshot.user_id,
+                    'username': username,
+                    'total_value': float(snapshot.total_value),
+                    'cash_flow': float(snapshot.cash_flow) if snapshot.cash_flow else 0
+                })
+        
+        # Check what's in chart caches
+        users = User.query.all()
+        for user in users:
+            username = user.username
+            investigation['chart_cache_analysis'][username] = {}
+            
+            # Check 1M chart cache (most likely to show recent data)
+            chart_cache = UserPortfolioChartCache.query.filter_by(
+                user_id=user.id, 
+                period='1M'
+            ).first()
+            
+            if chart_cache:
+                try:
+                    chart_data = json.loads(chart_cache.chart_data)
+                    
+                    if 'data' in chart_data and chart_data['data']:
+                        data_points = chart_data['data']
+                        
+                        # Find data points for our target dates
+                        relevant_points = []
+                        for point in data_points:
+                            if isinstance(point, dict) and 'x' in point and 'y' in point:
+                                if isinstance(point['x'], (int, float)):
+                                    point_date = datetime.fromtimestamp(point['x'] / 1000).date()
+                                    if point_date in target_dates:
+                                        relevant_points.append({
+                                            'date': str(point_date),
+                                            'value': point['y'],
+                                            'timestamp': point['x']
+                                        })
+                        
+                        investigation['chart_cache_analysis'][username] = {
+                            'total_points': len(data_points),
+                            'relevant_points': relevant_points,
+                            'cache_generated_at': chart_cache.generated_at.isoformat(),
+                            'last_point_date': None,
+                            'last_point_value': None
+                        }
+                        
+                        # Get the very last data point
+                        if data_points:
+                            last_point = data_points[-1]
+                            if isinstance(last_point, dict) and 'x' in last_point and 'y' in last_point:
+                                if isinstance(last_point['x'], (int, float)):
+                                    last_date = datetime.fromtimestamp(last_point['x'] / 1000).date()
+                                    investigation['chart_cache_analysis'][username]['last_point_date'] = str(last_date)
+                                    investigation['chart_cache_analysis'][username]['last_point_value'] = last_point['y']
+                    else:
+                        investigation['chart_cache_analysis'][username] = {'error': 'No data points in chart'}
+                        
+                except Exception as e:
+                    investigation['chart_cache_analysis'][username] = {'error': f'Failed to parse chart data: {str(e)}'}
+            else:
+                investigation['chart_cache_analysis'][username] = {'error': 'No 1M chart cache found'}
+        
+        # Check leaderboard cache
+        leaderboard_caches = LeaderboardCache.query.all()
+        investigation['leaderboard_cache_analysis'] = {
+            'total_entries': len(leaderboard_caches),
+            'periods': {}
+        }
+        
+        for cache in leaderboard_caches:
+            period = cache.period
+            if period not in investigation['leaderboard_cache_analysis']['periods']:
+                investigation['leaderboard_cache_analysis']['periods'][period] = {
+                    'generated_at': cache.generated_at.isoformat(),
+                    'users': []
+                }
+            
+            try:
+                leaderboard_data = json.loads(cache.leaderboard_data)
+                if isinstance(leaderboard_data, list):
+                    for entry in leaderboard_data:
+                        if isinstance(entry, dict):
+                            investigation['leaderboard_cache_analysis']['periods'][period]['users'].append({
+                                'username': entry.get('username', 'Unknown'),
+                                'performance': entry.get('performance', 0),
+                                'portfolio_value': entry.get('portfolio_value', 0)
+                            })
+            except Exception as e:
+                investigation['leaderboard_cache_analysis']['periods'][period]['error'] = str(e)
+        
+        # Generate summary
+        investigation['summary'] = {
+            'dates_with_snapshots': [],
+            'dates_with_zero_values': [],
+            'users_with_zero_portfolios': [],
+            'chart_cache_issues': [],
+            'recommendations': []
+        }
+        
+        # Analyze the data
+        for date_str, date_data in investigation['portfolio_snapshots'].items():
+            if date_data['count'] > 0:
+                investigation['summary']['dates_with_snapshots'].append(date_str)
+                
+                # Check for zero values
+                zero_users = [user for user in date_data['users'] if user['total_value'] == 0]
+                if zero_users:
+                    investigation['summary']['dates_with_zero_values'].append({
+                        'date': date_str,
+                        'zero_users': len(zero_users),
+                        'total_users': len(date_data['users'])
+                    })
+        
+        # Check for users with consistently zero portfolios
+        for username, chart_data in investigation['chart_cache_analysis'].items():
+            if isinstance(chart_data, dict) and 'last_point_value' in chart_data:
+                if chart_data['last_point_value'] == 0:
+                    investigation['summary']['users_with_zero_portfolios'].append(username)
+        
+        # Generate recommendations
+        if '2025-09-26' not in investigation['summary']['dates_with_snapshots']:
+            investigation['summary']['recommendations'].append("❌ No snapshots found for 9/26/2025 - backfill may have failed")
+        
+        if investigation['summary']['dates_with_zero_values']:
+            investigation['summary']['recommendations'].append("⚠️ Found snapshots with $0 values - data corruption detected")
+        
+        if investigation['summary']['users_with_zero_portfolios']:
+            investigation['summary']['recommendations'].append("🔧 Users with $0 portfolios need data repair")
+        
+        if not investigation['summary']['recommendations']:
+            investigation['summary']['recommendations'].append("✅ Data appears healthy")
+        
+        return f'''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Snapshot Data Investigation</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; max-width: 1200px; margin: 20px auto; padding: 20px; }}
+                .section {{ margin: 30px 0; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }}
+                .error {{ background: #f8d7da; border-color: #f5c6cb; }}
+                .warning {{ background: #fff3cd; border-color: #ffeaa7; }}
+                .success {{ background: #d4edda; border-color: #c3e6cb; }}
+                .info {{ background: #e7f3ff; border-color: #b3d7ff; }}
+                table {{ width: 100%; border-collapse: collapse; margin: 10px 0; }}
+                th, td {{ padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }}
+                th {{ background-color: #f2f2f2; }}
+                .zero-value {{ color: #dc3545; font-weight: bold; }}
+                .good-value {{ color: #28a745; }}
+                pre {{ background: #f8f9fa; padding: 15px; border-radius: 4px; overflow-x: auto; }}
+            </style>
+        </head>
+        <body>
+            <h1>🔍 Snapshot Data Investigation Report</h1>
+            <p><strong>Generated:</strong> {investigation['timestamp']}</p>
+            
+            <div class="section {'error' if investigation['summary']['recommendations'] and '❌' in str(investigation['summary']['recommendations']) else 'info'}">
+                <h2>📋 Executive Summary</h2>
+                <ul>
+                    {''.join(f'<li>{rec}</li>' for rec in investigation['summary']['recommendations'])}
+                </ul>
+                <p><strong>Dates with snapshots:</strong> {', '.join(investigation['summary']['dates_with_snapshots'])}</p>
+                <p><strong>Users with $0 portfolios:</strong> {', '.join(investigation['summary']['users_with_zero_portfolios']) if investigation['summary']['users_with_zero_portfolios'] else 'None'}</p>
+            </div>
+            
+            <div class="section">
+                <h2>📸 Portfolio Snapshots by Date</h2>
+                <table>
+                    <tr><th>Date</th><th>User</th><th>Portfolio Value</th><th>Cash Flow</th></tr>
+                    {''.join(f'''
+                        {''.join(f'''<tr>
+                            <td>{date_str}</td>
+                            <td>{user['username']}</td>
+                            <td class="{'zero-value' if user['total_value'] == 0 else 'good-value'}">${user['total_value']:,.2f}</td>
+                            <td>${user['cash_flow']:,.2f}</td>
+                        </tr>''' for user in date_data['users'])}
+                    ''' for date_str, date_data in investigation['portfolio_snapshots'].items() if date_data['users'])}
+                </table>
+            </div>
+            
+            <div class="section">
+                <h2>📊 Chart Cache Analysis</h2>
+                {''.join(f'''
+                    <h3>{username}</h3>
+                    {f'<p><strong>Error:</strong> {chart_data["error"]}</p>' if isinstance(chart_data, dict) and 'error' in chart_data else f'''
+                        <p><strong>Total Points:</strong> {chart_data.get('total_points', 'N/A')}</p>
+                        <p><strong>Cache Generated:</strong> {chart_data.get('cache_generated_at', 'N/A')}</p>
+                        <p><strong>Last Point:</strong> {chart_data.get('last_point_date', 'N/A')} = ${chart_data.get('last_point_value', 0):,.2f}</p>
+                        <p><strong>Relevant Points (9/24-9/27):</strong></p>
+                        <ul>
+                            {''.join(f'<li>{point["date"]}: ${point["value"]:,.2f}</li>' for point in chart_data.get('relevant_points', []))}
+                        </ul>
+                    '''}
+                ''' for username, chart_data in investigation['chart_cache_analysis'].items())}
+            </div>
+            
+            <div class="section">
+                <h2>🏆 Leaderboard Cache Analysis</h2>
+                <p><strong>Total Entries:</strong> {investigation['leaderboard_cache_analysis']['total_entries']}</p>
+                {''.join(f'''
+                    <h3>{period} Period</h3>
+                    <p><strong>Generated:</strong> {period_data.get('generated_at', 'N/A')}</p>
+                    {f'<p><strong>Error:</strong> {period_data["error"]}</p>' if 'error' in period_data else f'''
+                        <table>
+                            <tr><th>User</th><th>Performance</th><th>Portfolio Value</th></tr>
+                            {''.join(f'''<tr>
+                                <td>{user['username']}</td>
+                                <td class="{'zero-value' if user['performance'] == 0 else 'good-value'}">{user['performance']:.2f}%</td>
+                                <td class="{'zero-value' if user['portfolio_value'] == 0 else 'good-value'}">${user['portfolio_value']:,.2f}</td>
+                            </tr>''' for user in period_data.get('users', []))}
+                        </table>
+                    '''}
+                ''' for period, period_data in investigation['leaderboard_cache_analysis']['periods'].items())}
+            </div>
+            
+            <div class="section">
+                <h2>🔧 Raw Data (JSON)</h2>
+                <pre>{json.dumps(investigation, indent=2)}</pre>
+            </div>
+            
+            <p><a href="/admin">← Back to Admin Dashboard</a></p>
+        </body>
+        </html>
+        '''
+        
+    except Exception as e:
+        logger.error(f"Error in snapshot investigation: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/api/cron/cleanup-intraday-data', methods=['POST'])
 def cleanup_intraday_data_cron():
     """Automated cron endpoint to clean up old intraday snapshots while preserving 4PM market close data"""
