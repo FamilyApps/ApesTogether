@@ -11043,21 +11043,46 @@ def admin_debug_api_auth():
         if email != ADMIN_EMAIL:
             return jsonify({'error': 'Admin access required'}), 403
         
-        from flask import current_user
+        try:
+            from flask_login import current_user
+            flask_login_available = True
+            current_user_info = {
+                'is_authenticated': current_user.is_authenticated if hasattr(current_user, 'is_authenticated') else 'No is_authenticated',
+                'user_id': getattr(current_user, 'id', 'No ID') if hasattr(current_user, 'id') else 'No current_user',
+                'email': getattr(current_user, 'email', 'No email') if hasattr(current_user, 'email') else 'No current_user',
+                'type': str(type(current_user))
+            }
+        except ImportError as e:
+            flask_login_available = False
+            current_user_info = {'import_error': str(e)}
+        
+        # Check if User model is accessible
+        try:
+            user_from_session = None
+            if session.get('user_id'):
+                user_from_session = User.query.get(session.get('user_id'))
+                user_model_info = {
+                    'user_found': user_from_session is not None,
+                    'user_id': user_from_session.id if user_from_session else None,
+                    'username': user_from_session.username if user_from_session else None,
+                    'email': user_from_session.email if user_from_session else None
+                }
+            else:
+                user_model_info = {'no_user_id_in_session': True}
+        except Exception as e:
+            user_model_info = {'user_model_error': str(e)}
         
         debug_info = {
             'timestamp': datetime.now().isoformat(),
+            'flask_login_available': flask_login_available,
             'session_data': {
                 'user_id': session.get('user_id'),
                 'email': session.get('email'),
                 'username': session.get('username'),
                 'all_session_keys': list(session.keys())
             },
-            'current_user_data': {
-                'is_authenticated': current_user.is_authenticated if hasattr(current_user, 'is_authenticated') else 'No current_user',
-                'user_id': getattr(current_user, 'id', 'No ID') if hasattr(current_user, 'id') else 'No current_user',
-                'email': getattr(current_user, 'email', 'No email') if hasattr(current_user, 'email') else 'No current_user'
-            },
+            'current_user_data': current_user_info,
+            'user_model_data': user_model_info,
             'api_test_results': {}
         }
         
@@ -11122,12 +11147,19 @@ def admin_debug_api_auth():
             </div>
             
             <div class="section">
-                <h2>👤 Current User Data</h2>
+                <h2>🔐 Flask-Login Status</h2>
                 <table>
-                    <tr><th>Attribute</th><th>Value</th></tr>
-                    <tr><td>is_authenticated</td><td>{debug_info['current_user_data']['is_authenticated']}</td></tr>
-                    <tr><td>user_id</td><td>{debug_info['current_user_data']['user_id']}</td></tr>
-                    <tr><td>email</td><td>{debug_info['current_user_data']['email']}</td></tr>
+                    <tr><th>Property</th><th>Value</th></tr>
+                    <tr><td>flask_login_available</td><td>{debug_info['flask_login_available']}</td></tr>
+                    {''.join(f'<tr><td>{key}</td><td>{value}</td></tr>' for key, value in debug_info['current_user_data'].items())}
+                </table>
+            </div>
+            
+            <div class="section">
+                <h2>👤 User Model Data</h2>
+                <table>
+                    <tr><th>Property</th><th>Value</th></tr>
+                    {''.join(f'<tr><td>{key}</td><td>{value}</td></tr>' for key, value in debug_info['user_model_data'].items())}
                 </table>
             </div>
             
