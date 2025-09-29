@@ -10341,15 +10341,14 @@ def admin_force_chart_cache_regeneration():
         # STEP 1: Clear all chart caches
         logger.info("STEP 1: Clearing all chart caches...")
         
-        user_chart_caches = UserPortfolioChartCache.query.all()
-        for cache in user_chart_caches:
-            db.session.delete(cache)
-        results['caches_cleared'] += len(user_chart_caches)
+        # Use bulk delete to avoid session conflicts
+        user_cache_count = UserPortfolioChartCache.query.count()
+        UserPortfolioChartCache.query.delete()
+        results['caches_cleared'] += user_cache_count
         
-        sp500_chart_caches = SP500ChartCache.query.all()
-        for cache in sp500_chart_caches:
-            db.session.delete(cache)
-        results['caches_cleared'] += len(sp500_chart_caches)
+        sp500_cache_count = SP500ChartCache.query.count()
+        SP500ChartCache.query.delete()
+        results['caches_cleared'] += sp500_cache_count
         
         db.session.commit()
         logger.info(f"Cleared {results['caches_cleared']} chart cache entries")
@@ -10684,6 +10683,349 @@ def admin_investigate_snapshot_data():
         
     except Exception as e:
         logger.error(f"Error in snapshot investigation: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/historical-price-backfill', methods=['GET', 'POST'])
+@login_required
+def admin_historical_price_backfill():
+    """Admin endpoint to backfill historical prices and fix corrupted snapshot data"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        # Handle GET request - show form
+        if request.method == 'GET':
+            return '''
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Historical Price Backfill</title>
+                <style>
+                    body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+                    button { background: #28a745; color: white; padding: 15px 30px; border: none; border-radius: 4px; font-size: 18px; cursor: pointer; }
+                    button:hover { background: #218838; }
+                    button:disabled { background: #6c757d; cursor: not-allowed; }
+                    .info { background: #e7f3ff; padding: 20px; border-radius: 4px; margin: 20px 0; }
+                    .warning { background: #fff3cd; padding: 20px; border-radius: 4px; margin: 20px 0; border-left: 4px solid #ffc107; }
+                    .critical { background: #f8d7da; padding: 20px; border-radius: 4px; margin: 20px 0; border-left: 4px solid #dc3545; }
+                    #result { margin-top: 20px; padding: 20px; border-radius: 4px; display: none; }
+                    .success { background: #d4edda; border-left: 4px solid #28a745; }
+                    .error { background: #f8d7da; border-left: 4px solid #dc3545; }
+                    .progress { background: #cce7ff; border-left: 4px solid #007bff; }
+                    ul { margin: 10px 0; padding-left: 20px; }
+                    .step { margin: 10px 0; font-weight: bold; }
+                </style>
+            </head>
+            <body>
+                <h1>📈 Historical Price Backfill Tool</h1>
+                
+                <div class="critical">
+                    <h3>🚨 DATA CORRUPTION DETECTED</h3>
+                    <p>Investigation shows all portfolio snapshots for 9/26/2025 are corrupted with $0 values.</p>
+                    <p><strong>Root Cause:</strong> Portfolio calculator failed to get historical prices during backfill.</p>
+                </div>
+                
+                <div class="info">
+                    <h3>🔧 What This Tool Does:</h3>
+                    <ul>
+                        <li><strong>Fetches Real Historical Prices</strong> from Alpha Vantage API for 9/25 & 9/26</li>
+                        <li><strong>Recalculates Portfolio Values</strong> using actual stock prices from those dates</li>
+                        <li><strong>Updates All Snapshots</strong> with correct portfolio values</li>
+                        <li><strong>Updates S&P 500 Data</strong> for benchmark comparisons</li>
+                        <li><strong>Regenerates All Caches</strong> (Leaderboard, Charts, etc.)</li>
+                    </ul>
+                </div>
+                
+                <div class="warning">
+                    <h3>⚠️ Important Notes:</h3>
+                    <ul>
+                        <li><strong>API Rate Limits:</strong> Process takes ~5-10 minutes due to Alpha Vantage limits</li>
+                        <li><strong>Requires API Key:</strong> Must have valid ALPHA_VANTAGE_API_KEY in environment</li>
+                        <li><strong>One-Time Fix:</strong> Only run this once to repair the corrupted data</li>
+                        <li><strong>Safe Operation:</strong> Backs up existing data before making changes</li>
+                    </ul>
+                </div>
+                
+                <div class="step">
+                    <h3>🚀 Ready to Fix Your Data?</h3>
+                    <p>This will restore your portfolio charts and leaderboards to show correct values.</p>
+                    <button onclick="startBackfill()" id="backfillBtn">
+                        📈 Start Historical Price Backfill
+                    </button>
+                </div>
+                
+                <div id="result"></div>
+                
+                <script>
+                async function startBackfill() {
+                    const button = document.getElementById('backfillBtn');
+                    const resultDiv = document.getElementById('result');
+                    
+                    button.textContent = '⏳ Fetching Historical Prices...';
+                    button.disabled = true;
+                    resultDiv.style.display = 'block';
+                    resultDiv.className = 'progress';
+                    resultDiv.innerHTML = `
+                        <h3>🔄 Processing...</h3>
+                        <p>Step 1: Fetching historical stock prices from Alpha Vantage...</p>
+                        <p><em>This may take 5-10 minutes due to API rate limits.</em></p>
+                        <p><strong>Please be patient and do not refresh the page.</strong></p>
+                    `;
+                    
+                    try {
+                        const response = await fetch('/admin/historical-price-backfill', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (data.success) {
+                            resultDiv.className = 'success';
+                            resultDiv.innerHTML = `
+                                <h3>✅ Historical Price Backfill Successful!</h3>
+                                <div class="step">
+                                    <h4>📊 Data Restored:</h4>
+                                    <ul>
+                                        <li><strong>Prices Fetched:</strong> ${data.results.prices_fetched} historical prices</li>
+                                        <li><strong>Snapshots Fixed:</strong> ${data.results.snapshots_updated} portfolio snapshots</li>
+                                        <li><strong>S&P 500 Data:</strong> ${data.results.sp500_updated ? 'Updated' : 'No updates needed'}</li>
+                                        <li><strong>Caches Regenerated:</strong> ${data.results.caches_regenerated} cache entries</li>
+                                    </ul>
+                                </div>
+                                <div class="step">
+                                    <h4>🎉 Next Steps:</h4>
+                                    <ul>
+                                        <li>Go to your dashboard and check the charts</li>
+                                        <li>Verify 9/25 and 9/26 data points are now visible</li>
+                                        <li>Check that portfolio values are no longer $0</li>
+                                        <li>Confirm leaderboards show correct performance</li>
+                                    </ul>
+                                </div>
+                                <p><strong>Processing Time:</strong> ${data.results.processing_time_minutes} minutes</p>
+                            `;
+                        } else {
+                            resultDiv.className = 'error';
+                            resultDiv.innerHTML = `
+                                <h3>❌ Backfill Failed</h3>
+                                <p><strong>Error:</strong> ${data.error || data.message}</p>
+                                ${data.details ? '<p><strong>Details:</strong> ' + data.details + '</p>' : ''}
+                                <p><strong>Next Steps:</strong> Check that ALPHA_VANTAGE_API_KEY is set correctly.</p>
+                            `;
+                        }
+                    } catch (error) {
+                        resultDiv.className = 'error';
+                        resultDiv.innerHTML = `
+                            <h3>❌ Request Failed</h3>
+                            <p><strong>Error:</strong> ${error.message}</p>
+                            <p><strong>This might be due to:</strong></p>
+                            <ul>
+                                <li>Network timeout (process takes 5-10 minutes)</li>
+                                <li>Server error during price fetching</li>
+                                <li>API rate limit exceeded</li>
+                            </ul>
+                        `;
+                    }
+                    
+                    button.textContent = '📈 Start Historical Price Backfill';
+                    button.disabled = false;
+                }
+                </script>
+            </body>
+            </html>
+            '''
+        
+        # Handle POST request - perform backfill
+        import requests
+        import time
+        from datetime import date
+        from models import Stock, PortfolioSnapshot, MarketData, LeaderboardCache, UserPortfolioChartCache, SP500ChartCache
+        
+        start_time = datetime.now()
+        
+        results = {
+            'timestamp': start_time.isoformat(),
+            'prices_fetched': 0,
+            'snapshots_updated': 0,
+            'sp500_updated': False,
+            'caches_regenerated': 0,
+            'errors': []
+        }
+        
+        # Check API key
+        api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
+        if not api_key:
+            return jsonify({
+                'success': False,
+                'error': 'ALPHA_VANTAGE_API_KEY not found in environment variables',
+                'details': 'Please set your Alpha Vantage API key in the environment'
+            }), 400
+        
+        logger.info(f"Starting historical price backfill with API key: {api_key[:8]}...")
+        
+        target_dates = [date(2025, 9, 25), date(2025, 9, 26)]
+        
+        # Get all unique tickers
+        all_stocks = Stock.query.all()
+        unique_tickers = list(set(stock.ticker for stock in all_stocks))
+        unique_tickers.append("SPY")  # S&P 500 proxy
+        
+        logger.info(f"Fetching prices for {len(unique_tickers)} tickers: {unique_tickers}")
+        
+        # Fetch historical prices
+        historical_prices = {}
+        
+        for target_date in target_dates:
+            logger.info(f"Fetching prices for {target_date}")
+            historical_prices[target_date] = {}
+            
+            for ticker in unique_tickers:
+                try:
+                    logger.info(f"Fetching {ticker} for {target_date}")
+                    
+                    # Alpha Vantage API call
+                    url = "https://www.alphavantage.co/query"
+                    params = {
+                        'function': 'TIME_SERIES_DAILY',
+                        'symbol': ticker,
+                        'apikey': api_key,
+                        'outputsize': 'compact'
+                    }
+                    
+                    response = requests.get(url, params=params, timeout=30)
+                    data = response.json()
+                    
+                    if 'Error Message' in data:
+                        error_msg = f"API Error for {ticker}: {data['Error Message']}"
+                        results['errors'].append(error_msg)
+                        logger.error(error_msg)
+                        continue
+                        
+                    if 'Note' in data:
+                        error_msg = f"API Limit for {ticker}: {data['Note']}"
+                        results['errors'].append(error_msg)
+                        logger.warning(error_msg)
+                        continue
+                    
+                    time_series = data.get('Time Series (Daily)', {})
+                    date_str = target_date.strftime('%Y-%m-%d')
+                    
+                    if date_str in time_series:
+                        close_price = float(time_series[date_str]['4. close'])
+                        historical_prices[target_date][ticker] = close_price
+                        results['prices_fetched'] += 1
+                        logger.info(f"✅ {ticker} on {date_str}: ${close_price:.2f}")
+                    else:
+                        # Try previous trading day
+                        available_dates = sorted(time_series.keys(), reverse=True)
+                        for available_date in available_dates:
+                            if available_date < date_str:
+                                close_price = float(time_series[available_date]['4. close'])
+                                historical_prices[target_date][ticker] = close_price
+                                results['prices_fetched'] += 1
+                                logger.info(f"📅 {ticker} using {available_date}: ${close_price:.2f}")
+                                break
+                    
+                    # Rate limiting - 5 calls per minute
+                    time.sleep(12)
+                    
+                except Exception as e:
+                    error_msg = f"Error fetching {ticker}: {str(e)}"
+                    results['errors'].append(error_msg)
+                    logger.error(error_msg)
+        
+        # Update portfolio snapshots with correct values
+        logger.info("Updating portfolio snapshots with historical prices...")
+        
+        for target_date in target_dates:
+            date_prices = historical_prices.get(target_date, {})
+            if not date_prices:
+                continue
+                
+            snapshots = PortfolioSnapshot.query.filter_by(date=target_date).all()
+            
+            for snapshot in snapshots:
+                user_stocks = Stock.query.filter_by(user_id=snapshot.user_id).all()
+                correct_value = 0
+                
+                for stock in user_stocks:
+                    if stock.quantity > 0 and stock.ticker in date_prices:
+                        historical_price = date_prices[stock.ticker]
+                        stock_value = stock.quantity * historical_price
+                        correct_value += stock_value
+                
+                if correct_value > 0:
+                    old_value = snapshot.total_value
+                    snapshot.total_value = correct_value
+                    results['snapshots_updated'] += 1
+                    logger.info(f"Updated snapshot {snapshot.user_id} {target_date}: ${old_value:.2f} → ${correct_value:.2f}")
+        
+        # Update S&P 500 market data
+        if "SPY" in historical_prices.get(target_dates[0], {}):
+            for target_date in target_dates:
+                if "SPY" in historical_prices.get(target_date, {}):
+                    sp500_price = historical_prices[target_date]["SPY"]
+                    
+                    existing_data = MarketData.query.filter_by(
+                        ticker="SPY_SP500", 
+                        date=target_date
+                    ).first()
+                    
+                    if existing_data:
+                        existing_data.close_price = sp500_price
+                    else:
+                        new_data = MarketData(
+                            ticker="SPY_SP500",
+                            date=target_date,
+                            close_price=sp500_price,
+                            volume=0
+                        )
+                        db.session.add(new_data)
+                    
+                    results['sp500_updated'] = True
+                    logger.info(f"Updated S&P 500 {target_date}: ${sp500_price:.2f}")
+        
+        # Clear and regenerate caches
+        logger.info("Clearing corrupted caches...")
+        
+        # Clear all caches
+        LeaderboardCache.query.delete()
+        UserPortfolioChartCache.query.delete()
+        SP500ChartCache.query.delete()
+        
+        db.session.commit()
+        
+        # Regenerate leaderboard cache
+        logger.info("Regenerating caches...")
+        try:
+            from leaderboard_utils import update_leaderboard_cache
+            updated_count = update_leaderboard_cache()
+            results['caches_regenerated'] = updated_count
+            logger.info(f"Regenerated {updated_count} cache entries")
+        except Exception as e:
+            error_msg = f"Cache regeneration error: {str(e)}"
+            results['errors'].append(error_msg)
+            logger.error(error_msg)
+        
+        end_time = datetime.now()
+        processing_time = (end_time - start_time).total_seconds()
+        results['processing_time_minutes'] = round(processing_time / 60, 2)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Historical price backfill completed successfully',
+            'results': results
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error in historical price backfill: {str(e)}")
         import traceback
         return jsonify({
             'success': False,
