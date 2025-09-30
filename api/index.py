@@ -16043,8 +16043,8 @@ def admin_emergency_cache_rebuild():
                     continue
                 
                 # Find portfolio start date
-                earliest_stock = min(user_stocks, key=lambda s: s.created_at)
-                portfolio_start_date = earliest_stock.created_at.date()
+                earliest_stock = min(user_stocks, key=lambda s: s.purchase_date)
+                portfolio_start_date = earliest_stock.purchase_date.date()
                 
                 for period in periods:
                     try:
