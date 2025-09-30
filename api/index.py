@@ -16150,16 +16150,25 @@ def admin_emergency_cache_rebuild():
                         results['errors'].append(error_msg)
                         logger.error(error_msg)
                 
+                # Commit after each user to avoid large transaction timeout
+                try:
+                    db.session.commit()
+                    logger.info(f"Committed chart caches for user {user_id}")
+                except Exception as commit_error:
+                    logger.error(f"Failed to commit caches for user {user_id}: {commit_error}")
+                    db.session.rollback()
+                    error_msg = f"Commit failed for user {user_id}: {str(commit_error)}"
+                    results['errors'].append(error_msg)
+                
             except Exception as e:
                 error_msg = f"Error processing user {user_id}: {str(e)}"
                 results['errors'].append(error_msg)
                 logger.error(error_msg)
+                db.session.rollback()
         
-        # STEP 4: Commit chart caches (skip leaderboard rebuild to avoid timeout)
-        logger.info("Step 3: Committing chart caches...")
+        # STEP 4: Final summary (commits already done per-user)
+        logger.info("Step 3: Chart cache rebuild complete")
         logger.info("Note: Skipping leaderboard rebuild to avoid timeout - use /admin/regenerate-leaderboard-cache")
-        
-        db.session.commit()
         
         # Count leaderboards that will be updated by regular cron
         results['leaderboards_fixed'] = 0  # Will be updated by regular leaderboard cron
