@@ -143,25 +143,36 @@ class PortfolioPerformanceCalculator:
         # Get current prices and calculate value using AlphaVantage
         for ticker, quantity in holdings.items():
             if quantity > 0:  # Only count positive holdings
+                price = None
+                
                 try:
                     stock_data = self.get_stock_data(ticker)
                     if stock_data and stock_data.get('price') is not None:
                         price = stock_data['price']
-                        total_value += quantity * price
                 except Exception as e:
                     logger.error(f"Error fetching price for {ticker}: {e}")
+                
+                # If API failed or returned None, use fallback logic
+                if price is None:
                     # First fallback: try to use any cached price (even if expired)
                     ticker_upper = ticker.upper()
                     if ticker_upper in stock_price_cache and stock_price_cache[ticker_upper].get('price'):
                         cached_price = stock_price_cache[ticker_upper]['price']
-                        total_value += quantity * cached_price
+                        price = cached_price
                         logger.info(f"Using expired cached price for {ticker}: ${cached_price}")
                     else:
                         # Final fallback: use purchase price from Stock table
                         stock = Stock.query.filter_by(user_id=user_id, ticker=ticker).first()
-                        if stock:
-                            total_value += quantity * stock.purchase_price
-                            logger.info(f"Using purchase price for {ticker}: ${stock.purchase_price}")
+                        if stock and stock.purchase_price:
+                            price = stock.purchase_price
+                            logger.warning(f"API and cache failed for {ticker}, using purchase price: ${stock.purchase_price}")
+                        else:
+                            logger.error(f"No price available for {ticker} (quantity {quantity}) - skipping stock!")
+                            continue  # Skip this stock entirely
+                
+                # Add to total value if we have a valid price
+                if price and price > 0:
+                    total_value += quantity * price
         
         return total_value
     
