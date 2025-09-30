@@ -15968,7 +15968,8 @@ def admin_clean_zero_snapshots():
         if request.method == 'GET':
             # Show preview of what will be deleted
             
-            cutoff_date = date.today() - timedelta(days=7)
+            # Look for ALL zero-value snapshots (not just last 7 days)
+            # We need to clean ALL corrupted data for accurate performance calculations
             
             # Find zero-value snapshots for users with stocks
             zero_snapshots = db.session.query(
@@ -15979,7 +15980,6 @@ def admin_clean_zero_snapshots():
                 Stock, Stock.user_id == PortfolioSnapshot.user_id
             ).filter(
                 PortfolioSnapshot.total_value == 0,
-                PortfolioSnapshot.date >= cutoff_date,
                 Stock.quantity > 0
             ).distinct().all()
             
@@ -15996,12 +15996,9 @@ def admin_clean_zero_snapshots():
             })
         
         # POST: Actually delete them
-        cutoff_date = date.today() - timedelta(days=7)
-        
-        # Delete zero-value snapshots for users with stocks
+        # Delete ALL zero-value snapshots for users with stocks (not just recent ones)
         deleted_count = db.session.query(PortfolioSnapshot).filter(
             PortfolioSnapshot.total_value == 0,
-            PortfolioSnapshot.date >= cutoff_date,
             PortfolioSnapshot.user_id.in_(
                 db.session.query(Stock.user_id).filter(Stock.quantity > 0).distinct()
             )
@@ -16020,6 +16017,163 @@ def admin_clean_zero_snapshots():
     except Exception as e:
         db.session.rollback()
         logger.error(f"Error cleaning zero snapshots: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/check-sept30-snapshots', methods=['GET'])
+@login_required
+def admin_check_sept30_snapshots():
+    """Check if Sept 30, 2025 snapshots exist - diagnostic endpoint"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import date
+        from models import User, PortfolioSnapshot, Stock, UserPortfolioChartCache
+        
+        today = date(2025, 9, 30)
+        yesterday = date(2025, 9, 29)
+        
+        results = {
+            'today': str(today),
+            'yesterday': str(yesterday),
+            'today_snapshots': [],
+            'yesterday_snapshots': [],
+            'latest_snapshot_date': None,
+            'total_snapshots': 0,
+            'zero_value_count': 0,
+            'users_with_stocks': [],
+            'chart_cache_status': []
+        }
+        
+        # Check today's snapshots
+        today_snaps = db.session.query(
+            PortfolioSnapshot.user_id,
+            User.username,
+            PortfolioSnapshot.date,
+            PortfolioSnapshot.total_value,
+            PortfolioSnapshot.created_at
+        ).join(User).filter(
+            PortfolioSnapshot.date == today
+        ).all()
+        
+        results['today_snapshots'] = [
+            {
+                'user_id': s.user_id,
+                'username': s.username,
+                'date': s.date.isoformat(),
+                'total_value': float(s.total_value),
+                'created_at': s.created_at.isoformat() if s.created_at else None
+            } for s in today_snaps
+        ]
+        
+        # Check yesterday's snapshots
+        yesterday_snaps = db.session.query(
+            PortfolioSnapshot.user_id,
+            User.username,
+            PortfolioSnapshot.date,
+            PortfolioSnapshot.total_value,
+            PortfolioSnapshot.created_at
+        ).join(User).filter(
+            PortfolioSnapshot.date == yesterday
+        ).all()
+        
+        results['yesterday_snapshots'] = [
+            {
+                'user_id': s.user_id,
+                'username': s.username,
+                'date': s.date.isoformat(),
+                'total_value': float(s.total_value),
+                'created_at': s.created_at.isoformat() if s.created_at else None
+            } for s in yesterday_snaps
+        ]
+        
+        # Get latest snapshot date
+        latest = db.session.query(
+            func.max(PortfolioSnapshot.date)
+        ).scalar()
+        results['latest_snapshot_date'] = latest.isoformat() if latest else None
+        
+        # Total snapshot count
+        results['total_snapshots'] = db.session.query(PortfolioSnapshot).count()
+        
+        # Zero-value count
+        results['zero_value_count'] = db.session.query(PortfolioSnapshot).filter(
+            PortfolioSnapshot.total_value == 0
+        ).count()
+        
+        # Users with stocks
+        users_stocks = db.session.query(
+            User.id,
+            User.username,
+            func.count(Stock.id).label('stock_count')
+        ).outerjoin(Stock).group_by(User.id, User.username).all()
+        
+        results['users_with_stocks'] = [
+            {
+                'user_id': u.id,
+                'username': u.username,
+                'stock_count': u.stock_count
+            } for u in users_stocks if u.stock_count > 0
+        ]
+        
+        # Chart cache status for user 5
+        caches = UserPortfolioChartCache.query.filter_by(user_id=5).all()
+        results['chart_cache_status'] = [
+            {
+                'period': c.period,
+                'generated_at': c.generated_at.isoformat() if c.generated_at else None,
+                'data_size': len(c.chart_data) if c.chart_data else 0
+            } for c in caches
+        ]
+        
+        # Diagnosis
+        diagnosis = []
+        if len(results['today_snapshots']) == 0:
+            diagnosis.append("❌ NO SNAPSHOTS FOR SEPT 30 - Cron job didn't run or failed")
+        else:
+            diagnosis.append(f"✅ Found {len(results['today_snapshots'])} snapshots for Sept 30")
+        
+        if results['zero_value_count'] > 0:
+            diagnosis.append(f"⚠️  {results['zero_value_count']} zero-value snapshots exist (corrupted data)")
+        
+        results['diagnosis'] = diagnosis
+        
+        return jsonify(results)
+        
+    except Exception as e:
+        logger.error(f"Error checking Sept 30 snapshots: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/comprehensive-data-flow', methods=['GET'])
+@login_required
+def admin_comprehensive_data_flow():
+    """Run comprehensive data flow analysis (updated for Sept 30)"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        # Import and run the comprehensive debug
+        from comprehensive_data_flow_debug import run_comprehensive_debug
+        
+        results = run_comprehensive_debug()
+        return jsonify(results)
+        
+    except Exception as e:
+        logger.error(f"Error in comprehensive data flow: {str(e)}")
         import traceback
         return jsonify({
             'success': False,
