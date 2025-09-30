@@ -16155,14 +16155,14 @@ def admin_emergency_cache_rebuild():
                 results['errors'].append(error_msg)
                 logger.error(error_msg)
         
-        # STEP 4: Rebuild leaderboards using the new chart caches
-        logger.info("Step 3: Rebuilding leaderboards...")
-        
-        from leaderboard_utils import update_leaderboard_cache
-        update_leaderboard_cache(periods)
-        results['leaderboards_fixed'] = len(periods) * 2  # all and large_cap for each period
+        # STEP 4: Commit chart caches (skip leaderboard rebuild to avoid timeout)
+        logger.info("Step 3: Committing chart caches...")
+        logger.info("Note: Skipping leaderboard rebuild to avoid timeout - use /admin/regenerate-leaderboard-cache")
         
         db.session.commit()
+        
+        # Count leaderboards that will be updated by regular cron
+        results['leaderboards_fixed'] = 0  # Will be updated by regular leaderboard cron
         
         end_time = datetime.now()
         processing_time = (end_time - start_time).total_seconds() / 60
