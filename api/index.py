@@ -15686,6 +15686,7 @@ def admin_rebuild_user_cache(user_id):
         
         from datetime import date, datetime, timedelta
         import json
+        from models import User, Stock, PortfolioSnapshot, MarketData, UserPortfolioChartCache
         
         start_time = datetime.now()
         results = {
