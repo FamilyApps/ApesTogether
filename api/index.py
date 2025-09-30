@@ -15961,9 +15961,11 @@ def admin_clean_zero_snapshots():
         if email != ADMIN_EMAIL:
             return jsonify({'error': 'Admin access required'}), 403
         
+        from datetime import date, timedelta
+        from models import PortfolioSnapshot, Stock
+        
         if request.method == 'GET':
             # Show preview of what will be deleted
-            from datetime import date, timedelta
             
             cutoff_date = date.today() - timedelta(days=7)
             
@@ -15993,8 +15995,6 @@ def admin_clean_zero_snapshots():
             })
         
         # POST: Actually delete them
-        from datetime import date, timedelta
-        
         cutoff_date = date.today() - timedelta(days=7)
         
         # Delete zero-value snapshots for users with stocks
