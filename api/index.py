@@ -15901,6 +15901,290 @@ def admin_cache_consistency_analysis():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/emergency-cache-rebuild', methods=['GET', 'POST'])
+@login_required
+def admin_emergency_cache_rebuild():
+    """EMERGENCY: Force rebuild all caches with direct data population"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        if request.method == 'GET':
+            return '''
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>🚨 EMERGENCY CACHE REBUILD</title>
+                <style>
+                    body { font-family: Arial, sans-serif; max-width: 1000px; margin: 20px auto; padding: 20px; }
+                    button { background: #dc3545; color: white; padding: 15px 30px; border: none; border-radius: 4px; font-size: 18px; cursor: pointer; margin: 10px; }
+                    .critical { background: #f8d7da; padding: 20px; border-radius: 4px; margin: 20px 0; border-left: 6px solid #dc3545; }
+                    #results { margin-top: 20px; padding: 20px; border-radius: 4px; }
+                    .success { background: #d4edda; border-left: 6px solid #28a745; }
+                    .error { background: #f8d7da; border-left: 6px solid #dc3545; }
+                    .progress { background: #cce7ff; border-left: 4px solid #007bff; }
+                </style>
+            </head>
+            <body>
+                <h1>🚨 EMERGENCY CACHE REBUILD</h1>
+                
+                <div class="critical">
+                    <h2>⚠️ CRITICAL CACHE SYSTEM FAILURE DETECTED</h2>
+                    <p><strong>ALL chart caches have 0 data points</strong></p>
+                    <p><strong>ALL leaderboards show 0% performance</strong></p>
+                    <p><strong>Chart cache generation process is completely broken</strong></p>
+                </div>
+                
+                <div style="text-align: center; margin: 40px 0;">
+                    <button onclick="startEmergencyRebuild()" id="startBtn">
+                        🚨 START EMERGENCY REBUILD
+                    </button>
+                </div>
+                
+                <div id="results"></div>
+                
+                <script>
+                async function startEmergencyRebuild() {
+                    document.getElementById('startBtn').disabled = true;
+                    document.getElementById('startBtn').textContent = '🔄 REBUILDING...';
+                    
+                    document.getElementById('results').innerHTML = `
+                        <div class="progress">
+                            <h3>🚨 Emergency Cache Rebuild In Progress...</h3>
+                            <p><strong>Bypassing broken cache generation...</strong></p>
+                            <p><em>This will take 5-8 minutes.</em></p>
+                        </div>
+                    `;
+                    
+                    try {
+                        const response = await fetch('/admin/emergency-cache-rebuild', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (data.success) {
+                            document.getElementById('results').className = 'success';
+                            document.getElementById('results').innerHTML = `
+                                <h2>✅ EMERGENCY REBUILD COMPLETE!</h2>
+                                <h3>📊 Results:</h3>
+                                <ul>
+                                    <li><strong>Chart Caches Fixed:</strong> ${data.results.chart_caches_fixed}</li>
+                                    <li><strong>Leaderboards Fixed:</strong> ${data.results.leaderboards_fixed}</li>
+                                    <li><strong>Data Points Generated:</strong> ${data.results.data_points_generated}</li>
+                                    <li><strong>Processing Time:</strong> ${data.results.processing_time} minutes</li>
+                                </ul>
+                                <h3>🎉 Dashboard Should Work Now!</h3>
+                                <p><strong>🚀 Go check your dashboard and leaderboards!</strong></p>
+                            `;
+                        } else {
+                            document.getElementById('results').className = 'error';
+                            document.getElementById('results').innerHTML = `
+                                <h3>❌ Emergency Rebuild Failed</h3>
+                                <p><strong>Error:</strong> ${data.error}</p>
+                            `;
+                        }
+                    } catch (error) {
+                        document.getElementById('results').className = 'error';
+                        document.getElementById('results').innerHTML = `
+                            <h3>❌ Emergency Rebuild Failed</h3>
+                            <p><strong>Error:</strong> ${error.message}</p>
+                        `;
+                    }
+                    
+                    document.getElementById('startBtn').disabled = false;
+                    document.getElementById('startBtn').textContent = '🔄 Run Again';
+                }
+                </script>
+            </body>
+            </html>
+            '''
+        
+        # Handle POST request - perform emergency cache rebuild
+        from datetime import date, datetime, timedelta
+        from models import (PortfolioSnapshot, UserPortfolioChartCache, LeaderboardCache, 
+                          MarketData, User, Stock)
+        import json
+        
+        start_time = datetime.now()
+        results = {
+            'chart_caches_fixed': 0,
+            'leaderboards_fixed': 0,
+            'data_points_generated': 0,
+            'errors': []
+        }
+        
+        logger.info("🚨 Starting EMERGENCY CACHE REBUILD...")
+        
+        # STEP 1: Clear ALL existing caches
+        logger.info("Step 1: Clearing all existing caches...")
+        UserPortfolioChartCache.query.delete()
+        LeaderboardCache.query.delete()
+        db.session.commit()
+        
+        # STEP 2: Get all users with portfolios
+        users_with_stocks = db.session.query(User.id, User.username).join(Stock).distinct().all()
+        
+        # STEP 3: Manually rebuild chart caches using direct database queries
+        logger.info("Step 2: Manually rebuilding chart caches...")
+        
+        periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y']
+        
+        for user_id, username in users_with_stocks:
+            try:
+                logger.info(f"Processing user {user_id} ({username})")
+                
+                # Get user's stocks
+                user_stocks = Stock.query.filter_by(user_id=user_id).all()
+                if not user_stocks:
+                    continue
+                
+                # Find portfolio start date
+                earliest_stock = min(user_stocks, key=lambda s: s.created_at)
+                portfolio_start_date = earliest_stock.created_at.date()
+                
+                for period in periods:
+                    try:
+                        # Calculate date range for this period
+                        end_date = date.today()
+                        
+                        if period == '1D':
+                            start_date = end_date
+                        elif period == '5D':
+                            start_date = end_date - timedelta(days=7)  # Include weekends
+                        elif period == '1M':
+                            start_date = end_date - timedelta(days=30)
+                        elif period == '3M':
+                            start_date = end_date - timedelta(days=90)
+                        elif period == 'YTD':
+                            start_date = date(end_date.year, 1, 1)
+                        elif period == '1Y':
+                            start_date = end_date - timedelta(days=365)
+                        
+                        # Don't go before portfolio creation
+                        start_date = max(start_date, portfolio_start_date)
+                        
+                        # Get portfolio snapshots for this period
+                        snapshots = PortfolioSnapshot.query.filter(
+                            PortfolioSnapshot.user_id == user_id,
+                            PortfolioSnapshot.date >= start_date,
+                            PortfolioSnapshot.date <= end_date
+                        ).order_by(PortfolioSnapshot.date).all()
+                        
+                        # Get S&P 500 data for same period
+                        sp500_data = MarketData.query.filter(
+                            MarketData.ticker == "SPY_SP500",
+                            MarketData.date >= start_date,
+                            MarketData.date <= end_date
+                        ).order_by(MarketData.date).all()
+                        
+                        # Create date-indexed dictionaries
+                        snapshot_dict = {s.date: s.total_value for s in snapshots}
+                        sp500_dict = {s.date: s.close_price for s in sp500_data}
+                        
+                        # Generate chart data points
+                        chart_data_points = []
+                        
+                        # Get all dates in range (business days only for most periods)
+                        current_date = start_date
+                        while current_date <= end_date:
+                            if period == '1D' or current_date.weekday() < 5:  # Include weekends only for 1D
+                                portfolio_value = snapshot_dict.get(current_date, 0)
+                                sp500_value = sp500_dict.get(current_date, 0)
+                                
+                                if portfolio_value > 0 or sp500_value > 0:  # Only include if we have some data
+                                    chart_data_points.append({
+                                        'date': current_date.isoformat(),
+                                        'portfolio': portfolio_value,
+                                        'sp500': sp500_value
+                                    })
+                            
+                            current_date += timedelta(days=1)
+                        
+                        # Calculate performance if we have data
+                        portfolio_return = 0
+                        sp500_return = 0
+                        
+                        if len(chart_data_points) >= 2:
+                            first_portfolio = next((p['portfolio'] for p in chart_data_points if p['portfolio'] > 0), 0)
+                            last_portfolio = chart_data_points[-1]['portfolio']
+                            
+                            first_sp500 = next((p['sp500'] for p in chart_data_points if p['sp500'] > 0), 0)
+                            last_sp500 = chart_data_points[-1]['sp500']
+                            
+                            if first_portfolio > 0:
+                                portfolio_return = ((last_portfolio - first_portfolio) / first_portfolio) * 100
+                            
+                            if first_sp500 > 0:
+                                sp500_return = ((last_sp500 - first_sp500) / first_sp500) * 100
+                        
+                        # Create chart cache entry
+                        chart_cache_data = {
+                            'chart_data': chart_data_points,
+                            'portfolio_return': round(portfolio_return, 2),
+                            'sp500_return': round(sp500_return, 2),
+                            'period': period,
+                            'start_date': start_date.isoformat(),
+                            'end_date': end_date.isoformat()
+                        }
+                        
+                        # Save to cache
+                        cache_entry = UserPortfolioChartCache(
+                            user_id=user_id,
+                            period=period,
+                            chart_data=json.dumps(chart_cache_data),
+                            generated_at=datetime.now()
+                        )
+                        db.session.add(cache_entry)
+                        
+                        results['chart_caches_fixed'] += 1
+                        results['data_points_generated'] += len(chart_data_points)
+                        
+                        logger.info(f"Created {period} cache for user {user_id}: {len(chart_data_points)} points, {portfolio_return:.2f}% return")
+                        
+                    except Exception as e:
+                        error_msg = f"Error creating {period} cache for user {user_id}: {str(e)}"
+                        results['errors'].append(error_msg)
+                        logger.error(error_msg)
+                
+            except Exception as e:
+                error_msg = f"Error processing user {user_id}: {str(e)}"
+                results['errors'].append(error_msg)
+                logger.error(error_msg)
+        
+        # STEP 4: Rebuild leaderboards using the new chart caches
+        logger.info("Step 3: Rebuilding leaderboards...")
+        
+        from leaderboard_utils import update_leaderboard_cache
+        update_leaderboard_cache(periods)
+        results['leaderboards_fixed'] = len(periods) * 2  # all and large_cap for each period
+        
+        db.session.commit()
+        
+        end_time = datetime.now()
+        processing_time = (end_time - start_time).total_seconds() / 60
+        results['processing_time'] = round(processing_time, 2)
+        
+        logger.info(f"Emergency cache rebuild completed in {processing_time:.2f} minutes")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Emergency cache rebuild completed successfully',
+            'results': results
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error in emergency cache rebuild: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 # Export the Flask app for Vercel serverless function
 # This is required for Vercel's Python runtime
 app.debug = False
