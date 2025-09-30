@@ -9657,6 +9657,15 @@ def market_close_cron():
                     calculator = PortfolioPerformanceCalculator(user.id)
                     portfolio_value = calculator.calculate_portfolio_value(today)
                     
+                    logger.info(f"User {user.id} ({user.username}): Calculated value = ${portfolio_value:.2f}")
+                    
+                    # Skip if portfolio value is 0 or None (indicates calculation failure)
+                    if portfolio_value is None or portfolio_value <= 0:
+                        error_msg = f"User {user.id} ({user.username}): Skipping - portfolio value is {portfolio_value}"
+                        results['errors'].append(error_msg)
+                        logger.warning(error_msg)
+                        continue
+                    
                     # Check if snapshot already exists for today
                     existing_snapshot = PortfolioSnapshot.query.filter_by(
                         user_id=user.id, 
@@ -9666,6 +9675,7 @@ def market_close_cron():
                     if existing_snapshot:
                         existing_snapshot.total_value = portfolio_value
                         results['snapshots_updated'] += 1
+                        logger.info(f"Updated snapshot for user {user.id}: ${portfolio_value:.2f}")
                     else:
                         # Create new EOD snapshot
                         snapshot = PortfolioSnapshot(
@@ -9676,13 +9686,16 @@ def market_close_cron():
                         )
                         db.session.add(snapshot)
                         results['snapshots_created'] += 1
+                        logger.info(f"Created snapshot for user {user.id}: ${portfolio_value:.2f}")
                     
                     results['users_processed'] += 1
                     
                 except Exception as e:
-                    error_msg = f"Error processing user {user.id}: {str(e)}"
+                    error_msg = f"Error processing user {user.id} ({user.username}): {str(e)}"
                     results['errors'].append(error_msg)
                     logger.error(f"Market close user {user.id} error: {e}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
                     # Don't fail the entire pipeline for individual user errors
             
             results['pipeline_phases'].append('snapshots_completed')
