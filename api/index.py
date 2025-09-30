@@ -9653,9 +9653,9 @@ def market_close_cron():
             
             for user in users:
                 try:
-                    # Calculate portfolio value for today using correct constructor
-                    calculator = PortfolioPerformanceCalculator(user.id)
-                    portfolio_value = calculator.calculate_portfolio_value(today)
+                    # Calculate portfolio value for today
+                    calculator = PortfolioPerformanceCalculator()
+                    portfolio_value = calculator.calculate_portfolio_value(user.id, today)
                     
                     logger.info(f"User {user.id} ({user.username}): Calculated value = ${portfolio_value:.2f}")
                     
