@@ -15674,6 +15674,81 @@ def admin_nuclear_data_fix():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/clean-zero-snapshots', methods=['GET', 'POST'])
+@login_required
+def admin_clean_zero_snapshots():
+    """Clean corrupted zero-value snapshots"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        if request.method == 'GET':
+            # Show preview of what will be deleted
+            from datetime import date, timedelta
+            
+            cutoff_date = date.today() - timedelta(days=7)
+            
+            # Find zero-value snapshots for users with stocks
+            zero_snapshots = db.session.query(
+                PortfolioSnapshot.user_id,
+                PortfolioSnapshot.date,
+                PortfolioSnapshot.total_value
+            ).join(
+                Stock, Stock.user_id == PortfolioSnapshot.user_id
+            ).filter(
+                PortfolioSnapshot.total_value == 0,
+                PortfolioSnapshot.date >= cutoff_date,
+                Stock.quantity > 0
+            ).distinct().all()
+            
+            return jsonify({
+                'count': len(zero_snapshots),
+                'snapshots': [
+                    {
+                        'user_id': s.user_id,
+                        'date': s.date.isoformat(),
+                        'value': s.total_value
+                    } for s in zero_snapshots[:20]  # Show first 20
+                ],
+                'message': f'Found {len(zero_snapshots)} corrupted snapshots. POST to delete them.'
+            })
+        
+        # POST: Actually delete them
+        from datetime import date, timedelta
+        
+        cutoff_date = date.today() - timedelta(days=7)
+        
+        # Delete zero-value snapshots for users with stocks
+        deleted_count = db.session.query(PortfolioSnapshot).filter(
+            PortfolioSnapshot.total_value == 0,
+            PortfolioSnapshot.date >= cutoff_date,
+            PortfolioSnapshot.user_id.in_(
+                db.session.query(Stock.user_id).filter(Stock.quantity > 0).distinct()
+            )
+        ).delete(synchronize_session=False)
+        
+        db.session.commit()
+        
+        logger.info(f"Deleted {deleted_count} zero-value snapshots")
+        
+        return jsonify({
+            'success': True,
+            'deleted_count': deleted_count,
+            'message': f'Successfully deleted {deleted_count} corrupted snapshots'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error cleaning zero snapshots: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/cache-consistency-analysis', methods=['GET'])
 @login_required
 def admin_cache_consistency_analysis():
