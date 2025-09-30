@@ -15674,6 +15674,283 @@ def admin_nuclear_data_fix():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/rebuild-user-cache/<int:user_id>', methods=['GET'])
+@login_required
+def admin_rebuild_user_cache(user_id):
+    """Rebuild chart caches for a single user (avoids timeout)"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import date, datetime, timedelta
+        import json
+        
+        start_time = datetime.now()
+        results = {
+            'user_id': user_id,
+            'charts_fixed': 0,
+            'data_points_generated': 0,
+            'errors': []
+        }
+        
+        # Check user exists
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'success': False, 'error': f'User {user_id} not found'}), 404
+        
+        # Get user's stocks to find portfolio start date
+        user_stocks = Stock.query.filter_by(user_id=user_id).all()
+        if not user_stocks:
+            return jsonify({
+                'success': True,
+                'message': f'User {user_id} ({user.username}) has no stocks - no caches to generate'
+            })
+        
+        portfolio_start_date = min(user_stocks, key=lambda s: s.purchase_date).purchase_date.date()
+        
+        periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y']
+        
+        for period in periods:
+            try:
+                # Calculate date range
+                end_date = date.today()
+                
+                if period == '1D':
+                    start_date = end_date
+                elif period == '5D':
+                    start_date = end_date - timedelta(days=7)
+                elif period == '1M':
+                    start_date = end_date - timedelta(days=30)
+                elif period == '3M':
+                    start_date = end_date - timedelta(days=90)
+                elif period == 'YTD':
+                    start_date = date(end_date.year, 1, 1)
+                elif period == '1Y':
+                    start_date = end_date - timedelta(days=365)
+                
+                start_date = max(start_date, portfolio_start_date)
+                
+                # Get snapshots
+                snapshots = PortfolioSnapshot.query.filter(
+                    PortfolioSnapshot.user_id == user_id,
+                    PortfolioSnapshot.date >= start_date,
+                    PortfolioSnapshot.date <= end_date
+                ).order_by(PortfolioSnapshot.date).all()
+                
+                # Get S&P 500 data
+                sp500_data = MarketData.query.filter(
+                    MarketData.ticker == "SPY_SP500",
+                    MarketData.date >= start_date,
+                    MarketData.date <= end_date
+                ).order_by(MarketData.date).all()
+                
+                # Generate chart data
+                snapshot_dict = {s.date: s.total_value for s in snapshots}
+                sp500_dict = {s.date: s.close_price for s in sp500_data}
+                
+                chart_data_points = []
+                current_date = start_date
+                while current_date <= end_date:
+                    if period == '1D' or current_date.weekday() < 5:
+                        portfolio_value = snapshot_dict.get(current_date, 0)
+                        sp500_value = sp500_dict.get(current_date, 0)
+                        
+                        if portfolio_value > 0 or sp500_value > 0:
+                            chart_data_points.append({
+                                'date': current_date.isoformat(),
+                                'portfolio': portfolio_value,
+                                'sp500': sp500_value
+                            })
+                    
+                    current_date += timedelta(days=1)
+                
+                # Calculate returns
+                portfolio_return = 0
+                sp500_return = 0
+                
+                if len(chart_data_points) >= 2:
+                    first_portfolio = next((p['portfolio'] for p in chart_data_points if p['portfolio'] > 0), 0)
+                    last_portfolio = chart_data_points[-1]['portfolio']
+                    
+                    first_sp500 = next((p['sp500'] for p in chart_data_points if p['sp500'] > 0), 0)
+                    last_sp500 = chart_data_points[-1]['sp500']
+                    
+                    if first_portfolio > 0:
+                        portfolio_return = ((last_portfolio - first_portfolio) / first_portfolio) * 100
+                    
+                    if first_sp500 > 0:
+                        sp500_return = ((last_sp500 - first_sp500) / first_sp500) * 100
+                
+                chart_cache_data = {
+                    'chart_data': chart_data_points,
+                    'portfolio_return': round(portfolio_return, 2),
+                    'sp500_return': round(sp500_return, 2),
+                    'period': period,
+                    'start_date': start_date.isoformat(),
+                    'end_date': end_date.isoformat()
+                }
+                
+                # Update or create cache
+                cache_entry = UserPortfolioChartCache.query.filter_by(
+                    user_id=user_id,
+                    period=period
+                ).first()
+                
+                if cache_entry:
+                    cache_entry.chart_data = json.dumps(chart_cache_data)
+                    cache_entry.generated_at = datetime.now()
+                else:
+                    cache_entry = UserPortfolioChartCache(
+                        user_id=user_id,
+                        period=period,
+                        chart_data=json.dumps(chart_cache_data),
+                        generated_at=datetime.now()
+                    )
+                    db.session.add(cache_entry)
+                
+                results['charts_fixed'] += 1
+                results['data_points_generated'] += len(chart_data_points)
+                
+                logger.info(f"User {user_id} {period}: {len(chart_data_points)} points, {portfolio_return:.2f}% return")
+                
+            except Exception as e:
+                error_msg = f"{period}: {str(e)}"
+                results['errors'].append(error_msg)
+                logger.error(f"Error generating {period} cache for user {user_id}: {e}")
+        
+        # Single commit for this user
+        db.session.commit()
+        
+        processing_time = (datetime.now() - start_time).total_seconds()
+        
+        logger.info(f"Rebuilt caches for user {user_id} ({user.username}) in {processing_time:.2f}s")
+        
+        return jsonify({
+            'success': True,
+            'username': user.username,
+            'processing_time': round(processing_time, 2),
+            'results': results
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Rebuild failed for user {user_id}: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/rebuild-all-caches', methods=['GET'])
+@login_required
+def admin_rebuild_all_caches():
+    """UI page to rebuild caches for all users sequentially"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return "Admin access required", 403
+        
+        # Get all users with stocks
+        users_with_stocks = db.session.query(User.id, User.username).join(Stock).distinct().all()
+        
+        return f'''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Rebuild User Caches</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 20px auto; padding: 20px; }}
+                .user-item {{ padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; }}
+                .status {{ margin-left: 10px; font-weight: bold; }}
+                .success {{ color: #28a745; }}
+                .error {{ color: #dc3545; }}
+                .processing {{ color: #007bff; }}
+                button {{ padding: 8px 16px; margin: 5px; cursor: pointer; }}
+                .rebuild-all {{ background: #007bff; color: white; border: none; border-radius: 4px; padding: 12px 24px; font-size: 16px; }}
+                .progress {{ margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 4px; }}
+            </style>
+        </head>
+        <body>
+            <h1>🔄 Rebuild User Caches</h1>
+            <p>Rebuild chart caches one user at a time (avoids timeout).</p>
+            
+            <button class="rebuild-all" onclick="rebuildAll()">🚀 Rebuild All Users</button>
+            
+            <div id="progress" class="progress" style="display:none;">
+                <strong>Progress:</strong> <span id="progress-text">0/{len(users_with_stocks)}</span>
+            </div>
+            
+            <div id="user-list">
+                {"".join([f'''
+                <div class="user-item">
+                    <strong>{username}</strong> (ID: {user_id})
+                    <button onclick="rebuildUser({user_id})">Rebuild</button>
+                    <span class="status" id="status-{user_id}"></span>
+                </div>
+                ''' for user_id, username in users_with_stocks])}
+            </div>
+            
+            <script>
+                let completedCount = 0;
+                const totalUsers = {len(users_with_stocks)};
+                
+                async function rebuildUser(userId) {{
+                    const statusEl = document.getElementById(`status-${{userId}}`);
+                    statusEl.textContent = '⏳ Rebuilding...';
+                    statusEl.className = 'status processing';
+                    
+                    try {{
+                        const response = await fetch(`/admin/rebuild-user-cache/${{userId}}`);
+                        const data = await response.json();
+                        
+                        if (data.success) {{
+                            statusEl.textContent = `✅ Done! (${{data.results.charts_fixed}} charts, ${{data.processing_time}}s)`;
+                            statusEl.className = 'status success';
+                        }} else {{
+                            statusEl.textContent = `❌ Error: ${{data.error}}`;
+                            statusEl.className = 'status error';
+                        }}
+                    }} catch (error) {{
+                        statusEl.textContent = `❌ Failed: ${{error.message}}`;
+                        statusEl.className = 'status error';
+                    }}
+                }}
+                
+                async function rebuildAll() {{
+                    const progressDiv = document.getElementById('progress');
+                    const progressText = document.getElementById('progress-text');
+                    
+                    progressDiv.style.display = 'block';
+                    completedCount = 0;
+                    
+                    const userIds = {[user_id for user_id, _ in users_with_stocks]};
+                    
+                    for (let userId of userIds) {{
+                        await rebuildUser(userId);
+                        completedCount++;
+                        progressText.textContent = `${{completedCount}}/${{totalUsers}}`;
+                        
+                        // 2 second buffer between users
+                        if (completedCount < totalUsers) {{
+                            await new Promise(resolve => setTimeout(resolve, 2000));
+                        }}
+                    }}
+                    
+                    alert('✅ All caches rebuilt!');
+                }}
+            </script>
+        </body>
+        </html>
+        '''
+        
+    except Exception as e:
+        logger.error(f"Error loading rebuild UI: {str(e)}")
+        return f"Error: {str(e)}", 500
+
 @app.route('/admin/clean-zero-snapshots', methods=['GET', 'POST'])
 @login_required
 def admin_clean_zero_snapshots():
@@ -16227,12 +16504,13 @@ def admin_emergency_cache_rebuild():
                 
                 # Commit after each user to avoid large transaction timeout
                 try:
-                    db.session.commit()
-                    logger.info(f"Committed chart caches for user {user_id}")
-                except Exception as commit_error:
-                    logger.error(f"Failed to commit caches for user {user_id}: {commit_error}")
+                    # Flush to database without committing transaction
+                    db.session.flush()
+                    logger.info(f"Flushed chart caches for user {user_id} to database")
+                except Exception as flush_error:
+                    logger.error(f"Failed to flush caches for user {user_id}: {flush_error}")
                     db.session.rollback()
-                    error_msg = f"Commit failed for user {user_id}: {str(commit_error)}"
+                    error_msg = f"Flush failed for user {user_id}: {str(flush_error)}"
                     results['errors'].append(error_msg)
                 
             except Exception as e:
