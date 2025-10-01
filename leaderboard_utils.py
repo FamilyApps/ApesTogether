@@ -929,27 +929,53 @@ def generate_chart_from_snapshots(user_id, period):
     else:
         performance_data = []
     
+    # Fetch S&P 500 data for the same date range
+    sp500_performance = []
+    from models import MarketData
+    
+    sp500_snapshots = MarketData.query.filter(
+        MarketData.ticker == 'SPY_SP500',
+        MarketData.date >= start_date,
+        MarketData.date <= today
+    ).order_by(MarketData.date.asc()).all()
+    
+    if sp500_snapshots and len(sp500_snapshots) > 0:
+        sp500_values = [float(s.close_price) for s in sp500_snapshots]
+        start_sp500 = sp500_values[0]
+        
+        for value in sp500_values:
+            if start_sp500 > 0:
+                sp500_pct = ((value - start_sp500) / start_sp500) * 100
+            else:
+                sp500_pct = 0.0
+            sp500_performance.append(round(sp500_pct, 2))
+    
     # Format as Chart.js compatible data
     chart_data = {
         'labels': labels,
         'datasets': [
             {
-                'label': 'Portfolio Value',
-                'data': portfolio_data,
-                'borderColor': 'rgb(75, 192, 192)',
-                'backgroundColor': 'rgba(75, 192, 192, 0.2)',
-                'tension': 0.1
-            },
-            {
-                'label': 'Performance %',
+                'label': 'Your Portfolio',
                 'data': performance_data,
-                'borderColor': 'rgb(255, 99, 132)',
-                'backgroundColor': 'rgba(255, 99, 132, 0.2)',
+                'borderColor': 'rgb(40, 167, 69)',
+                'backgroundColor': 'rgba(40, 167, 69, 0.1)',
                 'tension': 0.1,
-                'yAxisID': 'y1'
+                'fill': false
             }
         ]
     }
+    
+    # Add S&P 500 dataset if we have data
+    if sp500_performance:
+        chart_data['datasets'].append({
+            'label': 'S&P 500',
+            'data': sp500_performance,
+            'borderColor': 'rgb(108, 117, 125)',
+            'backgroundColor': 'rgba(108, 117, 125, 0.1)',
+            'tension': 0.1,
+            'fill': false,
+            'borderDash': [5, 5]
+        })
     
     return chart_data
 

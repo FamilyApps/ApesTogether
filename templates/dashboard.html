@@ -552,9 +552,8 @@ function updatePerformanceChart(data) {
     setTimeout(() => {
         console.log('Inside setTimeout, creating chart...');
         
-        // For longer periods, use linear scale to avoid weekend gaps
-        // For 1D/5D, use time scale for proper hour/day formatting
-        const useLinearScale = !['1D', '5D'].includes(currentPeriod);
+        // Use time scale for all periods for proper date formatting
+        const useLinearScale = false;
         
         const portfolioDataPoints = data.chart_data.map((item, index) => {
             let xValue;
@@ -669,22 +668,13 @@ function updatePerformanceChart(data) {
                     },
                     scales: {
                         x: {
-                            type: useLinearScale ? 'linear' : 'time',
+                            type: 'time',
                             display: true,
                             title: {
                                 display: true,
                                 text: currentPeriod === '1D' ? 'Time (ET)' : 'Date'
                             },
-                            time: useLinearScale ? undefined : {
-                                displayFormats: {
-                                    hour: 'h:mm a',
-                                    day: 'MMM dd',
-                                    week: 'MMM dd',
-                                    month: 'MMM yyyy'
-                                },
-                                tooltipFormat: currentPeriod === '1D' ? 'MMM dd, h:mm a' : 'MMM dd, yyyy'
-                            },
-                            time: useLinearScale ? undefined : {
+                            time: {
                                 unit: currentPeriod === '1D' ? 'hour' : (currentPeriod === '5D' ? 'day' : 'day'),
                                 displayFormats: {
                                     hour: 'h:mm a',
@@ -692,27 +682,13 @@ function updatePerformanceChart(data) {
                                     week: 'MMM dd',
                                     month: 'MMM yyyy'
                                 },
-                                tooltipFormat: currentPeriod === '1D' ? 'h:mm a' : 'ddd MMM dd'
+                                tooltipFormat: currentPeriod === '1D' ? 'MMM dd, h:mm a' : 'MMM dd, yyyy'
                             },
                             ticks: {
-                                maxTicksLimit: currentPeriod === '1D' ? 8 : (currentPeriod === '5D' ? 10 : 10),
+                                maxTicksLimit: currentPeriod === '1D' ? 8 : 10,
                                 maxRotation: 45,
-                                minRotation: 0,
-                                // For linear scale, show date labels from actual data points
-                                callback: useLinearScale ? function(value, index) {
-                                    if (data.chart_data && data.chart_data[Math.floor(value)]) {
-                                        const date = new Date(data.chart_data[Math.floor(value)].date);
-                                        return date.toLocaleDateString('en-US', { 
-                                            month: 'short', 
-                                            day: 'numeric' 
-                                        });
-                                    }
-                                    return '';
-                                } : undefined
-                            },
-                            // For linear scale, ensure chart extends to full width
-                            min: useLinearScale ? 0 : undefined,
-                            max: useLinearScale ? (data.chart_data ? data.chart_data.length - 1 : undefined) : undefined
+                                minRotation: 0
+                            }
                         },
                         y: {
                             display: true,

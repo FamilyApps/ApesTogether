@@ -7303,23 +7303,49 @@ def get_portfolio_performance(period):
                 
                 # Extract performance percentages from Chart.js data
                 datasets = cached_data.get('datasets', [])
-                if not datasets:
+                labels = cached_data.get('labels', [])
+                
+                if not datasets or len(datasets) == 0:
                     logger.warning(f"No datasets in cached data for user {user_id}, period {period_upper}")
                     raise ValueError("No datasets in cached chart data")
                 
-                portfolio_data = datasets[0].get('data', []) if len(datasets) > 0 else []
-                sp500_data = datasets[1].get('data', []) if len(datasets) > 1 else []
-                if not portfolio_data:
+                portfolio_dataset = datasets[0].get('data', [])
+                sp500_dataset = datasets[1].get('data', []) if len(datasets) > 1 else []
+                
+                if not portfolio_dataset:
                     logger.warning(f"No portfolio data in cached chart for user {user_id}, period {period_upper}")
                     raise ValueError("No portfolio data in cached chart")
                 
-                if not sp500_data:
+                if not sp500_dataset:
                     logger.warning(f"No S&P 500 data in cached chart for user {user_id}, period {period_upper} - falling back to live calculation")
-                    # Don't raise error - fall through to live calculation which can generate S&P 500 data
-                    raise ValueError("No S&P 500 data in cached chart - using live calculation")
+                    raise ValueError("No S&P 500 data in cached chart")
+                
+                # Convert to dashboard format: list of {date, portfolio, sp500}
+                chart_data = []
+                for i in range(min(len(labels), len(portfolio_dataset))):
+                    chart_point = {
+                        'date': labels[i],
+                        'portfolio': portfolio_dataset[i],
+                        'sp500': sp500_dataset[i] if i < len(sp500_dataset) else 0
+                    }
+                    chart_data.append(chart_point)
+                
+                # Get last values for display labels (these are cumulative % returns)
+                portfolio_return = portfolio_dataset[-1] if portfolio_dataset else 0
+                sp500_return = sp500_dataset[-1] if sp500_dataset else 0
+                
+                logger.info(f"✅ Using cached chart: portfolio={portfolio_return}%, sp500={sp500_return}%, points={len(chart_data)}")
+                
+                return jsonify({
+                    'portfolio_return': round(portfolio_return, 2),
+                    'sp500_return': round(sp500_return, 2),
+                    'chart_data': chart_data,
+                    'period': period_upper,
+                    'from_cache': True
+                })
                     
             except Exception as e:
-                logger.warning(f"Failed to convert pre-rendered chart data to dashboard format: {e}")
+                logger.warning(f"Failed to use cached chart data: {e} - falling back to live calculation")
         
         logger.info(f"No pre-rendered cache available - using live calculation for user {user_id}, period {period_upper}")
         
