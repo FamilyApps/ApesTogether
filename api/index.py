@@ -14389,14 +14389,20 @@ def check_intraday_data():
         
         from datetime import datetime, date
         from models import PortfolioSnapshotIntraday
-        from sqlalchemy import func
+        from sqlalchemy import func, cast, Date
         
-        today = date.today()
+        # CRITICAL: Use Eastern Time to match how snapshots are created
+        today_et = get_market_date()
+        current_time_et = get_market_time()
         
-        # Check intraday snapshots for today
+        logger.info(f"Checking intraday data for {today_et} (ET) - Current time: {current_time_et}")
+        
+        # Check intraday snapshots for today (using ET date)
         today_snapshots = PortfolioSnapshotIntraday.query.filter(
-            func.date(PortfolioSnapshotIntraday.timestamp) == today
+            cast(PortfolioSnapshotIntraday.timestamp, Date) == today_et
         ).all()
+        
+        logger.info(f"Found {len(today_snapshots)} intraday snapshots for {today_et} (ET)")
         
         # Group by user
         user_snapshots = {}
@@ -14427,12 +14433,14 @@ def check_intraday_data():
         
         return jsonify({
             'success': True,
-            'today_date': today.isoformat(),
+            'today_date_et': today_et.isoformat(),
+            'current_time_et': current_time_et.isoformat(),
+            'timezone': 'America/New_York',
             'total_snapshots_today': total_snapshots,
             'users_with_data_today': users_with_data,
             'user_snapshots_today': user_snapshots,
             'recent_snapshots_sample': recent_sample,
-            'message': f'Found {total_snapshots} intraday snapshots for {users_with_data} users today'
+            'message': f'Found {total_snapshots} intraday snapshots for {users_with_data} users on {today_et} (ET)'
         }), 200
     
     except Exception as e:
