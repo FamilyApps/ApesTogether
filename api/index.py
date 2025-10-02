@@ -13128,18 +13128,16 @@ def portfolio_performance_intraday(period):
         user_id = session.get('user_id')
         if not user_id:
             return jsonify({'error': 'User not authenticated'}), 401
-        
         from datetime import datetime, date, timedelta
         from models import PortfolioSnapshotIntraday, MarketData
-        from sqlalchemy import func
+        from sqlalchemy import func, cast, Date
         
         # Calculate date range based on period - use last market day for weekends
-        # Use UTC date for consistency with database timestamps
-        from datetime import timezone
-        utc_now = datetime.now(timezone.utc)
-        today = utc_now.date()
+        # CRITICAL: Use Eastern Time, not UTC!
+        current_time_et = get_market_time()
+        today = current_time_et.date()
         
-        # Use last market day for weekend handling
+        # Use last market day for weekend handling (in ET)
         if today.weekday() == 5:  # Saturday
             market_day = today - timedelta(days=1)  # Friday
         elif today.weekday() == 6:  # Sunday
@@ -13147,8 +13145,8 @@ def portfolio_performance_intraday(period):
         else:
             market_day = today  # Monday-Friday
             
-        logger.info(f"Date calculation: UTC now={utc_now}, today={today}, market_day={market_day}")
-        logger.info(f"Forcing Vercel redeploy - timestamp: {utc_now.isoformat()}")
+        logger.info(f"Date calculation (ET): current_time={current_time_et}, today={today}, market_day={market_day}")
+        logger.info(f"Timezone: America/New_York")
         
         if period == '1D':
             start_date = market_day
@@ -13165,11 +13163,12 @@ def portfolio_performance_intraday(period):
             calculator = PortfolioPerformanceCalculator()
             return jsonify(calculator.get_performance_data(user_id, period)), 200
         
-        # Get intraday snapshots for the user in the date range
+        # Get intraday snapshots for the user in the date range (using ET date extraction)
+        # CRITICAL: Convert to ET timezone BEFORE casting to date to avoid UTC session timezone issues
         snapshots = PortfolioSnapshotIntraday.query.filter(
             PortfolioSnapshotIntraday.user_id == user_id,
-            func.date(PortfolioSnapshotIntraday.timestamp) >= start_date,
-            func.date(PortfolioSnapshotIntraday.timestamp) <= end_date
+            cast(func.timezone('America/New_York', PortfolioSnapshotIntraday.timestamp), Date) >= start_date,
+            cast(func.timezone('America/New_York', PortfolioSnapshotIntraday.timestamp), Date) <= end_date
         ).order_by(PortfolioSnapshotIntraday.timestamp).all()
         
         # Debug logging for 5D chart issue
@@ -13177,20 +13176,20 @@ def portfolio_performance_intraday(period):
         logger.info(f"Date range: {start_date} to {end_date}")
         logger.info(f"Found {len(snapshots)} snapshots")
         
-        # Check what today's date looks like in the database
+        # Check what today's date looks like in the database (using ET date)
         today_snapshots = PortfolioSnapshotIntraday.query.filter(
             PortfolioSnapshotIntraday.user_id == user_id,
-            func.date(PortfolioSnapshotIntraday.timestamp) == today
+            cast(func.timezone('America/New_York', PortfolioSnapshotIntraday.timestamp), Date) == today
         ).count()
-        logger.info(f"Snapshots specifically for today ({today}): {today_snapshots}")
+        logger.info(f"Snapshots specifically for today ({today} ET): {today_snapshots}")
         
         # Also check yesterday for comparison
         yesterday = today - timedelta(days=1)
         yesterday_snapshots = PortfolioSnapshotIntraday.query.filter(
             PortfolioSnapshotIntraday.user_id == user_id,
-            func.date(PortfolioSnapshotIntraday.timestamp) == yesterday
+            cast(func.timezone('America/New_York', PortfolioSnapshotIntraday.timestamp), Date) == yesterday
         ).count()
-        logger.info(f"Snapshots for yesterday ({yesterday}): {yesterday_snapshots}")
+        logger.info(f"Snapshots for yesterday ({yesterday} ET): {yesterday_snapshots}")
         
         if snapshots:
             logger.info(f"First snapshot: {snapshots[0].timestamp}")
