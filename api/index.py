@@ -8,15 +8,15 @@ import json
 import random
 import logging
 import traceback
-import requests
 import uuid
 import time
 import stripe
 import sys
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from functools import wraps
 from dotenv import load_dotenv
+from zoneinfo import ZoneInfo
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime, Boolean, func, text
 from sqlalchemy.pool import NullPool
 from flask import Flask, render_template_string, render_template, redirect, url_for, request, session, flash, jsonify, send_from_directory
@@ -56,6 +56,52 @@ else:
 # Admin credentials from environment variables
 ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
 ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
+
+# =============================================================================
+# TIMEZONE CONFIGURATION (Eastern Time for US Stock Market)
+# =============================================================================
+# Vercel runs in UTC, but we need Eastern Time for market operations
+MARKET_TZ = ZoneInfo('America/New_York')
+
+def get_market_time():
+    """Get current time in Eastern Time (handles DST automatically)"""
+    return datetime.now(MARKET_TZ)
+
+def get_market_date():
+    """Get current date in Eastern Time"""
+    return get_market_time().date()
+
+def is_market_hours(dt=None):
+    """
+    Check if current time (or provided datetime) is during market hours
+    Market hours: Monday-Friday, 9:30 AM - 4:00 PM ET (excluding holidays)
+    
+    Args:
+        dt: datetime object (with timezone). If None, uses current ET time.
+    
+    Returns:
+        bool: True if during market hours
+    """
+    if dt is None:
+        dt = get_market_time()
+    
+    # Ensure datetime is in ET
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=MARKET_TZ)
+    elif dt.tzinfo != MARKET_TZ:
+        dt = dt.astimezone(MARKET_TZ)
+    
+    # Check if weekend
+    if dt.weekday() >= 5:  # Saturday=5, Sunday=6
+        return False
+    
+    # Check if within market hours (9:30 AM - 4:00 PM ET)
+    market_open = dt.replace(hour=9, minute=30, second=0, microsecond=0)
+    market_close = dt.replace(hour=16, minute=0, second=0, microsecond=0)
+    
+    return market_open <= dt <= market_close
+
+# =============================================================================
 
 # Initialize Flask app
 # Use absolute paths for templates and static files in production
@@ -9611,10 +9657,11 @@ def market_open_cron():
                 logger.warning(f"Unauthorized market open attempt")
                 return jsonify({'error': 'Unauthorized'}), 401
         
-        from datetime import datetime
-        current_time = datetime.now()
+        # Use Eastern Time for market operations
+        current_time = get_market_time()
+        today_et = current_time.date()
         
-        logger.info(f"Market open cron job executed at {current_time}")
+        logger.info(f"Market open cron job executed at {current_time.strftime('%Y-%m-%d %H:%M:%S %Z')} (ET date: {today_et})")
         
         # For now, just log that market opened
         # In the future, we could add market open initialization logic here
@@ -9622,7 +9669,9 @@ def market_open_cron():
         return jsonify({
             'success': True,
             'message': 'Market open processing completed',
-            'timestamp': current_time.isoformat()
+            'timestamp': current_time.isoformat(),
+            'market_date_et': today_et.isoformat(),
+            'timezone': 'America/New_York'
         }), 200
     
     except Exception as e:
@@ -9650,16 +9699,18 @@ def market_close_cron():
                 logger.warning(f"Unauthorized market close attempt")
                 return jsonify({'error': 'Unauthorized'}), 401
         
-        from datetime import datetime, date
         from models import User, PortfolioSnapshot
         from portfolio_performance import PortfolioPerformanceCalculator
         from leaderboard_utils import update_leaderboard_cache
         
-        today = date.today()
-        current_time = datetime.now()
+        # Use Eastern Time for market operations
+        current_time = get_market_time()
+        today_et = current_time.date()
         
         results = {
             'timestamp': current_time.isoformat(),
+            'market_date_et': today_et.isoformat(),
+            'timezone': 'America/New_York',
             'users_processed': 0,
             'snapshots_created': 0,
             'snapshots_updated': 0,
@@ -9668,6 +9719,8 @@ def market_close_cron():
             'errors': [],
             'pipeline_phases': []
         }
+        
+        logger.info(f"Market close cron executing for {today_et} (ET)")
         
         # ATOMIC MARKET CLOSE PIPELINE - All phases must succeed or all rollback
         try:
@@ -9679,11 +9732,11 @@ def market_close_cron():
             
             for user in users:
                 try:
-                    # Calculate portfolio value for today
+                    # Calculate portfolio value for today (using ET date)
                     calculator = PortfolioPerformanceCalculator()
-                    portfolio_value = calculator.calculate_portfolio_value(user.id, today)
+                    portfolio_value = calculator.calculate_portfolio_value(user.id, today_et)
                     
-                    logger.info(f"User {user.id} ({user.username}): Calculated value = ${portfolio_value:.2f}")
+                    logger.info(f"User {user.id} ({user.username}): Calculated value = ${portfolio_value:.2f} on {today_et}")
                     
                     # Skip if portfolio value is 0 or None (indicates calculation failure)
                     if portfolio_value is None or portfolio_value <= 0:
@@ -9692,27 +9745,27 @@ def market_close_cron():
                         logger.warning(error_msg)
                         continue
                     
-                    # Check if snapshot already exists for today
+                    # Check if snapshot already exists for today (using ET date)
                     existing_snapshot = PortfolioSnapshot.query.filter_by(
                         user_id=user.id, 
-                        date=today
+                        date=today_et
                     ).first()
                     
                     if existing_snapshot:
                         existing_snapshot.total_value = portfolio_value
                         results['snapshots_updated'] += 1
-                        logger.info(f"Updated snapshot for user {user.id}: ${portfolio_value:.2f}")
+                        logger.info(f"Updated snapshot for user {user.id}: ${portfolio_value:.2f} on {today_et}")
                     else:
-                        # Create new EOD snapshot
+                        # Create new EOD snapshot with ET date
                         snapshot = PortfolioSnapshot(
                             user_id=user.id,
-                            date=today,
+                            date=today_et,  # Use ET date
                             total_value=portfolio_value,
                             cash_flow=0  # Calculate if needed
                         )
                         db.session.add(snapshot)
                         results['snapshots_created'] += 1
-                        logger.info(f"Created snapshot for user {user.id}: ${portfolio_value:.2f}")
+                        logger.info(f"Created snapshot for user {user.id}: ${portfolio_value:.2f} on {today_et}")
                     
                     results['users_processed'] += 1
                     
@@ -14162,12 +14215,13 @@ def collect_intraday_data():
                 logger.warning(f"Unauthorized intraday collection attempt")
                 return jsonify({'error': 'Unauthorized'}), 401
         
-        from datetime import datetime
         from models import User, PortfolioSnapshotIntraday
         from portfolio_performance import PortfolioPerformanceCalculator
         import time
         
-        current_time = datetime.now()
+        # Use eastern Time for all market operations
+        current_time = get_market_time()
+        today_et = current_time.date()
         
         # Don't collect data on weekends
         if current_time.weekday() >= 5:  # Saturday = 5, Sunday = 6
@@ -14176,12 +14230,12 @@ def collect_intraday_data():
                 'success': True,
                 'message': f'Skipped collection - market closed on {current_time.strftime("%A")}',
                 'timestamp': current_time.isoformat(),
+                'timezone': 'America/New_York',
                 'weekend': True
             })
         
         start_time = time.time()
         calculator = PortfolioPerformanceCalculator()
-        
         results = {
             'timestamp': current_time.isoformat(),
             'current_time_et': current_time.strftime('%Y-%m-%d %H:%M:%S ET'),
@@ -14207,17 +14261,17 @@ def collect_intraday_data():
                 spy_price = spy_data['price']
                 sp500_value = spy_price * 10  # Convert SPY to S&P 500 approximation
                 
-                # Store intraday SPY data
+                # Store intraday SPY data with ET date
                 from models import MarketData
                 market_data = MarketData(
                     ticker='SPY_INTRADAY',
-                    date=current_time.date(),
-                    timestamp=current_time,
+                    date=today_et,  # Use ET date instead of UTC
+                    timestamp=current_time,  # TZ-aware timestamp
                     close_price=sp500_value
                 )
                 db.session.add(market_data)
                 results['spy_data_collected'] = True
-                logger.info(f"SPY data collected: ${spy_price} (S&P 500: ${sp500_value})")
+                logger.info(f"SPY data collected: ${spy_price} (S&P 500: ${sp500_value}) on {today_et}")
             else:
                 results['errors'].append("Failed to fetch SPY data")
                 logger.error("Failed to fetch SPY data from AlphaVantage")
@@ -14254,24 +14308,25 @@ def collect_intraday_data():
                 # If this is market close time, also create EOD snapshot
                 if is_market_close:
                     from models import PortfolioSnapshot
-                    today = current_time.date()
                     
-                    # Check if EOD snapshot already exists for today
+                    # Check if EOD snapshot already exists for today (using ET date)
                     existing_eod = PortfolioSnapshot.query.filter_by(
                         user_id=user.id, 
-                        date=today
+                        date=today_et
                     ).first()
                     
                     if existing_eod:
                         existing_eod.total_value = portfolio_value
+                        logger.info(f"Updated EOD snapshot for user {user.id} on {today_et}")
                     else:
                         eod_snapshot = PortfolioSnapshot(
                             user_id=user.id,
-                            date=today,
+                            date=today_et,  # Use ET date
                             total_value=portfolio_value,
                             cash_flow=0
                         )
                         db.session.add(eod_snapshot)
+                        logger.info(f"Created EOD snapshot for user {user.id} on {today_et}")
                 
                 results['users_processed'] += 1
                 

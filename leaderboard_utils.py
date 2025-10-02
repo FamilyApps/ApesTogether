@@ -409,10 +409,18 @@ def get_user_chart_data(user_id, period):
     return fresh_data
 
 def get_last_market_day():
-    """Get the last market day (Monday-Friday, excluding weekends)"""
-    from datetime import date, timedelta
+    """Get the last market day (Monday-Friday, excluding weekends)
     
-    today = date.today()
+    IMPORTANT: Uses Eastern Time to avoid timezone mismatches.
+    Vercel runs in UTC, so we must explicitly use ET for market dates.
+    """
+    from datetime import date, timedelta
+    from zoneinfo import ZoneInfo
+    from datetime import datetime
+    
+    # CRITICAL: Use Eastern Time, not UTC
+    MARKET_TZ = ZoneInfo('America/New_York')
+    today = datetime.now(MARKET_TZ).date()
     
     # If it's Saturday (5) or Sunday (6), go back to Friday
     if today.weekday() == 5:  # Saturday
@@ -565,29 +573,38 @@ def generate_user_portfolio_chart(user_id, period):
     """
     Generate portfolio chart data for a specific user and period
     Returns chart data in format compatible with Chart.js
+    
+    IMPORTANT: Uses Eastern Time to avoid UTC/ET date mismatches.
     """
     import json
     from datetime import datetime, date, timedelta
     from portfolio_performance import PortfolioPerformanceCalculator
+    from zoneinfo import ZoneInfo
     
     try:
-        # Calculate date range for the period
-        today = date.today()
+        # CRITICAL: Use Eastern Time for all date operations
+        MARKET_TZ = ZoneInfo('America/New_York')
+        today = datetime.now(MARKET_TZ).date()
         
         if period == '1D':
             # For 1D charts, use intraday snapshots with proper time formatting
             from models import PortfolioSnapshotIntraday
-            from sqlalchemy import func, and_
+            from sqlalchemy import func, and_, cast, Date
             
-            # Get intraday snapshots for today
+            # CRITICAL: Query intraday snapshots using ET date extraction
+            # Timestamps are TZ-aware (ET), so we extract the date portion in ET
             intraday_snapshots = PortfolioSnapshotIntraday.query.filter(
                 and_(
                     PortfolioSnapshotIntraday.user_id == user_id,
-                    func.date(PortfolioSnapshotIntraday.timestamp) == today
+                    # Cast timestamp to date for comparison (timestamp is already in ET)
+                    cast(PortfolioSnapshotIntraday.timestamp, Date) == today
                 )
             ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
             
+            logger.info(f"Found {len(intraday_snapshots)} intraday snapshots for user {user_id} on {today} (ET)")
+            
             if not intraday_snapshots:
+                logger.warning(f"No intraday snapshots found for user {user_id} on {today} (ET)")
                 # Fallback to daily snapshot if no intraday data
                 daily_snapshot = PortfolioSnapshot.query.filter_by(
                     user_id=user_id, 
@@ -595,6 +612,7 @@ def generate_user_portfolio_chart(user_id, period):
                 ).first()
                 
                 if daily_snapshot:
+                    logger.info(f"Using daily snapshot fallback for user {user_id}")
                     chart_data = {
                         'labels': [today.strftime('%Y-%m-%d')],
                         'datasets': [{
@@ -606,15 +624,23 @@ def generate_user_portfolio_chart(user_id, period):
                         }],
                         'period': period,
                         'user_id': user_id,
-                        'generated_at': datetime.now().isoformat()
+                        'generated_at': datetime.now(MARKET_TZ).isoformat()
                     }
                     return chart_data
                 else:
+                    logger.warning(f"No daily snapshot found either for user {user_id} on {today} (ET)")
                     return None
             
-            # Format intraday chart data with proper time labels
+            # Format intraday chart data with proper time labels (convert to ET)
+            # Timestamps are already TZ-aware in ET, just format them
+            labels = []
+            for snapshot in intraday_snapshots:
+                # Ensure timestamp is in ET
+                ts_et = snapshot.timestamp.astimezone(MARKET_TZ) if snapshot.timestamp.tzinfo else snapshot.timestamp.replace(tzinfo=MARKET_TZ)
+                labels.append(ts_et.strftime('%H:%M'))
+            
             chart_data = {
-                'labels': [snapshot.timestamp.strftime('%H:%M') for snapshot in intraday_snapshots],
+                'labels': labels,
                 'datasets': [{
                     'label': 'Portfolio Value',
                     'data': [float(snapshot.total_value) for snapshot in intraday_snapshots],
