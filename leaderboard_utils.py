@@ -704,6 +704,7 @@ def generate_user_portfolio_chart(user_id, period):
         return chart_data
         
     except Exception as e:
+        # Fixed: Import logging at module level or use print for errors
         print(f"Error generating chart for user {user_id}, period {period}: {str(e)}")
         return None
 
@@ -803,8 +804,15 @@ def update_leaderboard_cache(periods=None):
                 continue
     
     # Generate portfolio charts only for users who made any leaderboard
+    # FIX #3: Skip 1D chart caching since it uses live intraday data via API endpoint
     for user_id in leaderboard_users:
         for period in periods:
+            # Skip 1D charts - they use live intraday data via /api/portfolio/intraday/1D
+            # Caching them here would be stale and cause errors
+            if period == '1D':
+                print(f"⏭ Skipping 1D chart cache for user {user_id} (uses live endpoint)")
+                continue
+            
             try:
                 # Generate chart data for this user and period
                 chart_data = generate_user_portfolio_chart(user_id, period)

@@ -9694,10 +9694,17 @@ def market_close_cron():
         if request.method == 'GET':
             logger.info("Market close cron triggered via GET from Vercel")
         else:
+            # FIX #4: Enhanced logging for POST triggers to investigate manual executions
             # POST requests require proper authentication
+            user_agent = request.headers.get('User-Agent', 'Unknown')
+            source_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+            logger.info(f"Market close triggered via POST - User-Agent: {user_agent}, Source IP: {source_ip}")
+            
             if not auth_header.startswith('Bearer ') or auth_header[7:] != expected_token:
-                logger.warning(f"Unauthorized market close attempt")
+                logger.warning(f"Unauthorized market close attempt from {source_ip}")
                 return jsonify({'error': 'Unauthorized'}), 401
+            
+            logger.info("POST authentication successful - proceeding with market close")
         
         from models import User, PortfolioSnapshot
         from portfolio_performance import PortfolioPerformanceCalculator
@@ -13261,12 +13268,16 @@ def portfolio_performance_intraday(period):
             sp500_return = ((spy_value - first_spy_value) / first_spy_value * 100) if first_spy_value > 0 else 0
             
             # Format date label based on period - use ISO format for Chart.js compatibility
+            # CRITICAL FIX: Convert timestamp to ET before sending to frontend
+            # PostgreSQL returns timestamps in UTC; convert to ET to display correct market hours
             if period == '1D':
-                # For 1D charts, use full ISO timestamp so Chart.js can parse it
-                date_label = snapshot.timestamp.isoformat()
+                # For 1D charts, use full ISO timestamp in ET timezone
+                et_timestamp = snapshot.timestamp.astimezone(MARKET_TZ)
+                date_label = et_timestamp.isoformat()
             elif period == '5D':
-                # For 5D charts, use full ISO timestamp
-                date_label = snapshot.timestamp.isoformat()
+                # For 5D charts, use full ISO timestamp in ET timezone
+                et_timestamp = snapshot.timestamp.astimezone(MARKET_TZ)
+                date_label = et_timestamp.isoformat()
             else:
                 # For longer periods, use ISO date
                 date_label = snapshot.timestamp.date().isoformat()
@@ -14283,8 +14294,10 @@ def collect_intraday_data():
         # Step 2: Get all users
         users = User.query.all()
         
-        # Check if this is the 4:00 PM collection (market close)
-        is_market_close = current_time.hour == 16 and current_time.minute == 0  # 4:00 PM ET
+        # FIX #2: REMOVED duplicate EOD snapshot creation logic
+        # EOD snapshots are now created ONLY by the dedicated market-close cron at 4:00 PM
+        # This intraday cron focuses solely on collecting intraday snapshots every 30 minutes
+        # Reason: Duplicate logic caused conflicts and was redundant with market-close cron
         
         # Batch processing for better performance
         intraday_snapshots = []
@@ -14304,46 +14317,10 @@ def collect_intraday_data():
                     intraday_snapshots.append(intraday_snapshot)
                     results['snapshots_created'] += 1
                 
-                # If this is market close time, also create EOD snapshot
-                if is_market_close:
-                    from models import PortfolioSnapshot
-                    
-                    # Check if EOD snapshot already exists for today (using ET date)
-                    existing_eod = PortfolioSnapshot.query.filter_by(
-                        user_id=user.id, 
-                        date=today_et
-                    ).first()
-                    
-                    if existing_eod:
-                        existing_eod.total_value = portfolio_value
-                        logger.info(f"Updated EOD snapshot for user {user.id} on {today_et}")
-                    else:
-                        eod_snapshot = PortfolioSnapshot(
-                            user_id=user.id,
-                            date=today_et,  # Use ET date
-                            total_value=portfolio_value,
-                            cash_flow=0
-                        )
-                        db.session.add(eod_snapshot)
-                        logger.info(f"Created EOD snapshot for user {user.id} on {today_et}")
-                
                 results['users_processed'] += 1
                 
             except Exception as e:
                 error_msg = f"Error processing user {user.id}: {str(e)}"
-                results['errors'].append(error_msg)
-                logger.error(error_msg)
-        
-        # If this is market close, update leaderboard
-        if is_market_close:
-            try:
-                from leaderboard_utils import update_leaderboard_cache
-                updated_count = update_leaderboard_cache()
-                results['leaderboard_updated'] = True
-                results['leaderboard_entries_updated'] = updated_count
-                logger.info(f"Leaderboard updated with {updated_count} entries")
-            except Exception as e:
-                error_msg = f"Leaderboard update error: {str(e)}"
                 results['errors'].append(error_msg)
                 logger.error(error_msg)
         
