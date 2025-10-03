@@ -4,6 +4,7 @@ Portfolio performance calculation using Modified Dietz method and market benchma
 import requests
 import os
 from datetime import datetime, date, timedelta
+from zoneinfo import ZoneInfo
 import logging
 from typing import Dict, List
 from models import PortfolioSnapshot, MarketData, Stock, Transaction, User, db
@@ -24,6 +25,17 @@ except ImportError:
         return True  # Fallback - assume always market hours
 
 logger = logging.getLogger(__name__)
+
+# Market timezone configuration (Eastern Time for US Stock Market)
+MARKET_TZ = ZoneInfo('America/New_York')
+
+def get_market_date():
+    """Get current date in Eastern Time (not UTC)
+    
+    CRITICAL: Vercel runs in UTC. date.today() returns UTC date which causes
+    +1 day offset after 8 PM ET (midnight UTC). Always use this for market dates.
+    """
+    return datetime.now(MARKET_TZ).date()
 
 # Cache for stock prices (90-second caching like existing system)
 stock_price_cache = {}
@@ -125,7 +137,7 @@ class PortfolioPerformanceCalculator:
     def calculate_portfolio_value(self, user_id: int, target_date: date = None) -> float:
         """Calculate total portfolio value for a user on a specific date"""
         if target_date is None:
-            target_date = date.today()
+            target_date = get_market_date()  # Use ET date, not UTC
         
         user = User.query.get(user_id)
         if not user:
@@ -179,7 +191,7 @@ class PortfolioPerformanceCalculator:
     def create_daily_snapshot(self, user_id: int, target_date: date = None):
         """Create or update daily portfolio snapshot"""
         if target_date is None:
-            target_date = date.today()
+            target_date = get_market_date()  # Use ET date, not UTC
         
         # Check if snapshot already exists
         existing_snapshot = PortfolioSnapshot.query.filter_by(
@@ -271,7 +283,7 @@ class PortfolioPerformanceCalculator:
         
         total_data_points = 0
         errors = []
-        end_date = date.today()
+        end_date = get_market_date()  # Use ET date, not UTC
         
         try:
             # Fetch full historical SPY data once (this gets all available data)
@@ -402,7 +414,7 @@ class PortfolioPerformanceCalculator:
         # Only fetch missing recent dates (avoid historical API calls)
         if missing_dates:
             # Only fetch if missing dates are recent (within last 7 days)
-            today = date.today()
+            today = get_market_date()  # Use ET date, not UTC
             recent_missing = [d for d in missing_dates if (today - d).days <= 7]
             
             # Don't make API calls on weekends
@@ -607,7 +619,7 @@ class PortfolioPerformanceCalculator:
         """Get performance data for 1D charts - shows intraday snapshots from today"""
         from models import PortfolioSnapshotIntraday
         
-        today = date.today()
+        today = get_market_date()  # Use ET date, not UTC
         
         # Get all intraday snapshots for today
         intraday_snapshots = PortfolioSnapshotIntraday.query.filter(
@@ -774,7 +786,7 @@ class PortfolioPerformanceCalculator:
         # Use timezone-aware calculations for DST handling
         from datetime import timezone, timedelta
         eastern_tz = get_market_timezone()
-        today = date.today()
+        today = get_market_date()  # Use ET date, not UTC
         
         # If it's Saturday (5) or Sunday (6), go back to Friday
         if today.weekday() == 5:  # Saturday
@@ -812,9 +824,6 @@ class PortfolioPerformanceCalculator:
         
         # Calculate portfolio return
         portfolio_return = self.calculate_modified_dietz_return(user_id, start_date, end_date)
-        
-        # Calculate S&P 500 return (cached data only)
-        sp500_return = self.calculate_sp500_return(start_date, end_date)
         
         # Get portfolio values for charting (database only)
         snapshots = PortfolioSnapshot.query.filter(
@@ -890,6 +899,20 @@ class PortfolioPerformanceCalculator:
         
         # Filter out weekends from chart data for cleaner visualization
         chart_data = self._filter_business_days(chart_data)
+        
+        # FIX: Extract S&P return from chart data for consistency (Grok-approved)
+        # This ensures card header ALWAYS matches chart's last data point
+        # Previously used separate calculate_sp500_return() which could use different data source
+        sp500_return = 0.0
+        if chart_data and len(chart_data) > 0:
+            # Get last S&P value from chart (already a percentage)
+            last_sp500_pct = chart_data[-1].get('sp500', 0)
+            sp500_return = last_sp500_pct / 100  # Convert back to decimal for consistency
+            logger.info(f"S&P 500 return extracted from chart: {sp500_return*100:.2f}% (last point: {last_sp500_pct}%)")
+        else:
+            # Fallback if no chart data (shouldn't happen, but defensive)
+            sp500_return = self.calculate_sp500_return(start_date, end_date)
+            logger.warning(f"No chart data available, using fallback S&P calculation: {sp500_return*100:.2f}%")
         
         return {
             'portfolio_return': round(portfolio_return * 100, 2),
