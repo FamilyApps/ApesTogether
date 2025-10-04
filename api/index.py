@@ -6121,6 +6121,397 @@ def admin_investigate_sept_deep_dive():
         logger.error(f"Error in Sept deep dive: {str(e)}")
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
+@app.route('/admin/backfill-sept-data', methods=['POST'])
+@login_required
+def admin_backfill_sept_data():
+    """Backfill Sept 2-11 market data using Alpha Vantage and recalculate everything"""
+    try:
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        import requests
+        from datetime import date, datetime, timedelta
+        from models import MarketData, PortfolioSnapshot, User, Stock, UserPortfolioChartCache, LeaderboardCache
+        import json as json_module
+        
+        ALPHA_VANTAGE_KEY = os.environ.get('ALPHA_VANTAGE_API_KEY')
+        if not ALPHA_VANTAGE_KEY:
+            return jsonify({'error': 'ALPHA_VANTAGE_API_KEY not configured'}), 500
+        
+        START_DATE = date(2025, 9, 2)
+        END_DATE = date(2025, 9, 11)
+        
+        results = {
+            'start_time': datetime.now().isoformat(),
+            'phase_1_api_calls': {},
+            'phase_2_data_insertion': {},
+            'phase_3_snapshot_recalculation': {},
+            'phase_4_cache_invalidation': {},
+            'phase_5_verification': {},
+            'success': False,
+            'errors': []
+        }
+        
+        # ========================================================================
+        # PHASE 1: FETCH DATA FROM ALPHA VANTAGE
+        # ========================================================================
+        logger.info("PHASE 1: Fetching historical data from Alpha Vantage")
+        
+        tickers = ['AAPL', 'SSPY', 'TSLA', 'SPY']
+        fetched_data = {}
+        
+        for ticker in tickers:
+            try:
+                logger.info(f"  Fetching {ticker}...")
+                url = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={ticker}&apikey={ALPHA_VANTAGE_KEY}&outputsize=compact'
+                
+                response = requests.get(url, timeout=30)
+                response.raise_for_status()
+                data = response.json()
+                
+                # Validate response
+                if 'Error Message' in data:
+                    results['errors'].append(f"{ticker}: {data['Error Message']}")
+                    results['phase_1_api_calls'][ticker] = {
+                        'success': False,
+                        'error': data['Error Message']
+                    }
+                    continue
+                
+                if 'Note' in data:
+                    results['errors'].append(f"{ticker}: API rate limit - {data['Note']}")
+                    results['phase_1_api_calls'][ticker] = {
+                        'success': False,
+                        'error': 'Rate limit exceeded'
+                    }
+                    continue
+                
+                if 'Time Series (Daily)' not in data:
+                    results['errors'].append(f"{ticker}: Unexpected API response format")
+                    results['phase_1_api_calls'][ticker] = {
+                        'success': False,
+                        'error': 'Invalid response format',
+                        'response_keys': list(data.keys())
+                    }
+                    continue
+                
+                # Extract data for Sept 2-11
+                time_series = data['Time Series (Daily)']
+                ticker_prices = {}
+                
+                current_date = START_DATE
+                while current_date <= END_DATE:
+                    date_str = current_date.strftime('%Y-%m-%d')
+                    if date_str in time_series:
+                        ticker_prices[current_date] = {
+                            'open': float(time_series[date_str]['1. open']),
+                            'high': float(time_series[date_str]['2. high']),
+                            'low': float(time_series[date_str]['3. low']),
+                            'close': float(time_series[date_str]['4. close']),
+                            'volume': int(time_series[date_str]['5. volume'])
+                        }
+                    current_date += timedelta(days=1)
+                
+                fetched_data[ticker] = ticker_prices
+                
+                results['phase_1_api_calls'][ticker] = {
+                    'success': True,
+                    'data_points': len(ticker_prices),
+                    'dates': [str(d) for d in sorted(ticker_prices.keys())],
+                    'sample_close_prices': {str(d): ticker_prices[d]['close'] for d in sorted(ticker_prices.keys())[:3]}
+                }
+                
+                logger.info(f"  ✅ {ticker}: {len(ticker_prices)} data points fetched")
+                
+                # Rate limit: 5 calls/minute for free tier
+                import time
+                time.sleep(12)  # Wait 12 seconds between calls
+                
+            except Exception as e:
+                results['errors'].append(f"{ticker}: {str(e)}")
+                results['phase_1_api_calls'][ticker] = {
+                    'success': False,
+                    'error': str(e)
+                }
+                logger.error(f"  ❌ {ticker}: {str(e)}")
+        
+        # ========================================================================
+        # PHASE 2: INSERT DATA INTO MARKETDATA TABLE
+        # ========================================================================
+        logger.info("PHASE 2: Inserting data into MarketData table")
+        
+        inserted_count = 0
+        updated_count = 0
+        
+        for ticker, prices in fetched_data.items():
+            ticker_inserted = 0
+            ticker_updated = 0
+            
+            for trade_date, price_data in prices.items():
+                # Check if entry already exists
+                existing = MarketData.query.filter_by(
+                    ticker=ticker,
+                    date=trade_date
+                ).first()
+                
+                if existing:
+                    # Update existing
+                    existing.open_price = price_data['open']
+                    existing.high_price = price_data['high']
+                    existing.low_price = price_data['low']
+                    existing.close_price = price_data['close']
+                    existing.volume = price_data['volume']
+                    ticker_updated += 1
+                else:
+                    # Insert new
+                    market_data = MarketData(
+                        ticker=ticker,
+                        date=trade_date,
+                        open_price=price_data['open'],
+                        high_price=price_data['high'],
+                        low_price=price_data['low'],
+                        close_price=price_data['close'],
+                        volume=price_data['volume']
+                    )
+                    db.session.add(market_data)
+                    ticker_inserted += 1
+            
+            inserted_count += ticker_inserted
+            updated_count += ticker_updated
+            
+            results['phase_2_data_insertion'][ticker] = {
+                'inserted': ticker_inserted,
+                'updated': ticker_updated,
+                'total': ticker_inserted + ticker_updated
+            }
+        
+        db.session.commit()
+        logger.info(f"  ✅ Inserted: {inserted_count}, Updated: {updated_count}")
+        
+        # ========================================================================
+        # PHASE 3: RECALCULATE PORTFOLIO SNAPSHOTS
+        # ========================================================================
+        logger.info("PHASE 3: Recalculating portfolio snapshots for all users")
+        
+        from portfolio_performance import PortfolioPerformanceCalculator
+        calculator = PortfolioPerformanceCalculator()
+        
+        all_users = User.query.all()
+        recalculated_users = {}
+        
+        for user in all_users:
+            before_snapshots = {}
+            after_snapshots = {}
+            
+            # Get BEFORE values
+            current_date = START_DATE
+            while current_date <= END_DATE:
+                snapshot = PortfolioSnapshot.query.filter_by(
+                    user_id=user.id,
+                    date=current_date
+                ).first()
+                if snapshot:
+                    before_snapshots[str(current_date)] = snapshot.total_value
+                current_date += timedelta(days=1)
+            
+            # Recalculate
+            try:
+                current_date = START_DATE
+                while current_date <= END_DATE:
+                    # Get user's holdings on this date
+                    holdings = db.session.query(
+                        Stock.ticker,
+                        func.sum(Stock.quantity).label('net_quantity')
+                    ).filter(
+                        Stock.user_id == user.id,
+                        Stock.purchase_date <= current_date
+                    ).group_by(Stock.ticker).having(
+                        func.sum(Stock.quantity) > 0
+                    ).all()
+                    
+                    # Calculate portfolio value using NEW market data
+                    portfolio_value = 0.0
+                    for ticker, qty in holdings:
+                        market_data = MarketData.query.filter_by(
+                            ticker=ticker,
+                            date=current_date
+                        ).first()
+                        
+                        if market_data:
+                            portfolio_value += qty * market_data.close_price
+                    
+                    # Update or create snapshot
+                    snapshot = PortfolioSnapshot.query.filter_by(
+                        user_id=user.id,
+                        date=current_date
+                    ).first()
+                    
+                    if snapshot:
+                        snapshot.total_value = portfolio_value
+                    else:
+                        snapshot = PortfolioSnapshot(
+                            user_id=user.id,
+                            date=current_date,
+                            total_value=portfolio_value,
+                            cash_flow=0.0
+                        )
+                        db.session.add(snapshot)
+                    
+                    after_snapshots[str(current_date)] = portfolio_value
+                    
+                    current_date += timedelta(days=1)
+                
+                db.session.commit()
+                
+                # Calculate differences
+                changes = {}
+                for date_str in before_snapshots.keys():
+                    before = before_snapshots.get(date_str, 0)
+                    after = after_snapshots.get(date_str, 0)
+                    if before != after:
+                        changes[date_str] = {
+                            'before': round(before, 2),
+                            'after': round(after, 2),
+                            'difference': round(after - before, 2),
+                            'pct_change': round(((after - before) / before * 100) if before > 0 else 0, 2)
+                        }
+                
+                recalculated_users[user.username] = {
+                    'user_id': user.id,
+                    'snapshots_updated': len(after_snapshots),
+                    'values_changed': len(changes),
+                    'changes': changes
+                }
+                
+                logger.info(f"  ✅ {user.username}: {len(changes)} values changed")
+                
+            except Exception as e:
+                results['errors'].append(f"Recalculation failed for {user.username}: {str(e)}")
+                logger.error(f"  ❌ {user.username}: {str(e)}")
+        
+        results['phase_3_snapshot_recalculation'] = recalculated_users
+        
+        # ========================================================================
+        # PHASE 4: INVALIDATE ALL CACHES
+        # ========================================================================
+        logger.info("PHASE 4: Clearing all caches")
+        
+        # Cache 1: UserPortfolioChartCache
+        chart_cache_count = UserPortfolioChartCache.query.delete()
+        
+        # Cache 2: LeaderboardCache
+        leaderboard_cache_count = LeaderboardCache.query.delete()
+        
+        # Cache 3: SP500ChartCache (if exists)
+        try:
+            from models import SP500ChartCache
+            sp500_cache_count = SP500ChartCache.query.delete()
+        except:
+            sp500_cache_count = 0
+        
+        db.session.commit()
+        
+        results['phase_4_cache_invalidation'] = {
+            'UserPortfolioChartCache_cleared': chart_cache_count,
+            'LeaderboardCache_cleared': leaderboard_cache_count,
+            'SP500ChartCache_cleared': sp500_cache_count,
+            'total_cache_entries_cleared': chart_cache_count + leaderboard_cache_count + sp500_cache_count
+        }
+        
+        logger.info(f"  ✅ Cleared {chart_cache_count + leaderboard_cache_count + sp500_cache_count} cache entries")
+        
+        # ========================================================================
+        # PHASE 5: VERIFICATION - DATA FLOW TRACE
+        # ========================================================================
+        logger.info("PHASE 5: Verifying data flow end-to-end")
+        
+        # Verify witty-raven's data specifically
+        witty_raven = User.query.filter_by(username='witty-raven').first()
+        if witty_raven:
+            verification = {
+                'market_data_check': {},
+                'snapshot_values': {},
+                'cache_status': {}
+            }
+            
+            # Check market data now exists
+            for ticker in ['AAPL', 'SSPY', 'TSLA']:
+                count = MarketData.query.filter(
+                    and_(
+                        MarketData.ticker == ticker,
+                        MarketData.date >= START_DATE,
+                        MarketData.date <= END_DATE
+                    )
+                ).count()
+                verification['market_data_check'][ticker] = {
+                    'data_points': count,
+                    'status': '✅ COMPLETE' if count > 0 else '❌ MISSING'
+                }
+            
+            # Check snapshot values
+            snapshots = PortfolioSnapshot.query.filter(
+                and_(
+                    PortfolioSnapshot.user_id == witty_raven.id,
+                    PortfolioSnapshot.date >= START_DATE,
+                    PortfolioSnapshot.date <= END_DATE
+                )
+            ).order_by(PortfolioSnapshot.date).all()
+            
+            for snapshot in snapshots:
+                verification['snapshot_values'][str(snapshot.date)] = round(snapshot.total_value, 2)
+            
+            # Verify no frozen values (consecutive days should differ)
+            frozen_count = 0
+            prev_value = None
+            for snapshot in snapshots:
+                if prev_value is not None and abs(snapshot.total_value - prev_value) < 0.01:
+                    frozen_count += 1
+                prev_value = snapshot.total_value
+            
+            verification['frozen_values_remaining'] = frozen_count
+            verification['data_quality'] = '✅ GOOD' if frozen_count < 3 else '⚠️ STILL FROZEN'
+            
+            # Check cache status
+            verification['cache_status'] = {
+                'chart_cache_entries': UserPortfolioChartCache.query.filter_by(user_id=witty_raven.id).count(),
+                'leaderboard_cache_entries': LeaderboardCache.query.count(),
+                'status': '✅ CLEARED' if UserPortfolioChartCache.query.filter_by(user_id=witty_raven.id).count() == 0 else '⚠️ STILL CACHED'
+            }
+            
+            results['phase_5_verification'] = verification
+        
+        # ========================================================================
+        # FINAL STATUS
+        # ========================================================================
+        results['end_time'] = datetime.now().isoformat()
+        results['success'] = len(results['errors']) == 0
+        results['summary'] = {
+            'api_calls_succeeded': sum(1 for v in results['phase_1_api_calls'].values() if v.get('success')),
+            'api_calls_failed': sum(1 for v in results['phase_1_api_calls'].values() if not v.get('success')),
+            'market_data_inserted': inserted_count,
+            'market_data_updated': updated_count,
+            'users_recalculated': len(recalculated_users),
+            'cache_entries_cleared': chart_cache_count + leaderboard_cache_count + sp500_cache_count,
+            'errors': len(results['errors'])
+        }
+        
+        logger.info("=" * 80)
+        logger.info("BACKFILL COMPLETE")
+        logger.info(f"Success: {results['success']}")
+        logger.info(f"Errors: {len(results['errors'])}")
+        logger.info("=" * 80)
+        
+        return jsonify(results), 200
+        
+    except Exception as e:
+        logger.error(f"Error in backfill: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/metrics')
 @login_required
 def admin_metrics():
