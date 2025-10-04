@@ -6512,6 +6512,25 @@ def admin_backfill_sept_data():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/run-sept-backfill')
+@login_required
+def admin_run_sept_backfill():
+    """GET wrapper for backfill - just visit this URL to trigger the backfill"""
+    try:
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        # Call the POST endpoint internally
+        return admin_backfill_sept_data()
+        
+    except Exception as e:
+        logger.error(f"Error in backfill wrapper: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/metrics')
 @login_required
 def admin_metrics():
