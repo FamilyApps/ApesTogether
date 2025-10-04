@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, date
 from functools import wraps
 from dotenv import load_dotenv
 from zoneinfo import ZoneInfo
-from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime, Boolean, func, text
+from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime, Boolean, func, text, and_, or_, cast, Date
 from sqlalchemy.pool import NullPool
 from flask import Flask, render_template_string, render_template, redirect, url_for, request, session, flash, jsonify, send_from_directory
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
