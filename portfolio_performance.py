@@ -840,9 +840,34 @@ class PortfolioPerformanceCalculator:
         # Normalize both to percentage change from start
         chart_data = []
         
-        # Get user's actual portfolio start date (first snapshot)
+        # Get user's actual portfolio start date (first snapshot) - GLOBAL baseline
         user_first_snapshot = PortfolioSnapshot.query.filter_by(user_id=user_id)\
             .order_by(PortfolioSnapshot.date.asc()).first()
+        
+        # FIX (Grok-validated): Use global baseline for consistency across all periods
+        # This prevents scale issues in shorter periods like 1M
+        if user_first_snapshot:
+            global_baseline_value = user_first_snapshot.total_value
+            global_baseline_date = user_first_snapshot.date
+            logger.info(f"Using global baseline for {period}: ${global_baseline_value:.2f} from {global_baseline_date}")
+        else:
+            # Fallback to period's first snapshot if no global baseline
+            global_baseline_value = snapshots[0].total_value if snapshots else 0
+            global_baseline_date = snapshots[0].date if snapshots else None
+            logger.warning(f"No global baseline found, using period baseline: ${global_baseline_value:.2f}")
+        
+        # DIAGNOSTIC LOGGING for 1M scale issue
+        if period == '1M' and snapshots:
+            logger.info(f"=== 1M CHART DIAGNOSTIC ===")
+            logger.info(f"Period: {period}, User: {user_id}")
+            logger.info(f"Query date range: {start_date} to {end_date}")
+            logger.info(f"Total snapshots retrieved: {len(snapshots)}")
+            logger.info(f"First snapshot in period: date={snapshots[0].date}, value=${snapshots[0].total_value:.2f}")
+            logger.info(f"Last snapshot in period: date={snapshots[-1].date}, value=${snapshots[-1].total_value:.2f}")
+            logger.info(f"Global baseline: date={global_baseline_date}, value=${global_baseline_value:.2f}")
+            if global_baseline_value > 0:
+                expected_return = ((snapshots[-1].total_value - global_baseline_value) / global_baseline_value) * 100
+                logger.info(f"Expected 1M return (from global baseline): {expected_return:.2f}%")
         
         if snapshots and sp500_data:
             # Find S&P 500 data for the full period (always show full S&P line)
@@ -852,6 +877,8 @@ class PortfolioPerformanceCalculator:
                 for date_key in sp500_dates:
                     if date_key >= start_date:
                         period_start_sp500 = sp500_data[date_key]
+                        if period == '1M':
+                            logger.info(f"S&P baseline for 1M: date={date_key}, value=${period_start_sp500:.2f}")
                         break
                 
                 if period_start_sp500:
@@ -867,9 +894,9 @@ class PortfolioPerformanceCalculator:
                             if user_first_snapshot and date_key >= user_first_snapshot.date and len(snapshots) > 0:
                                 # Find portfolio snapshot for this date
                                 portfolio_snapshot = next((s for s in snapshots if s.date == date_key), None)
-                                if portfolio_snapshot and snapshots[0].total_value > 0:
-                                    start_portfolio_value = snapshots[0].total_value
-                                    portfolio_pct = ((portfolio_snapshot.total_value - start_portfolio_value) / start_portfolio_value) * 100
+                                # FIX: Use global baseline instead of period baseline for consistency
+                                if portfolio_snapshot and global_baseline_value > 0:
+                                    portfolio_pct = ((portfolio_snapshot.total_value - global_baseline_value) / global_baseline_value) * 100
                             
                             chart_data.append({
                                 'date': date_key.isoformat(),

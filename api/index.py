@@ -13172,11 +13172,23 @@ def portfolio_performance_intraday(period):
         
         # Get intraday snapshots for the user in the date range (using ET date extraction)
         # CRITICAL: Convert to ET timezone BEFORE casting to date to avoid UTC session timezone issues
-        snapshots = PortfolioSnapshotIntraday.query.filter(
-            PortfolioSnapshotIntraday.user_id == user_id,
-            cast(func.timezone('America/New_York', PortfolioSnapshotIntraday.timestamp), Date) >= start_date,
-            cast(func.timezone('America/New_York', PortfolioSnapshotIntraday.timestamp), Date) <= end_date
-        ).order_by(PortfolioSnapshotIntraday.timestamp).all()
+        # FIX (Grok-validated): For 1D, use exact date match to prevent including previous day's data
+        if period == '1D':
+            # Use exact date match for single day - avoids edge cases with range queries
+            # at_time_zone() is more explicit than func.timezone() and avoids cast issues
+            snapshots = PortfolioSnapshotIntraday.query.filter(
+                PortfolioSnapshotIntraday.user_id == user_id,
+                func.date(func.timezone('America/New_York', PortfolioSnapshotIntraday.timestamp)) == market_day
+            ).order_by(PortfolioSnapshotIntraday.timestamp).all()
+            logger.info(f"1D Chart: Querying for exact date {market_day} (ET)")
+        else:
+            # For 5D and other periods, use date range
+            snapshots = PortfolioSnapshotIntraday.query.filter(
+                PortfolioSnapshotIntraday.user_id == user_id,
+                cast(func.timezone('America/New_York', PortfolioSnapshotIntraday.timestamp), Date) >= start_date,
+                cast(func.timezone('America/New_York', PortfolioSnapshotIntraday.timestamp), Date) <= end_date
+            ).order_by(PortfolioSnapshotIntraday.timestamp).all()
+            logger.info(f"{period} Chart: Querying date range {start_date} to {end_date} (ET)")
         
         # Debug logging for 5D chart issue
         logger.info(f"5D Chart Debug - Period: {period}, User: {user_id}")
