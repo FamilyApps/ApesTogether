@@ -5709,7 +5709,7 @@ def admin_investigate_sept_snapshots():
             results['user_info'] = {
                 'username': user.username,
                 'email': user.email,
-                'created_at': str(user.created_at)
+                'oauth_provider': user.oauth_provider
             }
         
         # Get snapshots
@@ -5720,6 +5720,11 @@ def admin_investigate_sept_snapshots():
                 PortfolioSnapshot.date <= END_DATE
             )
         ).order_by(PortfolioSnapshot.date).all()
+        
+        # Get first activity date from earliest snapshot (any date, not just this period)
+        first_snapshot = PortfolioSnapshot.query.filter_by(user_id=USER_ID).order_by(PortfolioSnapshot.date.asc()).first()
+        if first_snapshot and user:
+            results['user_info']['first_activity_date'] = str(first_snapshot.date)
         
         if snapshots:
             baseline = snapshots[0].total_value

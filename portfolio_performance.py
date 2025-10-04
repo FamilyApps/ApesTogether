@@ -890,7 +890,9 @@ class PortfolioPerformanceCalculator:
                             
                             # FIX (Grok-validated): Use short date format for category scale (multi-day periods)
                             # Category scale needs discrete labels like 'Sep 26', not ISO dates
-                            date_label = date_key.strftime('%b %d') if period != '1D' else date_key.isoformat()
+                            # Ensure we're working with date object, not datetime with time component
+                            date_only = date_key.date() if hasattr(date_key, 'date') else date_key
+                            date_label = date_only.strftime('%b %d') if period != '1D' else date_key.isoformat()
                             
                             chart_data.append({
                                 'date': date_label,
@@ -913,7 +915,8 @@ class PortfolioPerformanceCalculator:
                         sp500_pct = ((sp500_data[date_key] - start_sp500_value) / start_sp500_value) * 100
                         
                         # Use short date format for category scale (multi-day periods)
-                        date_label = date_key.strftime('%b %d') if period != '1D' else date_key.isoformat()
+                        date_only = date_key.date() if hasattr(date_key, 'date') else date_key
+                        date_label = date_only.strftime('%b %d') if period != '1D' else date_key.isoformat()
                         
                         chart_data.append({
                             'date': date_label,
