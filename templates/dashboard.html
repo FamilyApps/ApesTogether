@@ -685,7 +685,7 @@ function updatePerformanceChart(data) {
                                 unit: currentPeriod === '1D' ? 'hour' : (currentPeriod === '5D' ? 'day' : 'day'),
                                 displayFormats: {
                                     hour: 'h:mm a',
-                                    day: currentPeriod === '5D' ? 'ddd' : 'MMM dd',
+                                    day: currentPeriod === '5D' ? 'MMM d' : 'MMM dd',  // FIX: Use 'MMM d' for 5D (Sep 29, Oct 2)
                                     week: 'MMM dd',
                                     month: 'MMM yyyy'
                                 },
