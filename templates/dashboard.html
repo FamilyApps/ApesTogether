@@ -636,6 +636,13 @@ function updatePerformanceChart(data) {
                         intersect: false,
                         mode: 'index'
                     },
+                    elements: {
+                        line: {
+                            // FIX: Prevent long gap lines in 5D chart (Grok-validated)
+                            // For 5D/1D, don't connect across gaps > 1 hour (overnight/weekend)
+                            spanGaps: currentPeriod === '5D' || currentPeriod === '1D' ? 3600000 : true  // 1 hour in ms
+                        }
+                    },
                     plugins: {
                         legend: {
                             position: 'top',
