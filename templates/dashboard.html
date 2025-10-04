@@ -552,48 +552,38 @@ function updatePerformanceChart(data) {
     setTimeout(() => {
         console.log('Inside setTimeout, creating chart...');
         
-        // Use time scale for all periods for proper date formatting
-        const useLinearScale = false;
+        // FIX (Grok-validated): Use category scale for multi-day periods to eliminate empty spaces
+        // Category treats dates as discrete labels (no time gaps), while time scale for 1D preserves intraday spacing
+        const useCategoryScale = currentPeriod !== '1D';
         
-        const portfolioDataPoints = data.chart_data.map((item, index) => {
-            let xValue;
-            if (useLinearScale) {
-                xValue = index;
-            } else {
-                // For time scale, parse date more carefully
-                const dateStr = item.date;
-                if (dateStr.includes('T')) {
-                    // Already has time component
-                    xValue = new Date(dateStr);
-                } else {
-                    // Add time component to avoid timezone issues
-                    xValue = new Date(dateStr + 'T12:00:00');
-                }
-            }
-            return { x: xValue, y: item.portfolio };
-        });
+        // For category scale, extract labels and y-values separately
+        let labels = [];
+        let portfolioDataPoints = [];
+        let sp500DataPoints = [];
         
-        const sp500DataPoints = data.chart_data.map((item, index) => {
-            let xValue;
-            if (useLinearScale) {
-                xValue = index;
-            } else {
-                // For time scale, parse date more carefully
+        if (useCategoryScale) {
+            // Category scale: Use date labels from backend, map to y-values only
+            labels = data.chart_data.map(item => item.date);  // Backend sends formatted labels like 'Sep 26'
+            portfolioDataPoints = data.chart_data.map(item => item.portfolio);
+            sp500DataPoints = data.chart_data.map(item => item.sp500);
+        } else {
+            // Time scale (1D only): Use {x: Date, y: value} format for proper time positioning
+            portfolioDataPoints = data.chart_data.map(item => {
                 const dateStr = item.date;
-                if (dateStr.includes('T')) {
-                    // Already has time component
-                    xValue = new Date(dateStr);
-                } else {
-                    // Add time component to avoid timezone issues
-                    xValue = new Date(dateStr + 'T12:00:00');
-                }
-            }
-            return { x: xValue, y: item.sp500 };
-        });
+                const xValue = dateStr.includes('T') ? new Date(dateStr) : new Date(dateStr + 'T12:00:00');
+                return { x: xValue, y: item.portfolio };
+            });
+            sp500DataPoints = data.chart_data.map(item => {
+                const dateStr = item.date;
+                const xValue = dateStr.includes('T') ? new Date(dateStr) : new Date(dateStr + 'T12:00:00');
+                return { x: xValue, y: item.sp500 };
+            });
+        }
         
         console.log('Chart data points sample:', {
-            useLinearScale,
+            useCategoryScale,
             currentPeriod,
+            labels: useCategoryScale ? labels.slice(0, 3) : 'N/A (time scale)',
             portfolio: portfolioDataPoints.slice(0, 3),
             sp500: sp500DataPoints.slice(0, 3),
             raw_data: data.chart_data.slice(0, 3)
@@ -603,6 +593,7 @@ function updatePerformanceChart(data) {
             performanceChart = new Chart(ctx, {
                 type: 'line',
                 data: {
+                    labels: useCategoryScale ? labels : undefined,  // Only for category scale
                     datasets: [
                         {
                             label: 'Your Portfolio',
@@ -613,25 +604,8 @@ function updatePerformanceChart(data) {
                             fill: false,
                             tension: 0.1,
                             pointRadius: 0,
-                            pointHoverRadius: 4,
-                            // FIX: Skip drawing line segment if gap > 2 hours (overnight/weekend)
-                            segment: {
-                                borderColor: ctx => {
-                                    if (currentPeriod === '5D' || currentPeriod === '1D') {
-                                        const idx = ctx.p0DataIndex;
-                                        const p0 = ctx.p0;
-                                        const p1 = ctx.p1;
-                                        if (p0 && p1 && p0.parsed && p1.parsed) {
-                                            const timeDiff = p1.parsed.x - p0.parsed.x;
-                                            // If gap > 2 hours (7200000 ms), make line transparent
-                                            if (timeDiff > 7200000) {
-                                                return 'transparent';
-                                            }
-                                        }
-                                    }
-                                    return undefined; // Use default color
-                                }
-                            }
+                            pointHoverRadius: 4
+                            // Segment styling removed - category scale eliminates gaps naturally
                         },
                         {
                             label: 'S&P 500',
@@ -643,25 +617,8 @@ function updatePerformanceChart(data) {
                             tension: 0.1,
                             borderDash: [5, 5],
                             pointRadius: 0,
-                            pointHoverRadius: 4,
-                            // FIX: Skip drawing line segment if gap > 2 hours (overnight/weekend)
-                            segment: {
-                                borderColor: ctx => {
-                                    if (currentPeriod === '5D' || currentPeriod === '1D') {
-                                        const idx = ctx.p0DataIndex;
-                                        const p0 = ctx.p0;
-                                        const p1 = ctx.p1;
-                                        if (p0 && p1 && p0.parsed && p1.parsed) {
-                                            const timeDiff = p1.parsed.x - p0.parsed.x;
-                                            // If gap > 2 hours (7200000 ms), make line transparent
-                                            if (timeDiff > 7200000) {
-                                                return 'transparent';
-                                            }
-                                        }
-                                    }
-                                    return undefined; // Use default color
-                                }
-                            }
+                            pointHoverRadius: 4
+                            // Segment styling removed - category scale eliminates gaps naturally
                         }
                     ]
                 },
@@ -674,9 +631,7 @@ function updatePerformanceChart(data) {
                     },
                     elements: {
                         line: {
-                            // FIX: Prevent long gap lines in 5D chart (Grok-validated)
-                            // For 5D/1D, don't connect across gaps > 1 hour (overnight/weekend)
-                            spanGaps: currentPeriod === '5D' || currentPeriod === '1D' ? 3600000 : true  // 1 hour in ms
+                            // spanGaps removed - category scale handles gaps naturally by skipping missing dates
                         }
                     },
                     plugins: {
@@ -687,20 +642,15 @@ function updatePerformanceChart(data) {
                         tooltip: {
                             callbacks: {
                                 title: function(context) {
-                                    // For linear scale, show the actual date instead of index
-                                    if (useLinearScale && context[0] && data.chart_data) {
+                                    // For category scale, show formatted date from data
+                                    if (useCategoryScale && context[0] && data.chart_data) {
                                         const dataIndex = context[0].dataIndex;
                                         if (data.chart_data[dataIndex]) {
-                                            const date = new Date(data.chart_data[dataIndex].date);
-                                            return date.toLocaleDateString('en-US', { 
-                                                weekday: 'short',
-                                                month: 'short', 
-                                                day: 'numeric',
-                                                year: 'numeric'
-                                            });
+                                            // Backend date might be short format - expand for tooltip
+                                            return labels[dataIndex] + ', 2025';  // Add year for context
                                         }
                                     }
-                                    // For time scale, use default behavior
+                                    // For time scale (1D), use default behavior
                                     return Chart.defaults.plugins.tooltip.callbacks.title(context);
                                 },
                                 label: function(context) {
@@ -711,22 +661,22 @@ function updatePerformanceChart(data) {
                     },
                     scales: {
                         x: {
-                            type: 'time',
+                            type: useCategoryScale ? 'category' : 'time',  // FIX: Category for multi-day to skip gaps
                             display: true,
                             title: {
                                 display: true,
                                 text: currentPeriod === '1D' ? 'Time (ET)' : 'Date'
                             },
-                            time: {
-                                unit: currentPeriod === '1D' ? 'hour' : (currentPeriod === '5D' ? 'day' : 'day'),
-                                displayFormats: {
-                                    hour: 'h:mm a',
-                                    day: currentPeriod === '5D' ? 'MMM d' : 'MMM dd',  // FIX: Use 'MMM d' for 5D (Sep 29, Oct 2)
-                                    week: 'MMM dd',
-                                    month: 'MMM yyyy'
-                                },
-                                tooltipFormat: currentPeriod === '1D' ? 'MMM dd, h:mm a' : 'MMM dd, yyyy'
-                            },
+                            // Time scale config only applies to 1D
+                            ...(useCategoryScale ? {} : {
+                                time: {
+                                    unit: 'hour',
+                                    displayFormats: {
+                                        hour: 'h:mm a'
+                                    },
+                                    tooltipFormat: 'MMM dd, h:mm a'
+                                }
+                            }),
                             ticks: {
                                 maxTicksLimit: currentPeriod === '1D' ? 8 : 10,
                                 maxRotation: 45,

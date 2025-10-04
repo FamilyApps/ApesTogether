@@ -888,8 +888,12 @@ class PortfolioPerformanceCalculator:
                                     start_portfolio_value = snapshots[0].total_value
                                     portfolio_pct = ((portfolio_snapshot.total_value - start_portfolio_value) / start_portfolio_value) * 100
                             
+                            # FIX (Grok-validated): Use short date format for category scale (multi-day periods)
+                            # Category scale needs discrete labels like 'Sep 26', not ISO dates
+                            date_label = date_key.strftime('%b %d') if period != '1D' else date_key.isoformat()
+                            
                             chart_data.append({
-                                'date': date_key.isoformat(),
+                                'date': date_label,
                                 'portfolio': round(portfolio_pct, 2) if portfolio_pct is not None else None,
                                 'sp500': round(sp500_pct, 2)
                             })
@@ -908,8 +912,11 @@ class PortfolioPerformanceCalculator:
                     if date_key in sp500_data:
                         sp500_pct = ((sp500_data[date_key] - start_sp500_value) / start_sp500_value) * 100
                         
+                        # Use short date format for category scale (multi-day periods)
+                        date_label = date_key.strftime('%b %d') if period != '1D' else date_key.isoformat()
+                        
                         chart_data.append({
-                            'date': date_key.isoformat(),
+                            'date': date_label,
                             'portfolio': 0,  # No portfolio data available
                             'sp500': round(sp500_pct, 2)
                         })
