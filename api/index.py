@@ -5872,37 +5872,34 @@ def admin_investigate_sept_snapshots():
             })
         
         # Check market data availability
+        # Collect unique tickers from the holdings we calculated above
         all_stocks = set()
-        for snapshot in snapshots:
-            if snapshot.holdings:
-                try:
-                    holdings_dict = snapshot.holdings if isinstance(snapshot.holdings, dict) else json_module.loads(str(snapshot.holdings).replace("'", '"'))
-                    all_stocks.update(holdings_dict.keys())
-                except Exception as e:
-                    logger.warning(f"Could not parse holdings for {snapshot.date}: {e}")
+        for snapshot_data in results['snapshots']:
+            if 'holdings' in snapshot_data and snapshot_data['holdings']:
+                all_stocks.update(snapshot_data['holdings'].keys())
         
         results['stocks_in_portfolio'] = sorted(list(all_stocks))
         
-        for symbol in all_stocks:
-            stock = Stock.query.filter_by(symbol=symbol).first()
-            if stock:
-                market_data = MarketData.query.filter(
-                    and_(
-                        MarketData.stock_id == stock.id,
-                        MarketData.date >= START_DATE,
-                        MarketData.date <= END_DATE
-                    )
-                ).order_by(MarketData.date).all()
-                
-                results['market_data_check'][symbol] = {
-                    'stock_id': stock.id,
+        # Check if market data exists for each stock
+        for ticker in all_stocks:
+            market_data = MarketData.query.filter(
+                and_(
+                    MarketData.ticker == ticker,
+                    MarketData.date >= START_DATE,
+                    MarketData.date <= END_DATE
+                )
+            ).order_by(MarketData.date).all()
+            
+            if market_data:
+                results['market_data_check'][ticker] = {
                     'data_points_found': len(market_data),
                     'dates': [str(md.date) for md in market_data],
                     'prices': [round(md.close_price, 2) for md in market_data]
                 }
             else:
-                results['market_data_check'][symbol] = {
-                    'error': 'Stock not found in database'
+                results['market_data_check'][ticker] = {
+                    'data_points_found': 0,
+                    'error': 'No market data found for this period'
                 }
         
         # Summary analysis
