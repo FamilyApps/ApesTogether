@@ -218,7 +218,15 @@ class PortfolioPerformanceCalculator:
         db.session.commit()
     
     def calculate_daily_cash_flow(self, user_id: int, target_date: date) -> float:
-        """Calculate net cash flow (deposits - withdrawals) for a specific date"""
+        """Calculate net cash flow (external deposits/withdrawals) for a specific date
+        
+        CRITICAL FIX (Grok-validated): In a stock-only portfolio where users don't deposit/withdraw cash,
+        stock purchases = EXTERNAL DEPOSITS (adding value to portfolio)
+        stock sales = EXTERNAL WITHDRAWALS (removing value from portfolio)
+        
+        Modified Dietz formula: return = (end_value - start_value - net_cash_flow) / (start_value + weighted_cash_flow)
+        If buy/sell were treated as internal reallocations (cash_flow = 0), the formula would be wrong.
+        """
         transactions = Transaction.query.filter(
             and_(
                 Transaction.user_id == user_id,
@@ -230,9 +238,9 @@ class PortfolioPerformanceCalculator:
         for transaction in transactions:
             transaction_value = transaction.quantity * transaction.price
             if transaction.transaction_type == 'buy':
-                cash_flow -= transaction_value  # Money out (investment)
+                cash_flow += transaction_value  # ✅ External deposit (user adds stock to portfolio)
             else:  # sell
-                cash_flow += transaction_value  # Money in (divestment)
+                cash_flow -= transaction_value  # ✅ External withdrawal (user removes stock from portfolio)
         
         return cash_flow
     

@@ -17,8 +17,13 @@ def leaderboard_home():
     category = request.args.get('category', 'all')  # all, small_cap, large_cap
     
     # Try to serve pre-rendered HTML for maximum performance (1-5ms response time)
+    # GROK-VALIDATED: Serve auth-specific version for correct nav menu
     from models import LeaderboardCache
-    cache_key = f"{period}_{category}"
+    
+    # Determine which cached version to serve based on authentication status
+    auth_suffix = '_auth' if current_user.is_authenticated else '_anon'
+    cache_key = f"{period}_{category}{auth_suffix}"
+    
     cache_entry = LeaderboardCache.query.filter_by(period=cache_key).first()
     
     if cache_entry and cache_entry.rendered_html:

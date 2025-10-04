@@ -5677,6 +5677,34 @@ def fix_all_columns():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/clear-chart-cache')
+@login_required
+def admin_clear_chart_cache():
+    """Clear all cached chart data to force regeneration with new date format"""
+    try:
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import UserPortfolioChartCache
+        
+        # Count before deletion
+        count = UserPortfolioChartCache.query.count()
+        
+        # Delete all cached charts
+        UserPortfolioChartCache.query.delete()
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Cleared {count} cached chart entries',
+            'note': 'Charts will regenerate with new date format on next view'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error clearing chart cache: {str(e)}")
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
 @app.route('/admin/investigate-sept-snapshots')
 @login_required
 def admin_investigate_sept_snapshots():
@@ -5734,12 +5762,27 @@ def admin_investigate_sept_snapshots():
                 change = snapshot.total_value - baseline
                 pct_change = (change / baseline * 100) if baseline > 0 else 0
                 
+                # Get user's net holdings on this date (GROK-RECOMMENDED: GROUP BY with SUM)
+                # Stock table is a transaction log - need to sum quantities to get net position
+                from sqlalchemy import func
+                holdings_query = db.session.query(
+                    Stock.ticker,
+                    func.sum(Stock.quantity).label('net_quantity')
+                ).filter(
+                    Stock.user_id == USER_ID,
+                    Stock.purchase_date <= snapshot.date
+                ).group_by(Stock.ticker).having(
+                    func.sum(Stock.quantity) > 0  # Exclude fully sold positions
+                ).all()
+                
+                holdings_summary = {ticker: float(qty) for ticker, qty in holdings_query}
+                
                 results['snapshots'].append({
                     'date': str(snapshot.date),
                     'total_value': round(snapshot.total_value, 2),
                     'change_from_baseline': round(change, 2),
                     'pct_change': round(pct_change, 2),
-                    'holdings': str(snapshot.holdings) if snapshot.holdings else 'None'
+                    'holdings': holdings_summary
                 })
         
         # Get transactions
