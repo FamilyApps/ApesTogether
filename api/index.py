@@ -3003,9 +3003,29 @@ def add_stock():
         flash('Please login to add stocks', 'warning')
         return redirect(url_for('login'))
     
+    # Validate and parse form inputs
     ticker = request.form.get('ticker')
-    quantity = float(request.form.get('quantity'))
-    purchase_price = float(request.form.get('purchase_price'))
+    if not ticker:
+        flash('Ticker symbol is required', 'danger')
+        return redirect(url_for('dashboard'))
+    
+    try:
+        quantity = request.form.get('quantity')
+        if not quantity:
+            flash('Quantity is required', 'danger')
+            return redirect(url_for('dashboard'))
+        quantity = float(quantity)
+        
+        purchase_price = request.form.get('purchase_price')
+        if not purchase_price:
+            flash('Purchase price is required', 'danger')
+            return redirect(url_for('dashboard'))
+        purchase_price = float(purchase_price)
+        
+    except ValueError as e:
+        logger.error(f"Invalid input for add_stock: ticker={ticker}, quantity={request.form.get('quantity')}, price={request.form.get('purchase_price')}")
+        flash(f'Invalid input: Please enter valid numbers for quantity and price', 'danger')
+        return redirect(url_for('dashboard'))
     
     # Create new stock
     new_stock = Stock(
@@ -5670,21 +5690,6 @@ def admin_update_metrics():
             return jsonify({'error': 'Admin access required'}), 403
         
         from admin_metrics import update_daily_metrics
-        success = update_daily_metrics()
-        
-        return jsonify({
-            'success': success,
-            'message': 'Platform metrics updated successfully' if success else 'Error updating metrics'
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/admin/create-leaderboard-tables')
-@login_required
-def admin_create_leaderboard_tables():
-    """Create missing leaderboard-related tables"""
-    try:
         # Check if user is admin
         email = session.get('email', '')
         if email != ADMIN_EMAIL:

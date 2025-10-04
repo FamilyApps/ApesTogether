@@ -7,9 +7,21 @@
 
 ## 🔴 **PROBLEM STATEMENT**
 
-The **5D chart displays long diagonal lines** connecting data points **across overnight gaps and weekends** (e.g., Friday 4 PM → Monday 9:30 AM). This creates visual clutter and makes the chart harder to read.
+~~The **5D chart displays long diagonal lines** connecting data points **across overnight gaps and weekends** (e.g., Friday 4 PM → Monday 9:30 AM). This creates visual clutter and makes the chart harder to read.~~ **FIXED via segment styling**
 
-**Screenshot:** Attached (shows diagonal lines between days)
+**NEW ISSUE:** The gap lines are now gone (segment styling worked!), but the **x-axis displays dates/times when the market was CLOSED**. This creates empty space where no data points exist.
+
+**Current Behavior:**
+- Data points only exist for market days (Mon-Fri)
+- X-axis shows ALL dates including weekends and overnight hours
+- Result: Floating data points with empty space between them
+
+**Desired Behavior:**
+- X-axis should ONLY show dates/times when market was actually open
+- No empty space for closed market hours
+- Continuous x-axis with only market hours visible
+
+**Screenshot:** Attached (shows floating data points with empty x-axis space)
 
 ---
 
@@ -205,46 +217,104 @@ performanceChart = new Chart(ctx, {
 
 ---
 
+## 🛠️ **FIX ATTEMPTED #3: X-Axis Time Scale Configuration (NEEDS HELP)**
+
+**The Core Issue:**
+Chart.js `type: 'time'` scale displays a **continuous timeline** including all dates/times, even when no data exists for those periods.
+
+**What We Need:**
+An x-axis that shows **only market hours** (Mon-Fri, no weekends, no overnight gaps).
+
+**Possible Solutions:**
+
+### **Option A: Use Linear/Category Scale Instead of Time**
+```javascript
+scales: {
+    x: {
+        type: 'category',  // or 'linear'
+        labels: ['Sep 29', 'Sep 30', 'Oct 1', 'Oct 2', 'Oct 3']
+    }
+}
+```
+**Pros:** No empty space  
+**Cons:** Loses date formatting, tooltip formatting, time-aware features
+
+### **Option B: Chart.js Time Scale with `bounds` and `ticks`**
+```javascript
+scales: {
+    x: {
+        type: 'time',
+        bounds: 'data',  // Only show range of actual data
+        ticks: {
+            source: 'data'  // Only show ticks where data exists
+        }
+    }
+}
+```
+**Pros:** Keeps time scale features  
+**Cons:** May still show gaps if data spans weekends
+
+### **Option C: Custom Time Scale Adapter**
+Create a custom adapter that skips weekends and market closed hours entirely.
+
+### **Option D: Split Data into Multiple Datasets**
+One dataset per trading day, plotted separately.
+
+---
+
 ## ❓ **QUESTIONS FOR GROK**
 
-### 1. **Is the segment styling approach correct?**
-   - Does `ctx.p0.parsed.x` and `ctx.p1.parsed.x` give us timestamps in milliseconds?
-   - Is `timeDiff > 7200000` the right way to detect overnight gaps?
-   - Should we return `'transparent'` or something else to hide the line?
+### 1. **Segment Styling - RESOLVED ✓**
+   ~~Is the segment styling approach correct?~~ → **YES, it worked!**
+   - Transparent segments successfully hide gap lines
+   - Data points now "float" without connecting lines
 
-### 2. **Alternative Solutions?**
-   - **Backend approach:** Insert null values between days in the API response?
-   - **Frontend approach:** Different Chart.js plugin or configuration?
-   - **Data transformation:** Pre-process data to split into separate day datasets?
+### 2. **NEW: How to Fix X-Axis Showing Closed Market Hours?**
+   - **Which approach is best** for market hours data (Option A, B, C, or D)?
+   - **Should we use `bounds: 'data'` and `ticks.source: 'data'`?**
+   - **Does Chart.js have built-in support** for skipping time ranges (weekends/nights)?
+   - **Is there a financial charting plugin** that handles this automatically?
 
-### 3. **Why might segment styling not work?**
-   - Chart.js version compatibility?
-   - Execution timing (when is segment callback fired)?
-   - Scope issues with `currentPeriod` variable?
-   - Browser/Canvas rendering limitations?
+### 3. **Time Scale Configuration:**
+   - How to configure x-axis to **only display dates where data exists**?
+   - Should we switch from `type: 'time'` to `type: 'category'`?
+   - Can we keep time scale but customize tick/grid generation?
+   - Do we need a custom time adapter?
 
-### 4. **Best Practice for Market Hours Charts?**
-   - How do financial charting libraries (TradingView, etc.) handle this?
-   - Is there a Chart.js plugin specifically for this use case?
-   - Should we use a different chart library?
+### 4. **Best Practice for Market Hours Charts:**
+   - How do TradingView, Yahoo Finance, etc. handle market hours x-axes?
+   - Is there a Chart.js plugin specifically for stock market data?
+   - Should we pre-process data to use indices instead of timestamps?
+   - Should we consider a different charting library (Plotly, Highcharts)?
+
+### 5. **Implementation Approach:**
+   - **Backend solution:** Transform date data before sending to frontend?
+   - **Frontend solution:** Chart.js configuration only?
+   - **Hybrid solution:** Both backend preprocessing + frontend config?
 
 ---
 
 ## 🎯 **DESIRED OUTCOME**
 
 **5D Chart Should Show:**
-- ✅ Smooth lines connecting points **within each trading day**
-- ✅ **NO lines** (or invisible lines) connecting across overnight gaps (4 PM → 9:30 AM next day)
-- ✅ **NO lines** connecting across weekend gaps (Fri 4 PM → Mon 9:30 AM)
-- ✅ Clear visual separation between trading days
+- ✅ Smooth lines connecting points **within each trading day** → **ACHIEVED**
+- ✅ **NO lines** connecting across overnight gaps → **ACHIEVED (transparent segments)**
+- ✅ **NO lines** connecting across weekend gaps → **ACHIEVED (transparent segments)**
+- ❌ **NEW GOAL:** X-axis showing **ONLY market days** (no empty space for weekends/nights)
+- ❌ **NEW GOAL:** Continuous x-axis with only trading dates visible
 
-**Example:**
+**Current State:**
 ```
-Mon: ●━━●━━●  (connected)
-        X      (gap - no line)
-Tue: ●━━●━━●  (connected)
-        X      (gap - no line)
-Wed: ●━━●━━●  (connected)
+X-Axis:  Sep 29 | [empty] | [empty] | Oct 1 | Oct 2 | [empty] | [empty] | Oct 4
+Data:       ●                           ●       ●                           ●
+            (floating points with empty space between)
+```
+
+**Desired State:**
+```
+X-Axis:  Sep 29 | Sep 30 | Oct 1 | Oct 2 | Oct 3
+Data:       ●        ●       ●       ●       ●
+            (continuous axis, no empty space)
 ```
 
 ---
