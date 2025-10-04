@@ -3009,6 +3009,8 @@ def add_stock():
         flash('Ticker symbol is required', 'danger')
         return redirect(url_for('dashboard'))
     
+    ticker = ticker.upper().strip()
+    
     try:
         quantity = request.form.get('quantity')
         if not quantity:
@@ -3016,15 +3018,32 @@ def add_stock():
             return redirect(url_for('dashboard'))
         quantity = float(quantity)
         
-        purchase_price = request.form.get('purchase_price')
-        if not purchase_price:
-            flash('Purchase price is required', 'danger')
+        if quantity <= 0:
+            flash('Quantity must be greater than zero', 'danger')
             return redirect(url_for('dashboard'))
-        purchase_price = float(purchase_price)
         
     except ValueError as e:
-        logger.error(f"Invalid input for add_stock: ticker={ticker}, quantity={request.form.get('quantity')}, price={request.form.get('purchase_price')}")
-        flash(f'Invalid input: Please enter valid numbers for quantity and price', 'danger')
+        logger.error(f"Invalid quantity for add_stock: ticker={ticker}, quantity={request.form.get('quantity')}")
+        flash(f'Invalid input: Please enter a valid number for quantity', 'danger')
+        return redirect(url_for('dashboard'))
+    
+    # Fetch current stock price (with caching and API logic)
+    try:
+        from portfolio_performance import PortfolioPerformanceCalculator
+        calculator = PortfolioPerformanceCalculator()
+        stock_data = calculator.get_stock_data(ticker)
+        
+        if not stock_data or 'price' not in stock_data:
+            flash(f'Could not fetch current price for {ticker}. Please check the ticker symbol and try again.', 'danger')
+            logger.warning(f"Failed to fetch price for {ticker} when adding stock")
+            return redirect(url_for('dashboard'))
+        
+        purchase_price = stock_data['price']
+        logger.info(f"Fetched price for {ticker}: ${purchase_price:.2f}")
+        
+    except Exception as price_fetch_error:
+        logger.error(f"Error fetching stock price for {ticker}: {str(price_fetch_error)}")
+        flash(f'Error fetching stock price. Please try again later.', 'danger')
         return redirect(url_for('dashboard'))
     
     # Create new stock
