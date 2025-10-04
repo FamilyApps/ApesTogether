@@ -5677,6 +5677,99 @@ def fix_all_columns():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/verify-cache-migration')
+@login_required
+def admin_verify_cache_migration():
+    """Verify that new _auth/_anon cache format is working and old format can be cleaned up"""
+    try:
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import LeaderboardCache
+        
+        # Count cache entries by format
+        all_caches = LeaderboardCache.query.all()
+        
+        new_format = []  # Entries with _auth or _anon suffix
+        old_format = []  # Entries without suffix
+        
+        for cache in all_caches:
+            if cache.period.endswith('_auth') or cache.period.endswith('_anon'):
+                new_format.append({
+                    'period': cache.period,
+                    'has_html': bool(cache.rendered_html),
+                    'generated_at': str(cache.generated_at)
+                })
+            else:
+                old_format.append({
+                    'period': cache.period,
+                    'has_html': bool(cache.rendered_html),
+                    'generated_at': str(cache.generated_at)
+                })
+        
+        # Expected: 8 periods × 3 categories × 2 formats = 48 new entries
+        expected_count = 48
+        actual_count = len(new_format)
+        
+        return jsonify({
+            'success': True,
+            'new_format_count': actual_count,
+            'old_format_count': len(old_format),
+            'expected_new_count': expected_count,
+            'migration_complete': actual_count >= expected_count,
+            'can_delete_old_format': actual_count >= expected_count and len(old_format) > 0,
+            'new_format_samples': new_format[:5],  # Show first 5
+            'old_format_samples': old_format[:5],
+            'recommendation': 'DELETE old format entries' if actual_count >= expected_count else 'WAIT for next cron job'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error verifying cache migration: {str(e)}")
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+@app.route('/admin/delete-old-cache-format')
+@login_required
+def admin_delete_old_cache_format():
+    """Delete old cache entries without _auth/_anon suffix after migration is complete"""
+    try:
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import LeaderboardCache
+        
+        # Safety check: Only delete if new format exists
+        new_format_count = LeaderboardCache.query.filter(
+            (LeaderboardCache.period.like('%_auth')) | (LeaderboardCache.period.like('%_anon'))
+        ).count()
+        
+        if new_format_count < 48:  # 8 periods × 3 categories × 2 = 48
+            return jsonify({
+                'error': 'Migration not complete - cannot delete old format',
+                'new_format_count': new_format_count,
+                'expected': 48
+            }), 400
+        
+        # Delete old format (entries without _auth/_anon suffix)
+        deleted = 0
+        all_caches = LeaderboardCache.query.all()
+        for cache in all_caches:
+            if not (cache.period.endswith('_auth') or cache.period.endswith('_anon')):
+                db.session.delete(cache)
+                deleted += 1
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Deleted {deleted} old format cache entries',
+            'remaining_new_format': new_format_count
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error deleting old cache format: {str(e)}")
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
 @app.route('/admin/clear-chart-cache')
 @login_required
 def admin_clear_chart_cache():
