@@ -13550,20 +13550,21 @@ def portfolio_performance_intraday(period):
             portfolio_return = ((snapshot.total_value - first_portfolio_value) / first_portfolio_value * 100) if first_portfolio_value > 0 else 0
             sp500_return = ((spy_value - first_spy_value) / first_spy_value * 100) if first_spy_value > 0 else 0
             
-            # Format date label based on period - use ISO format for Chart.js compatibility
+            # Format date label based on period
             # CRITICAL FIX: Convert timestamp to ET before sending to frontend
             # PostgreSQL returns timestamps in UTC; convert to ET to display correct market hours
             if period == '1D':
-                # For 1D charts, use full ISO timestamp in ET timezone
+                # For 1D charts, use time-only format (e.g., "9:30 AM")
                 et_timestamp = snapshot.timestamp.astimezone(MARKET_TZ)
-                date_label = et_timestamp.isoformat()
+                date_label = et_timestamp.strftime('%I:%M %p')
             elif period == '5D':
-                # For 5D charts, use full ISO timestamp in ET timezone
+                # For 5D charts, use short date format (e.g., "Sep 30")
+                # GROK-VALIDATED FIX: Category scale needs discrete labels, not ISO timestamps
                 et_timestamp = snapshot.timestamp.astimezone(MARKET_TZ)
-                date_label = et_timestamp.isoformat()
+                date_label = et_timestamp.strftime('%b %d')
             else:
-                # For longer periods, use ISO date
-                date_label = snapshot.timestamp.date().isoformat()
+                # For longer periods, use short date format
+                date_label = snapshot.timestamp.date().strftime('%b %d')
             
             chart_data.append({
                 'date': date_label,
