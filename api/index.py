@@ -5850,24 +5850,25 @@ def admin_investigate_sept_snapshots():
                     'holdings': holdings_summary
                 })
         
-        # Get transactions
+        # Get transactions (FIXED: Transaction uses timestamp, not date)
         transactions = Transaction.query.filter(
             and_(
                 Transaction.user_id == USER_ID,
-                Transaction.date >= START_DATE,
-                Transaction.date <= END_DATE
+                func.date(Transaction.timestamp) >= START_DATE,
+                func.date(Transaction.timestamp) <= END_DATE
             )
-        ).order_by(Transaction.date).all()
+        ).order_by(Transaction.timestamp).all()
         
         for txn in transactions:
-            stock = Stock.query.get(txn.stock_id)
+            # Transaction model has: ticker, quantity, price, transaction_type, timestamp
             results['transactions'].append({
-                'date': str(txn.date),
+                'date': str(txn.timestamp.date()),
+                'time': str(txn.timestamp.time()),
                 'type': txn.transaction_type,
-                'symbol': stock.symbol if stock else 'Unknown',
-                'shares': txn.shares,
+                'ticker': txn.ticker,
+                'quantity': txn.quantity,
                 'price': txn.price,
-                'total': round(txn.shares * txn.price, 2)
+                'total': round(txn.quantity * txn.price, 2)
             })
         
         # Check market data availability
