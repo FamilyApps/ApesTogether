@@ -5770,34 +5770,6 @@ def admin_delete_old_cache_format():
         logger.error(f"Error deleting old cache format: {str(e)}")
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
-@app.route('/admin/clear-chart-cache')
-@login_required
-def admin_clear_chart_cache():
-    """Clear all cached chart data to force regeneration with new date format"""
-    try:
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
-        from models import UserPortfolioChartCache
-        
-        # Count before deletion
-        count = UserPortfolioChartCache.query.count()
-        
-        # Delete all cached charts
-        UserPortfolioChartCache.query.delete()
-        db.session.commit()
-        
-        return jsonify({
-            'success': True,
-            'message': f'Cleared {count} cached chart entries',
-            'note': 'Charts will regenerate with new date format on next view'
-        })
-        
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Error clearing chart cache: {str(e)}")
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
-
 @app.route('/admin/investigate-sept-snapshots')
 @login_required
 def admin_investigate_sept_snapshots():
