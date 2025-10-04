@@ -5922,6 +5922,205 @@ def admin_investigate_sept_snapshots():
         logger.error(traceback.format_exc())
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
+@app.route('/admin/investigate-sept-deep-dive')
+@login_required
+def admin_investigate_sept_deep_dive():
+    """Deep investigation: Was the Sept 3 6.87% drop real or data corruption?"""
+    try:
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import date
+        from models import User, PortfolioSnapshot, Stock, MarketData
+        import json as json_module
+        
+        START_DATE = date(2025, 9, 2)
+        END_DATE = date(2025, 9, 11)
+        
+        results = {
+            'investigation_period': f'{START_DATE} to {END_DATE}',
+            'all_users_analysis': {},
+            'market_data_availability': {},
+            'sp500_actual_performance': None,
+            'witty_raven_deep_dive': {},
+            'systemic_issue': False,
+            'backfill_recommendation': {}
+        }
+        
+        # QUESTION 1: Did ALL users experience similar issues?
+        all_users = User.query.all()
+        suspicious_count = 0
+        
+        for user in all_users:
+            snapshots = PortfolioSnapshot.query.filter(
+                and_(
+                    PortfolioSnapshot.user_id == user.id,
+                    PortfolioSnapshot.date >= START_DATE,
+                    PortfolioSnapshot.date <= END_DATE
+                )
+            ).order_by(PortfolioSnapshot.date).all()
+            
+            if len(snapshots) > 0:
+                # Check for frozen values
+                frozen_days = 0
+                prev_value = None
+                daily_values = []
+                
+                for snapshot in snapshots:
+                    daily_values.append({
+                        'date': str(snapshot.date),
+                        'value': round(snapshot.total_value, 2)
+                    })
+                    
+                    if prev_value is not None and abs(snapshot.total_value - prev_value) < 0.01:
+                        frozen_days += 1
+                    prev_value = snapshot.total_value
+                
+                # Calculate max drop
+                values = [s.total_value for s in snapshots]
+                max_value = max(values)
+                min_value = min(values)
+                max_drop_pct = ((min_value - max_value) / max_value * 100) if max_value > 0 else 0
+                
+                is_suspicious = frozen_days > 3 or max_drop_pct < -5
+                if is_suspicious:
+                    suspicious_count += 1
+                
+                results['all_users_analysis'][user.username] = {
+                    'user_id': user.id,
+                    'snapshots_count': len(snapshots),
+                    'frozen_days': frozen_days,
+                    'max_drop_pct': round(max_drop_pct, 2),
+                    'daily_values': daily_values,
+                    'suspicious': is_suspicious
+                }
+        
+        results['systemic_issue'] = suspicious_count > 1
+        results['affected_users_count'] = suspicious_count
+        
+        # QUESTION 2: What market data exists?
+        tickers = ['AAPL', 'SSPY', 'TSLA', 'SPY']
+        
+        for ticker in tickers:
+            market_data = MarketData.query.filter(
+                and_(
+                    MarketData.ticker == ticker,
+                    MarketData.date >= START_DATE,
+                    MarketData.date <= END_DATE
+                )
+            ).order_by(MarketData.date).all()
+            
+            if len(market_data) > 0:
+                results['market_data_availability'][ticker] = {
+                    'data_points': len(market_data),
+                    'prices': [{'date': str(md.date), 'close': round(md.close_price, 2)} for md in market_data]
+                }
+            else:
+                results['market_data_availability'][ticker] = {
+                    'data_points': 0,
+                    'error': 'NO DATA FOUND'
+                }
+        
+        # QUESTION 3: What was S&P 500's actual performance?
+        sp500_tickers = ['SPY', 'SPY_SP500', '^GSPC', 'SSPY']
+        
+        for ticker in sp500_tickers:
+            sp500_data = MarketData.query.filter(
+                and_(
+                    MarketData.ticker == ticker,
+                    MarketData.date >= START_DATE,
+                    MarketData.date <= END_DATE
+                )
+            ).order_by(MarketData.date).all()
+            
+            if len(sp500_data) >= 2:
+                first_price = sp500_data[0].close_price
+                performance = []
+                for md in sp500_data:
+                    pct_change = ((md.close_price - first_price) / first_price * 100)
+                    performance.append({
+                        'date': str(md.date),
+                        'price': round(md.close_price, 2),
+                        'pct_change': round(pct_change, 2)
+                    })
+                
+                results['sp500_actual_performance'] = {
+                    'ticker': ticker,
+                    'performance': performance
+                }
+                break
+        
+        # QUESTION 4: witty-raven deep dive
+        witty_raven = User.query.filter_by(username='witty-raven').first()
+        if witty_raven:
+            sept2 = PortfolioSnapshot.query.filter_by(
+                user_id=witty_raven.id,
+                date=date(2025, 9, 2)
+            ).first()
+            
+            sept3 = PortfolioSnapshot.query.filter_by(
+                user_id=witty_raven.id,
+                date=date(2025, 9, 3)
+            ).first()
+            
+            if sept2 and sept3:
+                # Get holdings
+                holdings = db.session.query(
+                    Stock.ticker,
+                    func.sum(Stock.quantity).label('net_quantity')
+                ).filter(
+                    Stock.user_id == witty_raven.id,
+                    Stock.purchase_date <= date(2025, 9, 2)
+                ).group_by(Stock.ticker).having(
+                    func.sum(Stock.quantity) > 0
+                ).all()
+                
+                holdings_analysis = {}
+                for ticker, qty in holdings:
+                    sept2_price = MarketData.query.filter_by(ticker=ticker, date=date(2025, 9, 2)).first()
+                    sept3_price = MarketData.query.filter_by(ticker=ticker, date=date(2025, 9, 3)).first()
+                    
+                    holdings_analysis[ticker] = {
+                        'quantity': float(qty),
+                        'sept2_price': round(sept2_price.close_price, 2) if sept2_price else 'MISSING',
+                        'sept3_price': round(sept3_price.close_price, 2) if sept3_price else 'MISSING',
+                        'price_change_pct': round(((sept3_price.close_price - sept2_price.close_price) / sept2_price.close_price * 100), 2) if sept2_price and sept3_price else 'CANNOT CALCULATE',
+                        'position_impact': round(qty * (sept3_price.close_price - sept2_price.close_price), 2) if sept2_price and sept3_price else 'CANNOT CALCULATE'
+                    }
+                
+                results['witty_raven_deep_dive'] = {
+                    'sept2_portfolio_value': round(sept2.total_value, 2),
+                    'sept3_portfolio_value': round(sept3.total_value, 2),
+                    'drop_amount': round(sept3.total_value - sept2.total_value, 2),
+                    'drop_pct': round(((sept3.total_value - sept2.total_value) / sept2.total_value * 100), 2),
+                    'holdings_breakdown': holdings_analysis
+                }
+        
+        # QUESTION 5: Backfill recommendation
+        missing_tickers = [ticker for ticker, data in results['market_data_availability'].items() if data['data_points'] == 0]
+        
+        results['backfill_recommendation'] = {
+            'needed': len(missing_tickers) > 0,
+            'missing_tickers': missing_tickers,
+            'api_calls_required': len(missing_tickers),
+            'method': 'Alpha Vantage TIME_SERIES_DAILY',
+            'date_range': f'{START_DATE} to {END_DATE} (7 trading days)',
+            'estimated_time': f'{len(missing_tickers) * 12} seconds' if len(missing_tickers) > 0 else '0 seconds',
+            'free_tier_sufficient': len(missing_tickers) <= 25,
+            'next_steps': [
+                f'1. Call Alpha Vantage for each ticker: {", ".join(missing_tickers)}',
+                '2. Insert historical prices into MarketData table',
+                '3. Recalculate portfolio snapshots for Sept 2-11',
+                '4. Clear and regenerate chart cache for affected users'
+            ] if len(missing_tickers) > 0 else ['No backfill needed - all market data exists']
+        }
+        
+        return jsonify(results), 200
+        
+    except Exception as e:
+        logger.error(f"Error in Sept deep dive: {str(e)}")
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
 @app.route('/admin/metrics')
 @login_required
 def admin_metrics():
