@@ -613,7 +613,25 @@ function updatePerformanceChart(data) {
                             fill: false,
                             tension: 0.1,
                             pointRadius: 0,
-                            pointHoverRadius: 4
+                            pointHoverRadius: 4,
+                            // FIX: Skip drawing line segment if gap > 2 hours (overnight/weekend)
+                            segment: {
+                                borderColor: ctx => {
+                                    if (currentPeriod === '5D' || currentPeriod === '1D') {
+                                        const idx = ctx.p0DataIndex;
+                                        const p0 = ctx.p0;
+                                        const p1 = ctx.p1;
+                                        if (p0 && p1 && p0.parsed && p1.parsed) {
+                                            const timeDiff = p1.parsed.x - p0.parsed.x;
+                                            // If gap > 2 hours (7200000 ms), make line transparent
+                                            if (timeDiff > 7200000) {
+                                                return 'transparent';
+                                            }
+                                        }
+                                    }
+                                    return undefined; // Use default color
+                                }
+                            }
                         },
                         {
                             label: 'S&P 500',
@@ -625,7 +643,25 @@ function updatePerformanceChart(data) {
                             tension: 0.1,
                             borderDash: [5, 5],
                             pointRadius: 0,
-                            pointHoverRadius: 4
+                            pointHoverRadius: 4,
+                            // FIX: Skip drawing line segment if gap > 2 hours (overnight/weekend)
+                            segment: {
+                                borderColor: ctx => {
+                                    if (currentPeriod === '5D' || currentPeriod === '1D') {
+                                        const idx = ctx.p0DataIndex;
+                                        const p0 = ctx.p0;
+                                        const p1 = ctx.p1;
+                                        if (p0 && p1 && p0.parsed && p1.parsed) {
+                                            const timeDiff = p1.parsed.x - p0.parsed.x;
+                                            // If gap > 2 hours (7200000 ms), make line transparent
+                                            if (timeDiff > 7200000) {
+                                                return 'transparent';
+                                            }
+                                        }
+                                    }
+                                    return undefined; // Use default color
+                                }
+                            }
                         }
                     ]
                 },

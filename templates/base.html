@@ -20,25 +20,33 @@
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto">
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('leaderboard.leaderboard_home') }}">Leaderboard</a>
-                    </li>
                     {% if current_user.is_authenticated %}
+                    <!-- Logged in: Show Dashboard, Leaderboard, Explore, Subscriptions, Logout -->
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('dashboard') }}">Dashboard</a>
+                        <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">Dashboard</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('explore') }}">Explore</a>
+                        <a class="nav-link {% if request.endpoint == 'leaderboard.leaderboard_home' %}active{% endif %}" href="{{ url_for('leaderboard.leaderboard_home') }}">Leaderboard</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('subscriptions') }}">Subscriptions</a>
+                        <a class="nav-link {% if request.endpoint == 'explore' %}active{% endif %}" href="{{ url_for('explore') }}">Explore</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'subscriptions' %}active{% endif %}" href="{{ url_for('subscriptions') }}">Subscriptions</a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('logout') }}">Logout</a>
                     </li>
                     {% else %}
+                    <!-- Not logged in: Show Leaderboard, Login, Sign Up -->
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'leaderboard.leaderboard_home' %}active{% endif %}" href="{{ url_for('leaderboard.leaderboard_home') }}">Leaderboard</a>
+                    </li>
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('login') }}">Login</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('register') }}">Sign Up</a>
                     </li>
                     {% endif %}
                 </ul>

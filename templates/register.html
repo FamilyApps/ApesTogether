@@ -24,6 +24,23 @@
                             <button type="submit" class="btn btn-primary btn-lg">Register</button>
                         </div>
                     </form>
+                    
+                    <!-- OAuth Options -->
+                    <div class="d-flex align-items-center my-4">
+                        <hr class="flex-grow-1">
+                        <span class="px-3 text-muted">OR</span>
+                        <hr class="flex-grow-1">
+                    </div>
+
+                    <div class="d-grid gap-3">
+                        <a href="{{ url_for('login_apple') }}" class="btn btn-outline-dark btn-lg">
+                            <i class="fab fa-apple me-2"></i>Sign up with Apple
+                        </a>
+                        <a href="{{ url_for('login_google') }}" class="btn btn-outline-primary btn-lg">
+                            <i class="fab fa-google me-2"></i>Sign up with Google
+                        </a>
+                    </div>
+
                     <hr class="my-4">
                     <p class="text-center">Already have an account? <a href="{{ url_for('login') }}">Log In</a></p>
                 </div>
