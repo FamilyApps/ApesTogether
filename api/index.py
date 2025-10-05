@@ -6523,6 +6523,223 @@ def admin_run_sept_backfill():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/verify-sept-backfill')
+@login_required
+def admin_verify_sept_backfill():
+    """Comprehensive verification: Check ALL users' holdings and validate backfill completeness"""
+    try:
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import date
+        from models import User, PortfolioSnapshot, Stock, MarketData
+        import json as json_module
+        
+        START_DATE = date(2025, 9, 2)
+        END_DATE = date(2025, 9, 11)
+        
+        results = {
+            'verification_date': datetime.now().isoformat(),
+            'period': f'{START_DATE} to {END_DATE}',
+            'all_users_detailed_analysis': {},
+            'missing_market_data': {},
+            'sept_9_investigation': {},
+            'backfill_completeness': {
+                'total_tickers_needed': 0,
+                'tickers_with_data': [],
+                'tickers_missing_data': [],
+                'additional_backfill_required': False
+            },
+            'recommendations': []
+        }
+        
+        # Get all unique tickers held by all users during this period
+        all_tickers_needed = set()
+        
+        all_users = User.query.all()
+        
+        for user in all_users:
+            user_analysis = {
+                'user_id': user.id,
+                'email': user.email,
+                'holdings_during_period': {},
+                'market_data_coverage': {},
+                'portfolio_values': {
+                    'before_backfill': {},
+                    'after_backfill': {},
+                    'changes': {}
+                },
+                'issues': []
+            }
+            
+            # Get user's holdings during Sept 2-11
+            holdings = db.session.query(
+                Stock.ticker,
+                func.sum(Stock.quantity).label('net_quantity')
+            ).filter(
+                Stock.user_id == user.id,
+                Stock.purchase_date <= END_DATE
+            ).group_by(Stock.ticker).having(
+                func.sum(Stock.quantity) > 0
+            ).all()
+            
+            if not holdings:
+                user_analysis['issues'].append('No holdings found during this period')
+                results['all_users_detailed_analysis'][user.username] = user_analysis
+                continue
+            
+            # Track holdings
+            for ticker, qty in holdings:
+                all_tickers_needed.add(ticker)
+                user_analysis['holdings_during_period'][ticker] = float(qty)
+                
+                # Check if we have market data for this ticker for Sept 2-11
+                market_data_count = MarketData.query.filter(
+                    and_(
+                        MarketData.ticker == ticker,
+                        MarketData.date >= START_DATE,
+                        MarketData.date <= END_DATE
+                    )
+                ).count()
+                
+                user_analysis['market_data_coverage'][ticker] = {
+                    'data_points': market_data_count,
+                    'expected': 8,  # Sept 2,3,4,5,8,9,10,11 (no weekends)
+                    'status': '✅ COMPLETE' if market_data_count >= 6 else '❌ INCOMPLETE',
+                    'missing_days': 8 - market_data_count if market_data_count < 8 else 0
+                }
+                
+                if market_data_count < 6:
+                    user_analysis['issues'].append(f'{ticker}: Only {market_data_count}/8 days of market data')
+            
+            # Get portfolio snapshots and show before/after
+            # BEFORE values are in the backfill results, but let's check current DB state
+            snapshots = PortfolioSnapshot.query.filter(
+                and_(
+                    PortfolioSnapshot.user_id == user.id,
+                    PortfolioSnapshot.date >= START_DATE,
+                    PortfolioSnapshot.date <= END_DATE
+                )
+            ).order_by(PortfolioSnapshot.date).all()
+            
+            for snapshot in snapshots:
+                user_analysis['portfolio_values']['after_backfill'][str(snapshot.date)] = round(snapshot.total_value, 2)
+            
+            # Check for zero values or frozen values
+            zero_count = sum(1 for v in user_analysis['portfolio_values']['after_backfill'].values() if v == 0)
+            if zero_count > 0:
+                user_analysis['issues'].append(f'{zero_count} days with $0.00 portfolio value')
+            
+            # Check for frozen values
+            values = list(user_analysis['portfolio_values']['after_backfill'].values())
+            frozen_count = 0
+            for i in range(1, len(values)):
+                if values[i] == values[i-1] and values[i] != 0:
+                    frozen_count += 1
+            if frozen_count > 2:
+                user_analysis['issues'].append(f'{frozen_count} consecutive frozen values')
+            
+            results['all_users_detailed_analysis'][user.username] = user_analysis
+        
+        # Summary of all tickers needed
+        results['backfill_completeness']['total_tickers_needed'] = len(all_tickers_needed)
+        results['backfill_completeness']['all_tickers'] = sorted(list(all_tickers_needed))
+        
+        # Check market data coverage for each ticker
+        for ticker in all_tickers_needed:
+            data_count = MarketData.query.filter(
+                and_(
+                    MarketData.ticker == ticker,
+                    MarketData.date >= START_DATE,
+                    MarketData.date <= END_DATE
+                )
+            ).count()
+            
+            if data_count >= 6:
+                results['backfill_completeness']['tickers_with_data'].append({
+                    'ticker': ticker,
+                    'data_points': data_count
+                })
+            else:
+                results['backfill_completeness']['tickers_missing_data'].append({
+                    'ticker': ticker,
+                    'data_points': data_count,
+                    'missing': 8 - data_count
+                })
+                results['missing_market_data'][ticker] = {
+                    'data_points_found': data_count,
+                    'data_points_expected': 8,
+                    'missing_days': 8 - data_count,
+                    'status': '❌ INCOMPLETE - BACKFILL NEEDED'
+                }
+        
+        results['backfill_completeness']['additional_backfill_required'] = len(results['backfill_completeness']['tickers_missing_data']) > 0
+        
+        # Investigate Sept 9 specifically
+        results['sept_9_investigation'] = {
+            'date': '2025-09-09',
+            'market_data_available': {}
+        }
+        
+        sept_9 = date(2025, 9, 9)
+        for ticker in all_tickers_needed:
+            market_data = MarketData.query.filter_by(
+                ticker=ticker,
+                date=sept_9
+            ).first()
+            
+            if market_data:
+                results['sept_9_investigation']['market_data_available'][ticker] = {
+                    'close_price': round(market_data.close_price, 2),
+                    'status': '✅ EXISTS'
+                }
+            else:
+                results['sept_9_investigation']['market_data_available'][ticker] = {
+                    'status': '❌ MISSING - This is why Sept 9 values may be incorrect'
+                }
+        
+        # Generate recommendations
+        if results['backfill_completeness']['additional_backfill_required']:
+            missing_tickers = [t['ticker'] for t in results['backfill_completeness']['tickers_missing_data']]
+            results['recommendations'].append({
+                'priority': 'HIGH',
+                'issue': f'Missing market data for {len(missing_tickers)} ticker(s)',
+                'tickers': missing_tickers,
+                'action': f'Run backfill for: {", ".join(missing_tickers)}',
+                'impact': 'Portfolio calculations are incorrect without this data'
+            })
+        
+        # Check for users with $0 portfolios
+        for username, analysis in results['all_users_detailed_analysis'].items():
+            zero_days = [d for d, v in analysis['portfolio_values']['after_backfill'].items() if v == 0]
+            if len(zero_days) > 2 and analysis['holdings_during_period']:
+                results['recommendations'].append({
+                    'priority': 'MEDIUM',
+                    'issue': f'{username} has {len(zero_days)} days with $0 portfolio',
+                    'holdings': analysis['holdings_during_period'],
+                    'action': 'Check if market data exists for their tickers',
+                    'impact': 'User charts will be incorrect'
+                })
+        
+        # Summary
+        results['summary'] = {
+            'total_users_analyzed': len(all_users),
+            'total_tickers_in_use': len(all_tickers_needed),
+            'tickers_fully_backfilled': len(results['backfill_completeness']['tickers_with_data']),
+            'tickers_need_backfill': len(results['backfill_completeness']['tickers_missing_data']),
+            'users_with_issues': sum(1 for a in results['all_users_detailed_analysis'].values() if a['issues']),
+            'backfill_complete': not results['backfill_completeness']['additional_backfill_required']
+        }
+        
+        return jsonify(results), 200
+        
+    except Exception as e:
+        logger.error(f"Error in backfill verification: {str(e)}")
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/metrics')
 @login_required
 def admin_metrics():
