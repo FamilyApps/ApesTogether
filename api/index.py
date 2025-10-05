@@ -7733,41 +7733,20 @@ def admin_debug_portfolio_timeline():
         if not user:
             return jsonify({'error': f'User {username} not found'}), 404
         
-        # Dates to analyze - extended back to May 26 to find when witty-raven started
-        # Sample every ~3-5 days to reduce page size but still capture key changes
-        target_dates = [
-            date(2025, 5, 26),
-            date(2025, 5, 30),
-            date(2025, 6, 3),
-            date(2025, 6, 6),
-            date(2025, 6, 10),
-            date(2025, 6, 13),
-            date(2025, 6, 17),
-            date(2025, 6, 20),
-            date(2025, 6, 24),
-            date(2025, 6, 27),
-            date(2025, 7, 1),
-            date(2025, 7, 7),
-            date(2025, 7, 14),
-            date(2025, 7, 21),
-            date(2025, 7, 28),
-            date(2025, 8, 1),
-            date(2025, 8, 8),
-            date(2025, 8, 15),
-            date(2025, 8, 22),
-            date(2025, 8, 29),
-            date(2025, 9, 1),
-            date(2025, 9, 2),
-            date(2025, 9, 3),
-            date(2025, 9, 4),
-            date(2025, 9, 5),
-            date(2025, 9, 8),
-            date(2025, 9, 9),
-            date(2025, 9, 10),
-            date(2025, 9, 11),
-            date(2025, 9, 12),
-            date(2025, 9, 15),
-        ]
+        # Generate daily dates from start_date to end_date (weekdays only)
+        from datetime import timedelta
+        
+        start_date = date(2025, 5, 26)
+        end_date = date(2025, 9, 15)
+        
+        # Generate EVERY WEEKDAY (Mon-Fri) in range
+        target_dates = []
+        current_date = start_date
+        while current_date <= end_date:
+            # Only include weekdays (0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri)
+            if current_date.weekday() < 5:
+                target_dates.append(current_date)
+            current_date += timedelta(days=1)
         
         # Get all stocks for this user
         all_stocks = Stock.query.filter_by(user_id=user.id).order_by(Stock.purchase_date).all()
@@ -7958,6 +7937,18 @@ def admin_debug_portfolio_timeline():
                     border-radius: 5px;
                     border-left: 4px solid #ffc107;
                 }}
+                .corrupted {{
+                    background: #ffebee;
+                    border-left: 4px solid #f44336;
+                }}
+                .corruption-warning {{
+                    background: #ffebee;
+                    border-left: 4px solid #f44336;
+                    padding: 10px;
+                    margin: 10px 0;
+                    font-weight: bold;
+                    color: #c62828;
+                }}
             </style>
         </head>
         <body>
@@ -7978,11 +7969,18 @@ def admin_debug_portfolio_timeline():
         for day_data in result['timeline']:
             weekend_class = ' weekend' if day_data['is_weekend'] else ''
             
+            # Check for data corruption: snapshot exists but no holdings
+            is_corrupted = (not day_data['holdings'] and 
+                          day_data['snapshot_value'] and 
+                          day_data['snapshot_value'] > 0)
+            corrupted_class = ' corrupted' if is_corrupted else ''
+            
             html += f"""
-            <div class="date-section{weekend_class}">
+            <div class="date-section{weekend_class}{corrupted_class}">
                 <div class="date-header">
                     {day_data['date']} ({day_data['day_of_week']})
                     {' 🏖️ WEEKEND' if day_data['is_weekend'] else ''}
+                    {' 🚨 CORRUPTED DATA' if is_corrupted else ''}
                 </div>
             """
             
@@ -8023,7 +8021,14 @@ def admin_debug_portfolio_timeline():
                 
                 html += "</tbody></table>"
             else:
-                html += '<p class="no-data">No holdings on this date</p>'
+                # No holdings but check if snapshot exists - this indicates data corruption
+                if day_data['snapshot_value'] and day_data['snapshot_value'] > 0:
+                    html += '<div class="corruption-warning">'
+                    html += '🚨 DATA CORRUPTION: Snapshot exists with value, but user had NO stocks on this date.<br>'
+                    html += 'The backfill incorrectly assigned a baseline value before the user even started trading.'
+                    html += '</div>'
+                else:
+                    html += '<p class="no-data">No holdings on this date</p>'
             
             # Summary box
             calculated_value = day_data['calculated_portfolio_value']
