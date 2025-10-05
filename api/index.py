@@ -7733,8 +7733,21 @@ def admin_debug_portfolio_timeline():
         if not user:
             return jsonify({'error': f'User {username} not found'}), 404
         
-        # Dates to analyze
+        # Dates to analyze - extended back to July 28 to find when witty-raven started
         target_dates = [
+            date(2025, 7, 28),
+            date(2025, 7, 29),
+            date(2025, 7, 30),
+            date(2025, 7, 31),
+            date(2025, 8, 1),
+            date(2025, 8, 4),
+            date(2025, 8, 5),
+            date(2025, 8, 8),
+            date(2025, 8, 11),
+            date(2025, 8, 15),
+            date(2025, 8, 18),
+            date(2025, 8, 22),
+            date(2025, 8, 25),
             date(2025, 8, 29),
             date(2025, 9, 1),
             date(2025, 9, 2),
@@ -8022,11 +8035,16 @@ def admin_debug_portfolio_timeline():
                 match_class = 'no-data'
                 match_text = 'No snapshot to compare'
             
+            # Add note if calculated is 0 but snapshot exists
+            missing_market_data_note = ''
+            if calculated_value == 0 and snapshot_value and snapshot_value > 0:
+                missing_market_data_note = '<br><strong>⚠️ Note:</strong> Calculated value is $0 because there\'s no market data for this date, but snapshot exists in DB.'
+            
             html += f"""
                 <div class="summary">
                     <strong>Calculated Portfolio Value:</strong> ${calculated_value:,.2f}<br>
                     <strong>Snapshot Value (DB):</strong> {'$' + f'{snapshot_value:,.2f}' if snapshot_value is not None else 'No snapshot'}<br>
-                    <strong>Match Status:</strong> <span class="{match_class}">{match_text}</span>
+                    <strong>Match Status:</strong> <span class="{match_class}">{match_text}</span>{missing_market_data_note}
                 </div>
             </div>
             """
