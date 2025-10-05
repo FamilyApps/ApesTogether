@@ -7749,18 +7749,22 @@ def admin_debug_portfolio_timeline():
             date(2025, 9, 15),
         ]
         
-        result = {
-            'username': username,
-            'user_id': user.id,
-            'user_created_at': user.created_at.isoformat() if user.created_at else None,
-            'timeline': []
-        }
-        
         # Get all stocks for this user
         all_stocks = Stock.query.filter_by(user_id=user.id).order_by(Stock.purchase_date).all()
         
         # Get all transactions for context
         all_transactions = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.timestamp).all()
+        
+        result = {
+            'username': username,
+            'user_id': user.id,
+            'email': user.email,
+            'first_stock_purchase': all_stocks[0].purchase_date.isoformat() if all_stocks else None,
+            'first_transaction': all_transactions[0].timestamp.isoformat() if all_transactions else None,
+            'total_stocks': len(all_stocks),
+            'total_transactions': len(all_transactions),
+            'timeline': []
+        }
         
         for target_date in target_dates:
             day_data = {
@@ -7846,12 +7850,7 @@ def admin_debug_portfolio_timeline():
             result['timeline'].append(day_data)
         
         # Add summary
-        result['summary'] = {
-            'total_stocks': len(all_stocks),
-            'total_transactions': len(all_transactions),
-            'first_purchase': all_stocks[0].purchase_date.isoformat() if all_stocks else None,
-            'date_range_analyzed': f"{target_dates[0]} to {target_dates[-1]}"
-        }
+        result['date_range_analyzed'] = f"{target_dates[0]} to {target_dates[-1]}"
         
         return jsonify(result), 200
         
