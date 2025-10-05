@@ -7712,6 +7712,153 @@ def admin_db_health_check():
         logger.error(f"Health check error: {str(e)}")
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
+@app.route('/admin/debug-portfolio-timeline', methods=['GET'])
+@login_required
+def admin_debug_portfolio_timeline():
+    """
+    Detailed portfolio breakdown across specific dates
+    Shows: holdings, stock prices, calculated values, snapshots
+    """
+    try:
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import date, datetime, timedelta
+        from models import User, Stock, MarketData, PortfolioSnapshot, Transaction
+        
+        username = request.args.get('username', 'witty-raven')
+        
+        # Find user
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': f'User {username} not found'}), 404
+        
+        # Dates to analyze
+        target_dates = [
+            date(2025, 8, 29),
+            date(2025, 9, 1),
+            date(2025, 9, 2),
+            date(2025, 9, 3),
+            date(2025, 9, 4),
+            date(2025, 9, 5),
+            date(2025, 9, 8),
+            date(2025, 9, 9),
+            date(2025, 9, 10),
+            date(2025, 9, 11),
+            date(2025, 9, 12),
+            date(2025, 9, 15),
+        ]
+        
+        result = {
+            'username': username,
+            'user_id': user.id,
+            'user_created_at': user.created_at.isoformat() if user.created_at else None,
+            'timeline': []
+        }
+        
+        # Get all stocks for this user
+        all_stocks = Stock.query.filter_by(user_id=user.id).order_by(Stock.purchase_date).all()
+        
+        # Get all transactions for context
+        all_transactions = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.timestamp).all()
+        
+        for target_date in target_dates:
+            day_data = {
+                'date': target_date.isoformat(),
+                'day_of_week': target_date.strftime('%A'),
+                'is_weekend': target_date.weekday() >= 5,
+                'holdings': [],
+                'calculated_portfolio_value': 0.0,
+                'snapshot_value': None,
+                'transactions_on_this_day': []
+            }
+            
+            # Find transactions on this day
+            day_transactions = [
+                {
+                    'type': t.transaction_type,
+                    'ticker': t.ticker,
+                    'quantity': t.quantity,
+                    'price': t.price,
+                    'time': t.timestamp.isoformat()
+                }
+                for t in all_transactions
+                if t.timestamp.date() == target_date
+            ]
+            day_data['transactions_on_this_day'] = day_transactions
+            
+            # Calculate holdings as of this date
+            holdings = {}
+            for stock in all_stocks:
+                if stock.purchase_date.date() <= target_date:
+                    if stock.ticker not in holdings:
+                        holdings[stock.ticker] = 0
+                    holdings[stock.ticker] += stock.quantity
+            
+            # Filter out zero/negative holdings
+            holdings = {ticker: qty for ticker, qty in holdings.items() if qty > 0}
+            
+            # Get market data for this date for all tickers
+            portfolio_value = 0.0
+            for ticker, quantity in holdings.items():
+                market_data = MarketData.query.filter_by(
+                    ticker=ticker,
+                    date=target_date
+                ).first()
+                
+                if market_data:
+                    stock_value = quantity * market_data.close_price
+                    portfolio_value += stock_value
+                    
+                    day_data['holdings'].append({
+                        'ticker': ticker,
+                        'quantity': quantity,
+                        'price': round(market_data.close_price, 2),
+                        'value': round(stock_value, 2)
+                    })
+                else:
+                    # No market data for this ticker on this date
+                    day_data['holdings'].append({
+                        'ticker': ticker,
+                        'quantity': quantity,
+                        'price': None,
+                        'value': None,
+                        'note': 'No market data'
+                    })
+            
+            day_data['calculated_portfolio_value'] = round(portfolio_value, 2)
+            day_data['holdings_count'] = len(holdings)
+            
+            # Get snapshot value from database
+            snapshot = PortfolioSnapshot.query.filter_by(
+                user_id=user.id,
+                date=target_date
+            ).first()
+            
+            if snapshot:
+                day_data['snapshot_value'] = round(snapshot.total_value, 2)
+                day_data['snapshot_exists'] = True
+                day_data['values_match'] = abs(portfolio_value - snapshot.total_value) < 0.01
+            else:
+                day_data['snapshot_exists'] = False
+                day_data['values_match'] = None
+            
+            result['timeline'].append(day_data)
+        
+        # Add summary
+        result['summary'] = {
+            'total_stocks': len(all_stocks),
+            'total_transactions': len(all_transactions),
+            'first_purchase': all_stocks[0].purchase_date.isoformat() if all_stocks else None,
+            'date_range_analyzed': f"{target_dates[0]} to {target_dates[-1]}"
+        }
+        
+        return jsonify(result), 200
+        
+    except Exception as e:
+        logger.error(f"Portfolio timeline debug error: {str(e)}")
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
 @app.route('/admin/profile-recalculation', methods=['POST'])
 @login_required
 def admin_profile_recalculation():
