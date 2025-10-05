@@ -7222,13 +7222,13 @@ def admin_recalculate_sept_snapshots():
 @app.route('/admin/recalculate-user', methods=['POST'])
 @login_required
 def admin_recalculate_user():
-    """Recalculate a SINGLE user's snapshots (avoids timeout)"""
+    """Recalculate a SINGLE user's snapshots using RAW SQL for speed"""
     try:
         if not current_user.is_admin:
             return jsonify({'error': 'Admin access required'}), 403
         
         from datetime import date, timedelta
-        from models import User, PortfolioSnapshot, Stock, MarketData
+        from sqlalchemy import text
         
         data = request.get_json()
         username = data.get('username')
@@ -7236,9 +7236,16 @@ def admin_recalculate_user():
         if not username:
             return jsonify({'success': False, 'error': 'No username provided'}), 400
         
-        user = User.query.filter_by(username=username).first()
-        if not user:
+        # Get user ID using raw SQL (faster)
+        result = db.session.execute(
+            text("SELECT id FROM users WHERE username = :username"),
+            {'username': username}
+        ).fetchone()
+        
+        if not result:
             return jsonify({'success': False, 'error': f'User {username} not found'}), 404
+        
+        user_id = result[0]
         
         START_DATE = date(2025, 9, 2)
         END_DATE = date(2025, 9, 11)
@@ -7246,52 +7253,83 @@ def admin_recalculate_user():
         results = {
             'success': True,
             'username': username,
-            'user_id': user.id,
+            'user_id': user_id,
             'snapshots_updated': 0,
             'daily_values': {}
         }
         
+        # Pre-fetch ALL market data for the period (one query instead of many)
+        market_data_cache = {}
+        market_data_rows = db.session.execute(
+            text("""
+                SELECT ticker, date, close_price 
+                FROM market_data 
+                WHERE date >= :start_date AND date <= :end_date
+            """),
+            {'start_date': START_DATE, 'end_date': END_DATE}
+        ).fetchall()
+        
+        for row in market_data_rows:
+            key = (row[0], row[1])  # (ticker, date)
+            market_data_cache[key] = row[2]  # close_price
+        
+        # Pre-fetch user's holdings (one query)
+        holdings_rows = db.session.execute(
+            text("""
+                SELECT ticker, purchase_date, quantity
+                FROM stocks
+                WHERE user_id = :user_id
+                ORDER BY purchase_date
+            """),
+            {'user_id': user_id}
+        ).fetchall()
+        
         current_date = START_DATE
         while current_date <= END_DATE:
-            # Get holdings on this date
-            holdings = db.session.query(
-                Stock.ticker,
-                func.sum(Stock.quantity).label('net_quantity')
-            ).filter(
-                Stock.user_id == user.id,
-                Stock.purchase_date <= current_date
-            ).group_by(Stock.ticker).having(
-                func.sum(Stock.quantity) > 0
-            ).all()
+            # Calculate holdings as of this date
+            holdings = {}
+            for ticker, purchase_date, qty in holdings_rows:
+                if purchase_date <= current_date:
+                    holdings[ticker] = holdings.get(ticker, 0) + qty
+            
+            # Remove zero/negative holdings
+            holdings = {t: q for t, q in holdings.items() if q > 0}
             
             # Calculate portfolio value
             portfolio_value = 0.0
-            for ticker, qty in holdings:
-                market_data = MarketData.query.filter_by(ticker=ticker, date=current_date).first()
-                if market_data:
-                    portfolio_value += qty * market_data.close_price
+            for ticker, qty in holdings.items():
+                price = market_data_cache.get((ticker, current_date))
+                if price:
+                    portfolio_value += qty * price
             
-            # Update snapshot
-            snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id, date=current_date).first()
-            if snapshot:
-                old_value = snapshot.total_value
-                snapshot.total_value = portfolio_value
-                # CRITICAL: Explicitly mark as dirty
-                db.session.merge(snapshot)
+            # Update using raw SQL (faster than ORM)
+            update_result = db.session.execute(
+                text("""
+                    UPDATE portfolio_snapshot 
+                    SET total_value = :new_value
+                    WHERE user_id = :user_id AND date = :date
+                    RETURNING total_value
+                """),
+                {'new_value': portfolio_value, 'user_id': user_id, 'date': current_date}
+            )
+            
+            updated_row = update_result.fetchone()
+            
+            if updated_row:
                 results['snapshots_updated'] += 1
                 results['daily_values'][str(current_date)] = {
-                    'old': round(old_value, 2),
                     'new': round(portfolio_value, 2),
-                    'changed': abs(old_value - portfolio_value) > 0.01
+                    'updated': True
                 }
             elif portfolio_value > 0:
-                snapshot = PortfolioSnapshot(
-                    user_id=user.id,
-                    date=current_date,
-                    total_value=portfolio_value,
-                    cash_flow=0.0
+                # Insert if doesn't exist
+                db.session.execute(
+                    text("""
+                        INSERT INTO portfolio_snapshot (user_id, date, total_value, cash_flow)
+                        VALUES (:user_id, :date, :total_value, 0.0)
+                    """),
+                    {'user_id': user_id, 'date': current_date, 'total_value': portfolio_value}
                 )
-                db.session.add(snapshot)
                 results['snapshots_updated'] += 1
                 results['daily_values'][str(current_date)] = {
                     'new': round(portfolio_value, 2),
@@ -7300,14 +7338,14 @@ def admin_recalculate_user():
             
             current_date += timedelta(days=1)
         
-        # CRITICAL: Flush and commit
-        db.session.flush()
+        # Commit once at the end
         db.session.commit()
         
         return jsonify(results), 200
         
     except Exception as e:
         logger.error(f"Error recalculating user: {str(e)}")
+        db.session.rollback()
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 @app.route('/admin/clear-caches', methods=['POST'])
