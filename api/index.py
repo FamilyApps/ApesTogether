@@ -7152,6 +7152,153 @@ def admin_recalculate_sept_snapshots():
         logger.error(f"Error recalculating snapshots: {str(e)}")
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
 
+@app.route('/admin/debug-recalculation')
+@login_required
+def admin_debug_recalculation():
+    """Debug version: Shows EXACTLY what happens during recalculation"""
+    try:
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import date, timedelta
+        from models import User, PortfolioSnapshot, Stock, MarketData
+        
+        START_DATE = date(2025, 9, 2)
+        END_DATE = date(2025, 9, 11)
+        
+        results = {
+            'period': f'{START_DATE} to {END_DATE}',
+            'users': {}
+        }
+        
+        # Focus on witty-raven first since we know their expected values
+        user = User.query.filter_by(username='witty-raven').first()
+        
+        if not user:
+            return jsonify({'error': 'witty-raven user not found'}), 404
+        
+        user_debug = {
+            'user_id': user.id,
+            'email': user.email,
+            'daily_details': {}
+        }
+        
+        current_date = START_DATE
+        while current_date <= END_DATE:
+            day_debug = {
+                'date': str(current_date),
+                'holdings': {},
+                'market_data_found': {},
+                'calculation': [],
+                'calculated_total': 0.0,
+                'snapshot_before': None,
+                'snapshot_after': None,
+                'snapshot_exists': False,
+                'update_attempted': False
+            }
+            
+            # Get holdings on this date
+            holdings = db.session.query(
+                Stock.ticker,
+                func.sum(Stock.quantity).label('net_quantity')
+            ).filter(
+                Stock.user_id == user.id,
+                Stock.purchase_date <= current_date
+            ).group_by(Stock.ticker).having(
+                func.sum(Stock.quantity) > 0
+            ).all()
+            
+            # Record holdings
+            for ticker, qty in holdings:
+                day_debug['holdings'][ticker] = float(qty)
+            
+            # Calculate portfolio value with detailed breakdown
+            portfolio_value = 0.0
+            for ticker, qty in holdings:
+                market_data = MarketData.query.filter_by(ticker=ticker, date=current_date).first()
+                
+                if market_data:
+                    ticker_value = qty * market_data.close_price
+                    portfolio_value += ticker_value
+                    
+                    day_debug['market_data_found'][ticker] = {
+                        'close_price': round(market_data.close_price, 2),
+                        'quantity': float(qty),
+                        'value': round(ticker_value, 2)
+                    }
+                    day_debug['calculation'].append(
+                        f"{ticker}: {qty} shares × ${market_data.close_price:.2f} = ${ticker_value:.2f}"
+                    )
+                else:
+                    day_debug['market_data_found'][ticker] = {
+                        'error': 'NOT FOUND IN DATABASE',
+                        'quantity': float(qty)
+                    }
+                    day_debug['calculation'].append(
+                        f"{ticker}: {qty} shares × NO PRICE = $0.00"
+                    )
+            
+            day_debug['calculated_total'] = round(portfolio_value, 2)
+            
+            # Check current snapshot value
+            snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id, date=current_date).first()
+            
+            if snapshot:
+                day_debug['snapshot_exists'] = True
+                day_debug['snapshot_before'] = round(snapshot.total_value, 2)
+                
+                # This is what the recalculation endpoint does
+                old_value = snapshot.total_value
+                snapshot.total_value = portfolio_value
+                day_debug['update_attempted'] = True
+                day_debug['snapshot_after'] = round(portfolio_value, 2)
+                day_debug['value_changed'] = (old_value != portfolio_value)
+                day_debug['difference'] = round(portfolio_value - old_value, 2)
+            else:
+                day_debug['snapshot_exists'] = False
+                day_debug['note'] = 'Snapshot does not exist - would be created if portfolio_value > 0'
+                if portfolio_value > 0:
+                    day_debug['would_create_snapshot'] = True
+                    day_debug['new_value'] = round(portfolio_value, 2)
+            
+            user_debug['daily_details'][str(current_date)] = day_debug
+            current_date += timedelta(days=1)
+        
+        results['users']['witty-raven'] = user_debug
+        
+        # Add summary
+        results['summary'] = {
+            'issue_diagnosis': [],
+            'expected_values': {
+                '2025-09-02': 6570.12,
+                '2025-09-03': 6659.32,
+                '2025-09-04': 6724.72,
+                '2025-09-05': 6848.16
+            }
+        }
+        
+        # Diagnose issues
+        for date_str, details in user_debug['daily_details'].items():
+            if details['snapshot_exists']:
+                if details['calculated_total'] == 0 and details['snapshot_before'] > 0:
+                    results['summary']['issue_diagnosis'].append(
+                        f"{date_str}: Calculated $0 but snapshot has ${details['snapshot_before']} - MISSING MARKET DATA?"
+                    )
+                elif not details.get('value_changed', False):
+                    results['summary']['issue_diagnosis'].append(
+                        f"{date_str}: Calculated ${details['calculated_total']} = snapshot value - NO CHANGE NEEDED"
+                    )
+                elif details['calculated_total'] != details['snapshot_before']:
+                    results['summary']['issue_diagnosis'].append(
+                        f"{date_str}: Would update from ${details['snapshot_before']} to ${details['calculated_total']} - SHOULD WORK"
+                    )
+        
+        return jsonify(results), 200
+        
+    except Exception as e:
+        logger.error(f"Error in debug recalculation: {str(e)}")
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
 @app.route('/admin/metrics')
 @login_required
 def admin_metrics():
