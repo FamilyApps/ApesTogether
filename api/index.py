@@ -6740,6 +6740,418 @@ def admin_verify_sept_backfill():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/complete-sept-backfill')
+@login_required
+def admin_complete_sept_backfill_page():
+    """Interface page for completing Sept backfill in batches (no timeout)"""
+    try:
+        if not current_user.is_admin:
+            return "Admin access required", 403
+        
+        html = '''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Complete Sept 2-11 Backfill</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 1200px; margin: 20px auto; padding: 20px; }
+        h1 { color: #2c3e50; }
+        .batch { 
+            background: #f8f9fa; 
+            border: 2px solid #dee2e6; 
+            border-radius: 8px; 
+            padding: 15px; 
+            margin: 15px 0; 
+        }
+        .batch h3 { margin-top: 0; color: #495057; }
+        button { 
+            background: #007bff; 
+            color: white; 
+            border: none; 
+            padding: 12px 24px; 
+            border-radius: 5px; 
+            cursor: pointer; 
+            font-size: 16px; 
+            margin: 5px;
+        }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #6c757d; cursor: not-allowed; }
+        .recalc-btn { background: #28a745; }
+        .recalc-btn:hover { background: #218838; }
+        .status { 
+            margin-top: 10px; 
+            padding: 10px; 
+            border-radius: 5px; 
+            display: none;
+        }
+        .status.loading { background: #fff3cd; border: 1px solid #ffc107; display: block; }
+        .status.success { background: #d4edda; border: 1px solid #28a745; display: block; }
+        .status.error { background: #f8d7da; border: 1px solid #dc3545; display: block; }
+        .ticker-list { color: #6c757d; margin: 10px 0; }
+        .progress { 
+            background: #e9ecef; 
+            height: 30px; 
+            border-radius: 5px; 
+            margin: 20px 0; 
+            overflow: hidden;
+        }
+        .progress-bar { 
+            background: #28a745; 
+            height: 100%; 
+            transition: width 0.3s; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            color: white; 
+            font-weight: bold;
+        }
+        pre { 
+            background: #f1f3f5; 
+            padding: 10px; 
+            border-radius: 5px; 
+            overflow-x: auto; 
+            max-height: 300px; 
+            overflow-y: auto;
+        }
+        .warning { background: #fff3cd; border: 1px solid #ffc107; padding: 15px; border-radius: 5px; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <h1>🔧 Complete Sept 2-11 Backfill</h1>
+    
+    <div class="warning">
+        <strong>⚠️ Current Status:</strong><br>
+        • Only 3/22 tickers have data (AAPL, SSPY, TSLA)<br>
+        • 19 tickers need backfill: GOOGL, NVDA, MSFT, AMZN, JPM, V, UNH, KO, PFE, O, SCHD, VTI, BRK-B, COST, HD, JNJ, LLY, WMT, XOM<br>
+        • Premium API: 150 calls/min (plenty of capacity)<br>
+        • Batched approach to avoid 60s timeout
+    </div>
+    
+    <div class="progress">
+        <div class="progress-bar" id="overallProgress" style="width: 0%">0/5 Complete</div>
+    </div>
+    
+    <div class="batch">
+        <h3>Batch 1: Tech Giants (5 tickers)</h3>
+        <div class="ticker-list">GOOGL, NVDA, MSFT, AMZN, COST</div>
+        <button onclick="runBatch(1, ['GOOGL', 'NVDA', 'MSFT', 'AMZN', 'COST'])">
+            🚀 Backfill Batch 1
+        </button>
+        <div class="status" id="status1"></div>
+    </div>
+    
+    <div class="batch">
+        <h3>Batch 2: Financial & Healthcare (5 tickers)</h3>
+        <div class="ticker-list">JPM, V, UNH, JNJ, LLY</div>
+        <button onclick="runBatch(2, ['JPM', 'V', 'UNH', 'JNJ', 'LLY'])">
+            🚀 Backfill Batch 2
+        </button>
+        <div class="status" id="status2"></div>
+    </div>
+    
+    <div class="batch">
+        <h3>Batch 3: Consumer & Retail (5 tickers)</h3>
+        <div class="ticker-list">WMT, HD, KO, PFE, XOM</div>
+        <button onclick="runBatch(3, ['WMT', 'HD', 'KO', 'PFE', 'XOM'])">
+            🚀 Backfill Batch 3
+        </button>
+        <div class="status" id="status3"></div>
+    </div>
+    
+    <div class="batch">
+        <h3>Batch 4: ETFs & Dividends (4 tickers)</h3>
+        <div class="ticker-list">VTI, SCHD, O, BRK-B</div>
+        <button onclick="runBatch(4, ['VTI', 'SCHD', 'O', 'BRK-B'])">
+            🚀 Backfill Batch 4
+        </button>
+        <div class="status" id="status4"></div>
+    </div>
+    
+    <div class="batch" style="background: #e7f3ff; border-color: #007bff;">
+        <h3>Final Step: Recalculate All Portfolios</h3>
+        <p><strong>Run this AFTER all batches complete</strong> to recalculate portfolio snapshots using the new data.</p>
+        <button class="recalc-btn" onclick="recalculateSnapshots()">
+            ✅ Recalculate All Portfolios
+        </button>
+        <div class="status" id="statusRecalc"></div>
+    </div>
+    
+    <script>
+        let completedBatches = 0;
+        
+        async function runBatch(batchNum, tickers) {
+            const statusDiv = document.getElementById('status' + batchNum);
+            const button = event.target;
+            
+            button.disabled = true;
+            statusDiv.className = 'status loading';
+            statusDiv.innerHTML = '⏳ Fetching data from Alpha Vantage... (~' + (tickers.length * 1) + 's)';
+            
+            try {
+                const response = await fetch('/admin/backfill-batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tickers: tickers })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    statusDiv.className = 'status success';
+                    statusDiv.innerHTML = '✅ <strong>Success!</strong><br>' +
+                        'Inserted: ' + result.summary.inserted + ' entries<br>' +
+                        'Updated: ' + result.summary.updated + ' entries<br>' +
+                        'Time: ' + result.summary.duration + '<br>' +
+                        '<details><summary>View Details</summary><pre>' + 
+                        JSON.stringify(result.details, null, 2) + '</pre></details>';
+                    
+                    completedBatches++;
+                    updateProgress();
+                } else {
+                    statusDiv.className = 'status error';
+                    statusDiv.innerHTML = '❌ <strong>Error:</strong><br>' + result.error;
+                    button.disabled = false;
+                }
+            } catch (error) {
+                statusDiv.className = 'status error';
+                statusDiv.innerHTML = '❌ <strong>Error:</strong><br>' + error.message;
+                button.disabled = false;
+            }
+        }
+        
+        async function recalculateSnapshots() {
+            const statusDiv = document.getElementById('statusRecalc');
+            const button = event.target;
+            
+            button.disabled = true;
+            statusDiv.className = 'status loading';
+            statusDiv.innerHTML = '⏳ Recalculating portfolio snapshots for all users... This may take 30-60 seconds.';
+            
+            try {
+                const response = await fetch('/admin/recalculate-sept-snapshots', {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    statusDiv.className = 'status success';
+                    statusDiv.innerHTML = '✅ <strong>Recalculation Complete!</strong><br>' +
+                        'Users recalculated: ' + result.summary.users_recalculated + '<br>' +
+                        'Snapshots updated: ' + result.summary.snapshots_updated + '<br>' +
+                        'Caches cleared: ' + result.summary.caches_cleared + '<br>' +
+                        '<details><summary>View Details</summary><pre>' + 
+                        JSON.stringify(result.details, null, 2) + '</pre></details>';
+                    
+                    updateProgress();
+                } else {
+                    statusDiv.className = 'status error';
+                    statusDiv.innerHTML = '❌ <strong>Error:</strong><br>' + result.error;
+                    button.disabled = false;
+                }
+            } catch (error) {
+                statusDiv.className = 'status error';
+                statusDiv.innerHTML = '❌ <strong>Error:</strong><br>' + error.message;
+                button.disabled = false;
+            }
+        }
+        
+        function updateProgress() {
+            const progressBar = document.getElementById('overallProgress');
+            const total = 5; // 4 batches + 1 recalc
+            const percent = (completedBatches / 4) * 100; // Only count batches for progress
+            progressBar.style.width = percent + '%';
+            progressBar.textContent = completedBatches + '/4 Batches Complete';
+        }
+    </script>
+</body>
+</html>
+        '''
+        
+        return html
+        
+    except Exception as e:
+        logger.error(f"Error rendering backfill page: {str(e)}")
+        return f"Error: {str(e)}", 500
+
+@app.route('/admin/backfill-batch', methods=['POST'])
+@login_required
+def admin_backfill_batch():
+    """Backfill a batch of tickers (called from button interface)"""
+    try:
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        import requests
+        from datetime import date, timedelta
+        from models import MarketData
+        import time as time_module
+        
+        data = request.get_json()
+        tickers = data.get('tickers', [])
+        
+        if not tickers:
+            return jsonify({'success': False, 'error': 'No tickers provided'}), 400
+        
+        ALPHA_VANTAGE_KEY = os.environ.get('ALPHA_VANTAGE_API_KEY')
+        START_DATE = date(2025, 9, 2)
+        END_DATE = date(2025, 9, 11)
+        
+        start_time = time_module.time()
+        results = {
+            'success': True,
+            'details': {},
+            'summary': {'inserted': 0, 'updated': 0, 'errors': 0, 'duration': ''}
+        }
+        
+        for ticker in tickers:
+            try:
+                # Fetch from Alpha Vantage
+                url = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={ticker}&apikey={ALPHA_VANTAGE_KEY}&outputsize=compact'
+                response = requests.get(url, timeout=30)
+                data = response.json()
+                
+                if 'Time Series (Daily)' not in data:
+                    results['details'][ticker] = {'success': False, 'error': 'Invalid API response'}
+                    results['summary']['errors'] += 1
+                    continue
+                
+                # Extract Sept 2-11 data
+                time_series = data['Time Series (Daily)']
+                inserted = 0
+                updated = 0
+                
+                current_date = START_DATE
+                while current_date <= END_DATE:
+                    date_str = current_date.strftime('%Y-%m-%d')
+                    if date_str in time_series:
+                        close_price = float(time_series[date_str]['4. close'])
+                        
+                        existing = MarketData.query.filter_by(ticker=ticker, date=current_date).first()
+                        if existing:
+                            existing.close_price = close_price
+                            updated += 1
+                        else:
+                            market_data = MarketData(ticker=ticker, date=current_date, close_price=close_price)
+                            db.session.add(market_data)
+                            inserted += 1
+                    
+                    current_date += timedelta(days=1)
+                
+                db.session.commit()
+                
+                results['details'][ticker] = {
+                    'success': True,
+                    'inserted': inserted,
+                    'updated': updated
+                }
+                results['summary']['inserted'] += inserted
+                results['summary']['updated'] += updated
+                
+                # Small delay for rate limiting (premium allows 150/min, so 0.5s is safe)
+                time_module.sleep(0.5)
+                
+            except Exception as e:
+                results['details'][ticker] = {'success': False, 'error': str(e)}
+                results['summary']['errors'] += 1
+        
+        duration = round(time_module.time() - start_time, 1)
+        results['summary']['duration'] = f'{duration}s'
+        
+        return jsonify(results), 200
+        
+    except Exception as e:
+        logger.error(f"Error in batch backfill: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/admin/recalculate-sept-snapshots', methods=['POST'])
+@login_required
+def admin_recalculate_sept_snapshots():
+    """Recalculate ALL users' portfolio snapshots for Sept 2-11"""
+    try:
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import date, timedelta
+        from models import User, PortfolioSnapshot, Stock, MarketData, UserPortfolioChartCache, LeaderboardCache
+        
+        START_DATE = date(2025, 9, 2)
+        END_DATE = date(2025, 9, 11)
+        
+        results = {
+            'success': True,
+            'details': {},
+            'summary': {
+                'users_recalculated': 0,
+                'snapshots_updated': 0,
+                'caches_cleared': 0
+            }
+        }
+        
+        all_users = User.query.all()
+        
+        for user in all_users:
+            user_snapshots_updated = 0
+            
+            current_date = START_DATE
+            while current_date <= END_DATE:
+                # Get holdings on this date
+                holdings = db.session.query(
+                    Stock.ticker,
+                    func.sum(Stock.quantity).label('net_quantity')
+                ).filter(
+                    Stock.user_id == user.id,
+                    Stock.purchase_date <= current_date
+                ).group_by(Stock.ticker).having(
+                    func.sum(Stock.quantity) > 0
+                ).all()
+                
+                # Calculate portfolio value
+                portfolio_value = 0.0
+                for ticker, qty in holdings:
+                    market_data = MarketData.query.filter_by(ticker=ticker, date=current_date).first()
+                    if market_data:
+                        portfolio_value += qty * market_data.close_price
+                
+                # Update snapshot
+                snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id, date=current_date).first()
+                if snapshot:
+                    snapshot.total_value = portfolio_value
+                    user_snapshots_updated += 1
+                elif portfolio_value > 0:
+                    snapshot = PortfolioSnapshot(
+                        user_id=user.id,
+                        date=current_date,
+                        total_value=portfolio_value,
+                        cash_flow=0.0
+                    )
+                    db.session.add(snapshot)
+                    user_snapshots_updated += 1
+                
+                current_date += timedelta(days=1)
+            
+            db.session.commit()
+            
+            results['details'][user.username] = {
+                'user_id': user.id,
+                'snapshots_updated': user_snapshots_updated
+            }
+            results['summary']['users_recalculated'] += 1
+            results['summary']['snapshots_updated'] += user_snapshots_updated
+        
+        # Clear caches
+        chart_cache = UserPortfolioChartCache.query.delete()
+        leaderboard_cache = LeaderboardCache.query.delete()
+        db.session.commit()
+        
+        results['summary']['caches_cleared'] = chart_cache + leaderboard_cache
+        
+        return jsonify(results), 200
+        
+    except Exception as e:
+        logger.error(f"Error recalculating snapshots: {str(e)}")
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
+
 @app.route('/admin/metrics')
 @login_required
 def admin_metrics():
