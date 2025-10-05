@@ -6878,13 +6878,34 @@ def admin_complete_sept_backfill_page():
     </div>
     
     <div class="batch" style="background: #e6f7ff; border-color: #17a2b8;">
-        <h3>⚡ Step 2: Try BULK UPDATE Method</h3>
+        <h3>⚡ Step 2: Bulk Recalculate All Users</h3>
         <p><strong>New approach: Pre-fetch ALL snapshots + bulk update (4 queries total)</strong></p>
+        <p><em>Click each user one at a time. Should complete in ~5-10 seconds each.</em></p>
         
         <button class="recalc-btn" style="background: #17a2b8;" onclick="recalculateUserBulk('witty-raven')">
-            ⚡ Bulk Recalc: witty-raven
+            ⚡ Bulk: witty-raven
         </button>
-        <div class="status" id="statusBulk"></div>
+        <div class="status" id="statusBulk-witty-raven"></div>
+        
+        <button class="recalc-btn" style="background: #17a2b8;" onclick="recalculateUserBulk('wise-buffalo')">
+            ⚡ Bulk: wise-buffalo
+        </button>
+        <div class="status" id="statusBulk-wise-buffalo"></div>
+        
+        <button class="recalc-btn" style="background: #17a2b8;" onclick="recalculateUserBulk('wild-bronco')">
+            ⚡ Bulk: wild-bronco
+        </button>
+        <div class="status" id="statusBulk-wild-bronco"></div>
+        
+        <button class="recalc-btn" style="background: #17a2b8;" onclick="recalculateUserBulk('testing2')">
+            ⚡ Bulk: testing2
+        </button>
+        <div class="status" id="statusBulk-testing2"></div>
+        
+        <button class="recalc-btn" style="background: #17a2b8;" onclick="recalculateUserBulk('testing3')">
+            ⚡ Bulk: testing3
+        </button>
+        <div class="status" id="statusBulk-testing3"></div>
     </div>
     
     <div class="batch" style="background: #e7f3ff; border-color: #007bff;">
@@ -7033,7 +7054,7 @@ def admin_complete_sept_backfill_page():
         }
         
         async function recalculateUserBulk(username) {
-            const statusDiv = document.getElementById('statusBulk');
+            const statusDiv = document.getElementById('statusBulk-' + username);
             const button = event.target;
             
             button.disabled = true;
