@@ -7228,7 +7228,7 @@ def admin_recalculate_user():
             return jsonify({'error': 'Admin access required'}), 403
         
         from datetime import date, timedelta
-        from sqlalchemy import text
+        from models import User, Stock, MarketData, PortfolioSnapshot
         
         data = request.get_json()
         username = data.get('username')
@@ -7236,16 +7236,13 @@ def admin_recalculate_user():
         if not username:
             return jsonify({'success': False, 'error': 'No username provided'}), 400
         
-        # Get user ID using raw SQL (faster)
-        result = db.session.execute(
-            text("SELECT id FROM user WHERE username = :username"),
-            {'username': username}
-        ).fetchone()
+        # Use ORM for user lookup (just 1 query, safe)
+        user = User.query.filter_by(username=username).first()
         
-        if not result:
+        if not user:
             return jsonify({'success': False, 'error': f'User {username} not found'}), 404
         
-        user_id = result[0]
+        user_id = user.id
         
         START_DATE = date(2025, 9, 2)
         END_DATE = date(2025, 9, 11)
@@ -7258,39 +7255,27 @@ def admin_recalculate_user():
             'daily_values': {}
         }
         
-        # Pre-fetch ALL market data for the period (one query instead of many)
+        # Pre-fetch ALL market data for the period (one query with ORM)
         market_data_cache = {}
-        market_data_rows = db.session.execute(
-            text("""
-                SELECT ticker, date, close_price 
-                FROM market_data 
-                WHERE date >= :start_date AND date <= :end_date
-            """),
-            {'start_date': START_DATE, 'end_date': END_DATE}
-        ).fetchall()
+        market_data_rows = MarketData.query.filter(
+            MarketData.date >= START_DATE,
+            MarketData.date <= END_DATE
+        ).all()
         
-        for row in market_data_rows:
-            key = (row[0], row[1])  # (ticker, date)
-            market_data_cache[key] = row[2]  # close_price
+        for md in market_data_rows:
+            key = (md.ticker, md.date)
+            market_data_cache[key] = md.close_price
         
-        # Pre-fetch user's holdings (one query)
-        holdings_rows = db.session.execute(
-            text("""
-                SELECT ticker, purchase_date, quantity
-                FROM stock
-                WHERE user_id = :user_id
-                ORDER BY purchase_date
-            """),
-            {'user_id': user_id}
-        ).fetchall()
+        # Pre-fetch user's holdings (one query with ORM)
+        holdings_rows = Stock.query.filter_by(user_id=user_id).order_by(Stock.purchase_date).all()
         
         current_date = START_DATE
         while current_date <= END_DATE:
             # Calculate holdings as of this date
             holdings = {}
-            for ticker, purchase_date, qty in holdings_rows:
-                if purchase_date <= current_date:
-                    holdings[ticker] = holdings.get(ticker, 0) + qty
+            for stock in holdings_rows:
+                if stock.purchase_date.date() <= current_date:
+                    holdings[stock.ticker] = holdings.get(stock.ticker, 0) + stock.quantity
             
             # Remove zero/negative holdings
             holdings = {t: q for t, q in holdings.items() if q > 0}
@@ -7302,34 +7287,33 @@ def admin_recalculate_user():
                 if price:
                     portfolio_value += qty * price
             
-            # Update using raw SQL (faster than ORM)
-            update_result = db.session.execute(
-                text("""
-                    UPDATE portfolio_snapshot 
-                    SET total_value = :new_value
-                    WHERE user_id = :user_id AND date = :date
-                    RETURNING total_value
-                """),
-                {'new_value': portfolio_value, 'user_id': user_id, 'date': current_date}
-            )
+            # Update or create snapshot using ORM
+            snapshot = PortfolioSnapshot.query.filter_by(
+                user_id=user_id, 
+                date=current_date
+            ).first()
             
-            updated_row = update_result.fetchone()
-            
-            if updated_row:
+            if snapshot:
+                old_value = snapshot.total_value
+                snapshot.total_value = portfolio_value
+                # Force dirty tracking
+                db.session.merge(snapshot)
                 results['snapshots_updated'] += 1
                 results['daily_values'][str(current_date)] = {
+                    'old': round(old_value, 2),
                     'new': round(portfolio_value, 2),
-                    'updated': True
+                    'updated': True,
+                    'changed': abs(old_value - portfolio_value) > 0.01
                 }
             elif portfolio_value > 0:
-                # Insert if doesn't exist
-                db.session.execute(
-                    text("""
-                        INSERT INTO portfolio_snapshot (user_id, date, total_value, cash_flow)
-                        VALUES (:user_id, :date, :total_value, 0.0)
-                    """),
-                    {'user_id': user_id, 'date': current_date, 'total_value': portfolio_value}
+                # Create new snapshot
+                snapshot = PortfolioSnapshot(
+                    user_id=user_id,
+                    date=current_date,
+                    total_value=portfolio_value,
+                    cash_flow=0.0
                 )
+                db.session.add(snapshot)
                 results['snapshots_updated'] += 1
                 results['daily_values'][str(current_date)] = {
                     'new': round(portfolio_value, 2),
@@ -7338,7 +7322,8 @@ def admin_recalculate_user():
             
             current_date += timedelta(days=1)
         
-        # Commit once at the end
+        # Flush changes and commit
+        db.session.flush()
         db.session.commit()
         
         return jsonify(results), 200
