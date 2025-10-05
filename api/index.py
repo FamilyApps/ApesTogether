@@ -7733,21 +7733,28 @@ def admin_debug_portfolio_timeline():
         if not user:
             return jsonify({'error': f'User {username} not found'}), 404
         
-        # Dates to analyze - extended back to July 28 to find when witty-raven started
+        # Dates to analyze - extended back to May 26 to find when witty-raven started
+        # Sample every ~3-5 days to reduce page size but still capture key changes
         target_dates = [
+            date(2025, 5, 26),
+            date(2025, 5, 30),
+            date(2025, 6, 3),
+            date(2025, 6, 6),
+            date(2025, 6, 10),
+            date(2025, 6, 13),
+            date(2025, 6, 17),
+            date(2025, 6, 20),
+            date(2025, 6, 24),
+            date(2025, 6, 27),
+            date(2025, 7, 1),
+            date(2025, 7, 7),
+            date(2025, 7, 14),
+            date(2025, 7, 21),
             date(2025, 7, 28),
-            date(2025, 7, 29),
-            date(2025, 7, 30),
-            date(2025, 7, 31),
             date(2025, 8, 1),
-            date(2025, 8, 4),
-            date(2025, 8, 5),
             date(2025, 8, 8),
-            date(2025, 8, 11),
             date(2025, 8, 15),
-            date(2025, 8, 18),
             date(2025, 8, 22),
-            date(2025, 8, 25),
             date(2025, 8, 29),
             date(2025, 9, 1),
             date(2025, 9, 2),
