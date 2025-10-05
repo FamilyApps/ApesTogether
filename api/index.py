@@ -6255,23 +6255,15 @@ def admin_backfill_sept_data():
                 ).first()
                 
                 if existing:
-                    # Update existing
-                    existing.open_price = price_data['open']
-                    existing.high_price = price_data['high']
-                    existing.low_price = price_data['low']
+                    # Update existing (MarketData only has close_price, not OHLCV)
                     existing.close_price = price_data['close']
-                    existing.volume = price_data['volume']
                     ticker_updated += 1
                 else:
-                    # Insert new
+                    # Insert new (MarketData only has close_price, not OHLCV)
                     market_data = MarketData(
                         ticker=ticker,
                         date=trade_date,
-                        open_price=price_data['open'],
-                        high_price=price_data['high'],
-                        low_price=price_data['low'],
-                        close_price=price_data['close'],
-                        volume=price_data['volume']
+                        close_price=price_data['close']
                     )
                     db.session.add(market_data)
                     ticker_inserted += 1
