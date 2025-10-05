@@ -6867,14 +6867,24 @@ def admin_complete_sept_backfill_page():
         <div class="status" id="status4"></div>
     </div>
     
-    <div class="batch" style="background: #fff9e6; border-color: #ff9800;">
-        <h3>🔍 FIRST: Profile Performance</h3>
-        <p><strong>Click this FIRST to see why recalculation is slow</strong></p>
+    <div class="batch" style="background: #ffe6e6; border-color: #dc3545;">
+        <h3>🩺 Step 1: Health Check</h3>
+        <p><strong>Start here - just count queries (very fast)</strong></p>
         
-        <button class="recalc-btn" style="background: #ff9800;" onclick="profileRecalculation('witty-raven')">
-            🔍 Profile witty-raven (diagnose slowness)
+        <button class="recalc-btn" style="background: #dc3545;" onclick="window.open('/admin/db-health-check', '_blank')">
+            🩺 DB Health Check (opens in new tab)
         </button>
-        <div class="status" id="statusProfile"></div>
+        <div class="status" id="statusHealth"></div>
+    </div>
+    
+    <div class="batch" style="background: #e6f7ff; border-color: #17a2b8;">
+        <h3>⚡ Step 2: Try BULK UPDATE Method</h3>
+        <p><strong>New approach: Pre-fetch ALL snapshots + bulk update (4 queries total)</strong></p>
+        
+        <button class="recalc-btn" style="background: #17a2b8;" onclick="recalculateUserBulk('witty-raven')">
+            ⚡ Bulk Recalc: witty-raven
+        </button>
+        <div class="status" id="statusBulk"></div>
     </div>
     
     <div class="batch" style="background: #e7f3ff; border-color: #007bff;">
@@ -7013,6 +7023,47 @@ def admin_complete_sept_backfill_page():
                 } else {
                     statusDiv.className = 'status error';
                     statusDiv.innerHTML = '❌ <strong>Unknown response</strong>';
+                    button.disabled = false;
+                }
+            } catch (error) {
+                statusDiv.className = 'status error';
+                statusDiv.innerHTML = '❌ <strong>Error:</strong><br>' + error.message;
+                button.disabled = false;
+            }
+        }
+        
+        async function recalculateUserBulk(username) {
+            const statusDiv = document.getElementById('statusBulk');
+            const button = event.target;
+            
+            button.disabled = true;
+            statusDiv.className = 'status loading';
+            statusDiv.innerHTML = '⏳ Bulk recalculating ' + username + '... (4 queries only)';
+            
+            try {
+                const response = await fetch('/admin/recalculate-user-bulk', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: username })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    let changedCount = 0;
+                    for (let date in result.daily_values) {
+                        if (result.daily_values[date].changed) changedCount++;
+                    }
+                    
+                    statusDiv.className = 'status success';
+                    statusDiv.innerHTML = '✅ <strong>BULK UPDATE SUCCESS!</strong><br>' +
+                        'Snapshots updated: ' + result.snapshots_updated + '<br>' +
+                        'Values changed: ' + changedCount + '<br>' +
+                        '<details><summary>View Daily Values</summary><pre>' + 
+                        JSON.stringify(result.daily_values, null, 2) + '</pre></details>';
+                } else {
+                    statusDiv.className = 'status error';
+                    statusDiv.innerHTML = '❌ <strong>Error:</strong><br>' + result.error;
                     button.disabled = false;
                 }
             } catch (error) {
@@ -7408,6 +7459,237 @@ def admin_recalculate_user():
         logger.error(f"Error recalculating user: {str(e)}")
         db.session.rollback()
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+@app.route('/admin/recalculate-user-bulk', methods=['POST'])
+@login_required
+def admin_recalculate_user_bulk():
+    """Recalculate using BULK UPDATE - pre-fetch ALL snapshots at once"""
+    try:
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import date, timedelta
+        from models import User, Stock, MarketData, PortfolioSnapshot
+        
+        data = request.get_json()
+        username = data.get('username')
+        
+        if not username:
+            return jsonify({'success': False, 'error': 'No username provided'}), 400
+        
+        # Query 1: Find user
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'success': False, 'error': f'User {username} not found'}), 404
+        
+        user_id = user.id
+        START_DATE = date(2025, 9, 2)
+        END_DATE = date(2025, 9, 11)
+        
+        # Query 2: Pre-fetch ALL market data for Sept 2-11
+        market_data_rows = MarketData.query.filter(
+            MarketData.date >= START_DATE,
+            MarketData.date <= END_DATE
+        ).all()
+        
+        market_data_cache = {(md.ticker, md.date): md.close_price for md in market_data_rows}
+        
+        # Query 3: Pre-fetch user's holdings
+        holdings_rows = Stock.query.filter_by(user_id=user_id).order_by(Stock.purchase_date).all()
+        
+        # Query 4: Pre-fetch ALL snapshots for the date range (THIS IS THE KEY CHANGE!)
+        snapshots = PortfolioSnapshot.query.filter(
+            PortfolioSnapshot.user_id == user_id,
+            PortfolioSnapshot.date >= START_DATE,
+            PortfolioSnapshot.date <= END_DATE
+        ).all()
+        
+        # Build snapshot dict for fast lookup
+        snapshot_dict = {snap.date: snap for snap in snapshots}
+        
+        # Calculate new values and prepare bulk update
+        updates = []
+        results = {
+            'success': True,
+            'username': username,
+            'user_id': user_id,
+            'snapshots_updated': 0,
+            'daily_values': {}
+        }
+        
+        current_date = START_DATE
+        while current_date <= END_DATE:
+            # Calculate holdings as of this date
+            holdings = {}
+            for stock in holdings_rows:
+                if stock.purchase_date.date() <= current_date:
+                    holdings[stock.ticker] = holdings.get(stock.ticker, 0) + stock.quantity
+            
+            holdings = {t: q for t, q in holdings.items() if q > 0}
+            
+            # Calculate portfolio value
+            portfolio_value = 0.0
+            for ticker, qty in holdings.items():
+                price = market_data_cache.get((ticker, current_date))
+                if price:
+                    portfolio_value += qty * price
+            
+            # Update snapshot if exists
+            snapshot = snapshot_dict.get(current_date)
+            if snapshot:
+                old_value = snapshot.total_value
+                updates.append({
+                    'id': snapshot.id,
+                    'total_value': portfolio_value
+                })
+                results['daily_values'][str(current_date)] = {
+                    'old': round(old_value, 2),
+                    'new': round(portfolio_value, 2),
+                    'changed': abs(old_value - portfolio_value) > 0.01
+                }
+                results['snapshots_updated'] += 1
+            
+            current_date += timedelta(days=1)
+        
+        # BULK UPDATE - single operation instead of 10 individual updates
+        if updates:
+            db.session.bulk_update_mappings(PortfolioSnapshot, updates)
+            db.session.commit()
+        
+        return jsonify(results), 200
+        
+    except Exception as e:
+        logger.error(f"Error in bulk recalculation: {str(e)}")
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+@app.route('/admin/db-health-check', methods=['GET'])
+@login_required
+def admin_db_health_check():
+    """Ultra-simple DB health check - just count queries"""
+    try:
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        import time
+        from datetime import date
+        from models import User, Stock, MarketData, PortfolioSnapshot
+        
+        health = {
+            'checks': [],
+            'total_time': 0
+        }
+        
+        overall_start = time.time()
+        
+        # Check 1: Can we connect to DB and count users?
+        start = time.time()
+        try:
+            user_count = User.query.count()
+            health['checks'].append({
+                'test': 'Count users',
+                'time': round(time.time() - start, 3),
+                'result': f'{user_count} users',
+                'status': 'OK'
+            })
+        except Exception as e:
+            health['checks'].append({
+                'test': 'Count users',
+                'time': round(time.time() - start, 3),
+                'error': str(e),
+                'status': 'FAILED'
+            })
+        
+        # Check 2: Can we find witty-raven?
+        start = time.time()
+        try:
+            user = User.query.filter_by(username='witty-raven').first()
+            health['checks'].append({
+                'test': 'Find witty-raven',
+                'time': round(time.time() - start, 3),
+                'result': f'Found user_id={user.id}' if user else 'NOT FOUND',
+                'status': 'OK' if user else 'FAILED'
+            })
+            user_id = user.id if user else None
+        except Exception as e:
+            health['checks'].append({
+                'test': 'Find witty-raven',
+                'time': round(time.time() - start, 3),
+                'error': str(e),
+                'status': 'FAILED'
+            })
+            user_id = None
+        
+        if user_id:
+            # Check 3: Count market data for Sept 2-11
+            start = time.time()
+            try:
+                md_count = MarketData.query.filter(
+                    MarketData.date >= date(2025, 9, 2),
+                    MarketData.date <= date(2025, 9, 11)
+                ).count()
+                health['checks'].append({
+                    'test': 'Count market data (Sept 2-11)',
+                    'time': round(time.time() - start, 3),
+                    'result': f'{md_count} rows',
+                    'status': 'OK'
+                })
+            except Exception as e:
+                health['checks'].append({
+                    'test': 'Count market data (Sept 2-11)',
+                    'time': round(time.time() - start, 3),
+                    'error': str(e),
+                    'status': 'FAILED'
+                })
+            
+            # Check 4: Count user's stocks
+            start = time.time()
+            try:
+                stock_count = Stock.query.filter_by(user_id=user_id).count()
+                health['checks'].append({
+                    'test': 'Count witty-raven stocks',
+                    'time': round(time.time() - start, 3),
+                    'result': f'{stock_count} stocks',
+                    'status': 'OK'
+                })
+            except Exception as e:
+                health['checks'].append({
+                    'test': 'Count witty-raven stocks',
+                    'time': round(time.time() - start, 3),
+                    'error': str(e),
+                    'status': 'FAILED'
+                })
+            
+            # Check 5: Count user's snapshots for Sept
+            start = time.time()
+            try:
+                snapshot_count = PortfolioSnapshot.query.filter(
+                    PortfolioSnapshot.user_id == user_id,
+                    PortfolioSnapshot.date >= date(2025, 9, 2),
+                    PortfolioSnapshot.date <= date(2025, 9, 11)
+                ).count()
+                health['checks'].append({
+                    'test': 'Count witty-raven Sept snapshots',
+                    'time': round(time.time() - start, 3),
+                    'result': f'{snapshot_count} snapshots',
+                    'status': 'OK'
+                })
+            except Exception as e:
+                health['checks'].append({
+                    'test': 'Count witty-raven Sept snapshots',
+                    'time': round(time.time() - start, 3),
+                    'error': str(e),
+                    'status': 'FAILED'
+                })
+        
+        health['total_time'] = round(time.time() - overall_start, 3)
+        health['status'] = 'OK' if all(c['status'] == 'OK' for c in health['checks']) else 'FAILED'
+        
+        return jsonify(health), 200
+        
+    except Exception as e:
+        logger.error(f"Health check error: {str(e)}")
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 @app.route('/admin/profile-recalculation', methods=['POST'])
 @login_required

@@ -1,0 +1,32 @@
+I have a Flask + SQLAlchemy app deployed on Vercel serverless functions. My admin endpoints for recalculating portfolio snapshots are timing out after 60 seconds, even though the logic should complete in under 10 seconds.
+
+THE PROBLEM:
+- Endpoint fetches market data (1 query), user holdings (1 query), then loops through 10 dates
+- For each date, it queries PortfolioSnapshot.query.filter_by(user_id=X, date=Y).first() 
+- Updates the snapshot's total_value field, uses db.session.merge()
+- After the loop, calls db.session.flush() then db.session.commit()
+- Expected: ~13 queries, <10 seconds
+- Actual: Times out at 60 seconds
+- Even the profiling endpoint (which does the same queries but just times them) times out!
+
+ATTEMPTED FIXES THAT FAILED:
+1. Using db.session.merge() + flush() (Grok's recommendation) - Still timeout
+2. Switching to raw SQL - Schema errors ("column id does not exist")
+3. Pre-fetching all data and calculating in memory - Still timeout
+4. Creating a diagnostic profiling endpoint - Also times out!
+
+ENVIRONMENT:
+- Vercel Serverless Functions (60s timeout limit)
+- PostgreSQL (Vercel Postgres)
+- Flask + SQLAlchemy ORM
+- Small dataset: ~5 users, ~220 market data rows, ~10 snapshots per user
+
+QUESTIONS:
+1. Why would simple queries timeout in Vercel serverless environment?
+2. Is there a connection pooling issue with SQLAlchemy + Vercel Postgres?
+3. Should I pre-fetch all 10 snapshots instead of querying in a loop?
+4. Is db.session.merge() slow? Should I use bulk_update_mappings() instead?
+5. Are there missing database indexes causing slow queries? (I have indexes on date and ticker)
+6. Should I use a different pattern for bulk updates in serverless Flask?
+
+I've attached GROK_TIMEOUT_ANALYSIS.md with the full code, error logs, and timeline of attempts. Can you help identify the root cause and suggest a fix that will work within the 60-second timeout?
