@@ -250,42 +250,55 @@ Date       | Total Value | Holdings Snapshot
 - Less database storage
 - Faster chart generation
 
-### Intraday Trading Example:
+### 🚨 **CRITICAL ISSUE DISCOVERED!**
 
-**High Volume Trader (50 trades/day):**
-```
-Trades on 9/19/2025:
-- 9:30 AM: Buy 100 AAPL @ $150
-- 9:45 AM: Sell 100 AAPL @ $151 (+$100)
-- 10:00 AM: Buy 200 TSLA @ $220
-- 10:15 AM: Sell 100 TSLA @ $222 (+$200)
-- 10:30 AM: Buy 50 GOOGL @ $140
-... 45 more trades throughout the day ...
+**Your Concern is 100% Valid!** The system **DOES NOT TRACK CASH BALANCE**.
 
-EOD Holdings:
-- TSLA: 100 shares (kept half)
-- GOOGL: 50 shares
-- AAPL: 0 shares (day traded)
-
-EOD Snapshot:
-- Total value based on TSLA + GOOGL holdings at close
-- Realized gains: $300+ from day trading (in cash balance)
-```
-
-**Chart Shows:**
-```
-Day-over-day portfolio change from market close to market close.
-If they ended with $50,000 on 9/18 and $52,000 on 9/19,
-the chart shows: +4% gain (including all realized gains from intraday trading).
-```
-
-### For Users Who Want Intraday Tracking:
-
-We **do** have intraday snapshots for the 1D chart:
+**The Problem (Confirmed in Code):**
 ```python
-# PortfolioSnapshotIntraday table (collected every 30 minutes)
-# Shows portfolio fluctuations during market hours
-# But this is OPTIONAL - not required for core functionality
+# portfolio_performance.py line 146-189
+def calculate_portfolio_value(user_id):
+    total_value = 0.0
+    stocks = Stock.query.filter_by(user_id=user_id).all()
+    
+    for stock in stocks:
+        total_value += stock.quantity * price
+    
+    return total_value  # ❌ ONLY STOCKS, NO CASH!
+```
+
+**Day Trader Scenario (BROKEN):**
+```
+Month 1: User day trades every day
+- Buys 10 TSLA @ 10 AM ($220)
+- Sells 10 TSLA @ 3:30 PM ($225)
+- Daily profit: $50
+- 22 trading days × $50 = $1,100 profit
+
+EOD Holdings Every Day: 0 stocks
+EOD Snapshot Every Day: $0  ❌ WRONG!
+1M Chart Shows: 0% gain  ❌ WRONG!
+Leaderboard: Excluded (no portfolio value)
+
+SHOULD SHOW:
+- Starting cash: $10,000
+- Ending cash: $11,100  
+- 1M Chart: +11% gain ✅
+- Leaderboard: Top performer ✅
+```
+
+**What's Missing:**
+```sql
+User table:
+❌ No cash_balance field
+
+PortfolioSnapshot:
+❌ total_value = stocks only (not stocks + cash)
+
+Transaction table:
+✅ Has all buy/sell records
+❌ No realized_gains calculation
+❌ No cumulative cash balance tracking
 ```
 
 ---

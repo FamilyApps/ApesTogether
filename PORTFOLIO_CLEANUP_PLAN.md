@@ -12,10 +12,11 @@ We have corrupted portfolio snapshots from early software development where:
 
 1. **Identify First Real Holdings Date** for each user
 2. **Delete Corrupted Snapshots** from before that date
-3. **Backfill Accurate Historical Prices** for all user assets
-4. **Rebuild Snapshots** with correct values from first holdings date forward
-5. **Fix Chart Display** to show no line before user started trading
-6. **Recalculate Gains** starting from actual first holdings date
+3. **FIX CRITICAL BUG: Add Cash Balance Tracking** 🚨
+4. **Backfill Accurate Historical Prices** for all user assets
+5. **Rebuild Snapshots** with correct values (stocks + cash) from first holdings date forward
+6. **Fix Chart Display** to show no line before user started trading
+7. **Recalculate Gains** starting from actual first holdings date
 
 ---
 
@@ -117,6 +118,189 @@ Example: User buys 100 AAPL at 10:05 AM ($150) and sells at 10:15 AM ($151)
 - Shows first transaction timestamp
 - Shows whether market data exists
 - Shows intraday trading patterns
+
+---
+
+## 🚨 PHASE 0: FIX CASH BALANCE BUG (CRITICAL)
+
+### **Problem Discovered:**
+Current system **only tracks stock holdings**, not cash balance. This means:
+- Day traders who end day with 0 stocks show $0 portfolio value
+- Realized gains from selling stocks are invisible
+- Leaderboard excludes profitable intraday traders
+- System is fundamentally broken for active traders
+
+### **Solution: Track Cash Balance + Calculate Realized Gains**
+
+#### Step 0.1: Add Cash Balance to User Model
+
+```python
+# Migration: add_user_cash_balance.py
+class User(db.Model):
+    # ... existing fields ...
+    cash_balance = db.Column(db.Float, default=0.0, nullable=False)
+    initial_cash = db.Column(db.Float, default=0.0, nullable=False)  # Starting capital
+```
+
+#### Step 0.2: Calculate Cumulative Cash Balance from Transactions
+
+```python
+def calculate_user_cash_balance(user_id, as_of_date=None):
+    """
+    Calculate user's cash balance from transaction history.
+    
+    Logic:
+    - Start with initial_cash (user's starting capital)
+    - For each BUY: subtract (quantity × price)
+    - For each SELL: add (quantity × price)
+    - Result: Current cash balance
+    """
+    user = User.query.get(user_id)
+    cash = user.initial_cash or 0.0
+    
+    # Get all transactions up to as_of_date
+    transactions = Transaction.query.filter_by(user_id=user_id)
+    if as_of_date:
+        transactions = transactions.filter(
+            func.date(Transaction.timestamp) <= as_of_date
+        )
+    transactions = transactions.order_by(Transaction.timestamp).all()
+    
+    for txn in transactions:
+        transaction_value = txn.quantity * txn.price
+        if txn.transaction_type == 'buy':
+            cash -= transaction_value  # Spent cash
+        elif txn.transaction_type == 'sell':
+            cash += transaction_value  # Received cash
+    
+    return cash
+```
+
+#### Step 0.3: Update Portfolio Value Calculation
+
+```python
+# portfolio_performance.py
+def calculate_portfolio_value(user_id, target_date=None):
+    """
+    Calculate total portfolio value = stocks + cash.
+    
+    NEW FORMULA:
+    total_value = sum(stock holdings × prices) + cash_balance
+    """
+    # Calculate stock holdings value (existing logic)
+    stock_value = 0.0
+    stocks = Stock.query.filter_by(user_id=user_id).all()
+    for stock in stocks:
+        price = get_market_price(stock.ticker, target_date)
+        stock_value += stock.quantity * price
+    
+    # Calculate cash balance (NEW!)
+    cash_balance = calculate_user_cash_balance(user_id, target_date)
+    
+    # Total = stocks + cash
+    total_value = stock_value + cash_balance
+    
+    return total_value
+```
+
+#### Step 0.4: Set Initial Cash for Existing Users
+
+```python
+def backfill_initial_cash():
+    """
+    For existing users, infer initial cash from their transaction history.
+    
+    Strategy:
+    - If user has stocks and transactions:
+      - Sum all buys: cash_spent
+      - Sum all sells: cash_received  
+      - Current stock value: stock_value
+      - Initial cash = cash_spent - cash_received + current_cash
+    
+    - If user only has stocks (no transactions):
+      - Initial cash = sum(stock purchase values)
+    """
+    users = User.query.all()
+    
+    for user in users:
+        transactions = Transaction.query.filter_by(user_id=user.id).all()
+        
+        if not transactions:
+            # No transaction history, use stock purchase values
+            stocks = Stock.query.filter_by(user_id=user.id).all()
+            initial_cash = sum(s.quantity * s.purchase_price for s in stocks)
+        else:
+            # Has transactions, calculate from history
+            cash_spent = sum(
+                t.quantity * t.price 
+                for t in transactions 
+                if t.transaction_type == 'buy'
+            )
+            cash_received = sum(
+                t.quantity * t.price 
+                for t in transactions 
+                if t.transaction_type == 'sell'
+            )
+            
+            # Current cash = what they have now after all trades
+            current_cash = calculate_user_cash_balance(user.id)
+            
+            # Work backwards: initial = spent - received + current
+            initial_cash = cash_spent - cash_received + current_cash
+        
+        user.initial_cash = initial_cash
+        user.cash_balance = calculate_user_cash_balance(user.id)
+        
+        print(f"{user.username}: Initial=${initial_cash:.2f}, Current Cash=${user.cash_balance:.2f}")
+    
+    db.session.commit()
+```
+
+### **Testing Scenario:**
+
+**Day Trader Test:**
+```python
+# Create test day trader
+user = User(username='day-trader-test', initial_cash=10000.0)
+
+# Day 1: Buy and sell TSLA
+Transaction(user_id=user.id, ticker='TSLA', quantity=10, 
+            price=220, type='buy', timestamp='2025-09-19 10:00:00')
+Transaction(user_id=user.id, ticker='TSLA', quantity=10, 
+            price=225, type='sell', timestamp='2025-09-19 15:30:00')
+
+# Day 1 EOD:
+stock_value = 0  # Sold all stocks
+cash_balance = 10000 - 2200 + 2250 = $10,050
+total_value = 0 + 10050 = $10,050  ✅
+
+# Snapshot:
+PortfolioSnapshot(date='2025-09-19', total_value=10050)
+
+# Chart: +0.5% gain ✅
+# Leaderboard: Included ✅
+```
+
+### **Migration Script:**
+
+```sql
+-- 20251005_add_cash_balance_tracking.sql
+
+ALTER TABLE user 
+ADD COLUMN cash_balance FLOAT DEFAULT 0.0 NOT NULL;
+
+ALTER TABLE user 
+ADD COLUMN initial_cash FLOAT DEFAULT 0.0 NOT NULL;
+
+-- Update existing users (run backfill_initial_cash() after this)
+```
+
+### **Impact:**
+- ✅ Day traders now show correct portfolio values
+- ✅ Realized gains captured in cash balance
+- ✅ Leaderboard includes all profitable traders
+- ✅ Charts show true performance
+- ✅ System works for all trading styles (buy-and-hold AND active trading)
 
 ---
 
