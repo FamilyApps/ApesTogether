@@ -6867,6 +6867,16 @@ def admin_complete_sept_backfill_page():
         <div class="status" id="status4"></div>
     </div>
     
+    <div class="batch" style="background: #fff9e6; border-color: #ff9800;">
+        <h3>🔍 FIRST: Profile Performance</h3>
+        <p><strong>Click this FIRST to see why recalculation is slow</strong></p>
+        
+        <button class="recalc-btn" style="background: #ff9800;" onclick="profileRecalculation('witty-raven')">
+            🔍 Profile witty-raven (diagnose slowness)
+        </button>
+        <div class="status" id="statusProfile"></div>
+    </div>
+    
     <div class="batch" style="background: #e7f3ff; border-color: #007bff;">
         <h3>Final Step: Recalculate Portfolios (One User at a Time)</h3>
         <p><strong>Run these AFTER all batches complete</strong>. Click each button to avoid 60s timeout.</p>
@@ -6937,6 +6947,72 @@ def admin_complete_sept_backfill_page():
                 } else {
                     statusDiv.className = 'status error';
                     statusDiv.innerHTML = '❌ <strong>Error:</strong><br>' + result.error;
+                    button.disabled = false;
+                }
+            } catch (error) {
+                statusDiv.className = 'status error';
+                statusDiv.innerHTML = '❌ <strong>Error:</strong><br>' + error.message;
+                button.disabled = false;
+            }
+        }
+        
+        async function profileRecalculation(username) {
+            const statusDiv = document.getElementById('statusProfile');
+            const button = event.target;
+            
+            button.disabled = true;
+            statusDiv.className = 'status loading';
+            statusDiv.innerHTML = '⏳ Profiling ' + username + '... (measuring performance)';
+            
+            try {
+                const response = await fetch('/admin/profile-recalculation', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: username })
+                });
+                
+                const result = await response.json();
+                
+                if (result.steps) {
+                    // Build a detailed report
+                    let report = '🔍 <strong>Performance Profile:</strong><br>';
+                    report += 'Total Time: ' + result.total_time + 's<br><br>';
+                    
+                    // Show slowest step first
+                    if (result.slowest_step) {
+                        report += '⚠️ <strong>SLOWEST STEP:</strong> ' + result.slowest_step.step + '<br>';
+                        report += 'Time: ' + result.slowest_step.time + 's (' + result.slowest_step.percentage + '% of total)<br><br>';
+                    }
+                    
+                    // Show all steps
+                    report += '<strong>Detailed Breakdown:</strong><br>';
+                    for (let step of result.steps) {
+                        let percentage = ((step.time_seconds / result.total_time) * 100).toFixed(1);
+                        report += step.step + ': <strong>' + step.time_seconds + 's</strong> (' + percentage + '%)<br>';
+                        if (step.rows_fetched !== undefined) {
+                            report += '&nbsp;&nbsp;→ Rows: ' + step.rows_fetched + '<br>';
+                        }
+                        if (step.cache_size !== undefined) {
+                            report += '&nbsp;&nbsp;→ Cache size: ' + step.cache_size + '<br>';
+                        }
+                        if (step.snapshots_processed !== undefined) {
+                            report += '&nbsp;&nbsp;→ Snapshots: ' + step.snapshots_processed + '<br>';
+                        }
+                        if (step.note) {
+                            report += '&nbsp;&nbsp;→ ' + step.note + '<br>';
+                        }
+                    }
+                    
+                    statusDiv.className = 'status success';
+                    statusDiv.innerHTML = report + '<br><details><summary>View Raw JSON</summary><pre>' + 
+                        JSON.stringify(result, null, 2) + '</pre></details>';
+                } else if (result.error) {
+                    statusDiv.className = 'status error';
+                    statusDiv.innerHTML = '❌ <strong>Error:</strong><br>' + result.error;
+                    button.disabled = false;
+                } else {
+                    statusDiv.className = 'status error';
+                    statusDiv.innerHTML = '❌ <strong>Unknown response</strong>';
                     button.disabled = false;
                 }
             } catch (error) {
@@ -7332,6 +7408,158 @@ def admin_recalculate_user():
         logger.error(f"Error recalculating user: {str(e)}")
         db.session.rollback()
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+@app.route('/admin/profile-recalculation', methods=['POST'])
+@login_required
+def admin_profile_recalculation():
+    """Profile the recalculation to see WHERE it's slow"""
+    try:
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        import time
+        from datetime import date, timedelta
+        from models import User, Stock, MarketData, PortfolioSnapshot
+        
+        data = request.get_json()
+        username = data.get('username', 'witty-raven')
+        
+        profile = {
+            'username': username,
+            'steps': [],
+            'total_time': 0,
+            'query_count': 0
+        }
+        
+        overall_start = time.time()
+        
+        # Step 1: Find user
+        step_start = time.time()
+        user = User.query.filter_by(username=username).first()
+        step_time = time.time() - step_start
+        profile['steps'].append({
+            'step': '1. Find user',
+            'time_seconds': round(step_time, 3),
+            'result': f'Found user_id={user.id}' if user else 'NOT FOUND'
+        })
+        
+        if not user:
+            return jsonify(profile), 404
+        
+        user_id = user.id
+        START_DATE = date(2025, 9, 2)
+        END_DATE = date(2025, 9, 11)
+        
+        # Step 2: Fetch market data
+        step_start = time.time()
+        market_data_rows = MarketData.query.filter(
+            MarketData.date >= START_DATE,
+            MarketData.date <= END_DATE
+        ).all()
+        step_time = time.time() - step_start
+        profile['steps'].append({
+            'step': '2. Fetch market data',
+            'time_seconds': round(step_time, 3),
+            'rows_fetched': len(market_data_rows)
+        })
+        
+        # Build cache
+        step_start = time.time()
+        market_data_cache = {}
+        for md in market_data_rows:
+            key = (md.ticker, md.date)
+            market_data_cache[key] = md.close_price
+        step_time = time.time() - step_start
+        profile['steps'].append({
+            'step': '3. Build market data cache',
+            'time_seconds': round(step_time, 3),
+            'cache_size': len(market_data_cache)
+        })
+        
+        # Step 4: Fetch holdings
+        step_start = time.time()
+        holdings_rows = Stock.query.filter_by(user_id=user_id).order_by(Stock.purchase_date).all()
+        step_time = time.time() - step_start
+        profile['steps'].append({
+            'step': '4. Fetch user holdings',
+            'time_seconds': round(step_time, 3),
+            'rows_fetched': len(holdings_rows)
+        })
+        
+        # Step 5: Calculate and update snapshots
+        step_start = time.time()
+        snapshots_processed = 0
+        current_date = START_DATE
+        
+        while current_date <= END_DATE:
+            # Calculate holdings
+            holdings = {}
+            for stock in holdings_rows:
+                if stock.purchase_date.date() <= current_date:
+                    holdings[stock.ticker] = holdings.get(stock.ticker, 0) + stock.quantity
+            
+            holdings = {t: q for t, q in holdings.items() if q > 0}
+            
+            # Calculate value
+            portfolio_value = 0.0
+            for ticker, qty in holdings.items():
+                price = market_data_cache.get((ticker, current_date))
+                if price:
+                    portfolio_value += qty * price
+            
+            # Update snapshot
+            snapshot = PortfolioSnapshot.query.filter_by(user_id=user_id, date=current_date).first()
+            if snapshot:
+                snapshot.total_value = portfolio_value
+                db.session.merge(snapshot)
+                snapshots_processed += 1
+            
+            current_date += timedelta(days=1)
+        
+        step_time = time.time() - step_start
+        profile['steps'].append({
+            'step': '5. Calculate & update snapshots (in memory)',
+            'time_seconds': round(step_time, 3),
+            'snapshots_processed': snapshots_processed,
+            'note': 'NOT YET COMMITTED - just marked dirty'
+        })
+        
+        # Step 6: Flush
+        step_start = time.time()
+        db.session.flush()
+        step_time = time.time() - step_start
+        profile['steps'].append({
+            'step': '6. db.session.flush()',
+            'time_seconds': round(step_time, 3),
+            'note': 'Emits SQL but does not commit'
+        })
+        
+        # Step 7: Commit
+        step_start = time.time()
+        db.session.commit()
+        step_time = time.time() - step_start
+        profile['steps'].append({
+            'step': '7. db.session.commit()',
+            'time_seconds': round(step_time, 3),
+            'note': 'Finalizes transaction'
+        })
+        
+        profile['total_time'] = round(time.time() - overall_start, 3)
+        
+        # Find the slowest step
+        slowest = max(profile['steps'], key=lambda x: x['time_seconds'])
+        profile['slowest_step'] = {
+            'step': slowest['step'],
+            'time': slowest['time_seconds'],
+            'percentage': round(slowest['time_seconds'] / profile['total_time'] * 100, 1)
+        }
+        
+        return jsonify(profile), 200
+        
+    except Exception as e:
+        logger.error(f"Error profiling: {str(e)}")
+        db.session.rollback()
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 @app.route('/admin/clear-caches', methods=['POST'])
 @login_required
