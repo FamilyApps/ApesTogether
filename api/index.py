@@ -6868,12 +6868,39 @@ def admin_complete_sept_backfill_page():
     </div>
     
     <div class="batch" style="background: #e7f3ff; border-color: #007bff;">
-        <h3>Final Step: Recalculate All Portfolios</h3>
-        <p><strong>Run this AFTER all batches complete</strong> to recalculate portfolio snapshots using the new data.</p>
-        <button class="recalc-btn" onclick="recalculateSnapshots()">
-            ✅ Recalculate All Portfolios
+        <h3>Final Step: Recalculate Portfolios (One User at a Time)</h3>
+        <p><strong>Run these AFTER all batches complete</strong>. Click each button to avoid 60s timeout.</p>
+        
+        <button class="recalc-btn" onclick="recalculateUser('witty-raven')">
+            ✅ Recalc: witty-raven
         </button>
-        <div class="status" id="statusRecalc"></div>
+        <div class="status" id="statusRecalc-witty-raven"></div>
+        
+        <button class="recalc-btn" onclick="recalculateUser('wise-buffalo')">
+            ✅ Recalc: wise-buffalo
+        </button>
+        <div class="status" id="statusRecalc-wise-buffalo"></div>
+        
+        <button class="recalc-btn" onclick="recalculateUser('wild-bronco')">
+            ✅ Recalc: wild-bronco
+        </button>
+        <div class="status" id="statusRecalc-wild-bronco"></div>
+        
+        <button class="recalc-btn" onclick="recalculateUser('testing2')">
+            ✅ Recalc: testing2
+        </button>
+        <div class="status" id="statusRecalc-testing2"></div>
+        
+        <button class="recalc-btn" onclick="recalculateUser('testing3')">
+            ✅ Recalc: testing3
+        </button>
+        <div class="status" id="statusRecalc-testing3"></div>
+        
+        <p style="margin-top: 15px;"><strong>After all users recalculated:</strong></p>
+        <button class="recalc-btn" onclick="clearCaches()">
+            🗑️ Clear All Caches
+        </button>
+        <div class="status" id="statusClearCache"></div>
     </div>
     
     <script>
@@ -6919,16 +6946,58 @@ def admin_complete_sept_backfill_page():
             }
         }
         
-        async function recalculateSnapshots() {
-            const statusDiv = document.getElementById('statusRecalc');
+        async function recalculateUser(username) {
+            const statusDiv = document.getElementById('statusRecalc-' + username);
             const button = event.target;
             
             button.disabled = true;
             statusDiv.className = 'status loading';
-            statusDiv.innerHTML = '⏳ Recalculating portfolio snapshots for all users... This may take 30-60 seconds.';
+            statusDiv.innerHTML = '⏳ Recalculating ' + username + '... (~5-10 seconds)';
             
             try {
-                const response = await fetch('/admin/recalculate-sept-snapshots', {
+                const response = await fetch('/admin/recalculate-user', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: username })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    // Count how many values actually changed
+                    let changedCount = 0;
+                    for (let date in result.daily_values) {
+                        if (result.daily_values[date].changed) changedCount++;
+                    }
+                    
+                    statusDiv.className = 'status success';
+                    statusDiv.innerHTML = '✅ <strong>Success!</strong><br>' +
+                        'Snapshots updated: ' + result.snapshots_updated + '<br>' +
+                        'Values changed: ' + changedCount + '<br>' +
+                        '<details><summary>View Daily Values</summary><pre>' + 
+                        JSON.stringify(result.daily_values, null, 2) + '</pre></details>';
+                } else {
+                    statusDiv.className = 'status error';
+                    statusDiv.innerHTML = '❌ <strong>Error:</strong><br>' + result.error;
+                    button.disabled = false;
+                }
+            } catch (error) {
+                statusDiv.className = 'status error';
+                statusDiv.innerHTML = '❌ <strong>Error:</strong><br>' + error.message;
+                button.disabled = false;
+            }
+        }
+        
+        async function clearCaches() {
+            const statusDiv = document.getElementById('statusClearCache');
+            const button = event.target;
+            
+            button.disabled = true;
+            statusDiv.className = 'status loading';
+            statusDiv.innerHTML = '⏳ Clearing chart and leaderboard caches...';
+            
+            try {
+                const response = await fetch('/admin/clear-caches', {
                     method: 'POST'
                 });
                 
@@ -6936,14 +7005,8 @@ def admin_complete_sept_backfill_page():
                 
                 if (result.success) {
                     statusDiv.className = 'status success';
-                    statusDiv.innerHTML = '✅ <strong>Recalculation Complete!</strong><br>' +
-                        'Users recalculated: ' + result.summary.users_recalculated + '<br>' +
-                        'Snapshots updated: ' + result.summary.snapshots_updated + '<br>' +
-                        'Caches cleared: ' + result.summary.caches_cleared + '<br>' +
-                        '<details><summary>View Details</summary><pre>' + 
-                        JSON.stringify(result.details, null, 2) + '</pre></details>';
-                    
-                    updateProgress();
+                    statusDiv.innerHTML = '✅ <strong>Caches Cleared!</strong><br>' +
+                        'Entries removed: ' + result.total_cleared;
                 } else {
                     statusDiv.className = 'status error';
                     statusDiv.innerHTML = '❌ <strong>Error:</strong><br>' + result.error;
@@ -7155,6 +7218,128 @@ def admin_recalculate_sept_snapshots():
     except Exception as e:
         logger.error(f"Error recalculating snapshots: {str(e)}")
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+@app.route('/admin/recalculate-user', methods=['POST'])
+@login_required
+def admin_recalculate_user():
+    """Recalculate a SINGLE user's snapshots (avoids timeout)"""
+    try:
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import date, timedelta
+        from models import User, PortfolioSnapshot, Stock, MarketData
+        
+        data = request.get_json()
+        username = data.get('username')
+        
+        if not username:
+            return jsonify({'success': False, 'error': 'No username provided'}), 400
+        
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'success': False, 'error': f'User {username} not found'}), 404
+        
+        START_DATE = date(2025, 9, 2)
+        END_DATE = date(2025, 9, 11)
+        
+        results = {
+            'success': True,
+            'username': username,
+            'user_id': user.id,
+            'snapshots_updated': 0,
+            'daily_values': {}
+        }
+        
+        current_date = START_DATE
+        while current_date <= END_DATE:
+            # Get holdings on this date
+            holdings = db.session.query(
+                Stock.ticker,
+                func.sum(Stock.quantity).label('net_quantity')
+            ).filter(
+                Stock.user_id == user.id,
+                Stock.purchase_date <= current_date
+            ).group_by(Stock.ticker).having(
+                func.sum(Stock.quantity) > 0
+            ).all()
+            
+            # Calculate portfolio value
+            portfolio_value = 0.0
+            for ticker, qty in holdings:
+                market_data = MarketData.query.filter_by(ticker=ticker, date=current_date).first()
+                if market_data:
+                    portfolio_value += qty * market_data.close_price
+            
+            # Update snapshot
+            snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id, date=current_date).first()
+            if snapshot:
+                old_value = snapshot.total_value
+                snapshot.total_value = portfolio_value
+                # CRITICAL: Explicitly mark as dirty
+                db.session.merge(snapshot)
+                results['snapshots_updated'] += 1
+                results['daily_values'][str(current_date)] = {
+                    'old': round(old_value, 2),
+                    'new': round(portfolio_value, 2),
+                    'changed': abs(old_value - portfolio_value) > 0.01
+                }
+            elif portfolio_value > 0:
+                snapshot = PortfolioSnapshot(
+                    user_id=user.id,
+                    date=current_date,
+                    total_value=portfolio_value,
+                    cash_flow=0.0
+                )
+                db.session.add(snapshot)
+                results['snapshots_updated'] += 1
+                results['daily_values'][str(current_date)] = {
+                    'new': round(portfolio_value, 2),
+                    'created': True
+                }
+            
+            current_date += timedelta(days=1)
+        
+        # CRITICAL: Flush and commit
+        db.session.flush()
+        db.session.commit()
+        
+        return jsonify(results), 200
+        
+    except Exception as e:
+        logger.error(f"Error recalculating user: {str(e)}")
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+@app.route('/admin/clear-caches', methods=['POST'])
+@login_required
+def admin_clear_caches():
+    """Clear chart and leaderboard caches"""
+    try:
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import UserPortfolioChartCache, LeaderboardCache, SP500ChartCache
+        
+        chart_cache = UserPortfolioChartCache.query.delete()
+        leaderboard_cache = LeaderboardCache.query.delete()
+        sp500_cache = SP500ChartCache.query.delete()
+        db.session.commit()
+        
+        total = chart_cache + leaderboard_cache + sp500_cache
+        
+        return jsonify({
+            'success': True,
+            'total_cleared': total,
+            'details': {
+                'chart_cache': chart_cache,
+                'leaderboard_cache': leaderboard_cache,
+                'sp500_cache': sp500_cache
+            }
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error clearing caches: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/admin/debug-recalculation')
 @login_required
