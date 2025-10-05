@@ -7238,7 +7238,7 @@ def admin_recalculate_user():
         
         # Get user ID using raw SQL (faster)
         result = db.session.execute(
-            text("SELECT id FROM users WHERE username = :username"),
+            text("SELECT id FROM user WHERE username = :username"),
             {'username': username}
         ).fetchone()
         
@@ -7277,7 +7277,7 @@ def admin_recalculate_user():
         holdings_rows = db.session.execute(
             text("""
                 SELECT ticker, purchase_date, quantity
-                FROM stocks
+                FROM stock
                 WHERE user_id = :user_id
                 ORDER BY purchase_date
             """),
