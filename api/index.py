@@ -8072,6 +8072,139 @@ def admin_debug_portfolio_timeline():
         logger.error(f"Portfolio timeline debug error: {str(e)}")
         return f"<html><body><h1>Error</h1><pre>{str(e)}\n\n{traceback.format_exc()}</pre></body></html>", 500
 
+@app.route('/admin/investigate-first-assets')
+@login_required
+def admin_investigate_first_assets():
+    """Investigate when user first added assets and intraday trading patterns"""
+    try:
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import date, datetime
+        from models import User, Stock, MarketData, PortfolioSnapshot, Transaction
+        from collections import defaultdict
+        
+        username = request.args.get('username', 'witty-raven')
+        
+        # Find user
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': f'User {username} not found'}), 404
+        
+        # Get all transactions
+        all_transactions = Transaction.query.filter_by(user_id=user.id)\
+            .order_by(Transaction.timestamp).all()
+        
+        if not all_transactions:
+            return jsonify({
+                'username': username,
+                'message': 'No transactions found'
+            })
+        
+        # Find first transaction date
+        first_txn = all_transactions[0]
+        first_date = first_txn.timestamp.date()
+        
+        # Get transactions on first date
+        first_date_txns = [t for t in all_transactions if t.timestamp.date() == first_date]
+        
+        # Group all transactions by date
+        by_date = defaultdict(list)
+        for txn in all_transactions:
+            by_date[txn.timestamp.date()].append(txn)
+        
+        # Find dates with intraday trading (multiple transactions same day)
+        intraday_dates = {d: txns for d, txns in by_date.items() if len(txns) > 1}
+        
+        # Get all unique tickers from first date
+        first_date_tickers = list(set([t.ticker for t in first_date_txns]))
+        
+        # Check market data for first date
+        market_data_check = {}
+        for ticker in first_date_tickers:
+            md = MarketData.query.filter_by(ticker=ticker, date=first_date).first()
+            market_data_check[ticker] = {
+                'exists': md is not None,
+                'open': float(md.open_price) if md else None,
+                'close': float(md.close_price) if md else None,
+                'high': float(md.high_price) if md else None,
+                'low': float(md.low_price) if md else None
+            }
+        
+        # Check snapshot for first date
+        snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id, date=first_date).first()
+        
+        # Get current holdings
+        current_stocks = Stock.query.filter_by(user_id=user.id).all()
+        
+        result = {
+            'username': username,
+            'user_id': user.id,
+            'first_transaction': {
+                'date': first_date.isoformat(),
+                'timestamp': first_txn.timestamp.isoformat(),
+                'type': first_txn.type,
+                'ticker': first_txn.ticker,
+                'quantity': first_txn.quantity,
+                'price': float(first_txn.price)
+            },
+            'transactions_on_first_date': [
+                {
+                    'timestamp': t.timestamp.isoformat(),
+                    'time': t.timestamp.strftime('%H:%M:%S'),
+                    'type': t.type,
+                    'ticker': t.ticker,
+                    'quantity': t.quantity,
+                    'price': float(t.price)
+                }
+                for t in first_date_txns
+            ],
+            'market_data_on_first_date': market_data_check,
+            'snapshot_on_first_date': {
+                'exists': snapshot is not None,
+                'total_value': float(snapshot.total_value) if snapshot else None,
+                'percentage_gain': float(snapshot.percentage_gain) if snapshot else None
+            } if snapshot else None,
+            'intraday_trading_summary': {
+                'total_dates_with_transactions': len(by_date),
+                'dates_with_multiple_transactions': len(intraday_dates),
+                'intraday_trading_dates': [
+                    {
+                        'date': d.isoformat(),
+                        'transaction_count': len(txns),
+                        'transactions': [
+                            {
+                                'time': t.timestamp.strftime('%H:%M:%S'),
+                                'type': t.type,
+                                'ticker': t.ticker,
+                                'quantity': t.quantity,
+                                'price': float(t.price)
+                            }
+                            for t in txns
+                        ]
+                    }
+                    for d, txns in sorted(intraday_dates.items())
+                ]
+            },
+            'current_holdings': [
+                {
+                    'ticker': s.ticker,
+                    'quantity': s.quantity,
+                    'purchase_date': s.purchase_date.isoformat(),
+                    'purchase_price': float(s.purchase_price)
+                }
+                for s in current_stocks
+            ],
+            'total_transactions': len(all_transactions)
+        }
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Investigate first assets error: {str(e)}")
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
 @app.route('/admin/profile-recalculation', methods=['POST'])
 @login_required
 def admin_profile_recalculation():

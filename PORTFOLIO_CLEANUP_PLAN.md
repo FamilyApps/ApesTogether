@@ -19,6 +19,107 @@ We have corrupted portfolio snapshots from early software development where:
 
 ---
 
+## 🚨 CRITICAL DESIGN DECISIONS
+
+### Design Decision 1: End-of-Day Snapshots Only
+
+**Current Design:**
+- Portfolio snapshots are taken at **market close** (end of day)
+- Snapshot uses closing prices from `MarketData.close_price`
+- All transactions during the day are aggregated to determine EOD holdings
+
+**Intraday Trading Handling:**
+```
+Example: User buys 100 AAPL at 10:05 AM ($150) and sells at 10:15 AM ($151)
+- Intraday gain: $100 (captured in Transaction table)
+- EOD holdings: 0 shares of AAPL
+- EOD snapshot: Portfolio value WITHOUT AAPL
+- Impact: Realized gains/losses are reflected in cash balance, not EOD snapshot
+```
+
+**Why This Works:**
+- Snapshots show "what you own at market close"
+- Realized gains become cash (increases buying power for other stocks)
+- Matches how traditional brokerages report portfolio value
+- Simplifies chart generation (one data point per day)
+
+**What We Capture:**
+✅ EOD portfolio value based on holdings × close prices  
+✅ Transaction history (all buys/sells with timestamps)  
+✅ Realized gains in transaction records  
+❌ Intraday portfolio fluctuations  
+❌ High-water marks during the day  
+
+**Future Enhancement (Phase 7 - Optional):**
+- Add "Realized Gains" field to snapshots
+- Calculate cumulative realized gains from all sold positions
+- Display alongside unrealized gains in portfolio
+
+### Design Decision 2: Chart Handling of Missing Data
+
+**Problem:** What happens when user has no assets or no snapshot for a date?
+
+**Solution:**
+```javascript
+// Chart.js handles missing data points gracefully:
+// - If data array is empty: Chart shows "No data available"
+// - If data array has gaps: Chart skips those dates (no line segment)
+// - If labels exist but data is null: Point is skipped
+
+// Example:
+{
+  labels: ['2025-06-19', '2025-06-20', null, '2025-06-23'],  // null = skip
+  data:   [10000,        10200,        null, 10500]           // null = no point
+}
+
+// For dates before first holdings:
+// Simply don't include them in labels/data arrays at all
+// Chart will start from first holdings date automatically
+```
+
+**Implementation:**
+1. Query snapshots WHERE `date >= first_holdings_date`
+2. Filter out weekends and dates with no data
+3. Chart automatically shows no line before first data point
+4. No crash, no special handling needed
+
+**Cache Safety:**
+- Cache is keyed by `(user_id, period)`
+- When we delete old snapshots, we invalidate cache: `cache.delete_memoized(get_chart_data, user_id)`
+- New cache will be generated with correct date range
+- No stale data served
+
+### Design Decision 3: Market Data Timing
+
+**Question:** Were prices fetched when user added assets on 6/19/2025?
+
+**Investigation Needed:**
+- Check Transaction table for exact timestamps
+- Check if MarketData exists for those tickers on 6/19/2025
+- Determine if Alpha Vantage call was made at time of purchase
+
+**Two Scenarios:**
+
+**Scenario A: Real-time prices were fetched**
+- User bought at 10:05 AM
+- Alpha Vantage called immediately
+- `transaction.price` = real-time quote
+- `MarketData.close_price` = EOD price (fetched later)
+- **For snapshots:** Use `MarketData.close_price` (standardized)
+
+**Scenario B: Prices were backfilled later**
+- User bought at 10:05 AM
+- `transaction.price` = user-entered or estimated
+- `MarketData` was backfilled from yfinance weeks later
+- **For snapshots:** Still use `MarketData.close_price` (most accurate)
+
+**Endpoint to Investigate:** `/admin/investigate-first-assets?username=witty-raven`
+- Shows first transaction timestamp
+- Shows whether market data exists
+- Shows intraday trading patterns
+
+---
+
 ## 📊 PHASE 1: ASSESSMENT & DISCOVERY
 
 ### 1.1 Create User Assessment Tool
