@@ -7721,7 +7721,7 @@ def admin_debug_portfolio_timeline():
     """
     try:
         if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
+            return "Admin access required", 403
         
         from datetime import date, datetime, timedelta
         from models import User, Stock, MarketData, PortfolioSnapshot, Transaction
@@ -7849,14 +7849,198 @@ def admin_debug_portfolio_timeline():
             
             result['timeline'].append(day_data)
         
-        # Add summary
-        result['date_range_analyzed'] = f"{target_dates[0]} to {target_dates[-1]}"
+        # Generate HTML output
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Portfolio Timeline: {username}</title>
+            <style>
+                body {{
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+                    max-width: 1200px;
+                    margin: 0 auto;
+                    padding: 20px;
+                    background: #f5f5f5;
+                }}
+                .header {{
+                    background: white;
+                    padding: 20px;
+                    border-radius: 8px;
+                    margin-bottom: 20px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                }}
+                .date-section {{
+                    background: white;
+                    padding: 20px;
+                    border-radius: 8px;
+                    margin-bottom: 20px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                }}
+                .date-header {{
+                    font-size: 20px;
+                    font-weight: bold;
+                    color: #333;
+                    margin-bottom: 10px;
+                    padding-bottom: 10px;
+                    border-bottom: 2px solid #007bff;
+                }}
+                .weekend {{
+                    background: #fff3cd;
+                    border-left: 4px solid #ffc107;
+                }}
+                table {{
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin: 15px 0;
+                }}
+                th {{
+                    background: #007bff;
+                    color: white;
+                    padding: 12px;
+                    text-align: left;
+                    font-weight: 600;
+                }}
+                td {{
+                    padding: 10px 12px;
+                    border-bottom: 1px solid #ddd;
+                }}
+                tr:hover {{
+                    background: #f8f9fa;
+                }}
+                .total-row {{
+                    font-weight: bold;
+                    background: #e7f3ff;
+                    font-size: 16px;
+                }}
+                .match-true {{
+                    color: #28a745;
+                    font-weight: bold;
+                }}
+                .match-false {{
+                    color: #dc3545;
+                    font-weight: bold;
+                }}
+                .no-data {{
+                    color: #6c757d;
+                    font-style: italic;
+                }}
+                .summary {{
+                    background: #e7f3ff;
+                    padding: 15px;
+                    border-radius: 5px;
+                    margin: 10px 0;
+                }}
+                .transaction {{
+                    background: #fff3cd;
+                    padding: 10px;
+                    margin: 10px 0;
+                    border-radius: 5px;
+                    border-left: 4px solid #ffc107;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>📊 Portfolio Timeline: {username}</h1>
+                <div class="summary">
+                    <strong>User ID:</strong> {result['user_id']}<br>
+                    <strong>Email:</strong> {result['email']}<br>
+                    <strong>First Stock Purchase:</strong> {result['first_stock_purchase'] or 'N/A'}<br>
+                    <strong>First Transaction:</strong> {result['first_transaction'] or 'N/A'}<br>
+                    <strong>Total Stocks:</strong> {result['total_stocks']}<br>
+                    <strong>Total Transactions:</strong> {result['total_transactions']}<br>
+                    <strong>Date Range:</strong> {target_dates[0]} to {target_dates[-1]}
+                </div>
+            </div>
+        """
         
-        return jsonify(result), 200
+        for day_data in result['timeline']:
+            weekend_class = ' weekend' if day_data['is_weekend'] else ''
+            
+            html += f"""
+            <div class="date-section{weekend_class}">
+                <div class="date-header">
+                    {day_data['date']} ({day_data['day_of_week']})
+                    {' 🏖️ WEEKEND' if day_data['is_weekend'] else ''}
+                </div>
+            """
+            
+            # Show transactions if any
+            if day_data['transactions_on_this_day']:
+                html += '<div class="transaction"><strong>📈 Transactions on this day:</strong><br>'
+                for txn in day_data['transactions_on_this_day']:
+                    html += f"&nbsp;&nbsp;• {txn['type'].upper()}: {txn['quantity']} shares of {txn['ticker']} @ ${txn['price']}<br>"
+                html += '</div>'
+            
+            # Holdings table
+            if day_data['holdings']:
+                html += """
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Ticker</th>
+                            <th>Quantity</th>
+                            <th>Price</th>
+                            <th>Value</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                """
+                
+                for holding in day_data['holdings']:
+                    price_str = f"${holding['price']}" if holding['price'] is not None else '<span class="no-data">No market data</span>'
+                    value_str = f"${holding['value']:,.2f}" if holding['value'] is not None else '<span class="no-data">—</span>'
+                    
+                    html += f"""
+                        <tr>
+                            <td><strong>{holding['ticker']}</strong></td>
+                            <td>{holding['quantity']}</td>
+                            <td>{price_str}</td>
+                            <td>{value_str}</td>
+                        </tr>
+                    """
+                
+                html += "</tbody></table>"
+            else:
+                html += '<p class="no-data">No holdings on this date</p>'
+            
+            # Summary box
+            calculated_value = day_data['calculated_portfolio_value']
+            snapshot_value = day_data['snapshot_value']
+            values_match = day_data['values_match']
+            
+            match_class = ''
+            match_text = ''
+            if values_match is True:
+                match_class = 'match-true'
+                match_text = '✅ Values Match'
+            elif values_match is False:
+                match_class = 'match-false'
+                match_text = '❌ Values DO NOT Match'
+            else:
+                match_class = 'no-data'
+                match_text = 'No snapshot to compare'
+            
+            html += f"""
+                <div class="summary">
+                    <strong>Calculated Portfolio Value:</strong> ${calculated_value:,.2f}<br>
+                    <strong>Snapshot Value (DB):</strong> {'$' + f'{snapshot_value:,.2f}' if snapshot_value is not None else 'No snapshot'}<br>
+                    <strong>Match Status:</strong> <span class="{match_class}">{match_text}</span>
+                </div>
+            </div>
+            """
+        
+        html += """
+        </body>
+        </html>
+        """
+        
+        return html, 200
         
     except Exception as e:
         logger.error(f"Portfolio timeline debug error: {str(e)}")
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return f"<html><body><h1>Error</h1><pre>{str(e)}\n\n{traceback.format_exc()}</pre></body></html>", 500
 
 @app.route('/admin/profile-recalculation', methods=['POST'])
 @login_required
