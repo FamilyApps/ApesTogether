@@ -7117,6 +7117,8 @@ def admin_recalculate_sept_snapshots():
                 snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id, date=current_date).first()
                 if snapshot:
                     snapshot.total_value = portfolio_value
+                    # CRITICAL FIX: Explicitly mark as dirty and merge to ensure SQLAlchemy tracks the change
+                    db.session.merge(snapshot)
                     user_snapshots_updated += 1
                 elif portfolio_value > 0:
                     snapshot = PortfolioSnapshot(
@@ -7130,6 +7132,8 @@ def admin_recalculate_sept_snapshots():
                 
                 current_date += timedelta(days=1)
             
+            # CRITICAL FIX: Flush before commit to force SQL emission and catch errors
+            db.session.flush()
             db.session.commit()
             
             results['details'][user.username] = {
