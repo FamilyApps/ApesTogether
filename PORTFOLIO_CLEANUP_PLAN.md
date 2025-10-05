@@ -295,12 +295,98 @@ ADD COLUMN initial_cash FLOAT DEFAULT 0.0 NOT NULL;
 -- Update existing users (run backfill_initial_cash() after this)
 ```
 
+### **Step 0.5: Create Retroactive Transactions for Existing Stocks**
+
+**Problem:** Existing users have stocks without transaction records (added during account setup).
+
+**Solution:** One-time script to create 'initial' transactions
+
+```python
+# Script: create_initial_transactions.py (CREATED)
+
+# For each stock without a matching transaction:
+# 1. Use Stock.purchase_date as timestamp (or 4 PM EST if time is midnight)
+# 2. Use Stock.purchase_price as price
+# 3. Create Transaction with type='initial'
+# 4. This allows cash_balance calculation to work retroactively
+
+# Run: python create_initial_transactions.py --execute
+```
+
+### **Step 0.6: Update /add_stock Route to Create Transactions**
+
+**Fixed in api/index.py:**
+```python
+@app.route('/add_stock', methods=['POST'])
+def add_stock():
+    # ... validation ...
+    
+    # Create stock record
+    new_stock = Stock(ticker, quantity, purchase_price, user_id)
+    
+    # NEW: Create transaction record
+    new_transaction = Transaction(
+        ticker=ticker,
+        quantity=quantity,
+        price=purchase_price,
+        type='initial',  # Distinguishes account setup from trades
+        timestamp=datetime.utcnow()
+    )
+    
+    db.session.add(new_stock)
+    db.session.add(new_transaction)  # ✅ Both records created!
+    db.session.commit()
+```
+
+### **Transaction Types (Enhanced):**
+- `'buy'` - Regular stock purchase (from trading)
+- `'sell'` - Regular stock sale (from trading)
+- `'initial'` - Stock added during account setup or manual portfolio entry
+
+### **Intraday Timing Fairness:**
+
+**Key Principle:** User performance judged against their PURCHASE PRICE, not EOD.
+
+**Scenario A: Buy During Market Hours**
+```
+9/18 Close: AAPL = $150
+9/19 11:00 AM: User buys AAPL @ $155 (stock went up $5 before they bought)
+9/19 4:00 PM: AAPL closes @ $160
+
+User's cost basis: $155 (what they paid) ✅
+Current value: $160
+Gain: $160 - $155 = +$5 per share ✅
+
+If we used previous day's close ($150) as baseline:
+Wrong gain: $160 - $150 = +$10 ❌
+This credits them for price movement they didn't experience!
+```
+
+**Scenario B: Setup After Hours/Weekend**
+```
+Friday 4 PM: AAPL closes @ $150
+Saturday 2 PM: User sets up account, adds AAPL
+Price used: $150 (most recent market close) ✅
+
+Monday 4 PM: AAPL closes @ $155
+Gain: $155 - $150 = +$5 ✅ Fair!
+```
+
+**Implementation:**
+- Use `Stock.purchase_price` (or `Transaction.price`) as cost basis
+- User's `initial_cash` = starting capital (what they invested)
+- Performance = (current_value - initial_cash) / initial_cash
+- This automatically uses their actual purchase prices as baseline ✅
+
 ### **Impact:**
 - ✅ Day traders now show correct portfolio values
 - ✅ Realized gains captured in cash balance
 - ✅ Leaderboard includes all profitable traders
 - ✅ Charts show true performance
 - ✅ System works for all trading styles (buy-and-hold AND active trading)
+- ✅ Performance judged against actual purchase prices, not arbitrary baselines
+- ✅ Fair to users who buy during market hours
+- ✅ Transaction history complete for all stocks (retroactively fixed + going forward)
 
 ---
 
