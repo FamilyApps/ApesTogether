@@ -179,3 +179,88 @@ class Stock(db.Model):
 - **Portfolio snapshots:** 10 per user (10 days)
 
 This is NOT a big data problem. Something is fundamentally wrong with how we're querying or how the environment is configured.
+
+---
+
+# GROK'S ANALYSIS AND SOLUTION
+
+## Root Cause Identified
+
+**Combination of 3 factors:**
+
+1. **Vercel Serverless Latency**
+   - Cold start: 1-2 seconds per invocation
+   - NullPool (no connection pooling): ~100-500ms per fresh connection
+   - Vercel Postgres has higher latency (40-100ms per query vs <10ms local)
+   - Cross-region network hops if not co-located
+   - **Cumulative effect:** 50-100 queries × 200ms each = 10-20 seconds
+
+2. **N+1 Query Problem**
+   - `PortfolioSnapshot.query.filter_by(user_id=X, date=Y).first()` in loop = 10 queries
+   - `db.session.merge()` is slow (5x slower than direct updates due to implicit SELECTs)
+   - Each query is a full round-trip in serverless environment
+
+3. **Missing Composite Index**
+   - Only had indexes on `date` and `ticker` (single columns)
+   - No composite index on `(user_id, date)` for PortfolioSnapshot
+   - Postgres does sequential scans without composite → slow even on small tables
+
+## Immediate Fix (3-Step Implementation)
+
+### Step 1: Add Composite Indexes ⚡
+```sql
+CREATE INDEX idx_portfolio_snapshot_user_date ON portfolio_snapshot (user_id, date);
+CREATE INDEX idx_stock_user_ticker ON stock (user_id, ticker);
+CREATE INDEX idx_market_data_ticker_date ON market_data (ticker, date);
+ANALYZE portfolio_snapshot;
+```
+
+**Impact:** 10-100x speedup on filter_by queries
+
+### Step 2: Pre-Fetch All Snapshots (Eliminate Loop Queries) 🎯
+```python
+# OLD (slow): 10 queries in loop
+for date in dates:
+    snapshot = PortfolioSnapshot.query.filter_by(user_id=X, date=date).first()
+    
+# NEW (fast): 1 query
+snapshots = PortfolioSnapshot.query.filter(
+    and_(PortfolioSnapshot.user_id == user_id, 
+         PortfolioSnapshot.date.in_(date_range))
+).all()
+snapshot_dict = {s.date: s for s in snapshots}
+```
+
+**Impact:** Reduces 10 queries to 1 query
+
+### Step 3: Use bulk_update_mappings (Not merge) 🚀
+```python
+# OLD (slow): merge() does implicit SELECTs per object
+for snapshot in snapshots:
+    snapshot.total_value = new_value
+    db.session.merge(snapshot)
+    
+# NEW (fast): Single UPDATE statement
+updates = [{'id': s.id, 'total_value': new_value} for s in snapshots]
+db.session.bulk_update_mappings(PortfolioSnapshot, updates)
+db.session.commit()
+```
+
+**Impact:** 5x faster (no per-object checks)
+
+## Expected Performance After Fix
+
+- **Query count:** 4 total (user, market data, holdings, snapshots)
+- **Execution time:** <10 seconds (was timing out at 60s)
+- **Speedup factors:**
+  - Indexes: 10-100x on filter queries
+  - Pre-fetch: Eliminates 10 round-trips
+  - Bulk update: 5x faster than merge
+
+## Implementation Status
+
+✅ **Bulk endpoint created** (`/admin/recalculate-user-bulk`)
+✅ **Index SQL file created** (`add_composite_indexes.sql`)
+✅ **Index application script created** (`apply_indexes.py`)
+⏳ **Pending:** Apply indexes to database
+⏳ **Pending:** Test bulk endpoint
