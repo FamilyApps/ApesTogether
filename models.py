@@ -16,10 +16,15 @@ class User(UserMixin, db.Model):
     oauth_provider = db.Column(db.String(20))
     oauth_id = db.Column(db.String(100))
     stocks = db.relationship('Stock', backref='owner', lazy='dynamic')
-    # Add fields for tiered subscriptions
+    
+    # Tiered subscriptions
     stripe_price_id = db.Column(db.String(255), nullable=True)
     subscription_price = db.Column(db.Float, nullable=True)
     stripe_customer_id = db.Column(db.String(255), nullable=True)
+    
+    # Cash tracking (NEW)
+    max_cash_deployed = db.Column(db.Float, default=0.0, nullable=False)  # Cumulative capital deployed
+    cash_proceeds = db.Column(db.Float, default=0.0, nullable=False)  # Uninvested cash from sales
 
 class Stock(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -55,24 +60,26 @@ class Transaction(db.Model):
     timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     
     # Relationship with User
-    user = db.relationship('User', backref=db.backref('transactions', lazy='dynamic'))
     
     def __repr__(self):
         return f"<Transaction {self.transaction_type} {self.quantity} {self.ticker} @ ${self.price}>"
 
 class PortfolioSnapshot(db.Model):
-    """Daily portfolio value snapshots for performance tracking"""
+    """Daily portfolio value snapshot"""
     __tablename__ = 'portfolio_snapshot'
     
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     date = db.Column(db.Date, nullable=False)
-    total_value = db.Column(db.Float, nullable=False)
-    cash_flow = db.Column(db.Float, default=0.0)  # Net cash flow for the day (deposits - withdrawals)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    total_value = db.Column(db.Float, nullable=False)  # stock_value + cash_proceeds
     
-    # Relationship with User
-    user = db.relationship('User', backref=db.backref('portfolio_snapshots', lazy='dynamic'))
+    # cash tracking components (NEW - for Modified Dietz calculations)
+    stock_value = db.Column(db.Float, default=0.0)  # Value of stock holding only
+    cash_proceeds = db.Column(db.Float, default=0.0)  # Uninvested cash from sales
+    max_cash_deployed = db.Column(db.Float, default=0.0)  # Cumulative capital deployed
+    
+    # Legacy field (kept for backward compatibility)
+    cash_flow = db.Column(db.Float, default=0.0)  # Net cash flow for the day (deposits - withdrawals)
     
     # Ensure one snapshot per user per day
     __table_args__ = (db.UniqueConstraint('user_id', 'date', name='unique_user_date_snapshot'),)

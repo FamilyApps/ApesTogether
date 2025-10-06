@@ -132,167 +132,139 @@ Current system **only tracks stock holdings**, not cash balance. This means:
 
 ### **Solution: Track Cash Balance + Calculate Realized Gains**
 
-#### Step 0.1: Add Cash Balance to User Model
+#### Step 0.1: Add Cash Tracking to User Model
+
+**BETTER DESIGN:** Use `max_cash_deployed` + `cash_proceeds` (NOT `initial_cash`)
 
 ```python
-# Migration: add_user_cash_balance.py
+# Migration: 20251005_add_cash_tracking.py (CREATED)
 class User(db.Model):
     # ... existing fields ...
-    cash_balance = db.Column(db.Float, default=0.0, nullable=False)
-    initial_cash = db.Column(db.Float, default=0.0, nullable=False)  # Starting capital
+    max_cash_deployed = db.Column(db.Float, default=0.0, nullable=False)  # Cumulative capital deployed
+    cash_proceeds = db.Column(db.Float, default=0.0, nullable=False)  # Uninvested cash from sales
 ```
 
-#### Step 0.2: Calculate Cumulative Cash Balance from Transactions
+**Why This Approach:**
+- ✅ No need to guess starting capital
+- ✅ Dynamically tracks actual investment
+- ✅ Handles reinvestment correctly
+- ✅ Works for users who add stocks over time
+
+#### Step 0.2: Transaction Processing Logic
 
 ```python
-def calculate_user_cash_balance(user_id, as_of_date=None):
+# cash_tracking.py (CREATED)
+def process_transaction(user_id, ticker, quantity, price, type):
     """
-    Calculate user's cash balance from transaction history.
+    Process transaction and update cash tracking.
     
-    Logic:
-    - Start with initial_cash (user's starting capital)
-    - For each BUY: subtract (quantity × price)
-    - For each SELL: add (quantity × price)
-    - Result: Current cash balance
+    BUY/INITIAL:
+    - Use cash_proceeds first
+    - If not enough, deploy new capital (increase max_cash_deployed)
+    
+    SELL:
+    - Add sale proceeds to cash_proceeds
     """
-    user = User.query.get(user_id)
-    cash = user.initial_cash or 0.0
+    transaction_value = quantity * price
     
-    # Get all transactions up to as_of_date
-    transactions = Transaction.query.filter_by(user_id=user_id)
-    if as_of_date:
-        transactions = transactions.filter(
-            func.date(Transaction.timestamp) <= as_of_date
-        )
-    transactions = transactions.order_by(Transaction.timestamp).all()
+    if type in ('buy', 'initial'):
+        if user.cash_proceeds >= transaction_value:
+            user.cash_proceeds -= transaction_value  # Use available cash
+        else:
+            new_capital = transaction_value - user.cash_proceeds
+            user.cash_proceeds = 0
+            user.max_cash_deployed += new_capital  # Deploy new capital
     
-    for txn in transactions:
-        transaction_value = txn.quantity * txn.price
-        if txn.transaction_type == 'buy':
-            cash -= transaction_value  # Spent cash
-        elif txn.transaction_type == 'sell':
-            cash += transaction_value  # Received cash
-    
-    return cash
+    elif type == 'sell':
+        user.cash_proceeds += transaction_value  # Add to cash
 ```
 
 #### Step 0.3: Update Portfolio Value Calculation
 
 ```python
-# portfolio_performance.py
-def calculate_portfolio_value(user_id, target_date=None):
+# cash_tracking.py (CREATED)
+def calculate_portfolio_value_with_cash(user_id):
     """
-    Calculate total portfolio value = stocks + cash.
+    Calculate total portfolio value = stocks + cash_proceeds.
     
     NEW FORMULA:
-    total_value = sum(stock holdings × prices) + cash_balance
+    total_value = sum(stock holdings × prices) + cash_proceeds
     """
-    # Calculate stock holdings value (existing logic)
-    stock_value = 0.0
-    stocks = Stock.query.filter_by(user_id=user_id).all()
-    for stock in stocks:
-        price = get_market_price(stock.ticker, target_date)
-        stock_value += stock.quantity * price
+    # Calculate stock value (existing logic)
+    stock_value = calculate_stock_value(user_id)
     
-    # Calculate cash balance (NEW!)
-    cash_balance = calculate_user_cash_balance(user_id, target_date)
+    # Add cash proceeds
+    cash_proceeds = user.cash_proceeds
     
-    # Total = stocks + cash
-    total_value = stock_value + cash_balance
+    # Total portfolio value
+    total_value = stock_value + cash_proceeds
     
     return total_value
 ```
 
-#### Step 0.4: Set Initial Cash for Existing Users
+#### Step 0.4: Performance Calculation
 
 ```python
-def backfill_initial_cash():
+def calculate_performance(user_id):
     """
-    For existing users, infer initial cash from their transaction history.
+    Calculate performance percentage.
     
-    Strategy:
-    - If user has stocks and transactions:
-      - Sum all buys: cash_spent
-      - Sum all sells: cash_received  
-      - Current stock value: stock_value
-      - Initial cash = cash_spent - cash_received + current_cash
-    
-    - If user only has stocks (no transactions):
-      - Initial cash = sum(stock purchase values)
+    Formula: (current_value - max_cash_deployed) / max_cash_deployed
     """
-    users = User.query.all()
+    portfolio_value = calculate_portfolio_value_with_cash(user_id)
     
-    for user in users:
-        transactions = Transaction.query.filter_by(user_id=user.id).all()
-        
-        if not transactions:
-            # No transaction history, use stock purchase values
-            stocks = Stock.query.filter_by(user_id=user.id).all()
-            initial_cash = sum(s.quantity * s.purchase_price for s in stocks)
-        else:
-            # Has transactions, calculate from history
-            cash_spent = sum(
-                t.quantity * t.price 
-                for t in transactions 
-                if t.transaction_type == 'buy'
-            )
-            cash_received = sum(
-                t.quantity * t.price 
-                for t in transactions 
-                if t.transaction_type == 'sell'
-            )
-            
-            # Current cash = what they have now after all trades
-            current_cash = calculate_user_cash_balance(user.id)
-            
-            # Work backwards: initial = spent - received + current
-            initial_cash = cash_spent - cash_received + current_cash
-        
-        user.initial_cash = initial_cash
-        user.cash_balance = calculate_user_cash_balance(user.id)
-        
-        print(f"{user.username}: Initial=${initial_cash:.2f}, Current Cash=${user.cash_balance:.2f}")
+    if user.max_cash_deployed == 0:
+        return 0.0
     
-    db.session.commit()
+    performance = ((portfolio_value - user.max_cash_deployed) / user.max_cash_deployed) * 100
+    
+    return performance
 ```
 
-### **Testing Scenario:**
+### **Example Flow:**
 
-**Day Trader Test:**
-```python
-# Create test day trader
-user = User(username='day-trader-test', initial_cash=10000.0)
+```
+Day 1: Add 10 TSLA @ $5
+  max_cash_deployed = $50 (deployed this much)
+  cash_proceeds = $0
+  Portfolio = $50 + $0 = $50
+  Performance = 0%
 
-# Day 1: Buy and sell TSLA
-Transaction(user_id=user.id, ticker='TSLA', quantity=10, 
-            price=220, type='buy', timestamp='2025-09-19 10:00:00')
-Transaction(user_id=user.id, ticker='TSLA', quantity=10, 
-            price=225, type='sell', timestamp='2025-09-19 15:30:00')
+Day 2: Buy 5 AAPL @ $2, TSLA → $5.50
+  max_cash_deployed = $60 (deployed $10 more)
+  cash_proceeds = $0
+  Stock value = $55 + $10 = $65
+  Portfolio = $65 + $0 = $65
+  Performance = +8.33% ✅
 
-# Day 1 EOD:
-stock_value = 0  # Sold all stocks
-cash_balance = 10000 - 2200 + 2250 = $10,050
-total_value = 0 + 10050 = $10,050  ✅
+Day 3: Sell AAPL @ $1
+  max_cash_deployed = $60 (no new deployment)
+  cash_proceeds = $5 (from sale)
+  Stock value = $55
+  Portfolio = $55 + $5 = $60
+  Performance = 0% ✅
 
-# Snapshot:
-PortfolioSnapshot(date='2025-09-19', total_value=10050)
-
-# Chart: +0.5% gain ✅
-# Leaderboard: Included ✅
+Day 4: Buy 10 SPY @ $1 (costs $10)
+  Uses $5 cash_proceeds + $5 new
+  max_cash_deployed = $65 (deployed $5 more)
+  cash_proceeds = $0
+  Stock value = $55 + $10 = $65
+  Portfolio = $65 + $0 = $65
+  Performance = 0% ✅
 ```
 
 ### **Migration Script:**
 
 ```sql
--- 20251005_add_cash_balance_tracking.sql
+-- 20251005_add_cash_tracking.sql (CREATED)
 
 ALTER TABLE user 
-ADD COLUMN cash_balance FLOAT DEFAULT 0.0 NOT NULL;
+ADD COLUMN max_cash_deployed FLOAT DEFAULT 0.0 NOT NULL;
 
 ALTER TABLE user 
-ADD COLUMN initial_cash FLOAT DEFAULT 0.0 NOT NULL;
+ADD COLUMN cash_proceeds FLOAT DEFAULT 0.0 NOT NULL;
 
--- Update existing users (run backfill_initial_cash() after this)
+-- Update existing users (run backfill_cash_tracking.py after this)
 ```
 
 ### **Step 0.5: Create Retroactive Transactions for Existing Stocks**

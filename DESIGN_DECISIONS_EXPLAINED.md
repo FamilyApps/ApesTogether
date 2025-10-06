@@ -287,19 +287,75 @@ SHOULD SHOW:
 - Leaderboard: Top performer ✅
 ```
 
-**What's Missing:**
+**What Was Missing (NOW FIXED):**
 ```sql
 User table:
-❌ No cash_balance field
+✅ max_cash_deployed field (cumulative capital deployed)
+✅ cash_proceeds field (uninvested cash from sales)
 
 PortfolioSnapshot:
-❌ total_value = stocks only (not stocks + cash)
+✅ total_value = stocks + cash_proceeds (UPDATED)
 
 Transaction table:
 ✅ Has all buy/sell records
-❌ No realized_gains calculation
-❌ No cumulative cash balance tracking
+✅ Used to calculate max_cash_deployed and cash_proceeds
 ```
+
+### **Improved Design: max_cash_deployed + cash_proceeds**
+
+**Key Innovation:** No need to guess starting capital! Track deployment dynamically.
+
+```python
+# User Model (UPDATED)
+class User(db.Model):
+    max_cash_deployed = Float  # Cumulative capital ever deployed
+    cash_proceeds = Float       # Uninvested cash from sales
+
+# Portfolio Value Formula
+portfolio_value = stock_value + cash_proceeds
+
+# Performance Formula
+performance = (portfolio_value - max_cash_deployed) / max_cash_deployed
+```
+
+**Example Flow:**
+```
+Day 1: Add 10 TSLA @ $5
+  max_cash_deployed = $50 (deployed this much)
+  cash_proceeds = $0
+  Portfolio = $50 + $0 = $50
+  Performance = ($50 - $50) / $50 = 0%
+
+Day 2: Buy 5 AAPL @ $2, TSLA rises to $5.50
+  max_cash_deployed = $50 + $10 = $60 (deployed $10 more)
+  cash_proceeds = $0
+  Stock value = (10 × $5.50) + (5 × $2) = $65
+  Portfolio = $65 + $0 = $65
+  Performance = ($65 - $60) / $60 = +8.33% ✅
+
+Day 3: Sell AAPL @ $1
+  max_cash_deployed = $60 (unchanged - no new deployment)
+  cash_proceeds = 5 × $1 = $5 (from sale)
+  Stock value = 10 × $5.50 = $55
+  Portfolio = $55 + $5 = $60
+  Performance = ($60 - $60) / $60 = 0% ✅
+
+Day 4: Buy 10 SPY @ $1 (costs $10)
+  Uses $5 cash_proceeds + $5 new capital
+  max_cash_deployed = $60 + $5 = $65 (deployed $5 more)
+  cash_proceeds = $0 (used all $5)
+  Stock value = $55 + $10 = $65
+  Portfolio = $65 + $0 = $65
+  Performance = ($65 - $65) / $65 = 0% ✅
+```
+
+**Why This is Better:**
+- ✅ No guessing starting capital
+- ✅ Dynamically tracks actual investment
+- ✅ Handles reinvestment correctly
+- ✅ Works for users who add stocks over time
+- ✅ Realized gains tracked via cash_proceeds
+- ✅ Simpler conceptual model
 
 ---
 

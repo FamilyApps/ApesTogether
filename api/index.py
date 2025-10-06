@@ -3054,20 +3054,21 @@ def add_stock():
         user_id=session['user_id']
     )
     
-    # CRITICAL FIX: Create transaction record for this stock addition
-    # Use 'initial' type to distinguish account setup from regular trades
-    new_transaction = Transaction(
-        user_id=session['user_id'],
-        ticker=ticker,
-        quantity=quantity,
-        price=purchase_price,
-        transaction_type='initial',  # Special type for account setup/manual additions
-        timestamp=datetime.utcnow()
-    )
-    
     try:
         db.session.add(new_stock)
-        db.session.add(new_transaction)  # Add transaction record
+        
+        # CRITICAL FIX: Process transaction and update cash tracking
+        from cash_tracking import process_transaction
+        cash_result = process_transaction(
+            db=db,
+            user_id=session['user_id'],
+            ticker=ticker,
+            quantity=quantity,
+            price=purchase_price,
+            transaction_type='initial',  # Account setup/manual addition
+            timestamp=datetime.utcnow()
+        )
+        
         db.session.commit()
         
         # Auto-populate stock info for new stocks
@@ -3077,7 +3078,8 @@ def add_stock():
             logger.warning(f"Failed to populate stock info for {ticker}: {str(stock_info_error)}")
         
         flash(f'Added {quantity} shares of {ticker}', 'success')
-        logger.info(f"Created stock AND transaction record for {ticker}: {quantity} shares @ ${purchase_price}")
+        logger.info(f"Created stock + transaction: {quantity} {ticker} @ ${purchase_price}")
+        logger.info(f"Cash tracking: max_deployed=${cash_result['max_cash_deployed']}, proceeds=${cash_result['cash_proceeds']}")
     except Exception as e:
         db.session.rollback()
         flash(f'Error adding stock: {str(e)}', 'danger')
@@ -18356,7 +18358,15 @@ try:
     app.register_blueprint(sms_bp)
     logger.info("SMS blueprint registered successfully")
 except Exception as e:
-    print(f"Error registering SMS blueprint: {e}")
+    logger.error(f"Error registering SMS blueprint: {e}")
+
+# Register cash tracking admin routes for Phase 0 implementation
+try:
+    from admin_cash_tracking import register_cash_tracking_routes
+    register_cash_tracking_routes(app, db)
+    logger.info("Cash tracking admin routes registered successfully")
+except Exception as e:
+    logger.error(f"Error registering cash tracking routes: {e}")
 
 # Register the leaderboard blueprint for Vercel deployment
 try:
