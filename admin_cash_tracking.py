@@ -32,7 +32,7 @@ def register_cash_tracking_routes(app, db):
             return jsonify({'error': 'Admin access required'}), 403
         
         try:
-            from sqlalchemy import inspect
+            from sqlalchemy import inspect, text
             
             # Check User columns
             inspector = inspect(db.engine)
@@ -43,13 +43,14 @@ def register_cash_tracking_routes(app, db):
             snapshot_columns = [col['name'] for col in inspector.get_columns('portfolio_snapshot')]
             has_snapshot_cash = all(col in snapshot_columns for col in ['stock_value', 'cash_proceeds', 'max_cash_deployed'])
             
-            # Check for missing transactions
-            missing_txn_count = 0
-            for user in User.query.all():
-                stocks = Stock.query.filter_by(user_id=user.id).count()
-                txns = Transaction.query.filter_by(user_id=user.id).count()
-                if stocks > 0 and txns == 0:
-                    missing_txn_count += 1
+            # Check for missing transactions (use raw SQL to avoid model issues)
+            result = db.session.execute(text("""
+                SELECT COUNT(*) as count
+                FROM "user" u
+                WHERE (SELECT COUNT(*) FROM stock WHERE user_id = u.id) > 0
+                  AND (SELECT COUNT(*) FROM stock_transaction WHERE user_id = u.id) = 0
+            """))
+            missing_txn_count = result.scalar()
             
             return jsonify({
                 'phase_01_transactions': 'complete' if missing_txn_count == 0 else f'{missing_txn_count} users need transactions',
@@ -70,31 +71,35 @@ def register_cash_tracking_routes(app, db):
             return "Admin access required", 403
         
         try:
-            from sqlalchemy import inspect
+            from sqlalchemy import inspect, text
             
             # Get status of all phases
             inspector = inspect(db.engine)
             
-            # Phase 0.1: Transaction records
-            users_missing_txns = []
-            for user in User.query.all():
-                stocks = Stock.query.filter_by(user_id=user.id).all()
-                txns = Transaction.query.filter_by(user_id=user.id).all()
-                
-                if len(stocks) > 0 and len(txns) == 0:
-                    users_missing_txns.append({
-                        'username': user.username,
-                        'stocks': len(stocks),
-                        'transactions': 0
-                    })
-            
-            # Phase 0.2: User cash columns
+            # Phase 0.2: Check User cash columns FIRST (before trying to query User model)
             user_cols = [col['name'] for col in inspector.get_columns('user')]
             has_user_cash = 'max_cash_deployed' in user_cols and 'cash_proceeds' in user_cols
             
             # Phase 0.4: Snapshot cash columns
             snap_cols = [col['name'] for col in inspector.get_columns('portfolio_snapshot')]
             has_snap_cash = all(c in snap_cols for c in ['stock_value', 'cash_proceeds', 'max_cash_deployed'])
+            
+            # Phase 0.1: Transaction records (use raw SQL to avoid model field issues)
+            users_missing_txns = []
+            result = db.session.execute(text("""
+                SELECT u.id, u.username,
+                       (SELECT COUNT(*) FROM stock WHERE user_id = u.id) as stock_count,
+                       (SELECT COUNT(*) FROM stock_transaction WHERE user_id = u.id) as txn_count
+                FROM "user" u
+            """))
+            
+            for row in result:
+                if row.stock_count > 0 and row.txn_count == 0:
+                    users_missing_txns.append({
+                        'username': row.username,
+                        'stocks': row.stock_count,
+                        'transactions': row.txn_count
+                    })
             
             # Build HTML
             html = f"""
