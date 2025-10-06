@@ -306,6 +306,33 @@ def register_cash_tracking_routes(app, db):
             import traceback
             return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
     
+    @app.route('/admin/cash-tracking/fix-transaction-type-column')
+    @login_required
+    def fix_transaction_type_column():
+        """Widen transaction_type column to support 'initial' (7 chars)"""
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        try:
+            from sqlalchemy import text
+            
+            # Widen the column from VARCHAR(4) to VARCHAR(10)
+            db.session.execute(text(
+                "ALTER TABLE stock_transaction ALTER COLUMN transaction_type TYPE VARCHAR(10)"
+            ))
+            db.session.commit()
+            
+            return jsonify({
+                'success': True,
+                'message': 'transaction_type column widened to VARCHAR(10)',
+                'note': 'Can now support buy, sell, and initial transaction types'
+            })
+            
+        except Exception as e:
+            db.session.rollback()
+            import traceback
+            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+    
     @app.route('/admin/cash-tracking/add-user-columns')
     @login_required
     def add_user_cash_columns():
