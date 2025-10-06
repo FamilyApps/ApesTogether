@@ -48,9 +48,23 @@ def register_phase_1_routes(app, db):
             result = db.session.execute(text("""
                 SELECT id, username, max_cash_deployed, cash_proceeds
                 FROM "user"
+                ORDER BY username
             """))
             all_users = result.fetchall()
-            users_with_cash = sum(1 for u in all_users if u.max_cash_deployed and u.max_cash_deployed > 0)
+            
+            # Debug: Count users with actual cash data
+            users_with_cash = 0
+            user_debug = []
+            for u in all_users:
+                has_cash = u.max_cash_deployed and float(u.max_cash_deployed) > 0
+                user_debug.append({
+                    'username': u.username,
+                    'max_cash': u.max_cash_deployed,
+                    'cash_proceeds': u.cash_proceeds,
+                    'has_data': has_cash
+                })
+                if has_cash:
+                    users_with_cash += 1
             
             # Check if any snapshots have MEANINGFUL cash data (stock_value > 0, not just defaults)
             result = db.session.execute(text("""
@@ -163,21 +177,24 @@ def register_phase_1_routes(app, db):
                     </tr>
                 </table>
                 
-                <h2>👥 User Cash Tracking Data</h2>
+                <h2>👥 User Cash Tracking Data (Debug)</h2>
                 <table>
                     <tr>
                         <th>Username</th>
                         <th>Max Cash Deployed</th>
                         <th>Cash Proceeds</th>
+                        <th>Has Data?</th>
                         <th>Status</th>
                     </tr>
                     {''.join(f'''<tr>
-                        <td>{u.username}</td>
-                        <td>${u.max_cash_deployed:,.2f}</td>
-                        <td>${u.cash_proceeds:,.2f}</td>
-                        <td>{'✅' if u.max_cash_deployed > 0 else '⚠️ No data'}</td>
-                    </tr>''' for u in all_users)}
+                        <td>{d['username']}</td>
+                        <td>{d['max_cash'] if d['max_cash'] is not None else 'NULL'} (${float(d['max_cash'] or 0):,.2f})</td>
+                        <td>{d['cash_proceeds'] if d['cash_proceeds'] is not None else 'NULL'} (${float(d['cash_proceeds'] or 0):,.2f})</td>
+                        <td>{'✅ YES' if d['has_data'] else '❌ NO'}</td>
+                        <td>{'✅ Good' if d['has_data'] else '⚠️ No data'}</td>
+                    </tr>''' for d in user_debug)}
                 </table>
+                <p><strong>Debug Info:</strong> Counting users where max_cash_deployed > 0</p>
                 
                 <h2>🎯 Next Actions</h2>
                 <ol>
