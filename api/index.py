@@ -18368,6 +18368,14 @@ try:
 except Exception as e:
     logger.error(f"Error registering cash tracking routes: {e}")
 
+# Register Phase 1 implementation routes
+try:
+    from admin_phase_1_routes import register_phase_1_routes
+    register_phase_1_routes(app, db)
+    logger.info("Phase 1 implementation routes registered successfully")
+except Exception as e:
+    logger.error(f"Error registering Phase 1 routes: {e}")
+
 # Register the leaderboard blueprint for Vercel deployment
 try:
     from leaderboard_routes import leaderboard_bp
