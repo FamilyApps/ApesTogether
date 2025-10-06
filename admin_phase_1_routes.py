@@ -44,21 +44,19 @@ def register_phase_1_routes(app, db):
                 'max_cash_deployed' in snap_cols
             )
             
-            # Check if users have cash data
+            # Check if users have MEANINGFUL cash data (not just default 0)
             result = db.session.execute(text("""
-                SELECT COUNT(*) as count
+                SELECT id, username, max_cash_deployed, cash_proceeds
                 FROM "user"
-                WHERE max_cash_deployed > 0
             """))
-            users_with_cash = result.scalar()
+            all_users = result.fetchall()
+            users_with_cash = sum(1 for u in all_users if u.max_cash_deployed and u.max_cash_deployed > 0)
             
-            # Check if any snapshots have cash data
+            # Check if any snapshots have MEANINGFUL cash data (stock_value > 0, not just defaults)
             result = db.session.execute(text("""
                 SELECT COUNT(*) as count
                 FROM portfolio_snapshot
-                WHERE stock_value IS NOT NULL 
-                   OR cash_proceeds IS NOT NULL
-                   OR max_cash_deployed IS NOT NULL
+                WHERE stock_value > 0
             """))
             snapshots_with_cash = result.scalar()
             
@@ -163,6 +161,22 @@ def register_phase_1_routes(app, db):
                         <td>{(snapshots_with_cash / total_snapshots * 100 if total_snapshots > 0 else 0):.1f}%</td>
                         <td>{'✅' if snapshots_with_cash > 0 else '⚠️'}</td>
                     </tr>
+                </table>
+                
+                <h2>👥 User Cash Tracking Data</h2>
+                <table>
+                    <tr>
+                        <th>Username</th>
+                        <th>Max Cash Deployed</th>
+                        <th>Cash Proceeds</th>
+                        <th>Status</th>
+                    </tr>
+                    {''.join(f'''<tr>
+                        <td>{u.username}</td>
+                        <td>${u.max_cash_deployed:,.2f}</td>
+                        <td>${u.cash_proceeds:,.2f}</td>
+                        <td>{'✅' if u.max_cash_deployed > 0 else '⚠️ No data'}</td>
+                    </tr>''' for u in all_users)}
                 </table>
                 
                 <h2>🎯 Next Actions</h2>
