@@ -210,12 +210,18 @@ def register_cash_tracking_routes(app, db):
         execute = request.args.get('execute') == 'true'
         
         try:
+            from sqlalchemy import text
+            
             results = []
             transactions_created = 0
             
-            for user in User.query.all():
-                stocks = Stock.query.filter_by(user_id=user.id).all()
-                existing_txns = Transaction.query.filter_by(user_id=user.id).all()
+            # Get all users (use raw SQL to get just id and username, avoiding new fields)
+            users_result = db.session.execute(text("SELECT id, username FROM \"user\""))
+            users = [{'id': row.id, 'username': row.username} for row in users_result]
+            
+            for user in users:
+                stocks = Stock.query.filter_by(user_id=user['id']).all()
+                existing_txns = Transaction.query.filter_by(user_id=user['id']).all()
                 
                 # Build map of existing transaction quantities
                 txn_map = {}
@@ -261,7 +267,7 @@ def register_cash_tracking_routes(app, db):
                         
                         if execute:
                             new_txn = Transaction(
-                                user_id=user.id,
+                                user_id=user['id'],
                                 ticker=stock.ticker,
                                 quantity=missing_qty,
                                 price=stock.purchase_price,
@@ -273,8 +279,8 @@ def register_cash_tracking_routes(app, db):
                 
                 if user_results:
                     results.append({
-                        'username': user.username,
-                        'user_id': user.id,
+                        'username': user['username'],
+                        'user_id': user['id'],
                         'transactions_to_create': user_results
                     })
             
@@ -445,29 +451,34 @@ def register_cash_tracking_routes(app, db):
         
         try:
             from cash_tracking import backfill_cash_tracking_for_user
+            from sqlalchemy import text
             
             results = []
             
-            for user in User.query.all():
+            # Get all users (use raw SQL to avoid querying new fields)
+            users_result = db.session.execute(text("SELECT id, username FROM \"user\""))
+            users = [{'id': row.id, 'username': row.username} for row in users_result]
+            
+            for user in users:
                 try:
                     if execute:
-                        result = backfill_cash_tracking_for_user(db, user.id)
+                        result = backfill_cash_tracking_for_user(db, user['id'])
                         results.append({
-                            'username': user.username,
+                            'username': user['username'],
                             'success': True,
                             **result
                         })
                     else:
                         # Preview: just show what would be calculated
-                        txns = Transaction.query.filter_by(user_id=user.id).count()
+                        txns = Transaction.query.filter_by(user_id=user['id']).count()
                         results.append({
-                            'username': user.username,
+                            'username': user['username'],
                             'transactions': txns,
                             'would_process': txns > 0
                         })
                 except Exception as e:
                     results.append({
-                        'username': user.username,
+                        'username': user['username'],
                         'success': False,
                         'error': str(e)
                     })
