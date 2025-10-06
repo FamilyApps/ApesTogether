@@ -466,6 +466,145 @@ def register_cash_tracking_routes(app, db):
             import traceback
             return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
     
+    @app.route('/admin/cash-tracking/test-direct-update')
+    @login_required
+    def test_direct_update():
+        """Test writing directly to user cash columns"""
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        try:
+            from sqlalchemy import text
+            
+            # Try direct SQL UPDATE
+            db.session.execute(text("""
+                UPDATE "user" 
+                SET max_cash_deployed = 999.99,
+                    cash_proceeds = 111.11
+                WHERE username = 'witty-raven'
+            """))
+            db.session.commit()
+            
+            # Read it back
+            result = db.session.execute(text("""
+                SELECT username, max_cash_deployed, cash_proceeds
+                FROM "user"
+                WHERE username = 'witty-raven'
+            """))
+            row = result.fetchone()
+            
+            return jsonify({
+                'success': True,
+                'test': 'Direct SQL UPDATE',
+                'username': row.username,
+                'max_cash_deployed': float(row.max_cash_deployed),
+                'cash_proceeds': float(row.cash_proceeds),
+                'message': 'If you see 999.99 and 111.11, database writes work!'
+            })
+            
+        except Exception as e:
+            db.session.rollback()
+            import traceback
+            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+    
+    @app.route('/admin/cash-tracking/backfill-users-v2')
+    @login_required
+    def backfill_user_cash_v2():
+        """Backfill with direct SQL UPDATE (more reliable)"""
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        execute = request.args.get('execute') == 'true'
+        
+        try:
+            from sqlalchemy import text
+            
+            # Get all users
+            users_result = db.session.execute(text("SELECT id, username FROM \"user\" ORDER BY username"))
+            users = [{'id': row.id, 'username': row.username} for row in users_result]
+            
+            results = []
+            
+            for user in users:
+                # Get all transactions for this user
+                txns_result = db.session.execute(text("""
+                    SELECT ticker, quantity, price, transaction_type, timestamp
+                    FROM stock_transaction
+                    WHERE user_id = :user_id
+                    ORDER BY timestamp
+                """), {'user_id': user['id']})
+                
+                txns = list(txns_result)
+                
+                if not txns:
+                    results.append({
+                        'username': user['username'],
+                        'max_cash_deployed': 0,
+                        'cash_proceeds': 0,
+                        'transactions': 0,
+                        'skipped': True
+                    })
+                    continue
+                
+                # Replay transactions
+                max_cash_deployed = 0.0
+                cash_proceeds = 0.0
+                
+                for txn in txns:
+                    value = txn.quantity * txn.price
+                    
+                    if txn.transaction_type in ('buy', 'initial'):
+                        if cash_proceeds >= value:
+                            cash_proceeds -= value
+                        else:
+                            new_capital = value - cash_proceeds
+                            cash_proceeds = 0
+                            max_cash_deployed += new_capital
+                    
+                    elif txn.transaction_type == 'sell':
+                        cash_proceeds += value
+                
+                results.append({
+                    'username': user['username'],
+                    'max_cash_deployed': max_cash_deployed,
+                    'cash_proceeds': cash_proceeds,
+                    'transactions': len(txns)
+                })
+                
+                if execute:
+                    # Direct SQL UPDATE
+                    db.session.execute(text("""
+                        UPDATE "user"
+                        SET max_cash_deployed = :max_cash,
+                            cash_proceeds = :cash_proc
+                        WHERE id = :user_id
+                    """), {
+                        'max_cash': max_cash_deployed,
+                        'cash_proc': cash_proceeds,
+                        'user_id': user['id']
+                    })
+            
+            if execute:
+                db.session.commit()
+                return jsonify({
+                    'success': True,
+                    'method': 'Direct SQL UPDATE',
+                    'users_processed': len([r for r in results if not r.get('skipped')]),
+                    'details': results
+                })
+            else:
+                return jsonify({
+                    'preview': True,
+                    'method': 'Would use direct SQL UPDATE',
+                    'details': results,
+                    'execute_url': '/admin/cash-tracking/backfill-users-v2?execute=true'
+                })
+                
+        except Exception as e:
+            db.session.rollback()
+            import traceback
+            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+    
     @app.route('/admin/cash-tracking/backfill-users')
     @login_required
     def backfill_user_cash():
