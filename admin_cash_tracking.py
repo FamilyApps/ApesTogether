@@ -466,6 +466,93 @@ def register_cash_tracking_routes(app, db):
             import traceback
             return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
     
+    @app.route('/admin/cash-tracking/backfill-single-user')
+    @login_required
+    def backfill_single_user():
+        """Backfill a single user with direct SQL (fast, no timeout)"""
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        username = request.args.get('user')
+        if not username:
+            return jsonify({'error': 'Missing ?user=username parameter'}), 400
+        
+        try:
+            from sqlalchemy import text
+            
+            # Get user
+            user_result = db.session.execute(text(
+                "SELECT id, username FROM \"user\" WHERE username = :username"
+            ), {'username': username})
+            user = user_result.fetchone()
+            
+            if not user:
+                return jsonify({'error': f'User {username} not found'}), 404
+            
+            # Get all transactions
+            txns_result = db.session.execute(text("""
+                SELECT ticker, quantity, price, transaction_type, timestamp
+                FROM stock_transaction
+                WHERE user_id = :user_id
+                ORDER BY timestamp
+            """), {'user_id': user.id})
+            
+            txns = list(txns_result)
+            
+            if not txns:
+                return jsonify({
+                    'username': username,
+                    'transactions': 0,
+                    'max_cash_deployed': 0,
+                    'cash_proceeds': 0,
+                    'message': 'No transactions found, skipped'
+                })
+            
+            # Replay transactions
+            max_cash_deployed = 0.0
+            cash_proceeds = 0.0
+            
+            for txn in txns:
+                value = txn.quantity * txn.price
+                
+                if txn.transaction_type in ('buy', 'initial'):
+                    if cash_proceeds >= value:
+                        cash_proceeds -= value
+                    else:
+                        new_capital = value - cash_proceeds
+                        cash_proceeds = 0
+                        max_cash_deployed += new_capital
+                
+                elif txn.transaction_type == 'sell':
+                    cash_proceeds += value
+            
+            # Direct SQL UPDATE
+            db.session.execute(text("""
+                UPDATE "user"
+                SET max_cash_deployed = :max_cash,
+                    cash_proceeds = :cash_proc
+                WHERE id = :user_id
+            """), {
+                'max_cash': max_cash_deployed,
+                'cash_proc': cash_proceeds,
+                'user_id': user.id
+            })
+            db.session.commit()
+            
+            return jsonify({
+                'success': True,
+                'username': username,
+                'transactions': len(txns),
+                'max_cash_deployed': max_cash_deployed,
+                'cash_proceeds': cash_proceeds,
+                'message': 'Successfully backfilled!'
+            })
+            
+        except Exception as e:
+            db.session.rollback()
+            import traceback
+            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+    
     @app.route('/admin/cash-tracking/test-direct-update')
     @login_required
     def test_direct_update():
