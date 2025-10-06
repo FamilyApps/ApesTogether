@@ -362,15 +362,15 @@ def register_cash_tracking_routes(app, db):
                 })
             
             if execute:
-                # Add columns
+                # Add columns (quote "user" because it's a PostgreSQL reserved keyword)
                 if not has_max_cash:
                     db.session.execute(text(
-                        "ALTER TABLE user ADD COLUMN max_cash_deployed FLOAT DEFAULT 0.0 NOT NULL"
+                        'ALTER TABLE "user" ADD COLUMN max_cash_deployed FLOAT DEFAULT 0.0 NOT NULL'
                     ))
                 
                 if not has_cash_proceeds:
                     db.session.execute(text(
-                        "ALTER TABLE user ADD COLUMN cash_proceeds FLOAT DEFAULT 0.0 NOT NULL"
+                        'ALTER TABLE "user" ADD COLUMN cash_proceeds FLOAT DEFAULT 0.0 NOT NULL'
                     ))
                 
                 db.session.commit()
