@@ -361,7 +361,7 @@ def register_phase_1_routes(app, db):
             return jsonify({'error': 'Admin access required'}), 403
         
         try:
-            from portfolio_performance import PortfolioPerformanceCalculator
+            from portfolio_performance import PortfolioPerformanceCalculator, get_market_date
             from sqlalchemy import text
             
             calculator = PortfolioPerformanceCalculator()
@@ -381,8 +381,8 @@ def register_phase_1_routes(app, db):
             
             for user_row in users_result:
                 try:
-                    # Check if snapshot already exists for today
-                    today = date.today()
+                    # Check if snapshot already exists for today (use ET date, not UTC)
+                    today = get_market_date()
                     existing = PortfolioSnapshot.query.filter_by(
                         user_id=user_row.id,
                         date=today
