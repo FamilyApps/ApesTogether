@@ -254,38 +254,59 @@ def register_phase_2_routes(app, db):
                 
                 first_date = first_txn.timestamp.date()
                 
-                # Find snapshots to delete (before first transaction OR zero value)
-                snapshots_to_delete = PortfolioSnapshot.query.filter(
-                    and_(
-                        PortfolioSnapshot.user_id == user['id'],
-                        or_(
-                            PortfolioSnapshot.date < first_date,
-                            PortfolioSnapshot.total_value == 0,
-                            PortfolioSnapshot.total_value == None
-                        )
-                    )
-                ).all()
-                
                 if execute:
-                    for snapshot in snapshots_to_delete:
-                        db.session.delete(snapshot)
+                    # Use direct SQL DELETE to avoid session issues
+                    result = db.session.execute(text("""
+                        DELETE FROM portfolio_snapshot
+                        WHERE user_id = :user_id
+                          AND (date < :first_date OR total_value = 0 OR total_value IS NULL)
+                        RETURNING id
+                    """), {'user_id': user['id'], 'first_date': first_date})
+                    deleted_ids = result.fetchall()
                     db.session.commit()
+                    
+                    snapshots_identified = len(deleted_ids)
                     action = 'deleted'
+                    
+                    # Get date range from remaining snapshots
+                    range_result = db.session.execute(text("""
+                        SELECT MIN(date) as earliest, MAX(date) as latest
+                        FROM portfolio_snapshot
+                        WHERE user_id = :user_id
+                    """), {'user_id': user['id']})
+                    date_range_row = range_result.fetchone()
+                    date_range = {
+                        'earliest': date_range_row.earliest.isoformat() if date_range_row and date_range_row.earliest else None,
+                        'latest': date_range_row.latest.isoformat() if date_range_row and date_range_row.latest else None
+                    } if date_range_row else None
                 else:
+                    # Preview mode - just count
+                    count_result = db.session.execute(text("""
+                        SELECT COUNT(*) as count,
+                               MIN(date) as earliest,
+                               MAX(date) as latest
+                        FROM portfolio_snapshot
+                        WHERE user_id = :user_id
+                          AND (date < :first_date OR total_value = 0 OR total_value IS NULL)
+                    """), {'user_id': user['id'], 'first_date': first_date})
+                    count_row = count_result.fetchone()
+                    
+                    snapshots_identified = count_row.count if count_row else 0
                     action = 'would_delete'
+                    date_range = {
+                        'earliest': count_row.earliest.isoformat() if count_row and count_row.earliest else None,
+                        'latest': count_row.latest.isoformat() if count_row and count_row.latest else None
+                    } if count_row and count_row.earliest else None
                 
                 results.append({
                     'username': user['username'],
                     'first_transaction_date': first_date.isoformat(),
-                    'snapshots_identified': len(snapshots_to_delete),
+                    'snapshots_identified': snapshots_identified,
                     'action': action,
-                    'date_range': {
-                        'earliest': snapshots_to_delete[0].date.isoformat() if snapshots_to_delete else None,
-                        'latest': snapshots_to_delete[-1].date.isoformat() if snapshots_to_delete else None
-                    } if snapshots_to_delete else None
+                    'date_range': date_range
                 })
                 
-                total_deleted += len(snapshots_to_delete)
+                total_deleted += snapshots_identified
             
             return jsonify({
                 'success': True,
