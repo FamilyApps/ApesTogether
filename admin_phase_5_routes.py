@@ -181,3 +181,119 @@ def register_phase_5_routes(app, db):
         except Exception as e:
             import traceback
             return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+    
+    @app.route('/admin/phase5/fetch-historical-prices')
+    @login_required
+    def fetch_historical_prices_route():
+        """Fetch historical prices for all tickers to populate MarketData cache"""
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        execute = request.args.get('execute') == 'true'
+        
+        try:
+            from portfolio_performance import PortfolioPerformanceCalculator, get_market_date
+            from models import Transaction, MarketData
+            from datetime import timedelta
+            
+            # Get date range
+            end_date = get_market_date()
+            
+            earliest_result = db.session.execute(text("""
+                SELECT MIN(DATE(timestamp)) as earliest
+                FROM transaction
+            """))
+            earliest_row = earliest_result.fetchone()
+            start_date = earliest_row.earliest if earliest_row and earliest_row.earliest else end_date - timedelta(days=120)
+            
+            # Get unique tickers
+            tickers_result = db.session.execute(text("""
+                SELECT DISTINCT ticker FROM transaction ORDER BY ticker
+            """))
+            tickers = [row.ticker.upper() for row in tickers_result]
+            
+            if not tickers:
+                return jsonify({'error': 'No tickers found'}), 404
+            
+            results = []
+            
+            for ticker in tickers:
+                cached_count = MarketData.query.filter(
+                    MarketData.ticker == ticker,
+                    MarketData.date >= start_date,
+                    MarketData.date <= end_date
+                ).count()
+                
+                days_span = (end_date - start_date).days
+                already_cached = cached_count >= days_span * 0.7
+                
+                if already_cached:
+                    results.append({
+                        'ticker': ticker,
+                        'status': 'cached',
+                        'cached_days': cached_count,
+                        'message': f'Already have {cached_count} days'
+                    })
+                    continue
+                
+                if execute:
+                    try:
+                        calculator = PortfolioPerformanceCalculator()
+                        price = calculator.get_historical_price(ticker, start_date)
+                        
+                        if price:
+                            new_cached_count = MarketData.query.filter(
+                                MarketData.ticker == ticker,
+                                MarketData.date >= start_date,
+                                MarketData.date <= end_date
+                            ).count()
+                            
+                            results.append({
+                                'ticker': ticker,
+                                'status': 'fetched',
+                                'cached_days': new_cached_count,
+                                'message': f'Fetched {new_cached_count} days'
+                            })
+                        else:
+                            results.append({
+                                'ticker': ticker,
+                                'status': 'error',
+                                'message': 'API returned no data'
+                            })
+                    except Exception as e:
+                        results.append({
+                            'ticker': ticker,
+                            'status': 'error',
+                            'message': str(e)
+                        })
+                else:
+                    results.append({
+                        'ticker': ticker,
+                        'status': 'will_fetch',
+                        'cached_days': cached_count,
+                        'message': f'Need to fetch (have {cached_count}/{days_span} days)'
+                    })
+            
+            return jsonify({
+                'success': True,
+                'executed': execute,
+                'date_range': {
+                    'start': start_date.isoformat(),
+                    'end': end_date.isoformat(),
+                    'days': (end_date - start_date).days
+                },
+                'tickers': len(tickers),
+                'results': results,
+                'summary': {
+                    'cached': len([r for r in results if r['status'] == 'cached']),
+                    'fetched': len([r for r in results if r['status'] == 'fetched']),
+                    'errors': len([r for r in results if r['status'] == 'error']),
+                    'will_fetch': len([r for r in results if r['status'] == 'will_fetch'])
+                },
+                'execute_url': '/admin/phase5/fetch-historical-prices?execute=true',
+                'note': 'With 150 calls/min limit, can fetch prices for all tickers in under 1 minute. Each call fetches 100+ days.'
+            })
+            
+        except Exception as e:
+            import traceback
+            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
