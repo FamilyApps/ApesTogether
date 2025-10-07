@@ -189,7 +189,7 @@ class PortfolioPerformanceCalculator:
         return total_value
     
     def create_daily_snapshot(self, user_id: int, target_date: date = None):
-        """Create or update daily portfolio snapshot"""
+        """Create or update daily portfolio snapshot with cash tracking"""
         if target_date is None:
             target_date = get_market_date()  # Use ET date, not UTC
         
@@ -198,19 +198,33 @@ class PortfolioPerformanceCalculator:
             user_id=user_id, date=target_date
         ).first()
         
-        portfolio_value = self.calculate_portfolio_value(user_id, target_date)
+        # Calculate portfolio value with cash breakdown
+        from cash_tracking import calculate_portfolio_value_with_cash
+        portfolio_breakdown = calculate_portfolio_value_with_cash(user_id, target_date)
+        
+        # Get user's max_cash_deployed
+        user = User.query.get(user_id)
+        max_cash_deployed = user.max_cash_deployed if user else 0.0
         
         # Calculate cash flow for the day
         daily_cash_flow = self.calculate_daily_cash_flow(user_id, target_date)
         
         if existing_snapshot:
-            existing_snapshot.total_value = portfolio_value
+            # Update existing snapshot with all cash tracking fields
+            existing_snapshot.total_value = portfolio_breakdown['total_value']
+            existing_snapshot.stock_value = portfolio_breakdown['stock_value']
+            existing_snapshot.cash_proceeds = portfolio_breakdown['cash_proceeds']
+            existing_snapshot.max_cash_deployed = max_cash_deployed
             existing_snapshot.cash_flow = daily_cash_flow
         else:
+            # Create new snapshot with all cash tracking fields
             snapshot = PortfolioSnapshot(
                 user_id=user_id,
                 date=target_date,
-                total_value=portfolio_value,
+                total_value=portfolio_breakdown['total_value'],
+                stock_value=portfolio_breakdown['stock_value'],
+                cash_proceeds=portfolio_breakdown['cash_proceeds'],
+                max_cash_deployed=max_cash_deployed,
                 cash_flow=daily_cash_flow
             )
             db.session.add(snapshot)
