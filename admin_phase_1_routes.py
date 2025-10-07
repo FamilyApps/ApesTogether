@@ -352,3 +352,97 @@ def register_phase_1_routes(app, db):
         except Exception as e:
             import traceback
             return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+    
+    @app.route('/admin/phase1/create-todays-snapshots')
+    @login_required
+    def create_todays_snapshots_with_cash():
+        """Create today's snapshots for all users with cash tracking"""
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        try:
+            from portfolio_performance import PortfolioPerformanceCalculator
+            from sqlalchemy import text
+            
+            calculator = PortfolioPerformanceCalculator()
+            
+            # Get all users with cash tracking
+            users_result = db.session.execute(text("""
+                SELECT id, username, max_cash_deployed
+                FROM "user"
+                WHERE max_cash_deployed > 0
+                ORDER BY username
+            """))
+            
+            results = []
+            snapshots_created = 0
+            snapshots_updated = 0
+            errors = []
+            
+            for user_row in users_result:
+                try:
+                    # Check if snapshot already exists for today
+                    today = date.today()
+                    existing = PortfolioSnapshot.query.filter_by(
+                        user_id=user_row.id,
+                        date=today
+                    ).first()
+                    
+                    action = 'updated' if existing else 'created'
+                    
+                    # Create/update snapshot
+                    calculator.create_daily_snapshot(user_row.id)
+                    
+                    # Verify it was saved correctly
+                    snapshot = PortfolioSnapshot.query.filter_by(
+                        user_id=user_row.id,
+                        date=today
+                    ).first()
+                    
+                    if snapshot:
+                        if action == 'created':
+                            snapshots_created += 1
+                        else:
+                            snapshots_updated += 1
+                        
+                        results.append({
+                            'username': user_row.username,
+                            'action': action,
+                            'date': today.isoformat(),
+                            'snapshot': {
+                                'total_value': float(snapshot.total_value),
+                                'stock_value': float(snapshot.stock_value) if snapshot.stock_value else 0,
+                                'cash_proceeds': float(snapshot.cash_proceeds) if snapshot.cash_proceeds else 0,
+                                'max_cash_deployed': float(snapshot.max_cash_deployed) if snapshot.max_cash_deployed else 0,
+                                'cash_flow': float(snapshot.cash_flow) if snapshot.cash_flow else 0
+                            },
+                            'verification': {
+                                'has_stock_value': snapshot.stock_value is not None and snapshot.stock_value > 0,
+                                'fields_populated': all([
+                                    snapshot.stock_value is not None,
+                                    snapshot.cash_proceeds is not None,
+                                    snapshot.max_cash_deployed is not None
+                                ])
+                            }
+                        })
+                    else:
+                        errors.append(f"{user_row.username}: Snapshot not found after creation")
+                        
+                except Exception as e:
+                    error_msg = f"{user_row.username}: {str(e)}"
+                    errors.append(error_msg)
+                    logger.error(error_msg)
+            
+            return jsonify({
+                'success': True,
+                'snapshots_created': snapshots_created,
+                'snapshots_updated': snapshots_updated,
+                'users_processed': len(results),
+                'errors': errors,
+                'details': results,
+                'message': f'Created {snapshots_created} and updated {snapshots_updated} snapshots with cash tracking!'
+            })
+            
+        except Exception as e:
+            import traceback
+            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
