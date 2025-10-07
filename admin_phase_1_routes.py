@@ -13,7 +13,7 @@ from flask import jsonify, request
 from flask_login import login_required, current_user
 from models import User, Stock, Transaction, PortfolioSnapshot
 from datetime import datetime, date, timedelta
-from sqlalchemy import text, func
+from sqlalchemy import text, func, and_
 import logging
 
 logger = logging.getLogger(__name__)
