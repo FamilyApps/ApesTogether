@@ -446,3 +446,211 @@ def register_phase_1_routes(app, db):
         except Exception as e:
             import traceback
             return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+    
+    @app.route('/admin/phase1/test-modified-dietz')
+    @login_required
+    def test_modified_dietz():
+        """Test Modified Dietz calculation for a user"""
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        username = request.args.get('user', 'witty-raven')
+        period = request.args.get('period', '1M')  # 1D, 1W, 1M, 3M, YTD, 1Y
+        
+        try:
+            from portfolio_performance import PortfolioPerformanceCalculator, get_market_date
+            from sqlalchemy import text
+            
+            calculator = PortfolioPerformanceCalculator()
+            
+            # Get user
+            user_result = db.session.execute(text(
+                "SELECT id, username, max_cash_deployed, cash_proceeds FROM \"user\" WHERE username = :username"
+            ), {'username': username})
+            user_row = user_result.fetchone()
+            
+            if not user_row:
+                return jsonify({'error': f'User {username} not found'}), 404
+            
+            # Calculate date range
+            end_date = get_market_date()
+            
+            if period == '1D':
+                start_date = end_date - timedelta(days=1)
+            elif period == '1W':
+                start_date = end_date - timedelta(days=7)
+            elif period == '1M':
+                start_date = end_date - timedelta(days=30)
+            elif period == '3M':
+                start_date = end_date - timedelta(days=90)
+            elif period == 'YTD':
+                start_date = date(end_date.year, 1, 1)
+            elif period == '1Y':
+                start_date = end_date - timedelta(days=365)
+            else:
+                return jsonify({'error': f'Invalid period: {period}'}), 400
+            
+            # Get snapshots for the period
+            snapshots = PortfolioSnapshot.query.filter(
+                and_(
+                    PortfolioSnapshot.user_id == user_row.id,
+                    PortfolioSnapshot.date >= start_date,
+                    PortfolioSnapshot.date <= end_date
+                )
+            ).order_by(PortfolioSnapshot.date).all()
+            
+            if len(snapshots) < 2:
+                return jsonify({
+                    'username': username,
+                    'period': period,
+                    'snapshots_found': len(snapshots),
+                    'error': 'Need at least 2 snapshots for performance calculation',
+                    'date_range': {
+                        'start': start_date.isoformat(),
+                        'end': end_date.isoformat()
+                    }
+                })
+            
+            # Calculate Modified Dietz return
+            modified_dietz_return = calculator.calculate_modified_dietz_return(
+                user_row.id, start_date, end_date
+            )
+            
+            # Calculate simple ROI for comparison
+            beginning_value = snapshots[0].total_value
+            ending_value = snapshots[-1].total_value
+            simple_roi = ((ending_value - beginning_value) / beginning_value) if beginning_value > 0 else 0
+            
+            # Get cash flow details
+            total_cash_flow = sum(s.cash_flow for s in snapshots[1:])
+            
+            return jsonify({
+                'success': True,
+                'username': username,
+                'period': period,
+                'date_range': {
+                    'start': start_date.isoformat(),
+                    'end': end_date.isoformat(),
+                    'days': (end_date - start_date).days
+                },
+                'snapshots_analyzed': len(snapshots),
+                'portfolio_values': {
+                    'beginning': float(beginning_value),
+                    'ending': float(ending_value),
+                    'change': float(ending_value - beginning_value)
+                },
+                'cash_flows': {
+                    'total_net_cash_flow': float(total_cash_flow),
+                    'transactions': len([s for s in snapshots if s.cash_flow != 0])
+                },
+                'returns': {
+                    'modified_dietz': float(modified_dietz_return * 100),  # Convert to percentage
+                    'simple_roi': float(simple_roi * 100),  # Convert to percentage
+                    'difference': float((modified_dietz_return - simple_roi) * 100)
+                },
+                'explanation': {
+                    'modified_dietz': 'Accounts for timing of cash flows (buys/sells)',
+                    'simple_roi': 'Ignores timing - just (end - start) / start',
+                    'why_different': 'Modified Dietz is more accurate when there are cash flows during the period'
+                }
+            })
+            
+        except Exception as e:
+            import traceback
+            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+    
+    @app.route('/admin/phase1/compare-all-users')
+    @login_required
+    def compare_all_users_performance():
+        """Compare performance calculations for all users"""
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        period = request.args.get('period', '1M')
+        
+        try:
+            from portfolio_performance import PortfolioPerformanceCalculator, get_market_date
+            from sqlalchemy import text
+            
+            calculator = PortfolioPerformanceCalculator()
+            
+            # Calculate date range
+            end_date = get_market_date()
+            
+            if period == '1M':
+                start_date = end_date - timedelta(days=30)
+            elif period == '3M':
+                start_date = end_date - timedelta(days=90)
+            elif period == 'YTD':
+                start_date = date(end_date.year, 1, 1)
+            elif period == '1Y':
+                start_date = end_date - timedelta(days=365)
+            else:
+                start_date = end_date - timedelta(days=30)
+            
+            # Get all users with cash tracking
+            users_result = db.session.execute(text("""
+                SELECT id, username, max_cash_deployed, cash_proceeds
+                FROM "user"
+                WHERE max_cash_deployed > 0
+                ORDER BY username
+            """))
+            
+            results = []
+            
+            for user_row in users_result:
+                snapshots = PortfolioSnapshot.query.filter(
+                    and_(
+                        PortfolioSnapshot.user_id == user_row.id,
+                        PortfolioSnapshot.date >= start_date,
+                        PortfolioSnapshot.date <= end_date
+                    )
+                ).order_by(PortfolioSnapshot.date).all()
+                
+                if len(snapshots) < 2:
+                    results.append({
+                        'username': user_row.username,
+                        'snapshots': len(snapshots),
+                        'status': 'insufficient_data'
+                    })
+                    continue
+                
+                # Calculate Modified Dietz
+                modified_dietz = calculator.calculate_modified_dietz_return(
+                    user_row.id, start_date, end_date
+                )
+                
+                # Calculate simple ROI
+                beginning = snapshots[0].total_value
+                ending = snapshots[-1].total_value
+                simple_roi = ((ending - beginning) / beginning) if beginning > 0 else 0
+                
+                results.append({
+                    'username': user_row.username,
+                    'invested': float(user_row.max_cash_deployed),
+                    'current_value': float(ending),
+                    'snapshots': len(snapshots),
+                    'modified_dietz_return': float(modified_dietz * 100),
+                    'simple_roi': float(simple_roi * 100),
+                    'difference': float((modified_dietz - simple_roi) * 100),
+                    'status': 'calculated'
+                })
+            
+            return jsonify({
+                'success': True,
+                'period': period,
+                'date_range': {
+                    'start': start_date.isoformat(),
+                    'end': end_date.isoformat()
+                },
+                'users_analyzed': len(results),
+                'results': results,
+                'summary': {
+                    'calculated': len([r for r in results if r.get('status') == 'calculated']),
+                    'insufficient_data': len([r for r in results if r.get('status') == 'insufficient_data'])
+                }
+            })
+            
+        except Exception as e:
+            import traceback
+            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
