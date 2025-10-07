@@ -47,6 +47,7 @@ class PortfolioPerformanceCalculator:
     def __init__(self):
         self.sp500_ticker = "SPY_SP500"  # S&P 500 proxy using SPY
         self.alpha_vantage_api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
+        self.historical_price_cache = {}  # Cache for historical prices during batch operations
     
     def get_stock_data(self, ticker_symbol: str) -> Dict:
         """Fetches stock data using AlphaVantage API with caching (same as existing system)"""
@@ -133,9 +134,132 @@ class PortfolioPerformanceCalculator:
                     db.session.rollback()
                 except:
                     pass
+    
+    def get_historical_price(self, ticker: str, target_date: date) -> float:
+        """
+        Get historical closing price for a ticker on a specific date.
+        
+        Order of precedence:
+        1. Local cache (for batch operations)
+        2. MarketData table (database cache)
+        3. Alpha Vantage TIME_SERIES_DAILY API
+        
+        Returns None if price cannot be found.
+        """
+        ticker_upper = ticker.upper()
+        cache_key = f"{ticker_upper}_{target_date.isoformat()}"
+        
+        # Check local cache first (for batch operations)
+        if cache_key in self.historical_price_cache:
+            logger.info(f"Using local cache for {ticker} on {target_date}: ${self.historical_price_cache[cache_key]}")
+            return self.historical_price_cache[cache_key]
+        
+        # Check MarketData table
+        market_data = MarketData.query.filter_by(
+            ticker=ticker_upper,
+            date=target_date
+        ).first()
+        
+        if market_data and market_data.close_price:
+            price = float(market_data.close_price)
+            self.historical_price_cache[cache_key] = price
+            logger.info(f"Using database cache for {ticker} on {target_date}: ${price}")
+            return price
+        
+        # Fetch from Alpha Vantage API
+        logger.info(f"Fetching historical price from API for {ticker} on {target_date}")
+        
+        try:
+            if not self.alpha_vantage_api_key:
+                logger.warning("Alpha Vantage API key not found")
+                return None
+            
+            import time
+            time.sleep(0.15)  # Rate limit: ~7 calls per second
+            
+            url = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={ticker}&outputsize=full&apikey={self.alpha_vantage_api_key}'
+            response = requests.get(url, timeout=10)
+            data = response.json()
+            
+            # Log API call
+            try:
+                from models import AlphaVantageAPILog
+                api_log = AlphaVantageAPILog(
+                    endpoint='TIME_SERIES_DAILY',
+                    symbol=ticker_upper,
+                    response_status='success' if 'Time Series (Daily)' in data else 'error',
+                    timestamp=datetime.now()
+                )
+                db.session.add(api_log)
+            except Exception as log_error:
+                logger.error(f"Failed to log API call: {log_error}")
+            
+            if 'Time Series (Daily)' not in data:
+                logger.warning(f"No time series data for {ticker}: {data.get('Note', data.get('Error Message', 'Unknown error'))}")
+                return None
+            
+            time_series = data['Time Series (Daily)']
+            date_str = target_date.isoformat()
+            
+            if date_str in time_series:
+                close_price = float(time_series[date_str]['4. close'])
+                
+                # Store in database for future use
+                try:
+                    new_market_data = MarketData(
+                        ticker=ticker_upper,
+                        date=target_date,
+                        close_price=close_price
+                    )
+                    db.session.add(new_market_data)
+                    db.session.commit()
+                    logger.info(f"✅ Fetched and cached {ticker} on {target_date}: ${close_price}")
+                except Exception as db_error:
+                    logger.error(f"Failed to save historical price to database: {db_error}")
+                    db.session.rollback()
+                
+                # Cache locally
+                self.historical_price_cache[cache_key] = close_price
+                return close_price
+            else:
+                # Date not found - try to find nearest previous trading day
+                logger.warning(f"No data for {ticker} on {date_str}, trying previous days...")
+                available_dates = sorted(time_series.keys(), reverse=True)
+                
+                for available_date_str in available_dates:
+                    if available_date_str <= date_str:
+                        close_price = float(time_series[available_date_str]['4. close'])
+                        logger.info(f"Using nearest date {available_date_str} for {ticker}: ${close_price}")
+                        
+                        # Store with the requested date for caching
+                        try:
+                            new_market_data = MarketData(
+                                ticker=ticker_upper,
+                                date=target_date,
+                                close_price=close_price
+                            )
+                            db.session.add(new_market_data)
+                            db.session.commit()
+                        except:
+                            db.session.rollback()
+                        
+                        self.historical_price_cache[cache_key] = close_price
+                        return close_price
+                
+                logger.error(f"No historical data found for {ticker} before {date_str}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error fetching historical price for {ticker} on {target_date}: {e}")
+            return None
 
     def calculate_portfolio_value(self, user_id: int, target_date: date = None) -> float:
-        """Calculate total portfolio value for a user on a specific date"""
+        """
+        Calculate total portfolio value for a user on a specific date.
+        
+        For current date: Uses Stock table + live prices
+        For historical dates: Reconstructs holdings from transactions + historical prices
+        """
         if target_date is None:
             target_date = get_market_date()  # Use ET date, not UTC
         
@@ -143,49 +267,85 @@ class PortfolioPerformanceCalculator:
         if not user:
             return 0.0
         
+        today = get_market_date()
+        is_historical = target_date < today
+        
         total_value = 0.0
-        
-        # Always use Stock table for current portfolio value (most accurate)
-        # Transaction table is for historical performance tracking only
-        stocks = Stock.query.filter_by(user_id=user_id).all()
         holdings = {}
-        for stock in stocks:
-            holdings[stock.ticker] = stock.quantity
         
-        # Get current prices and calculate value using AlphaVantage
-        for ticker, quantity in holdings.items():
-            if quantity > 0:  # Only count positive holdings
-                price = None
+        if is_historical:
+            # For historical dates: Reconstruct holdings from transaction history
+            logger.info(f"Calculating HISTORICAL portfolio value for user {user_id} on {target_date}")
+            
+            transactions = Transaction.query.filter(
+                Transaction.user_id == user_id,
+                func.date(Transaction.timestamp) <= target_date
+            ).order_by(Transaction.timestamp).all()
+            
+            # Replay transactions to get holdings as of target_date
+            for txn in transactions:
+                ticker = txn.ticker
+                if ticker not in holdings:
+                    holdings[ticker] = 0.0
                 
-                try:
-                    stock_data = self.get_stock_data(ticker)
-                    if stock_data and stock_data.get('price') is not None:
-                        price = stock_data['price']
-                except Exception as e:
-                    logger.error(f"Error fetching price for {ticker}: {e}")
-                
-                # If API failed or returned None, use fallback logic
-                if price is None:
-                    # First fallback: try to use any cached price (even if expired)
-                    ticker_upper = ticker.upper()
-                    if ticker_upper in stock_price_cache and stock_price_cache[ticker_upper].get('price'):
-                        cached_price = stock_price_cache[ticker_upper]['price']
-                        price = cached_price
-                        logger.info(f"Using expired cached price for {ticker}: ${cached_price}")
-                    else:
-                        # Final fallback: use purchase price from Stock table
-                        stock = Stock.query.filter_by(user_id=user_id, ticker=ticker).first()
-                        if stock and stock.purchase_price:
-                            price = stock.purchase_price
-                            logger.warning(f"API and cache failed for {ticker}, using purchase price: ${stock.purchase_price}")
+                if txn.transaction_type in ('buy', 'initial'):
+                    holdings[ticker] += txn.quantity
+                elif txn.transaction_type == 'sell':
+                    holdings[ticker] -= txn.quantity
+            
+            # Get historical prices for each holding
+            for ticker, quantity in holdings.items():
+                if quantity > 0:
+                    price = self.get_historical_price(ticker, target_date)
+                    
+                    if price is None:
+                        logger.warning(f"No historical price for {ticker} on {target_date}, skipping")
+                        continue
+                    
+                    value = quantity * price
+                    total_value += value
+                    logger.info(f"  {ticker}: {quantity} shares × ${price} = ${value:.2f}")
+        
+        else:
+            # For current date: Use Stock table (most accurate) + live prices
+            logger.info(f"Calculating CURRENT portfolio value for user {user_id}")
+            
+            stocks = Stock.query.filter_by(user_id=user_id).all()
+            for stock in stocks:
+                holdings[stock.ticker] = stock.quantity
+            
+            # Get current prices
+            for ticker, quantity in holdings.items():
+                if quantity > 0:
+                    price = None
+                    
+                    try:
+                        stock_data = self.get_stock_data(ticker)
+                        if stock_data and stock_data.get('price') is not None:
+                            price = stock_data['price']
+                    except Exception as e:
+                        logger.error(f"Error fetching price for {ticker}: {e}")
+                    
+                    # Fallback logic
+                    if price is None:
+                        ticker_upper = ticker.upper()
+                        if ticker_upper in stock_price_cache and stock_price_cache[ticker_upper].get('price'):
+                            cached_price = stock_price_cache[ticker_upper]['price']
+                            price = cached_price
+                            logger.info(f"Using expired cached price for {ticker}: ${cached_price}")
                         else:
-                            logger.error(f"No price available for {ticker} (quantity {quantity}) - skipping stock!")
-                            continue  # Skip this stock entirely
-                
-                # Add to total value if we have a valid price
-                if price and price > 0:
-                    total_value += quantity * price
+                            stock = Stock.query.filter_by(user_id=user_id, ticker=ticker).first()
+                            if stock and stock.purchase_price:
+                                price = stock.purchase_price
+                                logger.warning(f"API and cache failed for {ticker}, using purchase price: ${stock.purchase_price}")
+                            else:
+                                logger.error(f"No price available for {ticker} (quantity {quantity}) - skipping stock!")
+                                continue
+                    
+                    if price and price > 0:
+                        total_value += quantity * price
         
+        logger.info(f"Total portfolio value for user {user_id} on {target_date}: ${total_value:.2f}")
         return total_value
     
     def create_daily_snapshot(self, user_id: int, target_date: date = None):
