@@ -167,10 +167,41 @@ Status: ✅ COMPLETE (columns exist)
 - [ ] Modified Dietz calculation
 - [ ] Chart API integration
 
+## ⚠️ PRE-PUSH CHECKLIST
+
+**ALWAYS verify before pushing code:**
+
+1. **Check All Imports**
+   ```python
+   # Required imports for admin_phase_1_routes.py
+   from flask import jsonify, request
+   from flask_login import login_required, current_user
+   from models import User, Stock, Transaction, PortfolioSnapshot
+   from datetime import datetime, date, timedelta
+   from sqlalchemy import text, func, and_  # ✅ and_ is required!
+   import logging
+   ```
+
+2. **Verify Model Fields**
+   - User: `max_cash_deployed`, `cash_proceeds`
+   - PortfolioSnapshot: `stock_value`, `cash_proceeds`, `max_cash_deployed`, `total_value`, `cash_flow`
+   - Transaction: `ticker` (not symbol), `quantity` (not shares), `timestamp` (not date)
+
+3. **Verify Function Locations**
+   - `get_market_date()` → `portfolio_performance.py` (NOT utils.py)
+   - `calculate_portfolio_value_with_cash()` → `cash_tracking.py`
+
+4. **Verify SQLAlchemy Query Syntax**
+   - Use `and_()` for multiple conditions, not Python `and`
+   - Use `text()` for raw SQL
+   - Use quoted table names: `"user"` not `user`
+
+5. **Test Locally Before Pushing** (if possible)
+
 ## 🎯 Next Steps
 
-1. **Test bulk snapshot creation** (`/admin/phase1/create-todays-snapshots`)
-2. **Verify snapshot data** in database (stock_value, cash_proceeds populated)
-3. **Implement Modified Dietz** for performance calculations
+1. **Test bulk snapshot creation** (`/admin/phase1/create-todays-snapshots`) ✅ DONE
+2. **Verify snapshot data** in database (stock_value, cash_proceeds populated) ✅ DONE
+3. **Test Modified Dietz** for performance calculations (in progress)
 4. **Update chart APIs** to use cash tracking
 5. **Phase 2-6:** Data cleanup and historical rebuild
