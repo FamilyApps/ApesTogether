@@ -27,7 +27,7 @@ def fetch_all_historical_prices():
     # Find earliest transaction date
     earliest_result = db.session.execute(text("""
         SELECT MIN(DATE(timestamp)) as earliest
-        FROM transaction
+        FROM stock_transaction
     """))
     earliest_row = earliest_result.fetchone()
     start_date = earliest_row.earliest if earliest_row and earliest_row.earliest else end_date - timedelta(days=120)
@@ -36,7 +36,7 @@ def fetch_all_historical_prices():
     
     # Get all unique tickers
     tickers_result = db.session.execute(text("""
-        SELECT DISTINCT ticker FROM transaction ORDER BY ticker
+        SELECT DISTINCT ticker FROM stock_transaction ORDER BY ticker
     """))
     tickers = [row.ticker.upper() for row in tickers_result]
     
