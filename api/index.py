@@ -18392,6 +18392,14 @@ try:
 except Exception as e:
     logger.error(f"Error registering Phase 3 routes: {e}")
 
+# Register Phase 4 historical backfill routes
+try:
+    from admin_phase_4_routes import register_phase_4_routes
+    register_phase_4_routes(app, db)
+    logger.info("Phase 4 historical backfill routes registered successfully")
+except Exception as e:
+    logger.error(f"Error registering Phase 4 routes: {e}")
+
 # Register the leaderboard blueprint for Vercel deployment
 try:
     from leaderboard_routes import leaderboard_bp
