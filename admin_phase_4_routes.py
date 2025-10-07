@@ -293,3 +293,114 @@ def register_phase_4_routes(app, db):
         except Exception as e:
             import traceback
             return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+    
+    @app.route('/admin/phase4/inspect-snapshots')
+    @login_required
+    def inspect_snapshots():
+        """Inspect snapshot values to check for aberrations"""
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        username = request.args.get('user', 'witty-raven')
+        
+        try:
+            # Get user
+            user_result = db.session.execute(text(
+                "SELECT id, username FROM \"user\" WHERE username = :username"
+            ), {'username': username})
+            user_row = user_result.fetchone()
+            
+            if not user_row:
+                return jsonify({'error': f'User {username} not found'}), 404
+            
+            # Get all snapshots ordered by date
+            snapshots = PortfolioSnapshot.query.filter_by(
+                user_id=user_row.id
+            ).order_by(PortfolioSnapshot.date).all()
+            
+            if not snapshots:
+                return jsonify({'error': 'No snapshots found'}), 404
+            
+            # Analyze snapshots
+            snapshot_data = []
+            for i, s in enumerate(snapshots):
+                # Calculate day-over-day change
+                if i > 0:
+                    prev = snapshots[i-1]
+                    value_change = s.total_value - prev.total_value
+                    pct_change = (value_change / prev.total_value * 100) if prev.total_value > 0 else 0
+                else:
+                    value_change = 0
+                    pct_change = 0
+                
+                snapshot_data.append({
+                    'date': s.date.isoformat(),
+                    'weekday': s.date.strftime('%A'),
+                    'total_value': round(float(s.total_value), 2),
+                    'stock_value': round(float(s.stock_value), 2) if s.stock_value else 0,
+                    'cash_proceeds': round(float(s.cash_proceeds), 2) if s.cash_proceeds else 0,
+                    'max_cash_deployed': round(float(s.max_cash_deployed), 2) if s.max_cash_deployed else 0,
+                    'day_change': round(value_change, 2),
+                    'day_change_pct': round(pct_change, 2),
+                    'flag': '🚨' if abs(pct_change) > 20 else ('⚠️' if abs(pct_change) > 10 else '')
+                })
+            
+            # Calculate statistics
+            values = [s.total_value for s in snapshots]
+            changes = [d['day_change_pct'] for d in snapshot_data if d['day_change_pct'] != 0]
+            
+            stats = {
+                'total_snapshots': len(snapshots),
+                'date_range': {
+                    'start': snapshots[0].date.isoformat(),
+                    'end': snapshots[-1].date.isoformat(),
+                    'days': (snapshots[-1].date - snapshots[0].date).days
+                },
+                'portfolio_value': {
+                    'start': round(float(snapshots[0].total_value), 2),
+                    'end': round(float(snapshots[-1].total_value), 2),
+                    'min': round(min(values), 2),
+                    'max': round(max(values), 2),
+                    'current': round(float(snapshots[-1].total_value), 2)
+                },
+                'daily_changes': {
+                    'avg_pct': round(sum(changes) / len(changes), 2) if changes else 0,
+                    'max_gain_pct': round(max(changes), 2) if changes else 0,
+                    'max_loss_pct': round(min(changes), 2) if changes else 0,
+                    'large_moves': len([c for c in changes if abs(c) > 10])
+                },
+                'total_return': {
+                    'amount': round(float(snapshots[-1].total_value - snapshots[0].total_value), 2),
+                    'percent': round((snapshots[-1].total_value - snapshots[0].total_value) / snapshots[0].total_value * 100, 2) if snapshots[0].total_value > 0 else 0
+                }
+            }
+            
+            # Flag potential issues
+            issues = []
+            if stats['daily_changes']['large_moves'] > len(snapshots) * 0.2:
+                issues.append(f"⚠️ Many large daily moves ({stats['daily_changes']['large_moves']} days with >10% change)")
+            
+            if stats['portfolio_value']['min'] == stats['portfolio_value']['max']:
+                issues.append("🚨 All snapshots have identical values - likely using current prices!")
+            
+            # Check for flat periods
+            flat_periods = 0
+            for i in range(1, len(snapshot_data)):
+                if snapshot_data[i]['total_value'] == snapshot_data[i-1]['total_value']:
+                    flat_periods += 1
+            
+            if flat_periods > len(snapshots) * 0.5:
+                issues.append(f"🚨 Too many identical values ({flat_periods}/{len(snapshots)}) - possibly using current prices for historical dates")
+            
+            return jsonify({
+                'success': True,
+                'username': username,
+                'statistics': stats,
+                'issues': issues if issues else ['✅ No obvious issues detected'],
+                'snapshots': snapshot_data,
+                'warning': 'Check if historical values show realistic daily variations. If all values are similar, we may be using current prices instead of historical prices.'
+            })
+            
+        except Exception as e:
+            import traceback
+            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
