@@ -253,7 +253,8 @@ def register_phase_5_routes(app, db):
                 if execute:
                     try:
                         calculator = PortfolioPerformanceCalculator()
-                        price = calculator.get_historical_price(ticker, start_date)
+                        # Force fetch to populate ALL dates even if some exist
+                        price = calculator.get_historical_price(ticker, start_date, force_fetch=True)
                         
                         if price:
                             new_cached_count = MarketData.query.filter(

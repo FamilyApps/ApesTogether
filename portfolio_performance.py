@@ -135,14 +135,19 @@ class PortfolioPerformanceCalculator:
                 except:
                     pass
     
-    def get_historical_price(self, ticker: str, target_date: date) -> float:
+    def get_historical_price(self, ticker: str, target_date: date, force_fetch: bool = False) -> float:
         """
         Get historical closing price for a ticker on a specific date.
         
         Order of precedence:
         1. Local cache (for batch operations)
-        2. MarketData table (database cache)
+        2. MarketData table (database cache) - unless force_fetch=True
         3. Alpha Vantage TIME_SERIES_DAILY API
+        
+        Args:
+            ticker: Stock ticker symbol
+            target_date: Date to get price for
+            force_fetch: If True, skip cache and fetch from API to populate all dates
         
         Returns None if price cannot be found.
         """
@@ -150,21 +155,22 @@ class PortfolioPerformanceCalculator:
         cache_key = f"{ticker_upper}_{target_date.isoformat()}"
         
         # Check local cache first (for batch operations)
-        if cache_key in self.historical_price_cache:
+        if not force_fetch and cache_key in self.historical_price_cache:
             logger.info(f"Using local cache for {ticker} on {target_date}: ${self.historical_price_cache[cache_key]}")
             return self.historical_price_cache[cache_key]
         
-        # Check MarketData table
-        market_data = MarketData.query.filter_by(
-            ticker=ticker_upper,
-            date=target_date
-        ).first()
-        
-        if market_data and market_data.close_price:
-            price = float(market_data.close_price)
-            self.historical_price_cache[cache_key] = price
-            logger.info(f"Using database cache for {ticker} on {target_date}: ${price}")
-            return price
+        # Check MarketData table (unless forced to fetch)
+        if not force_fetch:
+            market_data = MarketData.query.filter_by(
+                ticker=ticker_upper,
+                date=target_date
+            ).first()
+            
+            if market_data and market_data.close_price:
+                price = float(market_data.close_price)
+                self.historical_price_cache[cache_key] = price
+                logger.info(f"Using database cache for {ticker} on {target_date}: ${price}")
+                return price
         
         # Fetch from Alpha Vantage API
         logger.info(f"Fetching historical price from API for {ticker} on {target_date}")
