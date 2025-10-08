@@ -993,6 +993,8 @@ class PortfolioPerformanceCalculator:
         else:
             end_date = today  # Monday-Friday
         
+        logger.info(f"Chart generation: today={today} ({today.strftime('%A')}), end_date={end_date} ({end_date.strftime('%A')})")
+        
         # Define period mappings
         period_days = {
             '1D': 1,
@@ -1046,6 +1048,10 @@ class PortfolioPerformanceCalculator:
                 PortfolioSnapshot.date <= end_date
             )
         ).order_by(PortfolioSnapshot.date).all()
+        
+        logger.info(f"Retrieved {len(snapshots)} snapshots for period {period}: {start_date} to {end_date}")
+        if snapshots:
+            logger.info(f"First snapshot: {snapshots[0].date}, Last snapshot: {snapshots[-1].date}")
         
         # Get S&P 500 data for charting (always use cached daily data - updated at 9PM)
         sp500_data = self.get_cached_sp500_data(start_date, end_date)
