@@ -326,10 +326,16 @@ def register_phase_5_routes(app, db):
             # Get a sample ticker
             sample_ticker = request.args.get('ticker', 'AAPL')
             
-            # Get last 20 days of prices
+            # Get all prices (or limit if specified)
+            limit = request.args.get('limit', 200)  # Default to 200 days (covers full range)
+            try:
+                limit = int(limit)
+            except:
+                limit = 200
+            
             prices = MarketData.query.filter_by(
                 ticker=sample_ticker.upper()
-            ).order_by(MarketData.date.desc()).limit(20).all()
+            ).order_by(MarketData.date.desc()).limit(limit).all()
             
             if not prices:
                 return jsonify({'error': f'No prices found for {sample_ticker}'}), 404
@@ -369,7 +375,7 @@ def register_phase_5_routes(app, db):
                     'latest': date_range.latest.isoformat() if date_range and date_range.latest else None
                 },
                 'sample_size': len(prices),
-                'sample_prices_last_20_days': price_data,
+                'prices': price_data,
                 'statistics': {
                     'unique_prices': unique_prices,
                     'min': round(min_price, 2),
