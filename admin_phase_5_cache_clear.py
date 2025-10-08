@@ -317,7 +317,18 @@ def register_phase_5_cache_routes(app, db):
             
             time_series = data['Time Series (Daily)']
             
-            # Insert missing dates
+            # Delete any incorrect data that was previously inserted
+            for missing_date in missing_dates:
+                incorrect_data = MarketData.query.filter_by(
+                    ticker=sp500_ticker,
+                    date=missing_date
+                ).first()
+                if incorrect_data:
+                    db.session.delete(incorrect_data)
+            
+            db.session.commit()
+            
+            # Insert missing dates with correct conversion
             inserted_records = []
             not_found_dates = []
             
@@ -326,19 +337,23 @@ def register_phase_5_cache_routes(app, db):
                 
                 if date_str in time_series:
                     daily_data = time_series[date_str]
-                    close_price = float(daily_data['4. close'])
+                    spy_price = float(daily_data['4. close'])
+                    
+                    # Convert SPY ETF price to S&P 500 index value (SPY × 10)
+                    sp500_index_value = spy_price * 10
                     
                     # Insert into database (MarketData only has ticker, date, close_price, timestamp, created_at)
                     market_data = MarketData(
                         ticker=sp500_ticker,
                         date=missing_date,
-                        close_price=close_price
+                        close_price=sp500_index_value
                     )
                     
                     db.session.add(market_data)
                     inserted_records.append({
                         'date': date_str,
-                        'close_price': close_price
+                        'spy_price': spy_price,
+                        'sp500_index': sp500_index_value
                     })
                 else:
                     not_found_dates.append({
