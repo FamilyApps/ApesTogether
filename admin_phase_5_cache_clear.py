@@ -235,6 +235,7 @@ def register_phase_5_cache_routes(app, db):
             
             sp500_ticker = "SPY_SP500"
             missing_dates = []
+            incorrect_dates = []  # Dates with suspiciously low values (raw SPY, not converted)
             existing_dates = []
             
             for check_date in dates_to_check:
@@ -248,10 +249,19 @@ def register_phase_5_cache_routes(app, db):
                 ).first()
                 
                 if existing:
-                    existing_dates.append({
-                        'date': check_date.isoformat(),
-                        'close_price': float(existing.close_price)
-                    })
+                    # Check if value is suspiciously low (< $1000 means it's raw SPY, not S&P 500 index)
+                    if existing.close_price < 1000:
+                        incorrect_dates.append({
+                            'date': check_date.isoformat(),
+                            'incorrect_price': float(existing.close_price),
+                            'issue': 'Raw SPY price, not S&P 500 index (needs × 10 conversion)'
+                        })
+                        missing_dates.append(check_date)  # Treat as missing so it gets fixed
+                    else:
+                        existing_dates.append({
+                            'date': check_date.isoformat(),
+                            'close_price': float(existing.close_price)
+                        })
                 else:
                     missing_dates.append(check_date)
             
@@ -261,10 +271,11 @@ def register_phase_5_cache_routes(app, db):
                     'preview': True,
                     'dates_checked': [d.isoformat() for d in dates_to_check if d.weekday() < 5],
                     'existing_dates': existing_dates,
+                    'incorrect_dates': incorrect_dates,
                     'missing_dates': [d.isoformat() for d in missing_dates],
                     'missing_count': len(missing_dates),
                     'execute_url': '/admin/phase5/backfill-sp500?execute=true',
-                    'note': 'This will fetch missing S&P 500 data from Alpha Vantage API'
+                    'note': 'This will fetch missing S&P 500 data from Alpha Vantage API and fix incorrect raw SPY values'
                 })
             
             # Execute backfill
@@ -363,13 +374,18 @@ def register_phase_5_cache_routes(app, db):
             
             db.session.commit()
             
+            corrected_count = len([r for r in inserted_records if r['date'] in [d['date'] for d in incorrect_dates]])
+            new_count = len(inserted_records) - corrected_count
+            
             return jsonify({
                 'success': True,
                 'executed': True,
-                'new_records': len(inserted_records),
+                'total_records': len(inserted_records),
+                'corrected_records': corrected_count,
+                'new_records': new_count,
                 'inserted': inserted_records,
                 'not_found': not_found_dates,
-                'message': f'Successfully backfilled {len(inserted_records)} missing S&P 500 data points',
+                'message': f'Successfully processed {len(inserted_records)} S&P 500 data points ({corrected_count} corrected, {new_count} new)',
                 'next_step': 'Clear chart caches at /admin/phase5/clear-chart-caches to regenerate charts'
             })
             
