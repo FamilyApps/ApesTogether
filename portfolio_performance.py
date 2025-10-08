@@ -1016,11 +1016,27 @@ class PortfolioPerformanceCalculator:
         if period == '1D':
             return self.get_intraday_performance_data(user_id, start_date, end_date)
         
-        # Ensure we have snapshots for the period
-        self.ensure_snapshots_exist(user_id, start_date, end_date)
+        # Get user's first snapshot to handle partial period data
+        user_first_snapshot = PortfolioSnapshot.query.filter_by(user_id=user_id)\
+            .order_by(PortfolioSnapshot.date.asc()).first()
+        
+        # Ensure we have snapshots for dates when user actually had holdings
+        # (Don't try to create snapshots before user's first holdings date)
+        if user_first_snapshot:
+            snapshot_start = max(start_date, user_first_snapshot.date)
+            self.ensure_snapshots_exist(user_id, snapshot_start, end_date)
+        else:
+            # No holdings yet, still ensure today's snapshot exists
+            self.ensure_snapshots_exist(user_id, end_date, end_date)
         
         # Calculate portfolio return
-        portfolio_return = self.calculate_modified_dietz_return(user_id, start_date, end_date)
+        # If user's first holdings is after period start, calculate return from first holdings date
+        portfolio_calc_start = start_date
+        if user_first_snapshot and user_first_snapshot.date > start_date:
+            portfolio_calc_start = user_first_snapshot.date
+            logger.info(f"User's first holdings {user_first_snapshot.date} is after period start {start_date}. Calculating return from first holdings.")
+        
+        portfolio_return = self.calculate_modified_dietz_return(user_id, portfolio_calc_start, end_date)
         
         # Get portfolio values for charting (database only)
         snapshots = PortfolioSnapshot.query.filter(
@@ -1037,9 +1053,7 @@ class PortfolioPerformanceCalculator:
         # Normalize both to percentage change from start
         chart_data = []
         
-        # Get user's actual portfolio start date (first snapshot)
-        user_first_snapshot = PortfolioSnapshot.query.filter_by(user_id=user_id)\
-            .order_by(PortfolioSnapshot.date.asc()).first()
+        # Note: user_first_snapshot already retrieved above (line 1021-1022)
         
         # DIAGNOSTIC LOGGING for 1M scale issue (investigate, don't change logic yet)
         if period == '1M' and snapshots:

@@ -165,3 +165,51 @@ def register_phase_5_cache_routes(app, db):
         except Exception as e:
             import traceback
             return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+    
+    @app.route('/admin/phase5/check-recent-snapshots')
+    @login_required
+    def check_recent_snapshots():
+        """Check if recent snapshots exist for all users"""
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        try:
+            from models import PortfolioSnapshot
+            from datetime import datetime, timedelta
+            
+            # Check last 5 days
+            today = datetime.now().date()
+            check_dates = [today - timedelta(days=i) for i in range(5)]
+            
+            # Get all users
+            users_result = db.session.execute(text("""
+                SELECT id, username FROM "user" WHERE max_cash_deployed > 0 ORDER BY username
+            """)).fetchall()
+            
+            results = {}
+            
+            for user_row in users_result:
+                user_snapshots = {}
+                for check_date in check_dates:
+                    snapshot = PortfolioSnapshot.query.filter_by(
+                        user_id=user_row.id,
+                        date=check_date
+                    ).first()
+                    
+                    user_snapshots[check_date.isoformat()] = {
+                        'exists': snapshot is not None,
+                        'weekday': check_date.strftime('%A'),
+                        'value': float(snapshot.total_value) if snapshot else None
+                    }
+                
+                results[user_row.username] = user_snapshots
+            
+            return jsonify({
+                'success': True,
+                'check_dates': [d.isoformat() for d in check_dates],
+                'snapshots': results
+            })
+            
+        except Exception as e:
+            import traceback
+            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
