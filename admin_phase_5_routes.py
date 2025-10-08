@@ -350,15 +350,26 @@ def register_phase_5_routes(app, db):
             max_price = max(price_values)
             avg_price = sum(price_values) / len(price_values)
             
-            # Check total count
+            # Check total count and date range
             total_count = MarketData.query.filter_by(ticker=sample_ticker.upper()).count()
+            
+            # Get actual date range
+            date_range = db.session.execute(text("""
+                SELECT MIN(date) as earliest, MAX(date) as latest
+                FROM market_data
+                WHERE ticker = :ticker
+            """), {'ticker': sample_ticker.upper()}).fetchone()
             
             return jsonify({
                 'success': True,
                 'ticker': sample_ticker.upper(),
                 'total_cached_days': total_count,
+                'date_range': {
+                    'earliest': date_range.earliest.isoformat() if date_range and date_range.earliest else None,
+                    'latest': date_range.latest.isoformat() if date_range and date_range.latest else None
+                },
                 'sample_size': len(prices),
-                'prices': price_data,
+                'sample_prices_last_20_days': price_data,
                 'statistics': {
                     'unique_prices': unique_prices,
                     'min': round(min_price, 2),
