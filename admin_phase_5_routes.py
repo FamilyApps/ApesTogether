@@ -312,3 +312,63 @@ def register_phase_5_routes(app, db):
         except Exception as e:
             import traceback
             return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+    
+    @app.route('/admin/phase5/verify-prices')
+    @login_required
+    def verify_prices():
+        """Verify that cached prices actually vary day-to-day"""
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        try:
+            from models import MarketData
+            
+            # Get a sample ticker
+            sample_ticker = request.args.get('ticker', 'AAPL')
+            
+            # Get last 20 days of prices
+            prices = MarketData.query.filter_by(
+                ticker=sample_ticker.upper()
+            ).order_by(MarketData.date.desc()).limit(20).all()
+            
+            if not prices:
+                return jsonify({'error': f'No prices found for {sample_ticker}'}), 404
+            
+            price_data = []
+            price_values = []
+            
+            for p in prices:
+                price_data.append({
+                    'date': p.date.isoformat(),
+                    'price': float(p.close_price)
+                })
+                price_values.append(float(p.close_price))
+            
+            # Calculate statistics
+            unique_prices = len(set(price_values))
+            min_price = min(price_values)
+            max_price = max(price_values)
+            avg_price = sum(price_values) / len(price_values)
+            
+            # Check total count
+            total_count = MarketData.query.filter_by(ticker=sample_ticker.upper()).count()
+            
+            return jsonify({
+                'success': True,
+                'ticker': sample_ticker.upper(),
+                'total_cached_days': total_count,
+                'sample_size': len(prices),
+                'prices': price_data,
+                'statistics': {
+                    'unique_prices': unique_prices,
+                    'min': round(min_price, 2),
+                    'max': round(max_price, 2),
+                    'avg': round(avg_price, 2),
+                    'variation': round(max_price - min_price, 2),
+                    'status': '✅ Prices vary correctly' if unique_prices > 1 else '🚨 ERROR: All prices identical!'
+                }
+            })
+            
+        except Exception as e:
+            import traceback
+            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
