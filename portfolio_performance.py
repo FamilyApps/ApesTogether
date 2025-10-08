@@ -199,54 +199,56 @@ class PortfolioPerformanceCalculator:
                 return None
             
             time_series = data['Time Series (Daily)']
-            date_str = target_date.isoformat()
             
-            if date_str in time_series:
-                close_price = float(time_series[date_str]['4. close'])
-                
-                # Store in database for future use
+            # CRITICAL: Store ALL dates from the API response (100+ days), not just the requested date
+            stored_count = 0
+            for date_str, price_data in time_series.items():
                 try:
-                    new_market_data = MarketData(
+                    date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+                    close_price = float(price_data['4. close'])
+                    
+                    # Check if already exists
+                    existing = MarketData.query.filter_by(
                         ticker=ticker_upper,
-                        date=target_date,
-                        close_price=close_price
-                    )
-                    db.session.add(new_market_data)
-                    db.session.commit()
-                    logger.info(f"✅ Fetched and cached {ticker} on {target_date}: ${close_price}")
-                except Exception as db_error:
-                    logger.error(f"Failed to save historical price to database: {db_error}")
-                    db.session.rollback()
-                
-                # Cache locally
-                self.historical_price_cache[cache_key] = close_price
-                return close_price
+                        date=date_obj
+                    ).first()
+                    
+                    if not existing:
+                        new_market_data = MarketData(
+                            ticker=ticker_upper,
+                            date=date_obj,
+                            close_price=close_price
+                        )
+                        db.session.add(new_market_data)
+                        stored_count += 1
+                        
+                        # Cache locally
+                        local_cache_key = f"{ticker_upper}_{date_obj.isoformat()}"
+                        self.historical_price_cache[local_cache_key] = close_price
+                    
+                except Exception as e:
+                    logger.error(f"Error storing price for {ticker} on {date_str}: {e}")
+                    continue
+            
+            try:
+                db.session.commit()
+                logger.info(f"✅ Stored {stored_count} days of data for {ticker}")
+            except Exception as db_error:
+                logger.error(f"Failed to commit historical prices for {ticker}: {db_error}")
+                db.session.rollback()
+            
+            # Now return the price for the requested date
+            target_date_str = target_date.isoformat()
+            if target_date_str in time_series:
+                return float(time_series[target_date_str]['4. close'])
             else:
-                # Date not found - try to find nearest previous trading day
-                logger.warning(f"No data for {ticker} on {date_str}, trying previous days...")
+                # Find nearest previous trading day
                 available_dates = sorted(time_series.keys(), reverse=True)
+                for date_str in available_dates:
+                    if date_str <= target_date_str:
+                        return float(time_series[date_str]['4. close'])
                 
-                for available_date_str in available_dates:
-                    if available_date_str <= date_str:
-                        close_price = float(time_series[available_date_str]['4. close'])
-                        logger.info(f"Using nearest date {available_date_str} for {ticker}: ${close_price}")
-                        
-                        # Store with the requested date for caching
-                        try:
-                            new_market_data = MarketData(
-                                ticker=ticker_upper,
-                                date=target_date,
-                                close_price=close_price
-                            )
-                            db.session.add(new_market_data)
-                            db.session.commit()
-                        except:
-                            db.session.rollback()
-                        
-                        self.historical_price_cache[cache_key] = close_price
-                        return close_price
-                
-                logger.error(f"No historical data found for {ticker} before {date_str}")
+                logger.error(f"No historical data found for {ticker} before {target_date}")
                 return None
                 
         except Exception as e:

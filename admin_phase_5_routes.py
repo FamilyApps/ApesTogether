@@ -182,6 +182,16 @@ def register_phase_5_routes(app, db):
             import traceback
             return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
     
+    @app.route('/admin/phase5/historical-prices-dashboard')
+    @login_required
+    def historical_prices_dashboard():
+        """Dashboard for fetching historical prices with per-ticker control"""
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from flask import render_template
+        return render_template('admin_historical_prices_dashboard.html')
+    
     @app.route('/admin/phase5/fetch-historical-prices')
     @login_required
     def fetch_historical_prices_route():
@@ -190,6 +200,7 @@ def register_phase_5_routes(app, db):
             return jsonify({'error': 'Admin access required'}), 403
         
         execute = request.args.get('execute') == 'true'
+        single_ticker = request.args.get('ticker')  # Optional: fetch single ticker
         
         try:
             from portfolio_performance import PortfolioPerformanceCalculator, get_market_date
@@ -207,10 +218,13 @@ def register_phase_5_routes(app, db):
             start_date = earliest_row.earliest if earliest_row and earliest_row.earliest else end_date - timedelta(days=120)
             
             # Get unique tickers
-            tickers_result = db.session.execute(text("""
-                SELECT DISTINCT ticker FROM stock_transaction ORDER BY ticker
-            """))
-            tickers = [row.ticker.upper() for row in tickers_result]
+            if single_ticker:
+                tickers = [single_ticker.upper()]
+            else:
+                tickers_result = db.session.execute(text("""
+                    SELECT DISTINCT ticker FROM stock_transaction ORDER BY ticker
+                """))
+                tickers = [row.ticker.upper() for row in tickers_result]
             
             if not tickers:
                 return jsonify({'error': 'No tickers found'}), 404
