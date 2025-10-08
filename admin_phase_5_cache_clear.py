@@ -328,15 +328,11 @@ def register_phase_5_cache_routes(app, db):
                     daily_data = time_series[date_str]
                     close_price = float(daily_data['4. close'])
                     
-                    # Insert into database
+                    # Insert into database (MarketData only has ticker, date, close_price, timestamp, created_at)
                     market_data = MarketData(
                         ticker=sp500_ticker,
                         date=missing_date,
-                        open_price=float(daily_data['1. open']),
-                        high_price=float(daily_data['2. high']),
-                        low_price=float(daily_data['3. low']),
-                        close_price=close_price,
-                        volume=int(daily_data['5. volume'])
+                        close_price=close_price
                     )
                     
                     db.session.add(market_data)
