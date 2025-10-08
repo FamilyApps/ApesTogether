@@ -213,3 +213,156 @@ def register_phase_5_cache_routes(app, db):
         except Exception as e:
             import traceback
             return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+    
+    @app.route('/admin/phase5/backfill-sp500')
+    @login_required
+    def backfill_sp500():
+        """Backfill missing recent S&P 500 data (last 7 days)"""
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        execute = request.args.get('execute') == 'true'
+        
+        try:
+            import os
+            import requests
+            from datetime import datetime, timedelta, date
+            from models import MarketData
+            
+            # Check what dates we need
+            today = date.today()
+            dates_to_check = [today - timedelta(days=i) for i in range(7)]
+            
+            sp500_ticker = "SPY_SP500"
+            missing_dates = []
+            existing_dates = []
+            
+            for check_date in dates_to_check:
+                # Skip weekends
+                if check_date.weekday() >= 5:
+                    continue
+                    
+                existing = MarketData.query.filter_by(
+                    ticker=sp500_ticker,
+                    date=check_date
+                ).first()
+                
+                if existing:
+                    existing_dates.append({
+                        'date': check_date.isoformat(),
+                        'close_price': float(existing.close_price)
+                    })
+                else:
+                    missing_dates.append(check_date)
+            
+            if not execute:
+                return jsonify({
+                    'success': True,
+                    'preview': True,
+                    'dates_checked': [d.isoformat() for d in dates_to_check if d.weekday() < 5],
+                    'existing_dates': existing_dates,
+                    'missing_dates': [d.isoformat() for d in missing_dates],
+                    'missing_count': len(missing_dates),
+                    'execute_url': '/admin/phase5/backfill-sp500?execute=true',
+                    'note': 'This will fetch missing S&P 500 data from Alpha Vantage API'
+                })
+            
+            # Execute backfill
+            if not missing_dates:
+                return jsonify({
+                    'success': True,
+                    'executed': True,
+                    'new_records': 0,
+                    'message': 'No missing dates found! All recent S&P 500 data is up to date.'
+                })
+            
+            # Get Alpha Vantage API key
+            api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
+            if not api_key:
+                return jsonify({
+                    'success': False,
+                    'error': 'ALPHA_VANTAGE_API_KEY not found in environment'
+                }), 500
+            
+            # Fetch SPY data from Alpha Vantage
+            url = "https://www.alphavantage.co/query"
+            params = {
+                'function': 'TIME_SERIES_DAILY',
+                'symbol': 'SPY',
+                'outputsize': 'compact',  # Last 100 days
+                'apikey': api_key
+            }
+            
+            response = requests.get(url, params=params, timeout=30)
+            
+            if response.status_code != 200:
+                return jsonify({
+                    'success': False,
+                    'error': f'Alpha Vantage API request failed: HTTP {response.status_code}'
+                }), 500
+            
+            data = response.json()
+            
+            if 'Error Message' in data:
+                return jsonify({
+                    'success': False,
+                    'error': f"Alpha Vantage error: {data['Error Message']}"
+                }), 500
+            
+            if 'Time Series (Daily)' not in data:
+                return jsonify({
+                    'success': False,
+                    'error': f"Unexpected response format: {list(data.keys())}"
+                }), 500
+            
+            time_series = data['Time Series (Daily)']
+            
+            # Insert missing dates
+            inserted_records = []
+            not_found_dates = []
+            
+            for missing_date in missing_dates:
+                date_str = missing_date.isoformat()
+                
+                if date_str in time_series:
+                    daily_data = time_series[date_str]
+                    close_price = float(daily_data['4. close'])
+                    
+                    # Insert into database
+                    market_data = MarketData(
+                        ticker=sp500_ticker,
+                        date=missing_date,
+                        open_price=float(daily_data['1. open']),
+                        high_price=float(daily_data['2. high']),
+                        low_price=float(daily_data['3. low']),
+                        close_price=close_price,
+                        volume=int(daily_data['5. volume'])
+                    )
+                    
+                    db.session.add(market_data)
+                    inserted_records.append({
+                        'date': date_str,
+                        'close_price': close_price
+                    })
+                else:
+                    not_found_dates.append({
+                        'date': date_str,
+                        'note': 'Market closed or data not available'
+                    })
+            
+            db.session.commit()
+            
+            return jsonify({
+                'success': True,
+                'executed': True,
+                'new_records': len(inserted_records),
+                'inserted': inserted_records,
+                'not_found': not_found_dates,
+                'message': f'Successfully backfilled {len(inserted_records)} missing S&P 500 data points',
+                'next_step': 'Clear chart caches at /admin/phase5/clear-chart-caches to regenerate charts'
+            })
+            
+        except Exception as e:
+            db.session.rollback()
+            import traceback
+            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
