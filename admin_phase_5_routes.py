@@ -31,24 +31,23 @@ def register_phase_5_routes(app, db):
             
             today = get_market_date()
             
-            # Get all users
+            # Get all users - fetch immediately to avoid cursor issues
             users_result = db.session.execute(text("""
                 SELECT id, username FROM "user" WHERE max_cash_deployed > 0 ORDER BY username
-            """))
+            """)).fetchall()
             
             results = []
             total_deleted = 0
             
             for user_row in users_result:
                 # Count snapshots before today (these were created with historical backfill but used current prices)
-                count_result = db.session.execute(text("""
+                count_row = db.session.execute(text("""
                     SELECT COUNT(*) as count,
                            MIN(date) as earliest,
                            MAX(date) as latest
                     FROM portfolio_snapshot
                     WHERE user_id = :user_id AND date < :today
-                """), {'user_id': user_row.id, 'today': today})
-                count_row = count_result.fetchone()
+                """), {'user_id': user_row.id, 'today': today}).fetchone()
                 
                 snapshot_count = count_row.count if count_row else 0
                 
