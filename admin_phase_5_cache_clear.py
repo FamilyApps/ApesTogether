@@ -328,14 +328,14 @@ def register_phase_5_cache_routes(app, db):
             
             time_series = data['Time Series (Daily)']
             
-            # Delete any incorrect data that was previously inserted
+            # Delete any incorrect data that was previously inserted (using bulk delete to avoid session issues)
+            deleted_count = 0
             for missing_date in missing_dates:
-                incorrect_data = MarketData.query.filter_by(
+                deleted = MarketData.query.filter_by(
                     ticker=sp500_ticker,
                     date=missing_date
-                ).first()
-                if incorrect_data:
-                    db.session.delete(incorrect_data)
+                ).delete()
+                deleted_count += deleted
             
             db.session.commit()
             
