@@ -177,7 +177,8 @@ class PortfolioPerformanceCalculator:
             import time
             time.sleep(0.15)  # Rate limit: ~7 calls per second
             
-            url = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={ticker}&outputsize=full&apikey={self.alpha_vantage_api_key}'
+            # Use compact (100 days) which should cover our date range and works on all API tiers
+            url = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={ticker}&outputsize=compact&apikey={self.alpha_vantage_api_key}'
             response = requests.get(url, timeout=10)
             data = response.json()
             
@@ -199,6 +200,10 @@ class PortfolioPerformanceCalculator:
                 return None
             
             time_series = data['Time Series (Daily)']
+            
+            # Log how many days the API actually returned
+            total_days_in_response = len(time_series)
+            logger.info(f"📊 API returned {total_days_in_response} days for {ticker}")
             
             # CRITICAL: Store ALL dates from the API response (100+ days), not just the requested date
             stored_count = 0
@@ -232,9 +237,11 @@ class PortfolioPerformanceCalculator:
             
             try:
                 db.session.commit()
-                logger.info(f"✅ Stored {stored_count} days of data for {ticker}")
+                logger.info(f"✅ Stored {stored_count} NEW days of data for {ticker} (API returned {total_days_in_response} total days)")
             except Exception as db_error:
-                logger.error(f"Failed to commit historical prices for {ticker}: {db_error}")
+                logger.error(f"❌ Failed to commit historical prices for {ticker}: {db_error}")
+                import traceback
+                logger.error(traceback.format_exc())
                 db.session.rollback()
             
             # Now return the price for the requested date
