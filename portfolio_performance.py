@@ -665,6 +665,20 @@ class PortfolioPerformanceCalculator:
             
             result = {data.date: data.close_price for data in cached_data}
             logger.info(f"Retrieved {len(result)} cached S&P 500 data points for {start_date} to {end_date}")
+            
+            if result:
+                sorted_dates = sorted(result.keys())
+                logger.info(f"S&P 500 date range: {sorted_dates[0]} to {sorted_dates[-1]}")
+                # Check for recent dates
+                from datetime import timedelta
+                today = get_market_date()
+                for i in range(5):
+                    check_date = today - timedelta(days=i)
+                    if check_date in result:
+                        logger.info(f"  ✓ S&P data exists for {check_date}")
+                    else:
+                        logger.warning(f"  ✗ S&P data MISSING for {check_date}")
+            
             return result
             
         except Exception as e:
@@ -702,8 +716,16 @@ class PortfolioPerformanceCalculator:
         
         for item in chart_data:
             try:
-                # Parse the date string to check day of week
-                item_date = datetime.strptime(item['date'], '%Y-%m-%d').date()
+                # Parse the date string - support both 'Oct 03' and '2025-10-03' formats
+                date_str = item['date']
+                try:
+                    # Try ISO format first
+                    item_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                except ValueError:
+                    # Try short format like 'Oct 03'
+                    current_year = datetime.now().year
+                    item_date = datetime.strptime(f"{current_year} {date_str}", '%Y %b %d').date()
+                
                 weekday = item_date.weekday()
                 
                 # Monday=0, Sunday=6. Keep Monday-Friday (0-4)
@@ -711,10 +733,10 @@ class PortfolioPerformanceCalculator:
                     business_days_data.append(item)
                 else:
                     weekend_count += 1
-                    logger.info(f"WEEKEND FILTER: Removing {item['date']} (weekday={weekday})")
+                    logger.debug(f"WEEKEND FILTER: Removing {date_str} (weekend)")
                     
             except (ValueError, KeyError) as e:
-                # If date parsing fails, keep the item
+                # If date parsing fails, keep the item (shouldn't happen now)
                 logger.warning(f"WEEKEND FILTER: Date parsing failed for {item}: {e}")
                 business_days_data.append(item)
         
