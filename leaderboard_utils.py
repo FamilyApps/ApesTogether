@@ -679,6 +679,36 @@ def generate_user_portfolio_chart(user_id, period):
             if not snapshots:
                 return None
             
+            # Get S&P 500 data for the same period
+            from models import MarketData
+            sp500_data = MarketData.query.filter_by(ticker='SPY_SP500')\
+                .filter(MarketData.date >= start_date)\
+                .order_by(MarketData.date.asc()).all()
+            
+            # Create a dict for quick S&P 500 lookup by date
+            sp500_by_date = {data.date: float(data.close_price) for data in sp500_data}
+            
+            # Calculate percentage returns (starting from 0%)
+            first_portfolio_value = float(snapshots[0].total_value)
+            first_sp500_value = sp500_by_date.get(snapshots[0].date)
+            
+            portfolio_returns = []
+            sp500_returns = []
+            
+            for snapshot in snapshots:
+                # Portfolio return percentage
+                current_value = float(snapshot.total_value)
+                portfolio_return = ((current_value - first_portfolio_value) / first_portfolio_value * 100) if first_portfolio_value > 0 else 0
+                portfolio_returns.append(round(portfolio_return, 2))
+                
+                # S&P 500 return percentage
+                sp500_value = sp500_by_date.get(snapshot.date)
+                if sp500_value and first_sp500_value:
+                    sp500_return = ((sp500_value - first_sp500_value) / first_sp500_value * 100)
+                    sp500_returns.append(round(sp500_return, 2))
+                else:
+                    sp500_returns.append(0)
+            
             # Format chart data with proper date labels
             if period == '5D':
                 # For 5D, show abbreviated dates (MM/DD)
@@ -689,13 +719,22 @@ def generate_user_portfolio_chart(user_id, period):
             
             chart_data = {
                 'labels': labels,
-                'datasets': [{
-                    'label': 'Portfolio Value',
-                    'data': [float(snapshot.total_value) for snapshot in snapshots],
-                    'borderColor': 'rgb(75, 192, 192)',
-                    'backgroundColor': 'rgba(75, 192, 192, 0.2)',
-                    'tension': 0.1
-                }],
+                'datasets': [
+                    {
+                        'label': 'Your Portfolio',
+                        'data': portfolio_returns,
+                        'borderColor': 'rgb(75, 192, 192)',
+                        'backgroundColor': 'rgba(75, 192, 192, 0.2)',
+                        'tension': 0.1
+                    },
+                    {
+                        'label': 'S&P 500',
+                        'data': sp500_returns,
+                        'borderColor': 'rgb(255, 99, 132)',
+                        'backgroundColor': 'rgba(255, 99, 132, 0.2)',
+                        'tension': 0.1
+                    }
+                ],
                 'period': period,
                 'user_id': user_id,
                 'generated_at': datetime.now().isoformat()
