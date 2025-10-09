@@ -3139,6 +3139,44 @@ def cleanup_intraday_data():
         flash(f'Intraday cleanup error: {str(e)}', 'danger')
         return redirect(url_for('admin_dashboard'))
 
+@app.route('/admin/regenerate-chart-cache')
+@login_required
+def regenerate_chart_cache():
+    """Admin endpoint to force regenerate chart cache for all users"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        flash('Admin access required', 'danger')
+        return redirect(url_for('login'))
+    
+    try:
+        from leaderboard_utils import update_leaderboard_cache
+        
+        results = {
+            'started_at': datetime.now().isoformat(),
+            'cache_updated': False,
+            'leaderboard_entries_updated': 0
+        }
+        
+        # Force regenerate all chart caches
+        updated_count = update_leaderboard_cache()
+        results['leaderboard_entries_updated'] = updated_count
+        results['cache_updated'] = True
+        results['completed_at'] = datetime.now().isoformat()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Chart cache regenerated for {updated_count} periods',
+            'results': results
+        })
+    
+    except Exception as e:
+        logger.error(f"Chart cache regeneration error: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/collect-sp500-manual')
 @login_required
 def collect_sp500_manual():
