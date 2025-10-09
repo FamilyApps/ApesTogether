@@ -3139,6 +3139,75 @@ def cleanup_intraday_data():
         flash(f'Intraday cleanup error: {str(e)}', 'danger')
         return redirect(url_for('admin_dashboard'))
 
+@app.route('/admin/inspect-chart-cache/<username>/<period>')
+@login_required
+def inspect_chart_cache(username, period):
+    """Admin endpoint to inspect what's in the chart cache"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        flash('Admin access required', 'danger')
+        return redirect(url_for('login'))
+    
+    try:
+        from models import User, UserPortfolioChartCache
+        import json
+        
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        period_upper = period.upper()
+        chart_cache = UserPortfolioChartCache.query.filter_by(
+            user_id=user.id,
+            period=period_upper
+        ).first()
+        
+        if not chart_cache:
+            return jsonify({'error': 'No cache found for this user/period'}), 404
+        
+        cached_data = json.loads(chart_cache.chart_data)
+        
+        results = {
+            'user': username,
+            'period': period_upper,
+            'generated_at': chart_cache.generated_at.isoformat() if chart_cache.generated_at else None,
+            'cache_structure': {
+                'has_labels': 'labels' in cached_data,
+                'labels_count': len(cached_data.get('labels', [])),
+                'first_label': cached_data.get('labels', [])[0] if cached_data.get('labels') else None,
+                'last_label': cached_data.get('labels', [])[-1] if cached_data.get('labels') else None,
+                'has_datasets': 'datasets' in cached_data,
+                'datasets_count': len(cached_data.get('datasets', []))
+            },
+            'datasets': []
+        }
+        
+        for i, dataset in enumerate(cached_data.get('datasets', [])):
+            dataset_info = {
+                'index': i,
+                'label': dataset.get('label'),
+                'data_count': len(dataset.get('data', [])),
+                'first_value': dataset.get('data', [])[0] if dataset.get('data') else None,
+                'last_value': dataset.get('data', [])[-1] if dataset.get('data') else None,
+                'sample_values': dataset.get('data', [])[:5] if dataset.get('data') else [],
+                'has_all_zeros': all(v == 0 for v in dataset.get('data', [])),
+                'has_any_nonzero': any(v != 0 for v in dataset.get('data', []))
+            }
+            results['datasets'].append(dataset_info)
+        
+        return jsonify({
+            'success': True,
+            'results': results
+        })
+    
+    except Exception as e:
+        logger.error(f"Chart cache inspection error: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/regenerate-chart-cache')
 @login_required
 def regenerate_chart_cache():
