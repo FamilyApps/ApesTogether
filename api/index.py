@@ -3137,6 +3137,93 @@ def cleanup_intraday_data():
         flash(f'Intraday cleanup error: {str(e)}', 'danger')
         return redirect(url_for('admin_dashboard'))
 
+@app.route('/admin/add-intraday-cash-fields')
+@login_required
+def add_intraday_cash_fields():
+    """Admin endpoint to add cash tracking fields to portfolio_snapshot_intraday table"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        flash('Admin access required', 'danger')
+        return redirect(url_for('login'))
+    
+    try:
+        from sqlalchemy import text
+        
+        results = {
+            'columns_added': [],
+            'columns_already_exist': [],
+            'errors': []
+        }
+        
+        # Add stock_value column
+        try:
+            db.session.execute(text("""
+                ALTER TABLE portfolio_snapshot_intraday 
+                ADD COLUMN IF NOT EXISTS stock_value FLOAT DEFAULT 0.0
+            """))
+            results['columns_added'].append('stock_value')
+        except Exception as e:
+            if 'already exists' in str(e).lower():
+                results['columns_already_exist'].append('stock_value')
+            else:
+                results['errors'].append(f"stock_value: {str(e)}")
+        
+        # Add cash_proceeds column
+        try:
+            db.session.execute(text("""
+                ALTER TABLE portfolio_snapshot_intraday 
+                ADD COLUMN IF NOT EXISTS cash_proceeds FLOAT DEFAULT 0.0
+            """))
+            results['columns_added'].append('cash_proceeds')
+        except Exception as e:
+            if 'already exists' in str(e).lower():
+                results['columns_already_exist'].append('cash_proceeds')
+            else:
+                results['errors'].append(f"cash_proceeds: {str(e)}")
+        
+        # Add max_cash_deployed column
+        try:
+            db.session.execute(text("""
+                ALTER TABLE portfolio_snapshot_intraday 
+                ADD COLUMN IF NOT EXISTS max_cash_deployed FLOAT DEFAULT 0.0
+            """))
+            results['columns_added'].append('max_cash_deployed')
+        except Exception as e:
+            if 'already exists' in str(e).lower():
+                results['columns_already_exist'].append('max_cash_deployed')
+            else:
+                results['errors'].append(f"max_cash_deployed: {str(e)}")
+        
+        # For existing rows, set stock_value = total_value (conservative approach)
+        try:
+            db.session.execute(text("""
+                UPDATE portfolio_snapshot_intraday 
+                SET stock_value = total_value,
+                    cash_proceeds = 0.0,
+                    max_cash_deployed = 0.0
+                WHERE stock_value IS NULL
+            """))
+            results['existing_rows_updated'] = True
+        except Exception as e:
+            results['errors'].append(f"update existing rows: {str(e)}")
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': len(results['errors']) == 0,
+            'message': 'Migration completed successfully' if len(results['errors']) == 0 else 'Migration completed with errors',
+            'results': results
+        })
+    
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Intraday cash fields migration error: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/check-intraday-retention')
 @login_required
 def check_intraday_retention():
