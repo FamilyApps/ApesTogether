@@ -3226,6 +3226,129 @@ def add_intraday_cash_fields():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/verify-snapshot-data-flow')
+@login_required
+def verify_snapshot_data_flow():
+    """Admin endpoint to verify entire data flow: snapshots → cache → charts"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        flash('Admin access required', 'danger')
+        return redirect(url_for('login'))
+    
+    try:
+        from datetime import date, timedelta
+        from models import PortfolioSnapshot, User, UserPortfolioChartCache, MarketData
+        
+        today = date.today()
+        results = {
+            'date_checked': today.isoformat(),
+            'portfolio_snapshots': {},
+            'sp500_data': {},
+            'chart_cache': {},
+            'issues': []
+        }
+        
+        # Check portfolio snapshots for today
+        users = User.query.all()
+        for user in users:
+            snapshot = PortfolioSnapshot.query.filter_by(
+                user_id=user.id,
+                date=today
+            ).first()
+            
+            results['portfolio_snapshots'][user.username] = {
+                'exists': snapshot is not None,
+                'total_value': float(snapshot.total_value) if snapshot else None,
+                'stock_value': float(snapshot.stock_value) if snapshot and hasattr(snapshot, 'stock_value') else None,
+                'cash_proceeds': float(snapshot.cash_proceeds) if snapshot and hasattr(snapshot, 'cash_proceeds') else None,
+                'date': snapshot.date.isoformat() if snapshot else None
+            }
+            
+            if not snapshot:
+                results['issues'].append(f"❌ No snapshot for {user.username} on {today}")
+        
+        # Check S&P 500 data for today
+        sp500_today = MarketData.query.filter_by(
+            ticker='SPY_SP500',
+            date=today
+        ).first()
+        
+        results['sp500_data']['today'] = {
+            'exists': sp500_today is not None,
+            'value': float(sp500_today.close_price) if sp500_today else None,
+            'date': sp500_today.date.isoformat() if sp500_today else None
+        }
+        
+        if not sp500_today:
+            results['issues'].append(f"❌ No S&P 500 data for {today}")
+        
+        # Check chart cache for each user
+        for user in users:
+            user_charts = UserPortfolioChartCache.query.filter_by(user_id=user.id).all()
+            results['chart_cache'][user.username] = {
+                'total_cached_periods': len(user_charts),
+                'periods': {}
+            }
+            
+            for chart in user_charts:
+                import json
+                chart_data = json.loads(chart.chart_data) if chart.chart_data else {}
+                data_points = len(chart_data.get('labels', []))
+                
+                results['chart_cache'][user.username]['periods'][chart.period] = {
+                    'generated_at': chart.generated_at.isoformat() if chart.generated_at else None,
+                    'data_points': data_points,
+                    'latest_label': chart_data.get('labels', [])[-1] if data_points > 0 else None
+                }
+                
+                # Check if today's data is in 1M and 3M charts
+                if chart.period in ['1M', '3M', 'YTD', '1Y']:
+                    labels = chart_data.get('labels', [])
+                    today_str = today.isoformat()
+                    if today_str not in labels:
+                        results['issues'].append(f"⚠️ {user.username}: {chart.period} chart missing today's data ({today_str})")
+        
+        # Check for YTD/1Y data availability for witty-raven
+        witty_raven = User.query.filter_by(username='witty-raven').first()
+        if witty_raven:
+            # Get first snapshot date
+            first_snapshot = PortfolioSnapshot.query.filter_by(user_id=witty_raven.id)\
+                .order_by(PortfolioSnapshot.date.asc()).first()
+            
+            all_snapshots = PortfolioSnapshot.query.filter_by(user_id=witty_raven.id)\
+                .order_by(PortfolioSnapshot.date.asc()).all()
+            
+            results['witty_raven_analysis'] = {
+                'first_snapshot_date': first_snapshot.date.isoformat() if first_snapshot else None,
+                'total_snapshots': len(all_snapshots),
+                'date_range': f"{first_snapshot.date.isoformat()} to {all_snapshots[-1].date.isoformat()}" if all_snapshots else None,
+                'days_of_data': (all_snapshots[-1].date - first_snapshot.date).days if len(all_snapshots) > 1 else 0
+            }
+            
+            if not first_snapshot:
+                results['issues'].append("❌ witty-raven has NO portfolio snapshots at all!")
+            elif len(all_snapshots) < 2:
+                results['issues'].append(f"⚠️ witty-raven only has {len(all_snapshots)} snapshot(s) - need at least 2 for charts")
+        
+        return jsonify({
+            'success': len(results['issues']) == 0,
+            'results': results,
+            'summary': {
+                'users_with_today_snapshot': sum(1 for v in results['portfolio_snapshots'].values() if v['exists']),
+                'total_users': len(users),
+                'sp500_data_exists': results['sp500_data']['today']['exists'],
+                'total_issues': len(results['issues'])
+            }
+        })
+    
+    except Exception as e:
+        logger.error(f"Snapshot data flow verification error: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/check-intraday-retention')
 @login_required
 def check_intraday_retention():
