@@ -3237,22 +3237,25 @@ def verify_snapshot_data_flow():
     try:
         from datetime import date, timedelta
         from models import PortfolioSnapshot, User, UserPortfolioChartCache, MarketData
+        from zoneinfo import ZoneInfo
         
-        today = date.today()
+        # Use Eastern Time to match market close logic
+        today_et = datetime.now(ZoneInfo('America/New_York')).date()
         results = {
-            'date_checked': today.isoformat(),
+            'date_checked': today_et.isoformat(),
+            'date_checked_timezone': 'America/New_York',
             'portfolio_snapshots': {},
             'sp500_data': {},
             'chart_cache': {},
             'issues': []
         }
         
-        # Check portfolio snapshots for today
+        # Check portfolio snapshots for today (ET)
         users = User.query.all()
         for user in users:
             snapshot = PortfolioSnapshot.query.filter_by(
                 user_id=user.id,
-                date=today
+                date=today_et
             ).first()
             
             results['portfolio_snapshots'][user.username] = {
@@ -3264,13 +3267,18 @@ def verify_snapshot_data_flow():
             }
             
             if not snapshot:
-                results['issues'].append(f"❌ No snapshot for {user.username} on {today}")
+                results['issues'].append(f"❌ No snapshot for {user.username} on {today_et}")
         
-        # Check S&P 500 data for today
+        # Check S&P 500 data for today (ET) - check both SPY_SP500 and recent dates
         sp500_today = MarketData.query.filter_by(
             ticker='SPY_SP500',
-            date=today
+            date=today_et
         ).first()
+        
+        # Also check last 3 days of S&P 500 data for debugging
+        sp500_recent = MarketData.query.filter_by(ticker='SPY_SP500')\
+            .filter(MarketData.date >= today_et - timedelta(days=3))\
+            .order_by(MarketData.date.desc()).all()
         
         results['sp500_data']['today'] = {
             'exists': sp500_today is not None,
@@ -3278,8 +3286,15 @@ def verify_snapshot_data_flow():
             'date': sp500_today.date.isoformat() if sp500_today else None
         }
         
+        results['sp500_data']['recent_dates'] = [
+            {
+                'date': s.date.isoformat(),
+                'value': float(s.close_price)
+            } for s in sp500_recent
+        ]
+        
         if not sp500_today:
-            results['issues'].append(f"❌ No S&P 500 data for {today}")
+            results['issues'].append(f"❌ No S&P 500 data for {today_et}")
         
         # Check chart cache for each user
         for user in users:
@@ -3303,7 +3318,7 @@ def verify_snapshot_data_flow():
                 # Check if today's data is in 1M and 3M charts
                 if chart.period in ['1M', '3M', 'YTD', '1Y']:
                     labels = chart_data.get('labels', [])
-                    today_str = today.isoformat()
+                    today_str = today_et.isoformat()
                     if today_str not in labels:
                         results['issues'].append(f"⚠️ {user.username}: {chart.period} chart missing today's data ({today_str})")
         
