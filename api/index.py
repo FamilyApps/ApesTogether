@@ -3124,13 +3124,15 @@ def cleanup_intraday_data():
         results = cleanup_old_intraday_data(days_to_keep=14)
         
         if results['errors']:
-            flash(f'Cleanup completed with errors: {len(results["errors"])} errors occurred', 'warning')
+            message = f'Cleanup completed with errors: {len(results["errors"])} errors occurred'
         else:
-            flash(f'Cleanup successful: {results["snapshots_deleted"]} snapshots deleted, {results["market_close_preserved"]} market close snapshots preserved', 'success')
+            message = f'Cleanup successful: {results["snapshots_deleted"]} snapshots deleted, {results["market_close_preserved"]} market close snapshots preserved'
         
-        return render_template_with_defaults('admin_debug.html', 
-                             title='Intraday Data Cleanup Results',
-                             results=results)
+        return jsonify({
+            'success': len(results['errors']) == 0,
+            'message': message,
+            'results': results
+        })
     
     except Exception as e:
         logger.error(f"Intraday cleanup error: {str(e)}")
