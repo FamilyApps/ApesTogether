@@ -3139,6 +3139,76 @@ def cleanup_intraday_data():
         flash(f'Intraday cleanup error: {str(e)}', 'danger')
         return redirect(url_for('admin_dashboard'))
 
+@app.route('/admin/cleanup-bogus-snapshots')
+@login_required
+def cleanup_bogus_snapshots():
+    """Admin endpoint to delete bogus $0 snapshots before user's first transaction"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        flash('Admin access required', 'danger')
+        return redirect(url_for('login'))
+    
+    try:
+        from models import User, PortfolioSnapshot, Transaction
+        from sqlalchemy import func
+        
+        results = {
+            'preview': {},
+            'deleted': {},
+            'errors': []
+        }
+        
+        # Get all users
+        users = User.query.all()
+        
+        for user in users:
+            # Find user's first transaction date
+            first_txn = Transaction.query.filter_by(user_id=user.id)\
+                .order_by(Transaction.timestamp.asc()).first()
+            
+            if not first_txn:
+                continue  # User has no transactions, skip
+            
+            first_txn_date = first_txn.timestamp.date()
+            
+            # Find bogus $0 snapshots before first transaction
+            bogus_snapshots = PortfolioSnapshot.query.filter(
+                PortfolioSnapshot.user_id == user.id,
+                PortfolioSnapshot.total_value == 0.0,
+                PortfolioSnapshot.date < first_txn_date
+            ).all()
+            
+            if bogus_snapshots:
+                results['preview'][user.username] = {
+                    'first_transaction_date': first_txn_date.isoformat(),
+                    'bogus_count': len(bogus_snapshots),
+                    'bogus_dates': [s.date.isoformat() for s in bogus_snapshots[:5]]  # Show first 5
+                }
+                
+                # Delete them
+                for snapshot in bogus_snapshots:
+                    db.session.delete(snapshot)
+                
+                results['deleted'][user.username] = len(bogus_snapshots)
+        
+        # Commit deletion
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Cleaned up bogus snapshots for {len(results["deleted"])} users',
+            'results': results
+        })
+    
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Cleanup error: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/debug-live-calculation/<username>/<period>')
 @login_required
 def debug_live_calculation(username, period):
