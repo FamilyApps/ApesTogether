@@ -3139,6 +3139,89 @@ def cleanup_intraday_data():
         flash(f'Intraday cleanup error: {str(e)}', 'danger')
         return redirect(url_for('admin_dashboard'))
 
+@app.route('/admin/debug-live-calculation/<username>/<period>')
+@login_required
+def debug_live_calculation(username, period):
+    """Admin endpoint to see what live calculation produces vs cached data"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        flash('Admin access required', 'danger')
+        return redirect(url_for('login'))
+    
+    try:
+        from models import User, UserPortfolioChartCache, PortfolioSnapshot
+        from portfolio_performance import PortfolioPerformanceCalculator
+        import json
+        
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        period_upper = period.upper()
+        
+        # Get what's in the cache
+        chart_cache = UserPortfolioChartCache.query.filter_by(
+            user_id=user.id,
+            period=period_upper
+        ).first()
+        
+        cache_info = None
+        if chart_cache:
+            cached_data = json.loads(chart_cache.chart_data)
+            cache_info = {
+                'exists': True,
+                'datasets_count': len(cached_data.get('datasets', [])),
+                'dataset_labels': [d.get('label') for d in cached_data.get('datasets', [])],
+                'first_label': cached_data.get('labels', [])[0] if cached_data.get('labels') else None,
+                'last_label': cached_data.get('labels', [])[-1] if cached_data.get('labels') else None,
+                'sample_portfolio_values': cached_data.get('datasets', [{}])[0].get('data', [])[:5] if cached_data.get('datasets') else []
+            }
+        else:
+            cache_info = {'exists': False}
+        
+        # Get what live calculation produces
+        calculator = PortfolioPerformanceCalculator()
+        live_data = calculator.get_performance_data(user.id, period_upper)
+        
+        live_info = {
+            'portfolio_return': live_data.get('portfolio_return'),
+            'sp500_return': live_data.get('sp500_return'),
+            'chart_data_points': len(live_data.get('chart_data', [])),
+            'first_chart_point': live_data.get('chart_data', [{}])[0] if live_data.get('chart_data') else None,
+            'last_chart_point': live_data.get('chart_data', [{}])[-1] if live_data.get('chart_data') else None,
+            'sample_chart_data': live_data.get('chart_data', [])[:5],
+            'has_error': 'error' in live_data
+        }
+        
+        # Get user's snapshot info
+        first_snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id).order_by(PortfolioSnapshot.date.asc()).first()
+        last_snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id).order_by(PortfolioSnapshot.date.desc()).first()
+        
+        snapshot_info = {
+            'first_date': first_snapshot.date.isoformat() if first_snapshot else None,
+            'first_value': float(first_snapshot.total_value) if first_snapshot else None,
+            'last_date': last_snapshot.date.isoformat() if last_snapshot else None,
+            'last_value': float(last_snapshot.total_value) if last_snapshot else None,
+            'total_count': PortfolioSnapshot.query.filter_by(user_id=user.id).count()
+        }
+        
+        return jsonify({
+            'success': True,
+            'user': username,
+            'period': period_upper,
+            'cache': cache_info,
+            'live_calculation': live_info,
+            'snapshots': snapshot_info
+        })
+    
+    except Exception as e:
+        logger.error(f"Debug live calculation error: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/inspect-chart-cache/<username>/<period>')
 @login_required
 def inspect_chart_cache(username, period):
