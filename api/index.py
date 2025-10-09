@@ -3137,6 +3137,100 @@ def cleanup_intraday_data():
         flash(f'Intraday cleanup error: {str(e)}', 'danger')
         return redirect(url_for('admin_dashboard'))
 
+@app.route('/admin/check-intraday-retention')
+@login_required
+def check_intraday_retention():
+    """Admin endpoint to check intraday data retention and verify purging is working"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        flash('Admin access required', 'danger')
+        return redirect(url_for('login'))
+    
+    try:
+        from datetime import timedelta, date
+        from models import PortfolioSnapshotIntraday, User
+        from sqlalchemy import func
+        
+        results = {
+            'total_intraday_snapshots': 0,
+            'snapshots_by_user': {},
+            'date_range': {},
+            'snapshots_by_day': {},
+            'estimated_daily_rate': 0,
+            'retention_analysis': {}
+        }
+        
+        # Total count
+        results['total_intraday_snapshots'] = PortfolioSnapshotIntraday.query.count()
+        
+        # Count by user
+        users = User.query.all()
+        for user in users:
+            count = PortfolioSnapshotIntraday.query.filter_by(user_id=user.id).count()
+            results['snapshots_by_user'][user.username] = count
+        
+        # Date range
+        oldest = PortfolioSnapshotIntraday.query.order_by(PortfolioSnapshotIntraday.timestamp.asc()).first()
+        newest = PortfolioSnapshotIntraday.query.order_by(PortfolioSnapshotIntraday.timestamp.desc()).first()
+        
+        if oldest and newest:
+            results['date_range'] = {
+                'oldest': oldest.timestamp.isoformat(),
+                'newest': newest.timestamp.isoformat(),
+                'days_span': (newest.timestamp.date() - oldest.timestamp.date()).days
+            }
+            
+            # Snapshots by day (last 20 days)
+            snapshots_by_day = {}
+            for days_ago in range(20):
+                check_date = date.today() - timedelta(days=days_ago)
+                count = PortfolioSnapshotIntraday.query.filter(
+                    func.date(PortfolioSnapshotIntraday.timestamp) == check_date
+                ).count()
+                
+                if count > 0:
+                    snapshots_by_day[check_date.isoformat()] = count
+            
+            results['snapshots_by_day'] = dict(sorted(snapshots_by_day.items(), reverse=True))
+            
+            # Estimate daily collection rate
+            if results['date_range']['days_span'] > 0:
+                results['estimated_daily_rate'] = round(results['total_intraday_snapshots'] / results['date_range']['days_span'], 1)
+        
+        # Retention analysis
+        cutoff_14_days = date.today() - timedelta(days=14)
+        old_snapshots = PortfolioSnapshotIntraday.query.filter(
+            PortfolioSnapshotIntraday.timestamp < datetime.combine(cutoff_14_days, datetime.min.time())
+        ).count()
+        
+        results['retention_analysis'] = {
+            'cutoff_date_14_days': cutoff_14_days.isoformat(),
+            'snapshots_older_than_14_days': old_snapshots,
+            'snapshots_within_14_days': results['total_intraday_snapshots'] - old_snapshots,
+            'purging_working': old_snapshots == 0,
+            'recommendation': 'Run /admin/cleanup-intraday-data to purge old data' if old_snapshots > 0 else '✅ Purging is working correctly - no old snapshots found'
+        }
+        
+        return jsonify({
+            'success': True,
+            'results': results,
+            'summary': {
+                'total_snapshots': results['total_intraday_snapshots'],
+                'date_range_days': results['date_range'].get('days_span', 0),
+                'daily_rate': results['estimated_daily_rate'],
+                'purging_status': '✅ Working' if results['retention_analysis']['purging_working'] else '⚠️ Needs attention',
+                'old_snapshots_count': results['retention_analysis']['snapshots_older_than_14_days']
+            }
+        })
+    
+    except Exception as e:
+        logger.error(f"Intraday retention check error: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/intraday-diagnostics')
 @login_required
 def admin_intraday_diagnostics():
@@ -12607,6 +12701,7 @@ def market_close_cron():
         from models import User, PortfolioSnapshot
         from portfolio_performance import PortfolioPerformanceCalculator
         from leaderboard_utils import update_leaderboard_cache
+        from cash_tracking import calculate_portfolio_value_with_cash
         
         # Use Eastern Time for market operations
         current_time = get_market_time()
@@ -12637,15 +12732,18 @@ def market_close_cron():
             
             for user in users:
                 try:
-                    # Calculate portfolio value for today (using ET date)
-                    calculator = PortfolioPerformanceCalculator()
-                    portfolio_value = calculator.calculate_portfolio_value(user.id, today_et)
+                    # Calculate portfolio value WITH cash tracking for today (using ET date)
+                    portfolio_data = calculate_portfolio_value_with_cash(user.id, today_et)
                     
-                    logger.info(f"User {user.id} ({user.username}): Calculated value = ${portfolio_value:.2f} on {today_et}")
+                    total_value = portfolio_data['total_value']
+                    stock_value = portfolio_data['stock_value']
+                    cash_proceeds = portfolio_data['cash_proceeds']
+                    
+                    logger.info(f"User {user.id} ({user.username}): total=${total_value:.2f}, stock=${stock_value:.2f}, cash=${cash_proceeds:.2f} on {today_et}")
                     
                     # Skip if portfolio value is 0 or None (indicates calculation failure)
-                    if portfolio_value is None or portfolio_value <= 0:
-                        error_msg = f"User {user.id} ({user.username}): Skipping - portfolio value is {portfolio_value}"
+                    if total_value is None or total_value <= 0:
+                        error_msg = f"User {user.id} ({user.username}): Skipping - portfolio value is {total_value}"
                         results['errors'].append(error_msg)
                         logger.warning(error_msg)
                         continue
@@ -12657,20 +12755,27 @@ def market_close_cron():
                     ).first()
                     
                     if existing_snapshot:
-                        existing_snapshot.total_value = portfolio_value
+                        # Update all fields
+                        existing_snapshot.total_value = total_value
+                        existing_snapshot.stock_value = stock_value
+                        existing_snapshot.cash_proceeds = cash_proceeds
+                        existing_snapshot.max_cash_deployed = user.max_cash_deployed
                         results['snapshots_updated'] += 1
-                        logger.info(f"Updated snapshot for user {user.id}: ${portfolio_value:.2f} on {today_et}")
+                        logger.info(f"Updated snapshot for user {user.id}: ${total_value:.2f} on {today_et}")
                     else:
-                        # Create new EOD snapshot with ET date
+                        # Create new EOD snapshot with ET date and ALL required fields
                         snapshot = PortfolioSnapshot(
                             user_id=user.id,
                             date=today_et,  # Use ET date
-                            total_value=portfolio_value,
-                            cash_flow=0  # Calculate if needed
+                            total_value=total_value,
+                            stock_value=stock_value,
+                            cash_proceeds=cash_proceeds,
+                            max_cash_deployed=user.max_cash_deployed,
+                            cash_flow=0  # Legacy field
                         )
                         db.session.add(snapshot)
                         results['snapshots_created'] += 1
-                        logger.info(f"Created snapshot for user {user.id}: ${portfolio_value:.2f} on {today_et}")
+                        logger.info(f"Created snapshot for user {user.id}: ${total_value:.2f} on {today_et}")
                     
                     results['users_processed'] += 1
                     
@@ -12684,6 +12789,53 @@ def market_close_cron():
             
             results['pipeline_phases'].append('snapshots_completed')
             logger.info(f"PHASE 1 Complete: {results['snapshots_created']} created, {results['snapshots_updated']} updated")
+            
+            # PHASE 1.5: Collect S&P 500 Market Close Data
+            logger.info("PHASE 1.5: Collecting S&P 500 market close data...")
+            results['pipeline_phases'].append('sp500_started')
+            
+            try:
+                calculator = PortfolioPerformanceCalculator()
+                spy_data = calculator.get_stock_data('SPY')
+                
+                if spy_data and spy_data.get('price'):
+                    spy_price = spy_data['price']
+                    sp500_value = spy_price * 10  # Convert SPY to S&P 500 approximation
+                    
+                    # Check if S&P 500 data already exists for today
+                    from models import MarketData
+                    existing_sp500 = MarketData.query.filter_by(
+                        ticker='SPY_SP500',
+                        date=today_et
+                    ).first()
+                    
+                    if existing_sp500:
+                        existing_sp500.close_price = sp500_value
+                        logger.info(f"Updated S&P 500 data for {today_et}: ${sp500_value:.2f}")
+                    else:
+                        market_data = MarketData(
+                            ticker='SPY_SP500',
+                            date=today_et,
+                            close_price=sp500_value
+                        )
+                        db.session.add(market_data)
+                        logger.info(f"Created S&P 500 data for {today_et}: ${sp500_value:.2f}")
+                    
+                    results['sp500_data_collected'] = True
+                else:
+                    error_msg = "Failed to fetch SPY data for S&P 500"
+                    results['errors'].append(error_msg)
+                    logger.error(error_msg)
+                    results['sp500_data_collected'] = False
+            
+            except Exception as e:
+                error_msg = f"Error collecting S&P 500 data: {str(e)}"
+                results['errors'].append(error_msg)
+                logger.error(error_msg)
+                results['sp500_data_collected'] = False
+            
+            results['pipeline_phases'].append('sp500_completed')
+            logger.info(f"PHASE 1.5 Complete: S&P 500 data collection {'succeeded' if results.get('sp500_data_collected') else 'failed'}")
             
             # PHASE 2: Update Leaderboard Cache (includes chart cache generation)
             logger.info("PHASE 2: Updating leaderboard and chart caches...")
@@ -17215,15 +17367,23 @@ def collect_intraday_data():
         
         for user in users:
             try:
-                # Calculate current portfolio value
-                portfolio_value = calculator.calculate_portfolio_value(user.id)
+                # Calculate current portfolio value WITH cash tracking
+                from cash_tracking import calculate_portfolio_value_with_cash
+                portfolio_data = calculate_portfolio_value_with_cash(user.id)
                 
-                if portfolio_value > 0:  # Only create snapshots for users with portfolios
-                    # Create intraday snapshot (add to batch)
+                total_value = portfolio_data['total_value']
+                stock_value = portfolio_data['stock_value']
+                cash_proceeds = portfolio_data['cash_proceeds']
+                
+                if total_value > 0:  # Only create snapshots for users with portfolios
+                    # Create intraday snapshot with ALL fields (add to batch)
                     intraday_snapshot = PortfolioSnapshotIntraday(
                         user_id=user.id,
                         timestamp=current_time,
-                        total_value=portfolio_value
+                        total_value=total_value,
+                        stock_value=stock_value,
+                        cash_proceeds=cash_proceeds,
+                        max_cash_deployed=user.max_cash_deployed
                     )
                     intraday_snapshots.append(intraday_snapshot)
                     results['snapshots_created'] += 1

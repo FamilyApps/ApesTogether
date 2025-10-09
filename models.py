@@ -111,7 +111,13 @@ class PortfolioSnapshotIntraday(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     timestamp = db.Column(db.DateTime, nullable=False)
-    total_value = db.Column(db.Float, nullable=False)
+    total_value = db.Column(db.Float, nullable=False)  # stock_value + cash_proceeds
+    
+    # Cash tracking components (ADDED - matches PortfolioSnapshot)
+    stock_value = db.Column(db.Float, default=0.0)  # Value of stock holdings only
+    cash_proceeds = db.Column(db.Float, default=0.0)  # Uninvested cash from sales
+    max_cash_deployed = db.Column(db.Float, default=0.0)  # Cumulative capital deployed
+    
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationship with User
