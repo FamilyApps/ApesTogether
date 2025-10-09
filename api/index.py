@@ -3139,6 +3139,81 @@ def cleanup_intraday_data():
         flash(f'Intraday cleanup error: {str(e)}', 'danger')
         return redirect(url_for('admin_dashboard'))
 
+@app.route('/admin/collect-sp500-manual')
+@login_required
+def collect_sp500_manual():
+    """Admin endpoint to manually collect S&P 500 data for today"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        flash('Admin access required', 'danger')
+        return redirect(url_for('login'))
+    
+    try:
+        from models import MarketData
+        from portfolio_performance import PortfolioPerformanceCalculator
+        from zoneinfo import ZoneInfo
+        
+        today_et = datetime.now(ZoneInfo('America/New_York')).date()
+        
+        results = {
+            'date': today_et.isoformat(),
+            'spy_data_fetched': False,
+            'sp500_value': None,
+            'database_updated': False,
+            'errors': []
+        }
+        
+        # Fetch SPY data
+        calculator = PortfolioPerformanceCalculator()
+        spy_data = calculator.get_stock_data('SPY')
+        
+        results['spy_api_response'] = spy_data
+        
+        if spy_data and spy_data.get('price'):
+            results['spy_data_fetched'] = True
+            spy_price = spy_data['price']
+            sp500_value = spy_price * 10
+            results['sp500_value'] = sp500_value
+            
+            # Check if entry exists
+            existing = MarketData.query.filter_by(
+                ticker='SPY_SP500',
+                date=today_et
+            ).first()
+            
+            if existing:
+                existing.close_price = sp500_value
+                results['action'] = 'updated'
+                results['old_value'] = float(existing.close_price)
+            else:
+                market_data = MarketData(
+                    ticker='SPY_SP500',
+                    date=today_et,
+                    close_price=sp500_value
+                )
+                db.session.add(market_data)
+                results['action'] = 'created'
+            
+            db.session.commit()
+            results['database_updated'] = True
+            
+        else:
+            results['errors'].append("SPY data fetch returned None or no price")
+        
+        return jsonify({
+            'success': results['database_updated'],
+            'results': results
+        })
+    
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Manual S&P 500 collection error: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/add-intraday-cash-fields')
 @login_required
 def add_intraday_cash_fields():
