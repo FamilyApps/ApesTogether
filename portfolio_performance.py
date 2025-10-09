@@ -368,6 +368,17 @@ class PortfolioPerformanceCalculator:
         if target_date is None:
             target_date = get_market_date()  # Use ET date, not UTC
         
+        # DEFENSIVE FIX: Check if user has any holdings on or before target_date
+        # Don't create bogus $0 snapshots before user's first transaction
+        first_transaction = Transaction.query.filter(
+            Transaction.user_id == user_id,
+            func.date(Transaction.timestamp) <= target_date
+        ).order_by(Transaction.timestamp.asc()).first()
+        
+        if not first_transaction:
+            logger.info(f"Skipping snapshot for user {user_id} on {target_date} - no holdings yet")
+            return  # No holdings on this date, don't create snapshot
+        
         # Check if snapshot already exists
         existing_snapshot = PortfolioSnapshot.query.filter_by(
             user_id=user_id, date=target_date
@@ -1113,18 +1124,30 @@ class PortfolioPerformanceCalculator:
                     # Sample data points for chart density
                     sampled_dates = self._sample_dates_for_period(sp500_dates, period)
                     
+                    # DEFENSIVE FIX: Find first non-zero snapshot as baseline (handles bogus $0 snapshots)
+                    start_portfolio_value = None
+                    start_portfolio_index = None
+                    for i, s in enumerate(snapshots):
+                        if s.total_value > 0:
+                            start_portfolio_value = s.total_value
+                            start_portfolio_index = i
+                            break
+                    
+                    if start_portfolio_value is None:
+                        # All snapshots are $0 (no holdings in period) - skip portfolio line
+                        logger.warning(f"No non-zero snapshots for user {user_id} in period {period} - portfolio line will be null")
+                    
                     for date_key in sampled_dates:
                         if date_key >= start_date and date_key in sp500_data:
                             sp500_pct = ((sp500_data[date_key] - period_start_sp500) / period_start_sp500) * 100
                             
-                            # Only include portfolio data from user's actual start date
+                            # Only include portfolio data from user's actual holdings date
                             portfolio_pct = None
-                            if user_first_snapshot and date_key >= user_first_snapshot.date and len(snapshots) > 0:
+                            if start_portfolio_value is not None and user_first_snapshot and date_key >= user_first_snapshot.date and len(snapshots) > 0:
                                 # Find portfolio snapshot for this date
                                 portfolio_snapshot = next((s for s in snapshots if s.date == date_key), None)
-                                # Use period baseline (snapshots[0]) - this is correct for period-based performance
-                                if portfolio_snapshot and snapshots[0].total_value > 0:
-                                    start_portfolio_value = snapshots[0].total_value
+                                # Calculate percentage from first non-zero snapshot (defensive against bogus $0 snapshots)
+                                if portfolio_snapshot and portfolio_snapshot.total_value > 0:
                                     portfolio_pct = ((portfolio_snapshot.total_value - start_portfolio_value) / start_portfolio_value) * 100
                             
                             # FIX (Grok-validated): Use short date format for category scale (multi-day periods)
