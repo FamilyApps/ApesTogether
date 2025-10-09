@@ -13246,26 +13246,17 @@ def market_close_cron():
             results['pipeline_phases'].append('sp500_completed')
             logger.info(f"PHASE 1.5 Complete: S&P 500 data collection {'succeeded' if results.get('sp500_data_collected') else 'failed'}")
             
-            # CRITICAL: Don't regenerate cache if S&P 500 collection failed
-            # Charts require both portfolio AND S&P 500 data to display correctly
-            if not results.get('sp500_data_collected'):
-                error_msg = "CRITICAL: Skipping cache regeneration - S&P 500 data collection failed"
-                logger.error(error_msg)
-                results['errors'].append(error_msg)
-                results['cache_regeneration_skipped'] = True
-                # Still commit portfolio snapshots, but don't regenerate cache with incomplete data
-            else:
-                # PHASE 2: Update Leaderboard Cache (includes chart cache generation)
-                logger.info("PHASE 2: Updating leaderboard and chart caches...")
-                results['pipeline_phases'].append('leaderboard_started')
-                
-                updated_count = update_leaderboard_cache()
-                results['leaderboard_updated'] = True
-                results['leaderboard_entries_updated'] = updated_count
-                results['chart_cache_updated'] = True  # update_leaderboard_cache also updates chart cache
-                
-                results['pipeline_phases'].append('leaderboard_completed')
-                logger.info(f"PHASE 2 Complete: {updated_count} leaderboard entries updated")
+            # PHASE 2: Update Leaderboard Cache (includes chart cache generation)
+            logger.info("PHASE 2: Updating leaderboard and chart caches...")
+            results['pipeline_phases'].append('leaderboard_started')
+            
+            updated_count = update_leaderboard_cache()
+            results['leaderboard_updated'] = True
+            results['leaderboard_entries_updated'] = updated_count
+            results['chart_cache_updated'] = True  # update_leaderboard_cache also updates chart cache
+            
+            results['pipeline_phases'].append('leaderboard_completed')
+            logger.info(f"PHASE 2 Complete: {updated_count} leaderboard entries updated")
             
             # PHASE 3: Atomic Database Commit
             logger.info("PHASE 3: Committing all changes atomically...")
