@@ -1136,6 +1136,14 @@ class PortfolioPerformanceCalculator:
                     if start_portfolio_value is None:
                         # All snapshots are $0 (no holdings in period) - skip portfolio line
                         logger.warning(f"No non-zero snapshots for user {user_id} in period {period} - portfolio line will be null")
+                    else:
+                        # GROK-VALIDATED FIX: Ensure first snapshot date is always in sampled_dates
+                        # Guarantees chart starts at +0% baseline instead of mid-gain
+                        first_snapshot_date = snapshots[start_portfolio_index].date
+                        if first_snapshot_date not in sampled_dates:
+                            sampled_dates.append(first_snapshot_date)
+                            sampled_dates.sort()  # Maintain chronological order
+                            logger.info(f"Added first snapshot date {first_snapshot_date} to sampled_dates for {period} chart baseline")
                     
                     for date_key in sampled_dates:
                         if date_key >= start_date and date_key in sp500_data:

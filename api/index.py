@@ -3139,6 +3139,130 @@ def cleanup_intraday_data():
         flash(f'Intraday cleanup error: {str(e)}', 'danger')
         return redirect(url_for('admin_dashboard'))
 
+@app.route('/admin/diagnose-missing-today/<username>')
+@login_required
+def diagnose_missing_today(username):
+    """Comprehensive diagnostic for why today's snapshot isn't appearing in charts"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        flash('Admin access required', 'danger')
+        return redirect(url_for('login'))
+    
+    try:
+        from models import User, PortfolioSnapshot, MarketData, UserPortfolioChartCache
+        from portfolio_performance import PortfolioPerformanceCalculator
+        from zoneinfo import ZoneInfo
+        import json
+        
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        today_et = datetime.now(ZoneInfo('America/New_York')).date()
+        yesterday_et = today_et - timedelta(days=1)
+        
+        results = {
+            'today': today_et.isoformat(),
+            'yesterday': yesterday_et.isoformat(),
+            'checks': {}
+        }
+        
+        # CHECK 1: Does today's portfolio snapshot exist?
+        today_snapshot = PortfolioSnapshot.query.filter_by(
+            user_id=user.id,
+            date=today_et
+        ).first()
+        
+        results['checks']['portfolio_snapshot_today'] = {
+            'exists': today_snapshot is not None,
+            'value': float(today_snapshot.total_value) if today_snapshot else None,
+            'date': today_snapshot.date.isoformat() if today_snapshot else None
+        }
+        
+        # CHECK 2: Does yesterday's snapshot exist for comparison?
+        yesterday_snapshot = PortfolioSnapshot.query.filter_by(
+            user_id=user.id,
+            date=yesterday_et
+        ).first()
+        
+        results['checks']['portfolio_snapshot_yesterday'] = {
+            'exists': yesterday_snapshot is not None,
+            'value': float(yesterday_snapshot.total_value) if yesterday_snapshot else None
+        }
+        
+        # CHECK 3: Does S&P 500 data exist for today?
+        sp500_today = MarketData.query.filter_by(
+            ticker='SPY_SP500',
+            date=today_et
+        ).first()
+        
+        results['checks']['sp500_data_today'] = {
+            'exists': sp500_today is not None,
+            'value': float(sp500_today.close_price) if sp500_today else None
+        }
+        
+        # CHECK 4: What's the last snapshot date in DB?
+        last_snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id)\
+            .order_by(PortfolioSnapshot.date.desc()).first()
+        
+        results['checks']['last_snapshot_in_db'] = {
+            'date': last_snapshot.date.isoformat() if last_snapshot else None,
+            'value': float(last_snapshot.total_value) if last_snapshot else None
+        }
+        
+        # CHECK 5: When was 1M chart cache last generated?
+        cache_1m = UserPortfolioChartCache.query.filter_by(
+            user_id=user.id,
+            period='1M'
+        ).first()
+        
+        if cache_1m:
+            cached_data = json.loads(cache_1m.chart_data)
+            results['checks']['chart_cache_1m'] = {
+                'generated_at': cache_1m.generated_at.isoformat() if cache_1m.generated_at else None,
+                'last_label': cached_data.get('labels', [])[-1] if cached_data.get('labels') else None,
+                'labels_count': len(cached_data.get('labels', [])),
+                'last_5_labels': cached_data.get('labels', [])[-5:] if cached_data.get('labels') else []
+            }
+        else:
+            results['checks']['chart_cache_1m'] = {'exists': False}
+        
+        # CHECK 6: What does live calculation produce?
+        calculator = PortfolioPerformanceCalculator()
+        live_1m = calculator.get_performance_data(user.id, '1M')
+        
+        results['checks']['live_calculation_1m'] = {
+            'chart_data_points': len(live_1m.get('chart_data', [])),
+            'last_5_points': live_1m.get('chart_data', [])[-5:] if live_1m.get('chart_data') else [],
+            'portfolio_return': live_1m.get('portfolio_return')
+        }
+        
+        # CHECK 7: Count all snapshots for date range analysis
+        one_month_ago = today_et - timedelta(days=30)
+        recent_snapshots = PortfolioSnapshot.query.filter(
+            PortfolioSnapshot.user_id == user.id,
+            PortfolioSnapshot.date >= one_month_ago
+        ).order_by(PortfolioSnapshot.date.desc()).all()
+        
+        results['checks']['recent_snapshots'] = {
+            'count': len(recent_snapshots),
+            'dates': [s.date.isoformat() for s in recent_snapshots[:10]]  # Last 10
+        }
+        
+        return jsonify({
+            'success': True,
+            'user': username,
+            'results': results
+        })
+    
+    except Exception as e:
+        logger.error(f"Diagnostic error: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/cleanup-bogus-snapshots')
 @login_required
 def cleanup_bogus_snapshots():
