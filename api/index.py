@@ -3267,81 +3267,102 @@ def diagnose_missing_today(username):
 @app.route('/admin/cleanup-bogus-snapshots')
 @login_required
 def cleanup_bogus_snapshots():
-    """Admin endpoint to delete bogus $0 snapshots before user's first transaction"""
+    """Admin endpoint to delete bogus $0 snapshots before user's first transaction (GROK FIX: Raw SQL + explicit conn)"""
     if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
         flash('Admin access required', 'danger')
         return redirect(url_for('login'))
     
     try:
-        from models import User, PortfolioSnapshot, Transaction
-        from sqlalchemy import func
+        from models import User, Transaction
+        from sqlalchemy import text
         
-        results = {
-            'preview': {},
-            'deleted': {},
-            'errors': []
-        }
+        deleted_counts = {}
+        preview = {}
+        errors = []
         
-        # Get all users
+        # Get all users (query outside transaction for efficiency)
         users = User.query.all()
         
-        for user in users:
-            # Find user's first transaction date
-            first_txn = Transaction.query.filter_by(user_id=user.id)\
-                .order_by(Transaction.timestamp.asc()).first()
-            
-            if not first_txn:
-                continue  # User has no transactions, skip
-            
-            first_txn_date = first_txn.timestamp.date()
-            
-            # Find bogus $0 snapshots before first transaction
-            bogus_snapshots = PortfolioSnapshot.query.filter(
-                PortfolioSnapshot.user_id == user.id,
-                PortfolioSnapshot.total_value == 0.0,
-                PortfolioSnapshot.date < first_txn_date
-            ).all()
-            
-            if bogus_snapshots:
-                bogus_dates = [s.date.isoformat() for s in bogus_snapshots[:5]]
-                bogus_count = len(bogus_snapshots)
+        # GROK FIX: Use explicit connection + transaction for serverless
+        with db.engine.connect() as conn:
+            with conn.begin():  # Explicit transaction block
+                for user in users:
+                    # Find user's first transaction date
+                    first_txn = Transaction.query.filter_by(user_id=user.id)\
+                        .order_by(Transaction.timestamp.asc()).first()
+                    
+                    if not first_txn:
+                        continue  # User has no transactions, skip
+                    
+                    first_txn_date = first_txn.timestamp.date()
+                    
+                    # Find bogus snapshot IDs using raw SQL (avoids loading objects)
+                    bogus_ids = conn.execute(text("""
+                        SELECT id FROM portfolio_snapshot
+                        WHERE user_id = :uid
+                          AND total_value = 0.0
+                          AND date < :first_date
+                        ORDER BY date ASC
+                    """), {'uid': user.id, 'first_date': first_txn_date}).scalars().all()
+                    
+                    if bogus_ids:
+                        # Get sample dates for preview
+                        sample_dates = conn.execute(text("""
+                            SELECT date FROM portfolio_snapshot
+                            WHERE id IN :ids
+                            ORDER BY date ASC
+                            LIMIT 5
+                        """), {'ids': tuple(bogus_ids)}).scalars().all()
+                        
+                        preview[user.username] = {
+                            'first_transaction_date': first_txn_date.isoformat(),
+                            'bogus_count': len(bogus_ids),
+                            'bogus_dates': [d.isoformat() for d in sample_dates]
+                        }
+                        
+                        # RAW SQL BULK DELETE - bypasses ORM state issues
+                        logger.info(f"Deleting {len(bogus_ids)} snapshots for {user.username} via RAW SQL: IDs {list(bogus_ids)[:10]}")
+                        
+                        result = conn.execute(text("""
+                            DELETE FROM portfolio_snapshot 
+                            WHERE id IN :ids
+                        """), {'ids': tuple(bogus_ids)})
+                        
+                        deleted_counts[user.username] = len(bogus_ids)
+                        logger.info(f"RAW SQL reported {result.rowcount} rows deleted for {user.username}")
                 
-                results['preview'][user.username] = {
-                    'first_transaction_date': first_txn_date.isoformat(),
-                    'bogus_count': bogus_count,
-                    'bogus_dates': bogus_dates
-                }
-                
-                # Delete by ID to avoid session conflicts
-                snapshot_ids = [s.id for s in bogus_snapshots]
-                logger.info(f"Attempting to delete {len(snapshot_ids)} snapshots for user {user.username}: IDs {snapshot_ids[:10]}")
-                
-                delete_count = PortfolioSnapshot.query.filter(PortfolioSnapshot.id.in_(snapshot_ids)).delete(synchronize_session=False)
-                logger.info(f"SQLAlchemy reported {delete_count} snapshots deleted")
-                
-                # Flush immediately to force deletion to DB
-                db.session.flush()
-                logger.info("Flushed deletion to database")
-                
-                results['deleted'][user.username] = bogus_count
+                # Explicit commit (with block auto-commits on exit, but explicit for logging)
+                conn.commit()
+                logger.info("Transaction committed successfully")
         
-        # Commit deletion
-        logger.info("Committing deletion transaction...")
-        db.session.commit()
-        logger.info("Deletion committed successfully")
+        # CRITICAL: Dispose engine to release serverless connections
+        db.engine.dispose()
+        logger.info("Engine disposed - connections released")
         
-        # CRITICAL: Close session and expunge all to force connection release
-        db.session.expunge_all()
-        logger.info("Session expunged - all objects detached from session")
+        # Verification: Query to confirm deletion
+        verification = {}
+        for username in deleted_counts.keys():
+            user = User.query.filter_by(username=username).first()
+            if user:
+                remaining = db.session.execute(text("""
+                    SELECT COUNT(*) FROM portfolio_snapshot
+                    WHERE user_id = :uid AND total_value = 0.0
+                """), {'uid': user.id}).scalar()
+                verification[username] = remaining
+                logger.info(f"Verification: {username} has {remaining} bogus snapshots remaining")
         
         return jsonify({
             'success': True,
-            'message': f'Cleaned up bogus snapshots for {len(results["deleted"])} users',
-            'results': results
+            'message': f'Cleaned up bogus snapshots for {len(deleted_counts)} users',
+            'results': {
+                'deleted': deleted_counts,
+                'preview': preview,
+                'verification': verification,
+                'errors': errors
+            }
         })
     
     except Exception as e:
-        db.session.rollback()
         logger.error(f"Cleanup error: {str(e)}")
         import traceback
         return jsonify({
