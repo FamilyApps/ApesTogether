@@ -3480,18 +3480,23 @@ def inspect_chart_cache(username, period):
         
         cached_data = json.loads(chart_cache.chart_data)
         
+        # CRITICAL: Show ALL labels to trace exactly what gets rendered
+        all_labels = cached_data.get('labels', [])
+        
         results = {
             'user': username,
             'period': period_upper,
             'generated_at': chart_cache.generated_at.isoformat() if chart_cache.generated_at else None,
             'cache_structure': {
                 'has_labels': 'labels' in cached_data,
-                'labels_count': len(cached_data.get('labels', [])),
-                'first_label': cached_data.get('labels', [])[0] if cached_data.get('labels') else None,
-                'last_label': cached_data.get('labels', [])[-1] if cached_data.get('labels') else None,
+                'labels_count': len(all_labels),
+                'first_label': all_labels[0] if all_labels else None,
+                'last_label': all_labels[-1] if all_labels else None,
                 'has_datasets': 'datasets' in cached_data,
                 'datasets_count': len(cached_data.get('datasets', []))
             },
+            'ALL_LABELS': all_labels,  # SHOW EVERY SINGLE LABEL
+            'first_10_labels': all_labels[:10] if all_labels else [],
             'datasets': []
         }
         
