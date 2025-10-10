@@ -1183,6 +1183,15 @@ def dashboard():
         from models import PortfolioSnapshot
         from models import PortfolioSnapshotIntraday
         
+        # Check if it's weekend or after market hours
+        today = get_market_date()  # FIX: Use ET not UTC
+        is_weekend = today.weekday() >= 5  # Saturday = 5, Sunday = 6
+        current_hour = get_market_time().hour  # FIX: Use ET not UTC
+        is_after_hours = current_hour < 9 or current_hour >= 16  # Before 9 AM or after 4 PM
+        
+        # SMART CACHING STRATEGY: Use cached data by default, refresh only when requested during market hours
+        force_refresh = request.args.get('refresh') == 'true'
+        is_market_hours_weekday = not is_weekend and not is_after_hours
         use_cached_data = not (is_market_hours_weekday and force_refresh)
         
         # Always try cached data first (fastest loading)
