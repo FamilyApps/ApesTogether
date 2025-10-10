@@ -3331,9 +3331,8 @@ def cleanup_bogus_snapshots():
                         deleted_counts[user.username] = len(bogus_ids)
                         logger.info(f"RAW SQL reported {result.rowcount} rows deleted for {user.username}")
                 
-                # Explicit commit (with block auto-commits on exit, but explicit for logging)
-                conn.commit()
-                logger.info("Transaction committed successfully")
+                # Note: with conn.begin() auto-commits on successful exit
+                logger.info("Transaction block exiting - auto-commit will occur")
         
         # CRITICAL: Dispose engine to release serverless connections
         db.engine.dispose()
