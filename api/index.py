@@ -3319,12 +3319,20 @@ def cleanup_bogus_snapshots():
                 delete_count = PortfolioSnapshot.query.filter(PortfolioSnapshot.id.in_(snapshot_ids)).delete(synchronize_session=False)
                 logger.info(f"SQLAlchemy reported {delete_count} snapshots deleted")
                 
+                # Flush immediately to force deletion to DB
+                db.session.flush()
+                logger.info("Flushed deletion to database")
+                
                 results['deleted'][user.username] = bogus_count
         
         # Commit deletion
         logger.info("Committing deletion transaction...")
         db.session.commit()
         logger.info("Deletion committed successfully")
+        
+        # CRITICAL: Close session and expunge all to force connection release
+        db.session.expunge_all()
+        logger.info("Session expunged - all objects detached from session")
         
         return jsonify({
             'success': True,
