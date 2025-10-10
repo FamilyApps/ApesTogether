@@ -3178,17 +3178,20 @@ def cleanup_bogus_snapshots():
             ).all()
             
             if bogus_snapshots:
+                bogus_dates = [s.date.isoformat() for s in bogus_snapshots[:5]]
+                bogus_count = len(bogus_snapshots)
+                
                 results['preview'][user.username] = {
                     'first_transaction_date': first_txn_date.isoformat(),
-                    'bogus_count': len(bogus_snapshots),
-                    'bogus_dates': [s.date.isoformat() for s in bogus_snapshots[:5]]  # Show first 5
+                    'bogus_count': bogus_count,
+                    'bogus_dates': bogus_dates
                 }
                 
-                # Delete them
-                for snapshot in bogus_snapshots:
-                    db.session.delete(snapshot)
+                # Delete by ID to avoid session conflicts
+                snapshot_ids = [s.id for s in bogus_snapshots]
+                PortfolioSnapshot.query.filter(PortfolioSnapshot.id.in_(snapshot_ids)).delete(synchronize_session=False)
                 
-                results['deleted'][user.username] = len(bogus_snapshots)
+                results['deleted'][user.username] = bogus_count
         
         # Commit deletion
         db.session.commit()
