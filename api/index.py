@@ -1181,16 +1181,8 @@ def dashboard():
     if current_user.is_authenticated:
         from datetime import date, datetime, timedelta
         from models import PortfolioSnapshot
+        from models import PortfolioSnapshotIntraday
         
-        # Check if it's weekend or after market hours - use cached snapshots
-        today = date.today()
-        is_weekend = today.weekday() >= 5  # Saturday = 5, Sunday = 6
-        current_hour = datetime.now().hour
-        is_after_hours = current_hour < 9 or current_hour >= 16  # Before 9 AM or after 4 PM
-        
-        # SMART CACHING STRATEGY: Use cached data by default, refresh only when requested during market hours
-        force_refresh = request.args.get('refresh') == 'true'
-        is_market_hours_weekday = not is_weekend and not is_after_hours
         use_cached_data = not (is_market_hours_weekday and force_refresh)
         
         # Always try cached data first (fastest loading)
@@ -1365,9 +1357,9 @@ def portfolio_value():
     current_user_id = session.get('user_id')
     
     # Check if it's weekend or after market hours - use cached snapshots
-    today = date.today()
+    today = get_market_date()  # FIX: Use ET not UTC
     is_weekend = today.weekday() >= 5  # Saturday = 5, Sunday = 6
-    current_hour = datetime.now().hour
+    current_hour = get_market_time().hour  # FIX: Use ET not UTC
     is_after_hours = current_hour < 9 or current_hour >= 16  # Before 9 AM or after 4 PM
     
     # Use cached snapshots on weekends or after hours, live data during market hours on weekdays
@@ -3870,8 +3862,9 @@ def check_intraday_retention():
             
             # Snapshots by day (last 20 days)
             snapshots_by_day = {}
+            today = get_market_date()  # FIX: Use ET
             for days_ago in range(20):
-                check_date = date.today() - timedelta(days=days_ago)
+                check_date = today - timedelta(days=days_ago)
                 count = PortfolioSnapshotIntraday.query.filter(
                     func.date(PortfolioSnapshotIntraday.timestamp) == check_date
                 ).count()
@@ -3886,7 +3879,7 @@ def check_intraday_retention():
                 results['estimated_daily_rate'] = round(results['total_intraday_snapshots'] / results['date_range']['days_span'], 1)
         
         # Retention analysis
-        cutoff_14_days = date.today() - timedelta(days=14)
+        cutoff_14_days = get_market_date() - timedelta(days=14)  # FIX: Use ET
         old_snapshots = PortfolioSnapshotIntraday.query.filter(
             PortfolioSnapshotIntraday.timestamp < datetime.combine(cutoff_14_days, datetime.min.time())
         ).count()
@@ -3933,7 +3926,7 @@ def admin_intraday_diagnostics():
         from sqlalchemy import func, text
         import json
         
-        today = date.today()
+        today = get_market_date()  # FIX: Use ET for market data queries
         yesterday = today - timedelta(days=1)
         
         diagnostics = {
@@ -4201,7 +4194,7 @@ def admin_snapshot_uniqueness_report():
         from sqlalchemy import func, distinct
         import json
         
-        today = date.today()
+        today = get_market_date()  # FIX: Use ET for market data queries
         yesterday = today - timedelta(days=1)
         
         report = {
@@ -4784,7 +4777,7 @@ def admin_intraday_collection_logs():
             utc = timezone.utc
             eastern = timezone(timedelta(hours=-4))  # EDT fallback
         
-        today = date.today()
+        today = get_market_date()  # FIX: Use ET for intraday queries
         yesterday = today - timedelta(days=1)
         
         # Get today's intraday snapshots grouped by timestamp (collection runs)
@@ -5245,7 +5238,7 @@ def test_cron_execution():
         from sqlalchemy import distinct
         from models import PortfolioSnapshotIntraday, PortfolioSnapshot, LeaderboardEntry, User, Transaction
         
-        today = datetime.now().date()
+        today = get_market_date()  # FIX: Use ET for snapshot queries
         yesterday = today - timedelta(days=1)
         
         # Get all users with portfolios
@@ -10396,7 +10389,7 @@ def admin_populate_leaderboard():
         total_users = User.query.count()
         users_with_stocks = User.query.join(Stock).distinct().count()
         total_snapshots = PortfolioSnapshot.query.count()
-        yesterday = date.today() - timedelta(days=1)
+        yesterday = get_market_date() - timedelta(days=1)  # FIX: Use ET
         yesterday_snapshots = PortfolioSnapshot.query.filter_by(date=yesterday).count()
         
         # Test database write capability
@@ -10790,8 +10783,8 @@ def admin_debug_leaderboard():
         import json
         
         # Data availability check
-        yesterday = date.today() - timedelta(days=1)
-        today = date.today()
+        today = get_market_date()  # FIX: Use ET for market data checks
+        yesterday = today - timedelta(days=1)
         
         debug_info = {
             'basic_data': {
