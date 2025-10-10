@@ -3314,12 +3314,17 @@ def cleanup_bogus_snapshots():
                 
                 # Delete by ID to avoid session conflicts
                 snapshot_ids = [s.id for s in bogus_snapshots]
-                PortfolioSnapshot.query.filter(PortfolioSnapshot.id.in_(snapshot_ids)).delete(synchronize_session=False)
+                logger.info(f"Attempting to delete {len(snapshot_ids)} snapshots for user {user.username}: IDs {snapshot_ids[:10]}")
+                
+                delete_count = PortfolioSnapshot.query.filter(PortfolioSnapshot.id.in_(snapshot_ids)).delete(synchronize_session=False)
+                logger.info(f"SQLAlchemy reported {delete_count} snapshots deleted")
                 
                 results['deleted'][user.username] = bogus_count
         
         # Commit deletion
+        logger.info("Committing deletion transaction...")
         db.session.commit()
+        logger.info("Deletion committed successfully")
         
         return jsonify({
             'success': True,
