@@ -1137,17 +1137,50 @@ class PortfolioPerformanceCalculator:
                         # All snapshots are $0 (no holdings in period) - skip portfolio line
                         logger.warning(f"No non-zero snapshots for user {user_id} in period {period} - portfolio line will be null")
                     else:
-                        # GROK-VALIDATED FIX: Ensure first snapshot date is always in sampled_dates
-                        # Guarantees chart starts at +0% baseline instead of mid-gain
+                        # FIX: For non-trading days (weekends, holidays), use nearest PRECEDING S&P close 
+                        # as portfolio baseline to show 0% on account creation date
                         first_snapshot_date = snapshots[start_portfolio_index].date
+                        
+                        # Find nearest preceding S&P 500 data for PORTFOLIO baseline (handles closed market days)
+                        portfolio_baseline_sp500 = None
+                        portfolio_baseline_date = None
+                        for sp_date in reversed(sp500_dates):
+                            if sp_date <= first_snapshot_date:
+                                portfolio_baseline_sp500 = sp500_data[sp_date]
+                                portfolio_baseline_date = sp_date
+                                break
+                        
+                        if portfolio_baseline_sp500 is None:
+                            # No preceding S&P data (user created account before our S&P data starts)
+                            portfolio_baseline_sp500 = period_start_sp500
+                            portfolio_baseline_date = sp500_dates[0]
+                        
+                        logger.info(f"Portfolio baseline: S&P from {portfolio_baseline_date} (${portfolio_baseline_sp500:.2f}) for account starting {first_snapshot_date}")
+                        logger.info(f"S&P 500 baseline: Period start {sp500_dates[0] if sp500_dates else 'N/A'} (${period_start_sp500:.2f})")
+                        
                         if first_snapshot_date not in sampled_dates:
                             sampled_dates.append(first_snapshot_date)
                             sampled_dates.sort()  # Maintain chronological order
-                            logger.info(f"Added first snapshot date {first_snapshot_date} to sampled_dates for {period} chart baseline")
+                            logger.info(f"Added first snapshot date {first_snapshot_date} to sampled_dates for chart baseline")
                     
                     for date_key in sampled_dates:
-                        if date_key >= start_date and date_key in sp500_data:
-                            sp500_pct = ((sp500_data[date_key] - period_start_sp500) / period_start_sp500) * 100
+                        if date_key >= start_date:
+                            # Get S&P data for this date, or use baseline if market was closed
+                            if date_key in sp500_data:
+                                sp500_value = sp500_data[date_key]
+                            else:
+                                # Market closed on this date - use nearest preceding close
+                                sp500_value = None
+                                for sp_date in reversed(sp500_dates):
+                                    if sp_date < date_key:
+                                        sp500_value = sp500_data[sp_date]
+                                        break
+                                
+                                if sp500_value is None:
+                                    # No preceding S&P data, skip this point
+                                    continue
+                            
+                            sp500_pct = ((sp500_value - period_start_sp500) / period_start_sp500) * 100
                             
                             # Only include portfolio data from user's actual holdings date
                             portfolio_pct = None
