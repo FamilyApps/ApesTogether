@@ -14060,6 +14060,28 @@ def market_close_cron():
             results['pipeline_phases'].append('commit_completed')
             logger.info("PHASE 3 Complete: All changes committed successfully")
             
+            # PHASE 3.5: VERIFICATION - Confirm S&P 500 data actually persisted
+            logger.info("PHASE 3.5: Verifying S&P 500 data persistence...")
+            from models import MarketData
+            
+            # Force a new query outside the transaction to verify persistence
+            db.session.expire_all()  # Clear any cached objects
+            
+            verify_sp500 = MarketData.query.filter_by(
+                ticker='SPY_SP500',
+                date=today_et
+            ).first()
+            
+            if verify_sp500:
+                logger.info(f"✅ VERIFIED: S&P 500 data exists in DB for {today_et}: ${verify_sp500.close_price:.2f}")
+                results['sp500_verification'] = 'SUCCESS'
+                results['sp500_verified_value'] = float(verify_sp500.close_price)
+            else:
+                logger.error(f"❌ VERIFICATION FAILED: S&P 500 data NOT found in DB for {today_et} despite successful commit!")
+                logger.error(f"This indicates a database replication lag or transaction isolation issue")
+                results['sp500_verification'] = 'FAILED'
+                results['errors'].append(f"S&P 500 data missing after commit for {today_et}")
+            
         except Exception as e:
             # ROLLBACK: Any failure rolls back entire pipeline
             logger.error(f"ATOMIC PIPELINE FAILURE: {str(e)}")
