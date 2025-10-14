@@ -3806,6 +3806,75 @@ def regenerate_chart_cache():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/backfill-sp500/<date_str>')
+@login_required
+def backfill_sp500_for_date(date_str):
+    """Backfill S&P 500 data for a specific date (format: YYYY-MM-DD)"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from datetime import datetime
+        from models import MarketData
+        from portfolio_performance import PortfolioPerformanceCalculator
+        
+        target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        
+        # Get SPY price for that date
+        calculator = PortfolioPerformanceCalculator()
+        spy_data = calculator.get_stock_data('SPY')
+        
+        if not spy_data or not spy_data.get('price'):
+            return jsonify({
+                'success': False,
+                'error': 'Failed to fetch SPY data from AlphaVantage',
+                'date': date_str
+            }), 500
+        
+        spy_price = spy_data['price']
+        sp500_value = spy_price * 10  # Convert SPY to S&P 500 approximation
+        
+        # Check if entry exists
+        existing = MarketData.query.filter_by(
+            ticker='SPY_SP500',
+            date=target_date
+        ).first()
+        
+        if existing:
+            old_value = existing.close_price
+            existing.close_price = sp500_value
+            action = 'updated'
+        else:
+            market_data = MarketData(
+                ticker='SPY_SP500',
+                date=target_date,
+                close_price=sp500_value
+            )
+            db.session.add(market_data)
+            old_value = None
+            action = 'created'
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'action': action,
+            'date': date_str,
+            'sp500_value': sp500_value,
+            'spy_price': spy_price,
+            'old_value': old_value
+        })
+    
+    except Exception as e:
+        logger.error(f"Backfill S&P 500 error: {str(e)}")
+        db.session.rollback()
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/collect-sp500-manual')
 @login_required
 def collect_sp500_manual():
