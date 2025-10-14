@@ -9,6 +9,8 @@ from flask_sqlalchemy import SQLAlchemy
 db = SQLAlchemy()
 
 class User(UserMixin, db.Model):
+    __tablename__ = 'user'  # Explicitly set - will be quoted in PostgreSQL as "user"
+    
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(150), unique=True, nullable=False)
     username = db.Column(db.String(80), unique=True, nullable=False)
@@ -31,6 +33,8 @@ class User(UserMixin, db.Model):
     deleted_at = db.Column(db.DateTime, nullable=True)  # GDPR soft-delete timestamp
 
 class Stock(db.Model):
+    __tablename__ = 'stock'
+    
     id = db.Column(db.Integer, primary_key=True)
     ticker = db.Column(db.String(10))
     quantity = db.Column(db.Float)
@@ -39,6 +43,8 @@ class Stock(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
 
 class Subscription(db.Model):
+    __tablename__ = 'subscription'
+    
     id = db.Column(db.Integer, primary_key=True)
     subscriber_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     subscribed_to_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)

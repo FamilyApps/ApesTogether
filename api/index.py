@@ -490,6 +490,8 @@ except Exception as e:
 
 # Define database models
 class User(db.Model, UserMixin):
+    __tablename__ = 'user'  # Explicitly set for PostgreSQL compatibility
+    
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
@@ -500,6 +502,15 @@ class User(db.Model, UserMixin):
     oauth_id = db.Column(db.String(100), nullable=True)
     stripe_price_id = db.Column(db.String(255), nullable=True)
     subscription_price = db.Column(db.Float, nullable=True)
+    
+    # Cash tracking
+    max_cash_deployed = db.Column(db.Float, default=0.0, nullable=False)
+    cash_proceeds = db.Column(db.Float, default=0.0, nullable=False)
+    
+    # Portfolio sharing & GDPR
+    portfolio_slug = db.Column(db.String(20), unique=True, nullable=True)
+    deleted_at = db.Column(db.DateTime, nullable=True)
+    
     stocks = db.relationship('Stock', backref='user', lazy=True)
     transactions = db.relationship('Transaction', backref='user', lazy=True)
     # We'll use subscriptions_made and subscribers relationships defined in the Subscription model

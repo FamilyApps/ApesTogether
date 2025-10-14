@@ -17,22 +17,22 @@ def upgrade(db):
     """Add portfolio_slug and deleted_at columns, generate slugs for existing users"""
     with db.engine.connect() as conn:
         with conn.begin():
-            # Add portfolio_slug column
+            # Add portfolio_slug column (quote "user" - it's a PostgreSQL reserved keyword)
             conn.execute(text("""
-                ALTER TABLE user 
+                ALTER TABLE "user" 
                 ADD COLUMN portfolio_slug VARCHAR(20) UNIQUE
             """))
             
             # Add deleted_at column
             conn.execute(text("""
-                ALTER TABLE user 
-                ADD COLUMN deleted_at DATETIME
+                ALTER TABLE "user" 
+                ADD COLUMN deleted_at TIMESTAMP
             """))
             
             print("✓ Added portfolio_slug and deleted_at columns to user table")
             
             # Generate slugs for existing users
-            users = conn.execute(text("SELECT id FROM user WHERE portfolio_slug IS NULL")).fetchall()
+            users = conn.execute(text('SELECT id FROM "user" WHERE portfolio_slug IS NULL')).fetchall()
             
             for user in users:
                 user_id = user[0]
@@ -41,7 +41,7 @@ def upgrade(db):
                     slug = generate_slug()
                     # Check if slug already exists
                     existing = conn.execute(text(
-                        "SELECT id FROM user WHERE portfolio_slug = :slug"
+                        'SELECT id FROM "user" WHERE portfolio_slug = :slug'
                     ), {'slug': slug}).fetchone()
                     
                     if not existing:
@@ -49,7 +49,7 @@ def upgrade(db):
                 
                 # Update user with slug
                 conn.execute(text(
-                    "UPDATE user SET portfolio_slug = :slug WHERE id = :user_id"
+                    'UPDATE "user" SET portfolio_slug = :slug WHERE id = :user_id'
                 ), {'slug': slug, 'user_id': user_id})
                 
                 print(f"✓ Generated slug for user {user_id}: {slug}")
@@ -60,6 +60,6 @@ def downgrade(db):
     """Remove portfolio_slug and deleted_at columns"""
     with db.engine.connect() as conn:
         with conn.begin():
-            conn.execute(text("ALTER TABLE user DROP COLUMN portfolio_slug"))
-            conn.execute(text("ALTER TABLE user DROP COLUMN deleted_at"))
+            conn.execute(text('ALTER TABLE "user" DROP COLUMN portfolio_slug'))
+            conn.execute(text('ALTER TABLE "user" DROP COLUMN deleted_at'))
             print("✓ Removed portfolio_slug and deleted_at columns from user table")
