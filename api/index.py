@@ -132,10 +132,7 @@ def is_market_holiday(check_date=None):
         date(year, 12, 25), # Christmas
     ]
     
-    # MLK Day - 3rd Monday in January
-    jan_1 = date(year, 1, 1)
-    mlk_day = jan_1 + timedelta(days=(7 - jan_1.weekday() + 14))  # 3rd Monday
-    holidays.append(mlk_day)
+    # NOTE: MLK Day is NOT a market holiday - NYSE/NASDAQ are open
     
     # Presidents Day - 3rd Monday in February
     feb_1 = date(year, 2, 1)
