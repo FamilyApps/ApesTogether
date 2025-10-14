@@ -25,12 +25,6 @@ class User(UserMixin, db.Model):
     # Cash tracking (NEW)
     max_cash_deployed = db.Column(db.Float, default=0.0, nullable=False)  # Cumulative capital deployed
     cash_proceeds = db.Column(db.Float, default=0.0, nullable=False)  # Uninvested cash from sales
-    
-    # Public portfolio URL (NEW - GDPR/sharing feature)
-    portfolio_slug = db.Column(db.String(20), unique=True, nullable=True)  # Unique URL slug (e.g., 'V1StGXR8_Z5')
-    
-    # GDPR compliance (NEW)
-    deleted_at = db.Column(db.DateTime, nullable=True)  # Soft delete timestamp for 30-day retention
 
 class Stock(db.Model):
     id = db.Column(db.Integer, primary_key=True)
