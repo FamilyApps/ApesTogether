@@ -177,10 +177,7 @@ def is_market_holiday(check_date=None):
     thanksgiving = nov_1 + timedelta(days=(3 - nov_1.weekday() + 21) % 7 + 21)
     holidays.append(thanksgiving)
     
-    # Columbus Day (Indigenous Peoples' Day) - 2nd Monday in October
-    oct_1 = date(year, 10, 1)
-    columbus_day = oct_1 + timedelta(days=(7 - oct_1.weekday() + 7) % 7 + 7)
-    holidays.append(columbus_day)
+    # NOTE: Columbus Day is NOT a market holiday - NYSE/NASDAQ are open
     
     # Observed holidays (if holiday falls on weekend, observe on Friday/Monday)
     for holiday in list(holidays):
