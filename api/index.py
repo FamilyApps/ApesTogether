@@ -3370,6 +3370,118 @@ def cleanup_bogus_snapshots():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/diagnose-missing-recent/<username>/<period>')
+@login_required
+def diagnose_missing_recent(username, period):
+    """COMPREHENSIVE diagnostic: Why are recent snapshots missing from charts?"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        flash('Admin access required', 'danger')
+        return redirect(url_for('login'))
+    
+    try:
+        from models import User, PortfolioSnapshot, MarketData
+        from datetime import date, timedelta
+        
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        today = get_market_date()
+        
+        # Get last 10 business days
+        date_range = []
+        check_date = today
+        while len(date_range) < 10:
+            date_range.append(check_date)
+            check_date -= timedelta(days=1)
+        
+        results = {
+            'today': today.isoformat(),
+            'today_weekday': today.strftime('%A'),
+            'last_10_days': []
+        }
+        
+        for d in date_range:
+            # Check portfolio snapshot
+            portfolio_snap = PortfolioSnapshot.query.filter_by(
+                user_id=user.id,
+                date=d
+            ).first()
+            
+            # Check S&P 500 data
+            sp500_snap = MarketData.query.filter_by(
+                ticker='SPY_SP500',
+                date=d
+            ).first()
+            
+            day_info = {
+                'date': d.isoformat(),
+                'weekday': d.strftime('%A'),
+                'is_weekend': d.weekday() >= 5,
+                'has_portfolio_snapshot': portfolio_snap is not None,
+                'portfolio_value': float(portfolio_snap.total_value) if portfolio_snap else None,
+                'has_sp500_data': sp500_snap is not None,
+                'sp500_close': float(sp500_snap.close) if sp500_snap else None,
+                'VERDICT': 'OK' if portfolio_snap and sp500_snap else 'MISSING'
+            }
+            
+            if not portfolio_snap and d.weekday() < 5:
+                day_info['PROBLEM'] = 'Missing portfolio snapshot on weekday!'
+            if not sp500_snap and d.weekday() < 5:
+                day_info['PROBLEM'] = 'Missing S&P 500 data on weekday!'
+            
+            results['last_10_days'].append(day_info)
+        
+        # Now check what sampling logic would do
+        period_upper = period.upper()
+        if period_upper == '1Y':
+            start_date = today - timedelta(days=365)
+        elif period_upper == 'YTD':
+            start_date = date(today.year, 1, 1)
+        elif period_upper == '3M':
+            start_date = today - timedelta(days=90)
+        elif period_upper == '1M':
+            start_date = today - timedelta(days=30)
+        else:
+            start_date = today - timedelta(days=30)
+        
+        # Get all snapshots for period
+        all_snapshots = PortfolioSnapshot.query.filter(
+            PortfolioSnapshot.user_id == user.id,
+            PortfolioSnapshot.date >= start_date,
+            PortfolioSnapshot.date <= today
+        ).order_by(PortfolioSnapshot.date.desc()).limit(10).all()
+        
+        results['period_check'] = {
+            'period': period_upper,
+            'start_date': start_date.isoformat(),
+            'end_date': today.isoformat(),
+            'total_snapshots': len(all_snapshots),
+            'most_recent_10': [
+                {
+                    'date': s.date.isoformat(),
+                    'value': float(s.total_value),
+                    'weekday': s.date.strftime('%A')
+                }
+                for s in all_snapshots
+            ]
+        }
+        
+        return jsonify({
+            'success': True,
+            'user': username,
+            'results': results
+        })
+    
+    except Exception as e:
+        logger.error(f"Missing recent diagnostic error: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/trace-chart-sampling/<username>/<period>')
 @login_required
 def trace_chart_sampling(username, period):
