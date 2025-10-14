@@ -3806,6 +3806,82 @@ def regenerate_chart_cache():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/check-cron-health')
+@login_required
+def check_cron_health():
+    """Check if market-close cron is running and collecting S&P 500 data"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import MarketData, PortfolioSnapshot, User
+        from datetime import timedelta
+        
+        today_et = get_market_date()
+        results = {
+            'today': today_et.isoformat(),
+            'cron_schedule': '0 20 * * 1-5 (4:00 PM ET daily)',
+            'last_10_weekdays': []
+        }
+        
+        # Check last 10 weekdays for S&P 500 data collection
+        check_date = today_et
+        days_checked = 0
+        
+        while days_checked < 10:
+            if check_date.weekday() < 5:  # Weekday
+                # Check S&P 500 data
+                sp500_data = MarketData.query.filter_by(
+                    ticker='SPY_SP500',
+                    date=check_date
+                ).first()
+                
+                # Check portfolio snapshots (at least one user should have a snapshot)
+                snapshot_count = PortfolioSnapshot.query.filter_by(date=check_date).count()
+                
+                day_result = {
+                    'date': check_date.isoformat(),
+                    'weekday': check_date.strftime('%A'),
+                    'has_sp500_data': sp500_data is not None,
+                    'sp500_value': float(sp500_data.close_price) if sp500_data else None,
+                    'portfolio_snapshots': snapshot_count,
+                    'status': 'OK' if sp500_data and snapshot_count > 0 else 'FAILED'
+                }
+                
+                if not sp500_data:
+                    day_result['issue'] = 'Missing S&P 500 data - cron may have failed'
+                if snapshot_count == 0:
+                    day_result['issue'] = 'Missing portfolio snapshots - cron may have failed'
+                
+                results['last_10_weekdays'].append(day_result)
+                days_checked += 1
+            
+            check_date -= timedelta(days=1)
+        
+        # Count failures
+        failures = [d for d in results['last_10_weekdays'] if d['status'] == 'FAILED']
+        results['failure_count'] = len(failures)
+        results['success_rate'] = f"{((10 - len(failures)) / 10) * 100}%"
+        
+        if failures:
+            results['DIAGNOSIS'] = f"Cron failing {len(failures)}/10 days - investigate AlphaVantage API or cron execution"
+        else:
+            results['DIAGNOSIS'] = "All crons successful"
+        
+        return jsonify({
+            'success': True,
+            'results': results
+        })
+    
+    except Exception as e:
+        logger.error(f"Cron health check error: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/backfill-sp500/<date_str>')
 @login_required
 def backfill_sp500_for_date(date_str):
