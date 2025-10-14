@@ -3370,6 +3370,128 @@ def cleanup_bogus_snapshots():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/trace-chart-sampling/<username>/<period>')
+@login_required
+def trace_chart_sampling(username, period):
+    """COMPREHENSIVE diagnostic: Trace EXACT sampling logic to find where 6/19 gets filtered"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        flash('Admin access required', 'danger')
+        return redirect(url_for('login'))
+    
+    try:
+        from models import User, PortfolioSnapshot, MarketData
+        from portfolio_performance import PortfolioPerformanceCalculator
+        from datetime import date, timedelta
+        
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        period_upper = period.upper()
+        
+        # Get date range (mirror live calculation logic)
+        today = get_market_date()
+        if today.weekday() == 5:  # Saturday
+            end_date = today - timedelta(days=1)
+        elif today.weekday() == 6:  # Sunday
+            end_date = today - timedelta(days=2)
+        else:
+            end_date = today
+        
+        if period_upper == 'YTD':
+            start_date = date(end_date.year, 1, 1)
+        elif period_upper == '1Y':
+            start_date = end_date - timedelta(days=365)
+        elif period_upper == '3M':
+            start_date = end_date - timedelta(days=90)
+        elif period_upper == '1M':
+            start_date = end_date - timedelta(days=30)
+        else:
+            start_date = end_date - timedelta(days=30)
+        
+        # STEP 1: All portfolio snapshots in DB
+        all_snapshots = PortfolioSnapshot.query.filter(
+            PortfolioSnapshot.user_id == user.id,
+            PortfolioSnapshot.date >= start_date,
+            PortfolioSnapshot.date <= end_date
+        ).order_by(PortfolioSnapshot.date.asc()).all()
+        
+        snapshot_dates = [s.date.isoformat() for s in all_snapshots]
+        
+        # STEP 2: All S&P 500 data available
+        sp500_records = MarketData.query.filter(
+            MarketData.ticker == 'SPY_SP500',
+            MarketData.date >= start_date,
+            MarketData.date <= end_date
+        ).order_by(MarketData.date.asc()).all()
+        
+        sp500_dates = [r.date.isoformat() for r in sp500_records]
+        
+        # STEP 3: Check if 6/19 exists in both
+        june_19 = date(2025, 6, 19)
+        has_snapshot_619 = any(s.date == june_19 for s in all_snapshots)
+        has_sp500_619 = any(r.date == june_19 for r in sp500_records)
+        
+        # STEP 4: Run actual live calculation
+        calculator = PortfolioPerformanceCalculator()
+        live_data = calculator.get_performance_data(user.id, period_upper)
+        
+        # STEP 5: Extract what actually got rendered
+        chart_data = live_data.get('chart_data', [])
+        rendered_dates = [point['date'] for point in chart_data]
+        
+        results = {
+            'period': period_upper,
+            'date_range': {
+                'start': start_date.isoformat(),
+                'end': end_date.isoformat()
+            },
+            'step1_all_snapshots': {
+                'count': len(all_snapshots),
+                'dates': snapshot_dates,
+                'first': snapshot_dates[0] if snapshot_dates else None,
+                'last': snapshot_dates[-1] if snapshot_dates else None
+            },
+            'step2_all_sp500_data': {
+                'count': len(sp500_records),
+                'dates': sp500_dates,
+                'first': sp500_dates[0] if sp500_dates else None,
+                'last': sp500_dates[-1] if sp500_dates else None
+            },
+            'step3_june_19_check': {
+                'has_portfolio_snapshot': has_snapshot_619,
+                'has_sp500_data': has_sp500_619,
+                'VERDICT': 'BOTH EXIST' if (has_snapshot_619 and has_sp500_619) else 'MISSING DATA'
+            },
+            'step4_rendered_chart': {
+                'count': len(chart_data),
+                'dates': rendered_dates,
+                'first': rendered_dates[0] if rendered_dates else None,
+                'last': rendered_dates[-1] if rendered_dates else None,
+                'first_5_points': chart_data[:5]
+            },
+            'SMOKING_GUN': {
+                'june_19_in_database': has_snapshot_619 and has_sp500_619,
+                'june_19_in_rendered_chart': 'Jun 19' in rendered_dates,
+                'PROBLEM': 'Data exists but not rendered!' if (has_snapshot_619 and has_sp500_619 and 'Jun 19' not in rendered_dates) else 'Check data availability'
+            }
+        }
+        
+        return jsonify({
+            'success': True,
+            'user': username,
+            'results': results
+        })
+    
+    except Exception as e:
+        logger.error(f"Trace sampling error: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/debug-live-calculation/<username>/<period>')
 @login_required
 def debug_live_calculation(username, period):
