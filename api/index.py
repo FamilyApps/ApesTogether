@@ -27,6 +27,8 @@ from flask_session import Session
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
 from authlib.integrations.flask_client import OAuth
+import secrets
+import string
 
 # Load environment variables
 load_dotenv()
@@ -70,6 +72,11 @@ def get_market_time():
 def get_market_date():
     """Get current date in Eastern Time"""
     return get_market_time().date()
+
+def generate_portfolio_slug():
+    """Generate a URL-safe unique slug for portfolio sharing (11 chars, like nanoid)"""
+    alphabet = string.ascii_letters + string.digits  # a-z, A-Z, 0-9
+    return ''.join(secrets.choice(alphabet) for _ in range(11))
 
 def is_market_hours(dt=None):
     """
@@ -3421,7 +3428,7 @@ def diagnose_missing_recent(username, period):
                 'has_portfolio_snapshot': portfolio_snap is not None,
                 'portfolio_value': float(portfolio_snap.total_value) if portfolio_snap else None,
                 'has_sp500_data': sp500_snap is not None,
-                'sp500_close': float(sp500_snap.close) if sp500_snap else None,
+                'sp500_close': float(sp500_snap.close_price) if sp500_snap else None,
                 'VERDICT': 'OK' if portfolio_snap and sp500_snap else 'MISSING'
             }
             
