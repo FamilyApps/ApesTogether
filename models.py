@@ -22,9 +22,13 @@ class User(UserMixin, db.Model):
     subscription_price = db.Column(db.Float, nullable=True)
     stripe_customer_id = db.Column(db.String(255), nullable=True)
     
-    # Cash tracking (NEW)
+    # Cash tracking
     max_cash_deployed = db.Column(db.Float, default=0.0, nullable=False)  # Cumulative capital deployed
     cash_proceeds = db.Column(db.Float, default=0.0, nullable=False)  # Uninvested cash from sales
+    
+    # Portfolio sharing & GDPR
+    portfolio_slug = db.Column(db.String(20), unique=True, nullable=True)  # Unique URL slug for public sharing
+    deleted_at = db.Column(db.DateTime, nullable=True)  # GDPR soft-delete timestamp
 
 class Stock(db.Model):
     id = db.Column(db.Integer, primary_key=True)

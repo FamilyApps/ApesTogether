@@ -19717,6 +19717,167 @@ def debug_all_routes():
         'timestamp': datetime.now().isoformat()
     })
 
+# =============================================================================
+# PHASE 2: PORTFOLIO SHARING & GDPR
+# =============================================================================
+
+@app.route('/admin/run-portfolio-slug-migration')
+@login_required
+def run_portfolio_slug_migration():
+    """Run migration to add portfolio_slug and deleted_at to User model"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        import sys
+        import os
+        # Add migrations directory to path  
+        migrations_dir = os.path.join(os.path.dirname(__file__), '..', 'migrations')
+        if migrations_dir not in sys.path:
+            sys.path.insert(0, migrations_dir)
+        
+        # Import with filename as module (Python will convert hyphens)
+        import importlib.util
+        migration_file = os.path.join(migrations_dir, '20251014_add_portfolio_slug_and_gdpr.py')
+        spec = importlib.util.spec_from_file_location("migration_module", migration_file)
+        migration_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(migration_module)
+        
+        migration_module.upgrade(db)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Migration completed successfully',
+            'details': 'Added portfolio_slug and deleted_at columns, generated slugs for existing users'
+        })
+    
+    except Exception as e:
+        logger.error(f"Migration error: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/p/<slug>')
+def public_portfolio_view(slug):
+    """Public portfolio view - accessible without login"""
+    try:
+        from models import User, PortfolioSnapshot
+        from portfolio_performance import PortfolioPerformanceCalculator
+        
+        # Find user by portfolio slug
+        user = User.query.filter_by(portfolio_slug=slug).first()
+        
+        if not user:
+            return render_template('404.html', message='Portfolio not found'), 404
+        
+        # Check if user account is deleted (GDPR)
+        if user.deleted_at:
+            return render_template('404.html', message='This portfolio is no longer available'), 404
+        
+        # Get current portfolio value
+        calculator = PortfolioPerformanceCalculator()
+        current_value = calculator.calculate_portfolio_value(user.id)
+        
+        # Get latest snapshot for comparison
+        latest_snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id).order_by(
+            PortfolioSnapshot.date.desc()
+        ).first()
+        
+        # Calculate performance
+        if latest_snapshot:
+            day_change = current_value - latest_snapshot.total_value
+            day_change_pct = (day_change / latest_snapshot.total_value * 100) if latest_snapshot.total_value > 0 else 0
+        else:
+            day_change = 0
+            day_change_pct = 0
+        
+        return render_template('public_portfolio.html',
+            username=user.username,
+            current_value=current_value,
+            day_change=day_change,
+            day_change_pct=day_change_pct,
+            slug=slug
+        )
+    
+    except Exception as e:
+        logger.error(f"Public portfolio view error: {str(e)}")
+        return render_template('500.html', error=str(e)), 500
+
+@app.route('/settings/portfolio-sharing')
+@login_required
+def portfolio_sharing_settings():
+    """Settings page for portfolio sharing"""
+    try:
+        # Generate slug if user doesn't have one
+        if not current_user.portfolio_slug:
+            current_user.portfolio_slug = generate_portfolio_slug()
+            db.session.commit()
+        
+        share_url = f"https://apestogether.ai/p/{current_user.portfolio_slug}"
+        
+        return render_template('portfolio_sharing_settings.html',
+            share_url=share_url,
+            slug=current_user.portfolio_slug
+        )
+    
+    except Exception as e:
+        logger.error(f"Portfolio sharing settings error: {str(e)}")
+        flash('Error loading portfolio sharing settings', 'danger')
+        return redirect(url_for('index'))
+
+@app.route('/settings/regenerate-portfolio-slug', methods=['POST'])
+@login_required
+def regenerate_portfolio_slug():
+    """Regenerate portfolio slug (invalidates old share links)"""
+    try:
+        current_user.portfolio_slug = generate_portfolio_slug()
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'new_slug': current_user.portfolio_slug,
+            'new_url': f"https://apestogether.ai/p/{current_user.portfolio_slug}"
+        })
+    
+    except Exception as e:
+        logger.error(f"Regenerate slug error: {str(e)}")
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/settings/gdpr')
+@login_required
+def gdpr_settings():
+    """GDPR settings page - account deletion"""
+    return render_template('gdpr_settings.html')
+
+@app.route('/settings/delete-account', methods=['POST'])
+@login_required
+def delete_account():
+    """GDPR-compliant account deletion - soft delete with 30-day grace period"""
+    try:
+        # Soft delete - mark account as deleted
+        current_user.deleted_at = datetime.utcnow()
+        db.session.commit()
+        
+        # Log out user
+        from flask_login import logout_user
+        logout_user()
+        
+        flash('Your account has been scheduled for deletion. You have 30 days to cancel by logging in again.', 'info')
+        return redirect(url_for('index'))
+    
+    except Exception as e:
+        logger.error(f"Account deletion error: {str(e)}")
+        db.session.rollback()
+        flash('Error deleting account. Please try again.', 'danger')
+        return redirect(url_for('gdpr_settings'))
+
 if __name__ == '__main__':
     # Log app startup with structured information
     logger.info("App starting", extra={

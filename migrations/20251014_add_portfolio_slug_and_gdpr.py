@@ -1,20 +1,19 @@
 """
-Migration: Add portfolio_slug and deleted_at to User model
+Migration: Add portfolio_slug and deleted_at to User model  
 Date: 2025-10-14
 Purpose: Enable unique shareable URLs and GDPR-compliant account deletion
 """
 
-from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import text
 import secrets
 import string
+from sqlalchemy import text
 
 def generate_slug():
     """Generate a URL-safe unique slug (11 chars, like nanoid)"""
     alphabet = string.ascii_letters + string.digits  # a-z, A-Z, 0-9
     return ''.join(secrets.choice(alphabet) for _ in range(11))
 
-def upgrade(db: SQLAlchemy):
+def upgrade(db):
     """Add portfolio_slug and deleted_at columns, generate slugs for existing users"""
     with db.engine.connect() as conn:
         with conn.begin():
@@ -57,7 +56,7 @@ def upgrade(db: SQLAlchemy):
             
             print(f"✓ Migration complete: {len(users)} users updated with portfolio slugs")
 
-def downgrade(db: SQLAlchemy):
+def downgrade(db):
     """Remove portfolio_slug and deleted_at columns"""
     with db.engine.connect() as conn:
         with conn.begin():
