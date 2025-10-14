@@ -108,6 +108,89 @@ def is_market_hours(dt=None):
     
     return market_open <= dt <= market_close
 
+def is_market_holiday(check_date=None):
+    """
+    Check if a given date is a US market holiday (NYSE/NASDAQ closed)
+    
+    Args:
+        check_date: date object to check. If None, uses current ET date.
+    
+    Returns:
+        bool: True if market is closed for a holiday
+    """
+    if check_date is None:
+        check_date = get_market_date()
+    
+    year = check_date.year
+    month = check_date.month
+    day = check_date.day
+    
+    # Fixed holidays
+    holidays = [
+        date(year, 1, 1),   # New Year's Day
+        date(year, 7, 4),   # Independence Day
+        date(year, 12, 25), # Christmas
+    ]
+    
+    # MLK Day - 3rd Monday in January
+    jan_1 = date(year, 1, 1)
+    mlk_day = jan_1 + timedelta(days=(7 - jan_1.weekday() + 14))  # 3rd Monday
+    holidays.append(mlk_day)
+    
+    # Presidents Day - 3rd Monday in February
+    feb_1 = date(year, 2, 1)
+    presidents_day = feb_1 + timedelta(days=(7 - feb_1.weekday() + 14))  # 3rd Monday
+    holidays.append(presidents_day)
+    
+    # Good Friday - Friday before Easter (complex calculation)
+    # Simplified: Use a lookup table for common years
+    good_fridays = {
+        2024: date(2024, 3, 29),
+        2025: date(2025, 4, 18),
+        2026: date(2026, 4, 3),
+        2027: date(2027, 3, 26),
+        2028: date(2028, 4, 14),
+    }
+    if year in good_fridays:
+        holidays.append(good_fridays[year])
+    
+    # Memorial Day - Last Monday in May
+    may_31 = date(year, 5, 31)
+    memorial_day = may_31 - timedelta(days=(may_31.weekday() + 7) % 7)
+    holidays.append(memorial_day)
+    
+    # Juneteenth - June 19 (observed if weekend)
+    juneteenth = date(year, 6, 19)
+    if juneteenth.weekday() == 5:  # Saturday
+        juneteenth = date(year, 6, 18)
+    elif juneteenth.weekday() == 6:  # Sunday
+        juneteenth = date(year, 6, 20)
+    holidays.append(juneteenth)
+    
+    # Labor Day - 1st Monday in September
+    sep_1 = date(year, 9, 1)
+    labor_day = sep_1 + timedelta(days=(7 - sep_1.weekday()) % 7)
+    holidays.append(labor_day)
+    
+    # Thanksgiving - 4th Thursday in November
+    nov_1 = date(year, 11, 1)
+    thanksgiving = nov_1 + timedelta(days=(3 - nov_1.weekday() + 21) % 7 + 21)
+    holidays.append(thanksgiving)
+    
+    # Columbus Day (Indigenous Peoples' Day) - 2nd Monday in October
+    oct_1 = date(year, 10, 1)
+    columbus_day = oct_1 + timedelta(days=(7 - oct_1.weekday() + 7) % 7 + 7)
+    holidays.append(columbus_day)
+    
+    # Observed holidays (if holiday falls on weekend, observe on Friday/Monday)
+    for holiday in list(holidays):
+        if holiday.weekday() == 5:  # Saturday -> observe Friday
+            holidays.append(holiday - timedelta(days=1))
+        elif holiday.weekday() == 6:  # Sunday -> observe Monday
+            holidays.append(holiday + timedelta(days=1))
+    
+    return check_date in holidays
+
 # =============================================================================
 
 # Initialize Flask app
@@ -13820,6 +13903,17 @@ def market_close_cron():
         # Use Eastern Time for market operations
         current_time = get_market_time()
         today_et = current_time.date()
+        
+        # CHECK: Skip if market holiday (NYSE/NASDAQ closed)
+        if is_market_holiday(today_et):
+            logger.info(f"Market closed for holiday on {today_et} - skipping market close pipeline")
+            return jsonify({
+                'success': True,
+                'skipped': True,
+                'reason': 'market_holiday',
+                'date': today_et.isoformat(),
+                'message': f'Market closed for holiday on {today_et}'
+            }), 200
         
         results = {
             'timestamp': current_time.isoformat(),
