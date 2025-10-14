@@ -3896,18 +3896,17 @@ def backfill_sp500_for_date(date_str):
         
         target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
         
-        # Get SPY price for that date
+        # Get HISTORICAL SPY price for that specific date
         calculator = PortfolioPerformanceCalculator()
-        spy_data = calculator.get_stock_data('SPY')
+        spy_price = calculator.get_historical_price('SPY', target_date, force_fetch=True)
         
-        if not spy_data or not spy_data.get('price'):
+        if not spy_price:
             return jsonify({
                 'success': False,
-                'error': 'Failed to fetch SPY data from AlphaVantage',
+                'error': f'Failed to fetch historical SPY data for {date_str}',
                 'date': date_str
             }), 500
         
-        spy_price = spy_data['price']
         sp500_value = spy_price * 10  # Convert SPY to S&P 500 approximation
         
         # Check if entry exists
