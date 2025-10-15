@@ -83,6 +83,18 @@
                         </button>
                     </div>
                 </div>
+                
+                <div class="alert alert-info mb-3">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <i class="fas fa-bell me-2"></i>
+                            <strong>Trade Notifications:</strong> You will be notified when {{ username }} makes a trade
+                        </div>
+                        <button class="btn btn-sm btn-outline-primary" onclick="window.location.href='/notification-preferences?portfolio_owner={{ portfolio_owner_id }}'">
+                            <i class="fas fa-cog me-1"></i>Notification Settings
+                        </button>
+                    </div>
+                </div>
                 <div class="card shadow-sm mb-4">
                     <div class="card-header bg-success text-white">
                         <div class="d-flex justify-content-between align-items-center">
@@ -224,6 +236,15 @@
                     </ul>
                 </div>
                 
+                <!-- Quick Pay Options (Apple Pay / Google Pay) -->
+                <div id="payment-request-button" class="mb-3">
+                    <!-- Payment Request Button will be inserted here -->
+                </div>
+                
+                <div class="text-center my-3">
+                    <span class="text-muted">or pay with card</span>
+                </div>
+                
                 <div class="card-element-container mb-3">
                     <label class="form-label">Card Information</label>
                     <div id="card-element" class="form-control" style="height: auto; padding: 12px;"></div>
@@ -322,6 +343,7 @@
         let stripe, card, cardElement;
         
         // Initialize Stripe
+        let paymentRequest;
         if (isLoggedIn) {
             stripe = Stripe('{{ stripe_public_key }}');
         }
@@ -353,6 +375,71 @@
                     }
                 });
                 cardElement.mount('#card-element');
+                
+                // Initialize Payment Request Button (Apple Pay / Google Pay)
+                paymentRequest = stripe.paymentRequest({
+                    country: 'US',
+                    currency: 'usd',
+                    total: {
+                        label: `Subscribe to ${username}'s Portfolio`,
+                        amount: Math.round(subscriptionPrice * 100), // Amount in cents
+                    },
+                    requestPayerName: true,
+                    requestPayerEmail: true,
+                });
+                
+                // Check if Payment Request is available
+                paymentRequest.canMakePayment().then(function(result) {
+                    if (result) {
+                        const prButton = elements.create('paymentRequestButton', {
+                            paymentRequest: paymentRequest,
+                        });
+                        prButton.mount('#payment-request-button');
+                        document.getElementById('payment-request-button').style.display = 'block';
+                    } else {
+                        document.getElementById('payment-request-button').style.display = 'none';
+                    }
+                });
+                
+                // Handle Payment Request completion
+                paymentRequest.on('paymentmethod', async function(ev) {
+                    try {
+                        const response = await fetch('/create-subscription', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                payment_method_id: ev.paymentMethod.id,
+                                portfolio_owner_id: portfolioOwnerId
+                            })
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (data.error) {
+                            ev.complete('fail');
+                            alert('Error: ' + data.error);
+                            return;
+                        }
+                        
+                        // Handle SCA if needed
+                        if (data.requiresAction) {
+                            const {error: confirmError} = await stripe.confirmCardPayment(data.clientSecret);
+                            if (confirmError) {
+                                ev.complete('fail');
+                                alert('Error: ' + confirmError.message);
+                                return;
+                            }
+                        }
+                        
+                        ev.complete('success');
+                        window.location.reload();
+                        
+                    } catch (error) {
+                        console.error('Error:', error);
+                        ev.complete('fail');
+                        alert('Payment failed. Please try again.');
+                    }
+                });
             }
         }
         
