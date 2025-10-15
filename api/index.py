@@ -19822,11 +19822,25 @@ def public_portfolio_view(slug):
         user = User.query.filter_by(portfolio_slug=slug).first()
         
         if not user:
-            return render_template('404.html', message='Portfolio not found'), 404
+            return """
+            <html><head><title>Portfolio Not Found</title></head>
+            <body style="font-family: Arial; text-align: center; padding: 50px;">
+                <h1>Portfolio Not Found</h1>
+                <p>The portfolio you're looking for doesn't exist.</p>
+                <p><a href="/">Return to Home</a></p>
+            </body></html>
+            """, 404
         
         # Check if user account is deleted (GDPR)
         if user.deleted_at:
-            return render_template('404.html', message='This portfolio is no longer available'), 404
+            return """
+            <html><head><title>Portfolio Not Available</title></head>
+            <body style="font-family: Arial; text-align: center; padding: 50px;">
+                <h1>Portfolio Not Available</h1>
+                <p>This portfolio is no longer available.</p>
+                <p><a href="/">Return to Home</a></p>
+            </body></html>
+            """, 404
         
         # Check if current user is a subscriber
         is_subscriber = False
@@ -19905,7 +19919,17 @@ def public_portfolio_view(slug):
     
     except Exception as e:
         logger.error(f"Public portfolio view error: {str(e)}")
-        return render_template('500.html', error=str(e)), 500
+        import traceback
+        traceback.print_exc()
+        return f"""
+        <html><head><title>Error</title></head>
+        <body style="font-family: Arial; text-align: center; padding: 50px;">
+            <h1>Something Went Wrong</h1>
+            <p>We encountered an error loading this portfolio.</p>
+            <p><a href="/">Return to Home</a></p>
+            <p style="color: #666; font-size: 12px;">Error: {str(e)}</p>
+        </body></html>
+        """, 500
 
 @app.route('/settings/portfolio-sharing')
 @login_required
