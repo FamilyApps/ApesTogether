@@ -19918,6 +19918,72 @@ def regenerate_portfolio_slug():
             'error': str(e)
         }), 500
 
+@app.route('/create-subscription-checkout', methods=['POST'])
+@login_required
+def create_subscription_checkout():
+    """Create Stripe checkout session for subscribing to a portfolio owner"""
+    try:
+        data = request.get_json()
+        portfolio_owner_id = data.get('portfolio_owner_id')
+        return_url = data.get('return_url', request.host_url)
+        
+        if not portfolio_owner_id:
+            return jsonify({'error': 'Portfolio owner ID required'}), 400
+        
+        # Get the portfolio owner
+        from models import User
+        portfolio_owner = User.query.get(portfolio_owner_id)
+        
+        if not portfolio_owner:
+            return jsonify({'error': 'Portfolio owner not found'}), 404
+        
+        # Check if already subscribed
+        from models import Subscription
+        existing_sub = Subscription.query.filter_by(
+            subscriber_id=current_user.id,
+            subscribed_to_id=portfolio_owner_id,
+            status='active'
+        ).first()
+        
+        if existing_sub:
+            return jsonify({'error': 'Already subscribed to this portfolio'}), 400
+        
+        # Get or create Stripe customer for current user
+        if not current_user.stripe_customer_id:
+            customer = stripe.Customer.create(
+                email=current_user.email,
+                name=current_user.username
+            )
+            current_user.stripe_customer_id = customer.id
+            db.session.commit()
+        
+        # Create Stripe Checkout session
+        checkout_session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[{
+                'price': portfolio_owner.stripe_price_id,
+                'quantity': 1,
+            }],
+            mode='subscription',
+            success_url=return_url + '?subscription=success',
+            cancel_url=return_url + '?subscription=cancelled',
+            customer=current_user.stripe_customer_id,
+            metadata={
+                'subscriber_id': current_user.id,
+                'subscribed_to_id': portfolio_owner_id
+            }
+        )
+        
+        return jsonify({
+            'success': True,
+            'checkout_url': checkout_session.url,
+            'session_id': checkout_session.id
+        })
+    
+    except Exception as e:
+        logger.error(f"Create subscription checkout error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/settings/gdpr')
 @login_required
 def gdpr_settings():
