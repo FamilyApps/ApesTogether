@@ -19744,8 +19744,7 @@ def run_portfolio_slug_migration():
     
     try:
         import sys
-        import os
-        # Add migrations directory to path  
+        # Add migrations directory to path (os is already imported at module level)
         migrations_dir = os.path.join(os.path.dirname(__file__), '..', 'migrations')
         if migrations_dir not in sys.path:
             sys.path.insert(0, migrations_dir)
