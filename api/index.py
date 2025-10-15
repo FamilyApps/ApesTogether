@@ -1415,10 +1415,24 @@ def dashboard():
                         'gain_loss_percent': 'N/A'
                     })
     
+    # Generate portfolio slug if user doesn't have one
+    if current_user.is_authenticated and not current_user.portfolio_slug:
+        try:
+            current_user.portfolio_slug = generate_portfolio_slug()
+            db.session.commit()
+            logger.info(f"Generated portfolio slug for user {current_user.id}")
+        except Exception as e:
+            logger.error(f"Error generating portfolio slug: {str(e)}")
+            db.session.rollback()
+    
+    # Build share URL
+    share_url = f"https://apestogether.ai/p/{current_user.portfolio_slug}" if current_user.is_authenticated and current_user.portfolio_slug else ""
+    
     return render_template_with_defaults('dashboard.html', 
                                        portfolio_data=portfolio_data,
                                        stocks=portfolio_data,  # Template expects 'stocks' variable
                                        total_portfolio_value=total_portfolio_value,
+                                       share_url=share_url,
                                        now=datetime.now())
 
 @app.route('/update_username', methods=['POST'])
