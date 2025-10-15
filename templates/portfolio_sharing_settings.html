@@ -46,39 +46,56 @@
 </div>
 
 <script>
-async function copyToClipboard() {
+function copyToClipboard() {
     const input = document.getElementById('shareUrl');
     const btn = event.target.closest('button');
     const originalHTML = btn.innerHTML;
     
-    try {
-        // Modern clipboard API
-        await navigator.clipboard.writeText(input.value);
-        
-        // Show success feedback
-        btn.innerHTML = '<i class="fas fa-check me-1"></i>Copied!';
-        btn.classList.remove('btn-outline-primary');
-        btn.classList.add('btn-success');
-        
-        setTimeout(() => {
-            btn.innerHTML = originalHTML;
-            btn.classList.remove('btn-success');
-            btn.classList.add('btn-outline-primary');
-        }, 2000);
-    } catch (err) {
-        // Fallback for older browsers
-        input.select();
-        input.setSelectionRange(0, 99999); // For mobile
-        try {
-            document.execCommand('copy');
+    // Select the text
+    input.select();
+    input.setSelectionRange(0, 99999); // For mobile devices
+    
+    // Try modern API first
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(input.value).then(() => {
+            // Success
             btn.innerHTML = '<i class="fas fa-check me-1"></i>Copied!';
+            btn.classList.remove('btn-outline-primary');
             btn.classList.add('btn-success');
+            
             setTimeout(() => {
                 btn.innerHTML = originalHTML;
                 btn.classList.remove('btn-success');
+                btn.classList.add('btn-outline-primary');
             }, 2000);
-        } catch (err2) {
-            alert('Failed to copy link. Please copy manually.');
+        }).catch(err => {
+            // Fallback to execCommand
+            copyWithExecCommand();
+        });
+    } else {
+        // Fallback to execCommand
+        copyWithExecCommand();
+    }
+    
+    function copyWithExecCommand() {
+        try {
+            const successful = document.execCommand('copy');
+            if (successful) {
+                btn.innerHTML = '<i class="fas fa-check me-1"></i>Copied!';
+                btn.classList.remove('btn-outline-primary');
+                btn.classList.add('btn-success');
+                
+                setTimeout(() => {
+                    btn.innerHTML = originalHTML;
+                    btn.classList.remove('btn-success');
+                    btn.classList.add('btn-outline-primary');
+                }, 2000);
+            } else {
+                // Still show the URL is selected so user can Ctrl+C
+                alert('Copy failed. The URL is selected - please press Ctrl+C (Cmd+C on Mac) to copy.');
+            }
+        } catch (err) {
+            alert('Copy failed. The URL is selected - please press Ctrl+C (Cmd+C on Mac) to copy.');
         }
     }
 }

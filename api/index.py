@@ -29,6 +29,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from authlib.integrations.flask_client import OAuth
 import secrets
 import string
+import requests
 
 # Load environment variables
 load_dotenv()
@@ -19966,7 +19967,7 @@ def public_portfolio_view(slug):
             for stock in stocks:
                 # Get current price from API
                 stock_data = get_stock_data(stock.ticker)
-                current_price = stock_data.get('price', stock.purchase_price)
+                current_price = stock_data.get('price', stock.purchase_price) if stock_data else stock.purchase_price
                 value = current_price * stock.quantity
                 gain_loss = value - (stock.purchase_price * stock.quantity)
                 gain_loss_pct = (gain_loss / (stock.purchase_price * stock.quantity) * 100) if stock.purchase_price > 0 else 0
