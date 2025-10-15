@@ -21,19 +21,14 @@
                 <div class="alert alert-info">
                     <i class="fas fa-info-circle me-2"></i>
                     <strong>What's shared:</strong> Your portfolio performance, charts, and returns. 
-                    Your individual holdings and transaction details remain private.
+                    Your individual holdings and transaction details remain private unless someone subscribes.
                 </div>
                 
-                <hr>
-                
-                <h5>Regenerate Link</h5>
-                <p class="text-muted">
-                    Regenerate your share link to invalidate the old one. Anyone with the old link will no longer be able to access your portfolio.
-                </p>
-                
-                <button class="btn btn-warning" onclick="regenerateSlug()">
-                    <i class="fas fa-sync-alt me-1"></i>Regenerate Link
-                </button>
+                <div class="alert alert-warning">
+                    <i class="fas fa-lock me-2"></i>
+                    <strong>Permanent Link:</strong> This link is permanently attached to your account and cannot be changed.
+                    This ensures subscribers always have access to your portfolio.
+                </div>
                 
                 <hr>
                 
@@ -51,49 +46,41 @@
 </div>
 
 <script>
-function copyToClipboard() {
+async function copyToClipboard() {
     const input = document.getElementById('shareUrl');
-    input.select();
-    document.execCommand('copy');
-    
-    // Show feedback
     const btn = event.target.closest('button');
     const originalHTML = btn.innerHTML;
-    btn.innerHTML = '<i class="fas fa-check me-1"></i>Copied!';
-    btn.classList.remove('btn-outline-primary');
-    btn.classList.add('btn-success');
     
-    setTimeout(() => {
-        btn.innerHTML = originalHTML;
-        btn.classList.remove('btn-success');
-        btn.classList.add('btn-outline-primary');
-    }, 2000);
-}
-
-function regenerateSlug() {
-    if (!confirm('Are you sure? This will invalidate your current share link and anyone with the old link will lose access.')) {
-        return;
+    try {
+        // Modern clipboard API
+        await navigator.clipboard.writeText(input.value);
+        
+        // Show success feedback
+        btn.innerHTML = '<i class="fas fa-check me-1"></i>Copied!';
+        btn.classList.remove('btn-outline-primary');
+        btn.classList.add('btn-success');
+        
+        setTimeout(() => {
+            btn.innerHTML = originalHTML;
+            btn.classList.remove('btn-success');
+            btn.classList.add('btn-outline-primary');
+        }, 2000);
+    } catch (err) {
+        // Fallback for older browsers
+        input.select();
+        input.setSelectionRange(0, 99999); // For mobile
+        try {
+            document.execCommand('copy');
+            btn.innerHTML = '<i class="fas fa-check me-1"></i>Copied!';
+            btn.classList.add('btn-success');
+            setTimeout(() => {
+                btn.innerHTML = originalHTML;
+                btn.classList.remove('btn-success');
+            }, 2000);
+        } catch (err2) {
+            alert('Failed to copy link. Please copy manually.');
+        }
     }
-    
-    fetch('/settings/regenerate-portfolio-slug', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        }
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            document.getElementById('shareUrl').value = data.new_url;
-            alert('Share link regenerated successfully!');
-        } else {
-            alert('Error: ' + data.error);
-        }
-    })
-    .catch(error => {
-        alert('Error regenerating link. Please try again.');
-        console.error(error);
-    });
 }
 </script>
 {% endblock %}

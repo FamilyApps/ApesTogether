@@ -19882,6 +19882,21 @@ def public_portfolio_view(slug):
             day_change = 0
             day_change_pct = 0
         
+        # Calculate portfolio statistics
+        from models import Transaction
+        from datetime import timedelta
+        
+        # Number of unique stocks held
+        num_stocks = Stock.query.filter_by(user_id=user.id).count()
+        
+        # Average trades per week (last 30 days)
+        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+        recent_trades = Transaction.query.filter(
+            Transaction.user_id == user.id,
+            Transaction.timestamp >= thirty_days_ago
+        ).count()
+        avg_trades_per_week = round(recent_trades / 4.3, 1)  # 30 days ≈ 4.3 weeks
+        
         # Get holdings if subscriber
         holdings = []
         if is_subscriber:
@@ -19914,6 +19929,8 @@ def public_portfolio_view(slug):
             subscription_price=user.subscription_price or 4.00,
             is_subscriber=is_subscriber,
             holdings=holdings,
+            num_stocks=num_stocks,
+            avg_trades_per_week=avg_trades_per_week,
             stripe_public_key=app.config.get('STRIPE_PUBLIC_KEY', '')
         )
     
