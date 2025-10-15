@@ -19891,6 +19891,33 @@ def delete_account():
         flash('Error deleting account. Please try again.', 'danger')
         return redirect(url_for('gdpr_settings'))
 
+@app.route('/api/public-portfolio/<slug>/performance/<period>')
+def public_portfolio_performance(slug, period):
+    """Get performance data for a public portfolio (no authentication required)"""
+    try:
+        from models import User
+        from portfolio_performance import PortfolioPerformanceCalculator
+        
+        # Find user by portfolio slug
+        user = User.query.filter_by(portfolio_slug=slug).first()
+        
+        if not user:
+            return jsonify({'error': 'Portfolio not found'}), 404
+        
+        # Check if user account is deleted (GDPR)
+        if user.deleted_at:
+            return jsonify({'error': 'Portfolio not available'}), 404
+        
+        # Get performance data using the existing calculator
+        calculator = PortfolioPerformanceCalculator()
+        data = calculator.get_performance_data(user.id, period)
+        
+        return jsonify(data)
+    
+    except Exception as e:
+        logger.error(f"Public portfolio performance error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     # Log app startup with structured information
     logger.info("App starting", extra={

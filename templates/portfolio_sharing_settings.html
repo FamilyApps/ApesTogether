@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8 mx-auto">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white">
+                <h4 class="mb-0"><i class="fas fa-share-alt me-2"></i>Portfolio Sharing</h4>
+            </div>
+            <div class="card-body">
+                <h5>Your Shareable Portfolio Link</h5>
+                <p class="text-muted">Share your portfolio performance with anyone using this link. No login required for viewers.</p>
+                
+                <div class="input-group mb-3">
+                    <input type="text" class="form-control" id="shareUrl" value="{{ share_url }}" readonly>
+                    <button class="btn btn-outline-primary" type="button" onclick="copyToClipboard()">
+                        <i class="fas fa-copy me-1"></i>Copy
+                    </button>
+                </div>
+                
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle me-2"></i>
+                    <strong>What's shared:</strong> Your portfolio performance, charts, and returns. 
+                    Your individual holdings and transaction details remain private.
+                </div>
+                
+                <hr>
+                
+                <h5>Regenerate Link</h5>
+                <p class="text-muted">
+                    Regenerate your share link to invalidate the old one. Anyone with the old link will no longer be able to access your portfolio.
+                </p>
+                
+                <button class="btn btn-warning" onclick="regenerateSlug()">
+                    <i class="fas fa-sync-alt me-1"></i>Regenerate Link
+                </button>
+                
+                <hr>
+                
+                <div class="d-flex justify-content-between">
+                    <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">
+                        <i class="fas fa-arrow-left me-1"></i>Back to Dashboard
+                    </a>
+                    <a href="{{ share_url }}" target="_blank" class="btn btn-primary">
+                        <i class="fas fa-external-link-alt me-1"></i>Preview Public View
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function copyToClipboard() {
+    const input = document.getElementById('shareUrl');
+    input.select();
+    document.execCommand('copy');
+    
+    // Show feedback
+    const btn = event.target.closest('button');
+    const originalHTML = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-check me-1"></i>Copied!';
+    btn.classList.remove('btn-outline-primary');
+    btn.classList.add('btn-success');
+    
+    setTimeout(() => {
+        btn.innerHTML = originalHTML;
+        btn.classList.remove('btn-success');
+        btn.classList.add('btn-outline-primary');
+    }, 2000);
+}
+
+function regenerateSlug() {
+    if (!confirm('Are you sure? This will invalidate your current share link and anyone with the old link will lose access.')) {
+        return;
+    }
+    
+    fetch('/settings/regenerate-portfolio-slug', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('shareUrl').value = data.new_url;
+            alert('Share link regenerated successfully!');
+        } else {
+            alert('Error: ' + data.error);
+        }
+    })
+    .catch(error => {
+        alert('Error regenerating link. Please try again.');
+        console.error(error);
+    });
+}
+</script>
+{% endblock %}

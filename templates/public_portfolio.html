@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ username }}'s Portfolio - ApesTogether</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <meta property="og:title" content="{{ username }}'s Portfolio Performance">
+    <meta property="og:description" content="View {{ username }}'s portfolio performance on ApesTogether">
+    <meta property="og:type" content="website">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <i class="fas fa-chart-line me-2"></i>ApesTogether
+            </a>
+            <div class="ms-auto">
+                <a href="{{ url_for('login') }}" class="btn btn-outline-light btn-sm me-2">Login</a>
+                <a href="{{ url_for('register') }}" class="btn btn-light btn-sm">Sign Up</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-md-10 mx-auto">
+                <!-- Header -->
+                <div class="card shadow-sm mb-4">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h2 class="mb-1">
+                                    <i class="fas fa-user-circle me-2 text-primary"></i>{{ username }}'s Portfolio
+                                </h2>
+                                <p class="text-muted mb-0">Public portfolio view • Updated in real-time</p>
+                            </div>
+                            <div class="text-end">
+                                <h3 class="mb-0">${{ "%.2f"|format(current_value) }}</h3>
+                                <p class="mb-0 {% if day_change >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                    <i class="fas fa-{% if day_change >= 0 %}arrow-up{% else %}arrow-down{% endif %} me-1"></i>
+                                    ${{ "%.2f"|format(day_change|abs) }} ({{ "%.2f"|format(day_change_pct|abs) }}%)
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Performance Chart -->
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header bg-white">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">Performance</h5>
+                            <div class="btn-group btn-group-sm" role="group" id="periodSelector">
+                                <button type="button" class="btn btn-outline-primary active" data-period="1D">1D</button>
+                                <button type="button" class="btn btn-outline-primary" data-period="5D">5D</button>
+                                <button type="button" class="btn btn-outline-primary" data-period="1M">1M</button>
+                                <button type="button" class="btn btn-outline-primary" data-period="3M">3M</button>
+                                <button type="button" class="btn btn-outline-primary" data-period="YTD">YTD</button>
+                                <button type="button" class="btn btn-outline-primary" data-period="1Y">1Y</button>
+                                <button type="button" class="btn btn-outline-primary" data-period="MAX">MAX</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="performanceChart" height="80"></canvas>
+                    </div>
+                </div>
+
+                <!-- Call to Action -->
+                <div class="card shadow-sm bg-light">
+                    <div class="card-body text-center py-4">
+                        <h4 class="mb-3">Track Your Own Portfolio</h4>
+                        <p class="text-muted mb-4">
+                            Join ApesTogether to track your investments, compete on leaderboards, and share your performance.
+                        </p>
+                        <a href="{{ url_for('register') }}" class="btn btn-primary btn-lg me-2">
+                            <i class="fas fa-rocket me-2"></i>Get Started Free
+                        </a>
+                        <a href="{{ url_for('leaderboard.leaderboard_home') }}" class="btn btn-outline-primary btn-lg">
+                            <i class="fas fa-trophy me-2"></i>View Leaderboard
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="mt-5 py-3 bg-light text-center">
+        <div class="container">
+            <p class="mb-0">&copy; 2025 ApesTogether. All rights reserved.</p>
+            <p class="mb-0 mt-2">
+                <a href="{{ url_for('terms_of_service') }}" class="text-muted text-decoration-none me-3">Terms of Service</a>
+                <a href="{{ url_for('privacy_policy') }}" class="text-muted text-decoration-none">Privacy Policy</a>
+            </p>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    
+    <script>
+        let chart = null;
+        const username = '{{ username }}';
+        const slug = '{{ slug }}';
+        
+        // Period selector
+        document.querySelectorAll('#periodSelector button').forEach(btn => {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('#periodSelector button').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                loadChart(this.dataset.period);
+            });
+        });
+        
+        // Load chart data
+        function loadChart(period) {
+            fetch(`/api/public-portfolio/${slug}/performance/${period}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        console.error('Error loading chart:', data.error);
+                        return;
+                    }
+                    
+                    updateChart(data, period);
+                })
+                .catch(error => {
+                    console.error('Error fetching chart data:', error);
+                });
+        }
+        
+        // Update chart
+        function updateChart(data, period) {
+            const ctx = document.getElementById('performanceChart').getContext('2d');
+            
+            if (chart) {
+                chart.destroy();
+            }
+            
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.labels,
+                    datasets: [{
+                        label: username + "'s Portfolio",
+                        data: data.portfolio,
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                        tension: 0.1,
+                        fill: true
+                    }, {
+                        label: 'S&P 500',
+                        data: data.sp500,
+                        borderColor: 'rgb(255, 99, 132)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                        tension: 0.1,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: true
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            ticks: {
+                                callback: function(value) {
+                                    return value.toFixed(2) + '%';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Load initial chart
+        loadChart('1D');
+    </script>
+</body>
+</html>
