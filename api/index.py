@@ -11655,6 +11655,68 @@ def get_portfolio_performance(period):
         logger.error(f"Performance calculation error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/portfolio/<int:user_id>/performance/<period>')
+def get_public_portfolio_performance(user_id, period):
+    """Get portfolio performance data for any user (public access for charts)"""
+    try:
+        from datetime import datetime, timedelta
+        import json
+        
+        logger.info(f"Public performance API called for user {user_id}, period {period}")
+        
+        period_upper = period.upper()
+        
+        # Try to use pre-rendered chart data (same as private endpoint)
+        chart_cache = UserPortfolioChartCache.query.filter_by(
+            user_id=user_id, period=period_upper
+        ).first()
+        
+        if chart_cache:
+            try:
+                cached_data = json.loads(chart_cache.chart_data)
+                datasets = cached_data.get('datasets', [])
+                labels = cached_data.get('labels', [])
+                
+                if datasets and len(datasets) > 0:
+                    portfolio_dataset = datasets[0].get('data', [])
+                    sp500_dataset = datasets[1].get('data', []) if len(datasets) > 1 else []
+                    
+                    if portfolio_dataset and sp500_dataset:
+                        chart_data = []
+                        for i in range(min(len(labels), len(portfolio_dataset))):
+                            chart_point = {
+                                'date': labels[i],
+                                'portfolio': portfolio_dataset[i],
+                                'sp500': sp500_dataset[i] if i < len(sp500_dataset) else 0
+                            }
+                            chart_data.append(chart_point)
+                        
+                        portfolio_return = portfolio_dataset[-1] if portfolio_dataset else 0
+                        sp500_return = sp500_dataset[-1] if sp500_dataset else 0
+                        
+                        return jsonify({
+                            'portfolio_return': round(portfolio_return, 2),
+                            'sp500_return': round(sp500_return, 2),
+                            'chart_data': chart_data,
+                            'period': period_upper,
+                            'from_cache': True
+                        })
+            except Exception as e:
+                logger.warning(f"Failed to use cached chart data: {e}")
+        
+        # Fallback: Live calculation
+        from portfolio_performance import PortfolioPerformanceCalculator
+        calculator = PortfolioPerformanceCalculator()
+        
+        logger.info(f"Performing live calculation for public portfolio user {user_id}, period {period_upper}")
+        performance_data = calculator.get_performance_data(user_id, period_upper)
+        
+        return jsonify(performance_data)
+        
+    except Exception as e:
+        logger.error(f"Public performance calculation error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/portfolio/snapshot')
 @login_required
 def create_portfolio_snapshot():
