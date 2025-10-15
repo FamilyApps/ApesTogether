@@ -41,21 +41,27 @@
                                     {% for subscription in active_subscriptions %}
                                     <tr>
                                         <td>
-                                            <a href="{{ url_for('profile', username=subscription.subscribed_to.username) }}">
+                                            <a href="/p/{{ subscription.subscribed_to.portfolio_slug }}">
                                                 {{ subscription.subscribed_to.username }}
                                             </a>
                                         </td>
                                         <td>
-                                            <span class="badge bg-success">{{ subscription.status }}</span>
+                                            {% if subscription.status == 'cancelled' %}
+                                                <span class="badge bg-warning text-dark">Cancelled</span>
+                                                <small class="text-muted d-block">Access until {{ subscription.end_date.strftime('%m/%d/%Y') if subscription.end_date else 'N/A' }}</small>
+                                            {% else %}
+                                                <span class="badge bg-success">Active</span>
+                                            {% endif %}
                                         </td>
-                                        <td>{{ subscription.start_date.strftime('%Y-%m-%d') }}</td>
+                                        <td>{{ subscription.start_date.strftime('%m/%d/%Y') }}</td>
                                         <td>
-                                            <form action="{{ url_for('cancel_subscription') }}" method="post" class="d-inline">
-                                                <input type="hidden" name="subscription_id" value="{{ subscription.id }}">
-                                                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to cancel this subscription?')">
-                                                    Cancel
+                                            {% if subscription.status == 'active' %}
+                                                <button class="btn btn-sm btn-danger" onclick="confirmCancelSubscription({{ subscription.subscribed_to.id }}, '{{ subscription.subscribed_to.username }}')">
+                                                    <i class="fas fa-times me-1"></i>Unsubscribe
                                                 </button>
-                                            </form>
+                                            {% else %}
+                                                <span class="text-muted">Cancels {{ subscription.end_date.strftime('%m/%d/%Y') if subscription.end_date else 'soon' }}</span>
+                                            {% endif %}
                                         </td>
                                     </tr>
                                     {% endfor %}
@@ -122,4 +128,43 @@
         </div>
     </div>
 </div>
+
+<script>
+async function confirmCancelSubscription(portfolioOwnerId, username) {
+    const endDate = new Date();
+    endDate.setMonth(endDate.getMonth() + 1);
+    const endDateStr = endDate.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
+    
+    const confirmed = confirm(
+        `Unsubscribe from ${username}'s portfolio?\n\n` +
+        `• Your subscription will be canceled\n` +
+        `• You'll keep access until ${endDateStr}\n` +
+        `• You'll continue receiving trade notifications until then\n` +
+        `• No further charges after this billing period\n\n` +
+        'Are you sure you want to unsubscribe?'
+    );
+    
+    if (!confirmed) return;
+    
+    try {
+        const response = await fetch('/unsubscribe-from-portfolio', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({portfolio_owner_id: portfolioOwnerId})
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            alert('Subscription canceled. You\\'ll have access until ' + data.end_date);
+            window.location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Failed to unsubscribe'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Failed to unsubscribe. Please try again.');
+    }
+}
+</script>
 {% endblock %}

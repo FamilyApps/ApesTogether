@@ -72,6 +72,17 @@
                 <!-- Holdings Section - Different for Subscribers vs Non-Subscribers -->
                 {% if is_subscriber %}
                 <!-- SUBSCRIBER VIEW: Show actual holdings -->
+                <div class="alert alert-success mb-3">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <i class="fas fa-check-circle me-2"></i>
+                            <strong>Active Subscription</strong> - You have full access to {{ username }}'s portfolio
+                        </div>
+                        <button class="btn btn-sm btn-outline-danger" onclick="confirmUnsubscribe()">
+                            <i class="fas fa-times me-1"></i>Unsubscribe
+                        </button>
+                    </div>
+                </div>
                 <div class="card shadow-sm mb-4">
                     <div class="card-header bg-success text-white">
                         <div class="d-flex justify-content-between align-items-center">
@@ -149,7 +160,7 @@
                                 <i class="fas fa-crown fa-3x text-warning mb-3"></i>
                                 <h4 class="mb-3">Unlock Full Portfolio Access</h4>
                                 <p class="text-muted mb-4">See {{ username }}'s complete holdings, positions, and trade history</p>
-                                <button class="btn btn-warning btn-lg w-100" onclick="initiateSubscription()">
+                                <button class="btn btn-warning btn-lg w-100" onclick="showSubscriptionModal()">
                                     <i class="fas fa-unlock-alt me-2"></i>Subscribe for ${{ "%.2f"|format(subscription_price) }}/month
                                 </button>
                             </div>
@@ -187,6 +198,114 @@
         </div>
     </footer>
 
+    <!-- Subscription Modal (Slide-up) -->
+    <div id="subscriptionModal" class="payment-modal">
+        <div class="payment-modal-content">
+            <div class="payment-modal-header">
+                <h4><i class="fas fa-crown me-2 text-warning"></i>Subscribe to {{ username }}'s Portfolio</h4>
+                <button class="btn-close" onclick="closeSubscriptionModal()"></button>
+            </div>
+            <div class="payment-modal-body">
+                <div class="subscription-details mb-4">
+                    <div class="text-center mb-3">
+                        <h2 class="text-primary">${{ "%.2f"|format(subscription_price) }}<span class="fs-6 text-muted">/month</span></h2>
+                        <p class="text-muted">Billed monthly • Cancel anytime</p>
+                    </div>
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Recurring Subscription:</strong> You'll be charged ${{ "%.2f"|format(subscription_price) }} monthly until you cancel. 
+                        You can unsubscribe at any time and will retain access until the end of your billing period.
+                    </div>
+                    <ul class="list-unstyled mb-3">
+                        <li class="mb-2"><i class="fas fa-check text-success me-2"></i>Full access to portfolio holdings</li>
+                        <li class="mb-2"><i class="fas fa-check text-success me-2"></i>Real-time trade notifications</li>
+                        <li class="mb-2"><i class="fas fa-check text-success me-2"></i>Complete transaction history</li>
+                        <li class="mb-2"><i class="fas fa-check text-success me-2"></i>Performance analytics</li>
+                    </ul>
+                </div>
+                
+                <div class="card-element-container mb-3">
+                    <label class="form-label">Card Information</label>
+                    <div id="card-element" class="form-control" style="height: auto; padding: 12px;"></div>
+                    <div id="card-errors" class="text-danger mt-2" role="alert"></div>
+                </div>
+                
+                <button id="submitPayment" class="btn btn-primary btn-lg w-100" onclick="processSubscription()">
+                    <i class="fas fa-lock me-2"></i>Subscribe Now
+                </button>
+                
+                <p class="text-muted small text-center mt-3 mb-0">
+                    <i class="fas fa-shield-alt me-1"></i>Secure payment powered by Stripe
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .payment-modal {
+            display: none;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 9999;
+            animation: fadeIn 0.3s;
+        }
+        
+        .payment-modal.show {
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+        }
+        
+        .payment-modal-content {
+            background: white;
+            width: 100%;
+            max-width: 600px;
+            max-height: 90vh;
+            overflow-y: auto;
+            border-radius: 20px 20px 0 0;
+            animation: slideUp 0.3s ease-out;
+        }
+        
+        .payment-modal-header {
+            padding: 20px;
+            border-bottom: 1px solid #e9ecef;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            background: white;
+            z-index: 1;
+        }
+        
+        .payment-modal-body {
+            padding: 20px;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        @keyframes slideUp {
+            from { transform: translateY(100%); }
+            to { transform: translateY(0); }
+        }
+        
+        #card-element {
+            border: 1px solid #ced4da;
+        }
+        
+        #card-element.StripeElement--focus {
+            border-color: #80bdff;
+            box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+        }
+    </style>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
@@ -200,46 +319,148 @@
         const subscriptionPrice = {{ subscription_price|default(4.00) }};
         const isLoggedIn = {{ 'true' if current_user.is_authenticated else 'false' }};
         const currentUrl = window.location.href;
+        let stripe, card, cardElement;
         
-        // Subscription flow
-        function initiateSubscription() {
+        // Initialize Stripe
+        if (isLoggedIn) {
+            stripe = Stripe('{{ stripe_public_key }}');
+        }
+        
+        // Show subscription modal
+        function showSubscriptionModal() {
             if (!isLoggedIn) {
                 // Save return URL and redirect to login
                 sessionStorage.setItem('returnAfterLogin', currentUrl);
                 sessionStorage.setItem('initiateSubscription', portfolioOwnerId);
                 window.location.href = '/login?next=' + encodeURIComponent(currentUrl);
-            } else {
-                // User is logged in, show payment modal
-                showSubscriptionModal();
+                return;
+            }
+            
+            document.getElementById('subscriptionModal').classList.add('show');
+            
+            // Initialize Stripe Elements if not already done
+            if (!cardElement) {
+                const elements = stripe.elements();
+                cardElement = elements.create('card', {
+                    style: {
+                        base: {
+                            fontSize: '16px',
+                            color: '#32325d',
+                            '::placeholder': {
+                                color: '#aab7c4'
+                            }
+                        }
+                    }
+                });
+                cardElement.mount('#card-element');
             }
         }
         
-        function showSubscriptionModal() {
-            // Create Stripe subscription checkout
-            fetch('/create-subscription-checkout', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    portfolio_owner_id: portfolioOwnerId,
-                    return_url: currentUrl
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    alert('Error: ' + data.error);
+        function closeSubscriptionModal() {
+            document.getElementById('subscriptionModal').classList.remove('show');
+        }
+        
+        // Handle subscription payment
+        async function processSubscription() {
+            const submitButton = document.getElementById('submitPayment');
+            const errorElement = document.getElementById('card-errors');
+            
+            submitButton.disabled = true;
+            submitButton.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Processing...';
+            errorElement.textContent = '';
+            
+            try {
+                // Create payment method
+                const {paymentMethod, error} = await stripe.createPaymentMethod({
+                    type: 'card',
+                    card: cardElement,
+                });
+                
+                if (error) {
+                    errorElement.textContent = error.message;
+                    submitButton.disabled = false;
+                    submitButton.innerHTML = '<i class="fas fa-lock me-2"></i>Subscribe Now';
                     return;
                 }
                 
-                // Redirect to Stripe Checkout
-                window.location.href = data.checkout_url;
-            })
-            .catch(error => {
+                // Create subscription on server
+                const response = await fetch('/create-subscription', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        payment_method_id: paymentMethod.id,
+                        portfolio_owner_id: portfolioOwnerId
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    errorElement.textContent = data.error;
+                    submitButton.disabled = false;
+                    submitButton.innerHTML = '<i class="fas fa-lock me-2"></i>Subscribe Now';
+                    return;
+                }
+                
+                // Handle SCA if needed
+                if (data.requiresAction) {
+                    const {error: confirmError} = await stripe.confirmCardPayment(data.clientSecret);
+                    
+                    if (confirmError) {
+                        errorElement.textContent = confirmError.message;
+                        submitButton.disabled = false;
+                        submitButton.innerHTML = '<i class="fas fa-lock me-2"></i>Subscribe Now';
+                        return;
+                    }
+                }
+                
+                // Success!
+                window.location.reload();
+                
+            } catch (error) {
                 console.error('Error:', error);
-                alert('Failed to start subscription. Please try again.');
-            });
+                errorElement.textContent = 'Payment failed. Please try again.';
+                submitButton.disabled = false;
+                submitButton.innerHTML = '<i class="fas fa-lock me-2"></i>Subscribe Now';
+            }
+        }
+        
+        // Unsubscribe confirmation
+        async function confirmUnsubscribe() {
+            const endDate = new Date();
+            endDate.setMonth(endDate.getMonth() + 1);
+            const endDateStr = endDate.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
+            
+            const confirmed = confirm(
+                `Unsubscribe from ${username}'s portfolio?\n\n` +
+                `• Your subscription will be canceled\n` +
+                `• You'll keep access until ${endDateStr}\n` +
+                `• You'll continue receiving trade notifications until then\n` +
+                `• No further charges after this billing period\n\n` +
+                'Are you sure you want to unsubscribe?'
+            );
+            
+            if (!confirmed) return;
+            
+            try {
+                const response = await fetch('/unsubscribe-from-portfolio', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({portfolio_owner_id: portfolioOwnerId})
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('Subscription canceled. You\'ll have access until ' + endDateStr);
+                    window.location.reload();
+                } else {
+                    alert('Error: ' + (data.error || 'Failed to unsubscribe'));
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Failed to unsubscribe. Please try again.');
+            }
         }
         
         // Period selector

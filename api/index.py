@@ -1110,24 +1110,48 @@ def subscriptions():
             
         current_user_id = current_user.id
         
-        # Get active subscriptions
+        # Get active and cancelled (but not expired) subscriptions
         try:
-            # Use a direct SQL query instead of ORM to minimize potential issues
-            active_subscriptions_query = "SELECT * FROM subscription WHERE subscriber_id = :user_id AND status = 'active'"
-            active_subscriptions = db.session.execute(text(active_subscriptions_query), {"user_id": current_user_id}).fetchall()
+            from models import Subscription
+            from datetime import datetime, timedelta
             
-            # Get canceled subscriptions
-            canceled_subscriptions_query = "SELECT * FROM subscription WHERE subscriber_id = :user_id AND status = 'canceled'"
-            canceled_subscriptions = db.session.execute(text(canceled_subscriptions_query), {"user_id": current_user_id}).fetchall()
+            # Get all active subscriptions
+            active_subs = Subscription.query.filter_by(
+                subscriber_id=current_user_id,
+                status='active'
+            ).all()
             
-            # Convert to list of dictionaries for template rendering
-            active_subs = [dict(sub) for sub in active_subscriptions] if active_subscriptions else []
-            canceled_subs = [dict(sub) for sub in canceled_subscriptions] if canceled_subscriptions else []
+            # Get cancelled subscriptions that haven't expired yet
+            cancelled_subs = Subscription.query.filter(
+                Subscription.subscriber_id == current_user_id,
+                Subscription.status == 'cancelled',
+                (Subscription.end_date.is_(None) | (Subscription.end_date > datetime.utcnow()))
+            ).all()
+            
+            # Combine active and cancelled (still have access) as "active_subscriptions"
+            all_active_subs = active_subs + cancelled_subs
+            
+            # Clean up expired cancelled subscriptions
+            expired_subs = Subscription.query.filter(
+                Subscription.subscriber_id == current_user_id,
+                Subscription.status == 'cancelled',
+                Subscription.end_date <= datetime.utcnow()
+            ).all()
+            for sub in expired_subs:
+                db.session.delete(sub)
+            if expired_subs:
+                db.session.commit()
+            
+            # Get truly canceled (past) subscriptions for history
+            past_subs = Subscription.query.filter(
+                Subscription.subscriber_id == current_user_id,
+                Subscription.status.in_(['canceled', 'expired'])
+            ).all()
             
             return render_template_with_defaults(
                 'subscriptions.html',
-                active_subscriptions=active_subs,
-                canceled_subscriptions=canceled_subs,
+                active_subscriptions=all_active_subs,
+                canceled_subscriptions=past_subs,
                 current_user=current_user
             )
         except Exception as e:
@@ -19811,13 +19835,21 @@ def public_portfolio_view(slug):
             if current_user.id == user.id:
                 is_subscriber = True
             else:
-                # Check for active subscription
-                subscription = Subscription.query.filter_by(
-                    subscriber_id=current_user.id,
-                    subscribed_to_id=user.id,
-                    status='active'
+                # Check for active OR cancelled (but not expired) subscription
+                subscription = Subscription.query.filter(
+                    Subscription.subscriber_id == current_user.id,
+                    Subscription.subscribed_to_id == user.id,
+                    Subscription.status.in_(['active', 'cancelled'])
                 ).first()
-                is_subscriber = subscription is not None
+                
+                # If cancelled, check if still within access period
+                if subscription:
+                    if subscription.status == 'active':
+                        is_subscriber = True
+                    elif subscription.status == 'cancelled' and subscription.end_date:
+                        is_subscriber = subscription.end_date > datetime.utcnow()
+                    else:
+                        is_subscriber = False
         
         # Get current portfolio value
         calculator = PortfolioPerformanceCalculator()
@@ -19867,7 +19899,8 @@ def public_portfolio_view(slug):
             portfolio_owner_id=user.id,
             subscription_price=user.subscription_price or 4.00,
             is_subscriber=is_subscriber,
-            holdings=holdings
+            holdings=holdings,
+            stripe_public_key=app.config.get('STRIPE_PUBLIC_KEY', '')
         )
     
     except Exception as e:
@@ -19918,27 +19951,26 @@ def regenerate_portfolio_slug():
             'error': str(e)
         }), 500
 
-@app.route('/create-subscription-checkout', methods=['POST'])
+@app.route('/create-subscription', methods=['POST'])
 @login_required
-def create_subscription_checkout():
-    """Create Stripe checkout session for subscribing to a portfolio owner"""
+def create_subscription():
+    """Create subscription using Stripe Elements (slide-up modal)"""
     try:
         data = request.get_json()
+        payment_method_id = data.get('payment_method_id')
         portfolio_owner_id = data.get('portfolio_owner_id')
-        return_url = data.get('return_url', request.host_url)
         
-        if not portfolio_owner_id:
-            return jsonify({'error': 'Portfolio owner ID required'}), 400
+        if not payment_method_id or not portfolio_owner_id:
+            return jsonify({'error': 'Payment method and portfolio owner required'}), 400
         
         # Get the portfolio owner
-        from models import User
+        from models import User, Subscription
         portfolio_owner = User.query.get(portfolio_owner_id)
         
         if not portfolio_owner:
             return jsonify({'error': 'Portfolio owner not found'}), 404
         
         # Check if already subscribed
-        from models import Subscription
         existing_sub = Subscription.query.filter_by(
             subscriber_id=current_user.id,
             subscribed_to_id=portfolio_owner_id,
@@ -19948,40 +19980,105 @@ def create_subscription_checkout():
         if existing_sub:
             return jsonify({'error': 'Already subscribed to this portfolio'}), 400
         
-        # Get or create Stripe customer for current user
+        # Get or create Stripe customer
         if not current_user.stripe_customer_id:
             customer = stripe.Customer.create(
                 email=current_user.email,
-                name=current_user.username
+                name=current_user.username,
+                payment_method=payment_method_id,
+                invoice_settings={'default_payment_method': payment_method_id}
             )
             current_user.stripe_customer_id = customer.id
             db.session.commit()
+        else:
+            # Attach payment method to existing customer
+            stripe.PaymentMethod.attach(
+                payment_method_id,
+                customer=current_user.stripe_customer_id
+            )
+            stripe.Customer.modify(
+                current_user.stripe_customer_id,
+                invoice_settings={'default_payment_method': payment_method_id}
+            )
         
-        # Create Stripe Checkout session
-        checkout_session = stripe.checkout.Session.create(
-            payment_method_types=['card'],
-            line_items=[{
-                'price': portfolio_owner.stripe_price_id,
-                'quantity': 1,
-            }],
-            mode='subscription',
-            success_url=return_url + '?subscription=success',
-            cancel_url=return_url + '?subscription=cancelled',
+        # Create Stripe subscription
+        stripe_subscription = stripe.Subscription.create(
             customer=current_user.stripe_customer_id,
+            items=[{'price': portfolio_owner.stripe_price_id}],
+            expand=['latest_invoice.payment_intent'],
             metadata={
                 'subscriber_id': current_user.id,
                 'subscribed_to_id': portfolio_owner_id
             }
         )
         
+        # Create subscription record in database
+        subscription = Subscription(
+            subscriber_id=current_user.id,
+            subscribed_to_id=portfolio_owner_id,
+            stripe_subscription_id=stripe_subscription.id,
+            status='active',
+            start_date=datetime.utcnow()
+        )
+        db.session.add(subscription)
+        db.session.commit()
+        
+        # Check if payment requires action (SCA)
+        payment_intent = stripe_subscription.latest_invoice.payment_intent
+        if payment_intent.status == 'requires_action':
+            return jsonify({
+                'requiresAction': True,
+                'clientSecret': payment_intent.client_secret
+            })
+        
+        return jsonify({'success': True, 'subscription_id': subscription.id})
+    
+    except Exception as e:
+        logger.error(f"Create subscription error: {str(e)}")
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/unsubscribe-from-portfolio', methods=['POST'])
+@login_required
+def unsubscribe_from_portfolio():
+    """Cancel subscription to a portfolio (keep access until period end)"""
+    try:
+        data = request.get_json()
+        portfolio_owner_id = data.get('portfolio_owner_id')
+        
+        if not portfolio_owner_id:
+            return jsonify({'error': 'Portfolio owner ID required'}), 400
+        
+        # Find active subscription
+        from models import Subscription
+        subscription = Subscription.query.filter_by(
+            subscriber_id=current_user.id,
+            subscribed_to_id=portfolio_owner_id,
+            status='active'
+        ).first()
+        
+        if not subscription:
+            return jsonify({'error': 'No active subscription found'}), 404
+        
+        # Cancel on Stripe (at period end)
+        stripe.Subscription.modify(
+            subscription.stripe_subscription_id,
+            cancel_at_period_end=True
+        )
+        
+        # Update subscription status to 'cancelled' (but still active until period end)
+        subscription.status = 'cancelled'
+        subscription.end_date = datetime.utcnow() + timedelta(days=30)  # ~1 month from now
+        db.session.commit()
+        
         return jsonify({
             'success': True,
-            'checkout_url': checkout_session.url,
-            'session_id': checkout_session.id
+            'end_date': subscription.end_date.strftime('%m/%d/%Y')
         })
     
     except Exception as e:
-        logger.error(f"Create subscription checkout error: {str(e)}")
+        logger.error(f"Unsubscribe error: {str(e)}")
+        db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/settings/gdpr')
