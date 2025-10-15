@@ -19791,7 +19791,7 @@ def run_portfolio_slug_migration():
 def public_portfolio_view(slug):
     """Public portfolio view - accessible without login"""
     try:
-        from models import User, PortfolioSnapshot
+        from models import User, PortfolioSnapshot, Stock, Subscription
         from portfolio_performance import PortfolioPerformanceCalculator
         
         # Find user by portfolio slug
@@ -19803,6 +19803,21 @@ def public_portfolio_view(slug):
         # Check if user account is deleted (GDPR)
         if user.deleted_at:
             return render_template('404.html', message='This portfolio is no longer available'), 404
+        
+        # Check if current user is a subscriber
+        is_subscriber = False
+        if current_user.is_authenticated:
+            # Check if viewing own portfolio OR has active subscription
+            if current_user.id == user.id:
+                is_subscriber = True
+            else:
+                # Check for active subscription
+                subscription = Subscription.query.filter_by(
+                    subscriber_id=current_user.id,
+                    subscribed_to_id=user.id,
+                    status='active'
+                ).first()
+                is_subscriber = subscription is not None
         
         # Get current portfolio value
         calculator = PortfolioPerformanceCalculator()
@@ -19821,12 +19836,38 @@ def public_portfolio_view(slug):
             day_change = 0
             day_change_pct = 0
         
+        # Get holdings if subscriber
+        holdings = []
+        if is_subscriber:
+            stocks = Stock.query.filter_by(user_id=user.id).all()
+            for stock in stocks:
+                # Get current price from API
+                stock_data = get_stock_data(stock.ticker)
+                current_price = stock_data.get('price', stock.purchase_price)
+                value = current_price * stock.quantity
+                gain_loss = value - (stock.purchase_price * stock.quantity)
+                gain_loss_pct = (gain_loss / (stock.purchase_price * stock.quantity) * 100) if stock.purchase_price > 0 else 0
+                
+                holdings.append({
+                    'ticker': stock.ticker,
+                    'quantity': stock.quantity,
+                    'purchase_price': stock.purchase_price,
+                    'current_price': current_price,
+                    'value': value,
+                    'gain_loss': gain_loss,
+                    'gain_loss_pct': gain_loss_pct
+                })
+        
         return render_template('public_portfolio.html',
             username=user.username,
             current_value=current_value,
             day_change=day_change,
             day_change_pct=day_change_pct,
-            slug=slug
+            slug=slug,
+            portfolio_owner_id=user.id,
+            subscription_price=user.subscription_price or 4.00,
+            is_subscriber=is_subscriber,
+            holdings=holdings
         )
     
     except Exception as e:
