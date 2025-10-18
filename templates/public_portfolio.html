@@ -618,20 +618,30 @@
                 chart.destroy();
             }
             
+            // Extract data from API response (same format as dashboard)
+            if (!data.chart_data || data.chart_data.length === 0) {
+                console.error('No chart data available');
+                return;
+            }
+            
+            const labels = data.chart_data.map(item => item.date);
+            const portfolioData = data.chart_data.map(item => item.portfolio);
+            const sp500Data = data.chart_data.map(item => item.sp500);
+            
             chart = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: data.labels,
+                    labels: labels,
                     datasets: [{
                         label: username + "'s Portfolio",
-                        data: data.portfolio,
+                        data: portfolioData,
                         borderColor: 'rgb(75, 192, 192)',
                         backgroundColor: 'rgba(75, 192, 192, 0.1)',
                         tension: 0.1,
                         fill: true
                     }, {
                         label: 'S&P 500',
-                        data: data.sp500,
+                        data: sp500Data,
                         borderColor: 'rgb(255, 99, 132)',
                         backgroundColor: 'rgba(255, 99, 132, 0.1)',
                         tension: 0.1,
@@ -647,7 +657,17 @@
                         },
                         tooltip: {
                             mode: 'index',
-                            intersect: false
+                            intersect: false,
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    label += context.parsed.y.toFixed(2) + '%';
+                                    return label;
+                                }
+                            }
                         }
                     },
                     scales: {

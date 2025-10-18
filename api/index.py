@@ -14135,6 +14135,10 @@ def market_close_cron():
                         db.session.add(market_data)
                         logger.info(f"Created S&P 500 data for {today_et}: ${sp500_value:.2f}")
                     
+                    # Flush to write to DB immediately (but don't commit yet - part of atomic transaction)
+                    db.session.flush()
+                    logger.info(f"Flushed S&P 500 data to session")
+                    
                     results['sp500_data_collected'] = True
                 else:
                     error_msg = "Failed to fetch SPY data for S&P 500"
@@ -17545,11 +17549,21 @@ def portfolio_performance_intraday(period):
             start_date = market_day
             end_date = market_day
         elif period == '5D':
-            # For 5D, we want the last 5 business days including today
-            # Go back 7 calendar days to ensure we capture 5 business days
-            start_date = market_day - timedelta(days=7)
+            # For 5D, we want EXACTLY the last 5 business days including today
+            # Count backwards to find the 5th business day
+            business_days_found = 0
+            current_date = market_day
+            
+            while business_days_found < 5:
+                if current_date.weekday() < 5:  # Monday=0, Friday=4
+                    business_days_found += 1
+                    if business_days_found == 5:
+                        start_date = current_date
+                        break
+                current_date -= timedelta(days=1)
+            
             end_date = market_day
-            logger.info(f"5D Date Range: {start_date} to {end_date} (market_day: {market_day}, today: {today})")
+            logger.info(f"5D Date Range: {start_date} to {end_date} (exactly 5 business days)")
         else:
             # Fallback to regular performance API for other periods
             from portfolio_performance import PortfolioPerformanceCalculator
@@ -17669,9 +17683,9 @@ def portfolio_performance_intraday(period):
             # CRITICAL FIX: Convert timestamp to ET before sending to frontend
             # PostgreSQL returns timestamps in UTC; convert to ET to display correct market hours
             if period == '1D':
-                # For 1D charts, use time-only format (e.g., "9:30 AM")
+                # For 1D charts, use date + time format (e.g., "Oct 18 9:30 AM")
                 et_timestamp = snapshot.timestamp.astimezone(MARKET_TZ)
-                date_label = et_timestamp.strftime('%I:%M %p')
+                date_label = et_timestamp.strftime('%b %d %I:%M %p')
             elif period == '5D':
                 # For 5D charts, use short date format (e.g., "Sep 30")
                 # GROK-VALIDATED FIX: Category scale needs discrete labels, not ISO timestamps
