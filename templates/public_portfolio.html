@@ -99,7 +99,9 @@
                         </div>
                     </div>
                     <div class="card-body">
-                        <canvas id="performanceChart" height="80"></canvas>
+                        <div style="position: relative; height: 400px;">
+                            <canvas id="performanceChart"></canvas>
+                        </div>
                     </div>
                 </div>
 
@@ -593,7 +595,7 @@
             });
         });
         
-        // Load chart data
+        // Load chart data - uses pre-rendered cache from market close
         function loadChart(period) {
             fetch(`/api/portfolio/${portfolioOwnerId}/performance/${period}`)
                 .then(response => response.json())
@@ -637,23 +639,32 @@
                         data: portfolioData,
                         borderColor: 'rgb(75, 192, 192)',
                         backgroundColor: 'rgba(75, 192, 192, 0.1)',
-                        tension: 0.1,
-                        fill: true
+                        tension: 0.4,
+                        fill: true,
+                        pointRadius: 0,
+                        pointHoverRadius: 4
                     }, {
                         label: 'S&P 500',
                         data: sp500Data,
                         borderColor: 'rgb(255, 99, 132)',
                         backgroundColor: 'rgba(255, 99, 132, 0.1)',
-                        tension: 0.1,
-                        fill: true
+                        tension: 0.4,
+                        fill: true,
+                        pointRadius: 0,
+                        pointHoverRadius: 4
                     }]
                 },
                 options: {
                     responsive: true,
-                    maintainAspectRatio: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
                     plugins: {
                         legend: {
-                            display: true
+                            display: true,
+                            position: 'top'
                         },
                         tooltip: {
                             mode: 'index',
@@ -671,8 +682,20 @@
                         }
                     },
                     scales: {
+                        x: {
+                            grid: {
+                                display: false
+                            },
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        },
                         y: {
                             beginAtZero: false,
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.05)'
+                            },
                             ticks: {
                                 callback: function(value) {
                                     return value.toFixed(2) + '%';
