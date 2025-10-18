@@ -3895,6 +3895,88 @@ def inspect_chart_cache(username, period):
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/check-snapshot-data')
+@login_required
+def check_snapshot_data():
+    """Check if both portfolio snapshots AND S&P 500 data exist for recent dates"""
+    try:
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import date, timedelta
+        from models import PortfolioSnapshot, MarketData, User
+        from sqlalchemy import func
+        
+        # Check last 7 days
+        today = date.today()
+        results = {
+            'check_date': today.isoformat(),
+            'days_checked': [],
+            'summary': {
+                'total_days': 0,
+                'days_with_portfolio_data': 0,
+                'days_with_sp500_data': 0,
+                'days_with_both': 0
+            }
+        }
+        
+        for days_back in range(7):
+            check_date = today - timedelta(days=days_back)
+            
+            # Skip weekends
+            if check_date.weekday() >= 5:
+                continue
+            
+            # Count portfolio snapshots for this date
+            portfolio_count = PortfolioSnapshot.query.filter_by(date=check_date).count()
+            
+            # Get user breakdown
+            user_snapshots = db.session.query(
+                PortfolioSnapshot.user_id, 
+                PortfolioSnapshot.total_value
+            ).filter_by(date=check_date).all()
+            
+            # Check S&P 500 data for this date
+            sp500_data = MarketData.query.filter_by(
+                ticker='SPY_SP500',
+                date=check_date
+            ).first()
+            
+            day_result = {
+                'date': check_date.isoformat(),
+                'weekday': check_date.strftime('%A'),
+                'portfolio_snapshots': portfolio_count,
+                'sp500_data_exists': sp500_data is not None,
+                'sp500_value': float(sp500_data.close_price) if sp500_data else None,
+                'user_details': [
+                    {'user_id': uid, 'total_value': float(val)}
+                    for uid, val in user_snapshots
+                ]
+            }
+            
+            results['days_checked'].append(day_result)
+            results['summary']['total_days'] += 1
+            
+            if portfolio_count > 0:
+                results['summary']['days_with_portfolio_data'] += 1
+            if sp500_data:
+                results['summary']['days_with_sp500_data'] += 1
+            if portfolio_count > 0 and sp500_data:
+                results['summary']['days_with_both'] += 1
+        
+        # Add diagnosis
+        results['diagnosis'] = {
+            'portfolio_snapshots_ok': results['summary']['days_with_portfolio_data'] == results['summary']['total_days'],
+            'sp500_data_ok': results['summary']['days_with_sp500_data'] == results['summary']['total_days'],
+            'system_healthy': results['summary']['days_with_both'] == results['summary']['total_days']
+        }
+        
+        return jsonify(results)
+        
+    except Exception as e:
+        logger.error(f"Error checking snapshot data: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/regenerate-chart-cache')
 @login_required
 def regenerate_chart_cache():
