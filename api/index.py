@@ -3895,6 +3895,167 @@ def inspect_chart_cache(username, period):
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/backfill-sp500-data', methods=['GET', 'POST'])
+@login_required
+def backfill_sp500_data():
+    """Backfill missing S&P 500 data for specific dates"""
+    try:
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import date, timedelta
+        from models import MarketData
+        from portfolio_performance import PortfolioPerformanceCalculator
+        
+        # GET: Show missing dates and confirm
+        if request.method == 'GET':
+            # Check last 10 business days for missing S&P 500 data
+            today = date.today()
+            missing_dates = []
+            
+            for days_back in range(10):
+                check_date = today - timedelta(days=days_back)
+                
+                # Skip weekends
+                if check_date.weekday() >= 5:
+                    continue
+                
+                # Check if S&P 500 data exists
+                sp500_data = MarketData.query.filter_by(
+                    ticker='SPY_SP500',
+                    date=check_date
+                ).first()
+                
+                if not sp500_data:
+                    missing_dates.append(check_date.isoformat())
+            
+            return jsonify({
+                'missing_dates': missing_dates,
+                'count': len(missing_dates),
+                'message': f'Found {len(missing_dates)} missing S&P 500 dates',
+                'action': 'POST to this endpoint to backfill'
+            })
+        
+        # POST: Perform backfill
+        results = {
+            'started_at': datetime.now().isoformat(),
+            'dates_processed': [],
+            'successes': 0,
+            'failures': 0,
+            'errors': []
+        }
+        
+        # Get dates to backfill from request or auto-detect
+        dates_to_fill = request.json.get('dates', []) if request.json else []
+        
+        if not dates_to_fill:
+            # Auto-detect missing dates from last 10 days
+            today = date.today()
+            for days_back in range(10):
+                check_date = today - timedelta(days=days_back)
+                if check_date.weekday() >= 5:
+                    continue
+                
+                sp500_data = MarketData.query.filter_by(
+                    ticker='SPY_SP500',
+                    date=check_date
+                ).first()
+                
+                if not sp500_data:
+                    dates_to_fill.append(check_date.isoformat())
+        
+        # Backfill each missing date - fetch historical SPY data ONCE
+        import os
+        import requests
+        
+        ALPHA_VANTAGE_API_KEY = os.environ.get('ALPHA_VANTAGE_API_KEY')
+        
+        if not dates_to_fill:
+            return jsonify({
+                'success': True,
+                'message': 'No missing dates to backfill',
+                'results': results
+            })
+        
+        # Fetch historical SPY data (single API call for all dates)
+        url = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=SPY&apikey={ALPHA_VANTAGE_API_KEY}&outputsize=compact'
+        
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        time_series = data.get('Time Series (Daily)', {})
+        
+        if not time_series:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to fetch SPY data from Alpha Vantage',
+                'response': data
+            }), 500
+        
+        # Process each missing date
+        for date_str in dates_to_fill:
+            try:
+                fill_date = date.fromisoformat(date_str)
+                
+                # Extract close price for this specific date
+                day_data = time_series.get(date_str)
+                
+                if not day_data:
+                    results['errors'].append(f"{date_str}: No SPY data in Alpha Vantage response")
+                    results['failures'] += 1
+                    continue
+                
+                spy_close = float(day_data.get('4. close'))
+                sp500_value = spy_close * 10  # Convert SPY to S&P 500
+                
+                # Create MarketData entry
+                market_data = MarketData(
+                    ticker='SPY_SP500',
+                    date=fill_date,
+                    close_price=sp500_value
+                )
+                db.session.add(market_data)
+                
+                results['dates_processed'].append({
+                    'date': date_str,
+                    'spy_close': spy_close,
+                    'sp500_value': sp500_value,
+                    'status': 'created'
+                })
+                results['successes'] += 1
+                
+                logger.info(f"Backfilled S&P 500 for {date_str}: SPY=${spy_close:.2f} → S&P 500=${sp500_value:.2f}")
+                
+            except Exception as e:
+                error_msg = f"{date_str}: {str(e)}"
+                results['errors'].append(error_msg)
+                results['failures'] += 1
+                logger.error(f"Backfill error: {error_msg}")
+        
+        # Commit all changes
+        db.session.commit()
+        results['completed_at'] = datetime.now().isoformat()
+        results['database_committed'] = True
+        
+        # Optionally regenerate chart cache
+        if results['successes'] > 0:
+            try:
+                from leaderboard_utils import update_leaderboard_cache
+                updated_count = update_leaderboard_cache()
+                results['chart_cache_regenerated'] = True
+                results['chart_cache_entries'] = updated_count
+            except Exception as e:
+                results['chart_cache_error'] = str(e)
+        
+        return jsonify({
+            'success': True,
+            'results': results
+        })
+        
+    except Exception as e:
+        logger.error(f"Backfill error: {e}")
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/check-snapshot-data')
 @login_required
 def check_snapshot_data():
