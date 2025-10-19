@@ -3946,7 +3946,11 @@ def backfill_sp500_data():
         }
         
         # Get dates to backfill from request or auto-detect
-        dates_to_fill = request.json.get('dates', []) if request.json else []
+        # Handle both JSON and form POST requests
+        try:
+            dates_to_fill = request.json.get('dates', []) if request.json else []
+        except:
+            dates_to_fill = []
         
         if not dates_to_fill:
             # Auto-detect missing dates from last 10 days
