@@ -4058,6 +4058,183 @@ def backfill_sp500_data():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/command-center', methods=['GET'])
+@login_required
+def admin_command_center():
+    """One-time use admin command center with buttons for common operations"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    return '''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Admin Command Center</title>
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+        <style>
+            .command-card { margin-bottom: 20px; }
+            .result-box { 
+                margin-top: 10px; 
+                padding: 15px; 
+                background: #f8f9fa; 
+                border-radius: 5px;
+                max-height: 400px;
+                overflow-y: auto;
+            }
+            .success { background: #d4edda; border: 1px solid #c3e6cb; }
+            .error { background: #f8d7da; border: 1px solid #f5c6cb; }
+            .loading { background: #fff3cd; border: 1px solid #ffeaa7; }
+        </style>
+    </head>
+    <body>
+        <div class="container mt-4">
+            <h1>🛠 Admin Command Center</h1>
+            <p class="text-muted">One-click admin operations</p>
+            
+            <div class="row">
+                <!-- Backfill S&P 500 -->
+                <div class="col-md-6">
+                    <div class="card command-card">
+                        <div class="card-header bg-primary text-white">
+                            <h5>📈 Backfill S&P 500 Data</h5>
+                        </div>
+                        <div class="card-body">
+                            <p>Backfill missing S&P 500 data for 10/15, 10/16, 10/17</p>
+                            <button class="btn btn-primary" onclick="runCommand('backfill')">
+                                Run Backfill
+                            </button>
+                            <div id="backfill-result" class="result-box" style="display:none;"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Check Snapshot Data -->
+                <div class="col-md-6">
+                    <div class="card command-card">
+                        <div class="card-header bg-info text-white">
+                            <h5>🔍 Check Snapshot Data</h5>
+                        </div>
+                        <div class="card-body">
+                            <p>Verify portfolio + S&P 500 snapshots exist</p>
+                            <button class="btn btn-info" onclick="runCommand('check')">
+                                Check Data
+                            </button>
+                            <div id="check-result" class="result-box" style="display:none;"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Regenerate Chart Cache -->
+                <div class="col-md-6">
+                    <div class="card command-card">
+                        <div class="card-header bg-success text-white">
+                            <h5>🔄 Regenerate Chart Cache</h5>
+                        </div>
+                        <div class="card-body">
+                            <p>Force regenerate all chart caches</p>
+                            <button class="btn btn-success" onclick="runCommand('regenerate')">
+                                Regenerate Cache
+                            </button>
+                            <div id="regenerate-result" class="result-box" style="display:none;"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Clear Leaderboard HTML Cache -->
+                <div class="col-md-6">
+                    <div class="card command-card">
+                        <div class="card-header bg-warning text-dark">
+                            <h5>🗑 Clear Leaderboard HTML Cache</h5>
+                        </div>
+                        <div class="card-body">
+                            <p>Clear pre-rendered HTML (fixes nav menu issues)</p>
+                            <button class="btn btn-warning" onclick="runCommand('clear-html')">
+                                Clear HTML Cache
+                            </button>
+                            <div id="clear-html-result" class="result-box" style="display:none;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <script>
+        async function runCommand(cmd) {
+            const resultDiv = document.getElementById(cmd + '-result');
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'result-box loading';
+            resultDiv.innerHTML = '⏳ Running...';
+            
+            try {
+                let url, method = 'POST';
+                if (cmd === 'backfill') {
+                    url = '/admin/backfill-sp500-data';
+                } else if (cmd === 'check') {
+                    url = '/admin/check-snapshot-data';
+                    method = 'GET';
+                } else if (cmd === 'regenerate') {
+                    url = '/admin/regenerate-chart-cache';
+                    method = 'GET';
+                } else if (cmd === 'clear-html') {
+                    url = '/admin/clear-leaderboard-html';
+                    method = 'POST';
+                }
+                
+                const response = await fetch(url, { method });
+                const data = await response.json();
+                
+                if (data.success !== false && response.ok) {
+                    resultDiv.className = 'result-box success';
+                    resultDiv.innerHTML = '<strong>✅ Success!</strong><pre>' + 
+                        JSON.stringify(data, null, 2) + '</pre>';
+                } else {
+                    resultDiv.className = 'result-box error';
+                    resultDiv.innerHTML = '<strong>❌ Error!</strong><pre>' + 
+                        JSON.stringify(data, null, 2) + '</pre>';
+                }
+            } catch (error) {
+                resultDiv.className = 'result-box error';
+                resultDiv.innerHTML = '<strong>❌ Error!</strong><p>' + error.message + '</p>';
+            }
+        }
+        </script>
+    </body>
+    </html>
+    '''
+
+@app.route('/admin/clear-leaderboard-html', methods=['POST'])
+@login_required
+def clear_leaderboard_html():
+    """Clear pre-rendered HTML from leaderboard cache to force regeneration"""
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import LeaderboardCache
+        from sqlalchemy import update
+        
+        # Clear all rendered_html fields
+        result = db.session.execute(
+            update(LeaderboardCache).values(rendered_html=None)
+        )
+        db.session.commit()
+        
+        cleared_count = result.rowcount
+        
+        logger.info(f"Cleared {cleared_count} pre-rendered HTML cache entries")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Cleared {cleared_count} HTML cache entries',
+            'cleared_count': cleared_count,
+            'next_step': 'Visit /leaderboard to trigger fresh rendering with correct nav menu'
+        })
+    
+    except Exception as e:
+        logger.error(f"Error clearing HTML cache: {e}")
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/check-snapshot-data')
 @login_required
 def check_snapshot_data():
