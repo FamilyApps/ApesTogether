@@ -4261,8 +4261,9 @@ def check_recent_snapshots():
                 user_data['snapshots'].append({
                     'date': snapshot.date.isoformat(),
                     'total_value': float(snapshot.total_value) if snapshot.total_value else 0,
-                    'cash_balance': float(snapshot.cash_balance) if snapshot.cash_balance else 0,
-                    'is_market_close': snapshot.is_market_close if hasattr(snapshot, 'is_market_close') else None
+                    'stock_value': float(snapshot.stock_value) if snapshot.stock_value else 0,
+                    'cash_proceeds': float(snapshot.cash_proceeds) if snapshot.cash_proceeds else 0,
+                    'max_cash_deployed': float(snapshot.max_cash_deployed) if snapshot.max_cash_deployed else 0
                 })
             
             # Check if last 5 snapshots are identical (indicates issue)
