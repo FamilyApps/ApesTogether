@@ -15227,9 +15227,20 @@ def admin_trigger_market_close_backfill():
             
             for user in users:
                 try:
-                    # Calculate portfolio value for target date
-                    calculator = PortfolioPerformanceCalculator()
-                    portfolio_value = calculator.calculate_portfolio_value(user.id, target_date)
+                    # Calculate portfolio value WITH cash tracking for target date
+                    from cash_tracking import calculate_portfolio_value_with_cash
+                    portfolio_data = calculate_portfolio_value_with_cash(user.id, target_date)
+                    
+                    total_value = portfolio_data['total_value']
+                    stock_value = portfolio_data['stock_value']
+                    cash_proceeds = portfolio_data['cash_proceeds']
+                    
+                    # Skip if portfolio value is 0 or None
+                    if total_value is None or total_value <= 0:
+                        error_msg = f"User {user.id} ({user.username}): Skipping - portfolio value is {total_value} on {target_date}"
+                        results['errors'].append(error_msg)
+                        logger.warning(error_msg)
+                        continue
                     
                     # Check if snapshot already exists for target date
                     existing_snapshot = PortfolioSnapshot.query.filter_by(
@@ -15238,20 +15249,26 @@ def admin_trigger_market_close_backfill():
                     ).first()
                     
                     if existing_snapshot:
-                        existing_snapshot.total_value = portfolio_value
+                        existing_snapshot.total_value = total_value
+                        existing_snapshot.stock_value = stock_value
+                        existing_snapshot.cash_proceeds = cash_proceeds
+                        existing_snapshot.max_cash_deployed = user.max_cash_deployed
                         results['snapshots_updated'] += 1
-                        logger.info(f"Updated snapshot for user {user.id} on {target_date}: ${portfolio_value:.2f}")
+                        logger.info(f"Updated snapshot for user {user.id} on {target_date}: ${total_value:.2f}")
                     else:
-                        # Create new snapshot for target date
+                        # Create new snapshot for target date with ALL required fields
                         snapshot = PortfolioSnapshot(
                             user_id=user.id,
                             date=target_date,
-                            total_value=portfolio_value,
-                            cash_flow=0
+                            total_value=total_value,
+                            stock_value=stock_value,
+                            cash_proceeds=cash_proceeds,
+                            max_cash_deployed=user.max_cash_deployed,
+                            cash_flow=0  # Legacy field
                         )
                         db.session.add(snapshot)
                         results['snapshots_created'] += 1
-                        logger.info(f"Created snapshot for user {user.id} on {target_date}: ${portfolio_value:.2f}")
+                        logger.info(f"Created snapshot for user {user.id} on {target_date}: ${total_value:.2f}")
                     
                     results['users_processed'] += 1
                     
