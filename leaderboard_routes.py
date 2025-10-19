@@ -17,21 +17,15 @@ def leaderboard_home():
     category = request.args.get('category', 'all')  # all, small_cap, large_cap
     
     # Try to serve pre-rendered HTML for maximum performance (1-5ms response time)
-    # GROK-VALIDATED: Serve auth-specific version for correct nav menu
+    # AUTH-AWARE CACHING: Serve different versions based on authentication status
     from models import LeaderboardCache
     
     # Determine which cached version to serve based on authentication status
     auth_suffix = '_auth' if current_user.is_authenticated else '_anon'
-    cache_key_new = f"{period}_{category}{auth_suffix}"
+    cache_key = f"{period}_{category}{auth_suffix}"
     
-    # Try new cache format first (with _auth/_anon suffix)
-    cache_entry = LeaderboardCache.query.filter_by(period=cache_key_new).first()
-    
-    # BACKWARD COMPATIBILITY: If new format doesn't exist, try old format
-    # This handles the transition period before cron job runs
-    if not cache_entry or not cache_entry.rendered_html:
-        cache_key_old = f"{period}_{category}"
-        cache_entry = LeaderboardCache.query.filter_by(period=cache_key_old).first()
+    # Try to get auth-aware cached version
+    cache_entry = LeaderboardCache.query.filter_by(period=cache_key).first()
     
     if cache_entry and cache_entry.rendered_html:
         # Serve pre-rendered HTML directly - maximum performance!
