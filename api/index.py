@@ -4345,19 +4345,33 @@ def check_recent_snapshots():
             return jsonify({'error': 'Admin access required'}), 403
         
         from datetime import date, timedelta
-        from models import PortfolioSnapshot, User
+        from models import PortfolioSnapshot, User, MarketData
         from sqlalchemy import func
         
         # Get all active users
         users = User.query.all()
         
-        # Check last 5 business days
+        # Check Oct 7-17 specifically
         today = date.today()
+        oct_7 = date(2025, 10, 7)
+        oct_17 = date(2025, 10, 17)
+        
         results = {
             'check_date': today.isoformat(),
+            'date_range_checked': f'{oct_7.isoformat()} to {oct_17.isoformat()}',
             'users_checked': len(users),
             'users': []
         }
+        
+        # Check S&P 500 data for Oct 7-17
+        sp500_dates = MarketData.query.filter(
+            MarketData.ticker == 'SPY_SP500',
+            MarketData.date >= oct_7,
+            MarketData.date <= oct_17
+        ).order_by(MarketData.date).all()
+        
+        results['sp500_data_count'] = len(sp500_dates)
+        results['sp500_dates'] = [{'date': s.date.isoformat(), 'value': float(s.close_price)} for s in sp500_dates]
         
         for user in users:
             user_data = {
@@ -4366,10 +4380,12 @@ def check_recent_snapshots():
                 'snapshots': []
             }
             
-            # Get last 10 snapshots (more than 5 days to account for weekends)
-            snapshots = PortfolioSnapshot.query.filter_by(
-                user_id=user.id
-            ).order_by(PortfolioSnapshot.date.desc()).limit(10).all()
+            # Get ALL snapshots from Oct 7-17
+            snapshots = PortfolioSnapshot.query.filter(
+                PortfolioSnapshot.user_id == user.id,
+                PortfolioSnapshot.date >= oct_7,
+                PortfolioSnapshot.date <= oct_17
+            ).order_by(PortfolioSnapshot.date.desc()).all()
             
             for snapshot in snapshots:
                 user_data['snapshots'].append({

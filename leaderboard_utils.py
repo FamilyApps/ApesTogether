@@ -59,7 +59,8 @@ def get_or_create_stock_info(ticker):
             stock_info.cap_classification = classify_market_cap(market_cap)
             stock_info.last_updated = datetime.now()
             
-            db.session.commit()
+            # NOTE: Do NOT commit here - let caller handle transaction
+            # This is called during market close cron atomicity must be preserved
             return stock_info
         else:
             current_app.logger.warning(f"No market cap data for {ticker}, using mock data")
@@ -121,7 +122,8 @@ def create_mock_stock_info(ticker):
     stock_info.cap_classification = classify_market_cap(market_cap)
     stock_info.last_updated = datetime.now()
     
-    db.session.commit()
+    # NOTE: Do NOT commit here - let caller handle transaction
+    # This is called during market close cron - atomicity must be preserved
     return stock_info
 
 def calculate_portfolio_cap_percentages(user_id):
@@ -300,7 +302,9 @@ def update_leaderboard_entry(user_id, period):
     entry.portfolio_value = round(portfolio_value, 2)
     entry.calculated_at = datetime.now()
     
-    db.session.commit()
+    # NOTE: Do NOT commit here - let caller handle transaction
+    # This function is LEGACY (replaced by update_leaderboard_cache using LeaderboardCache)
+    # But if it's still called, it should not break atomic transactions
     return entry
 
 def get_leaderboard_data(period='YTD', limit=20, category='all'):
@@ -400,11 +404,15 @@ def get_user_chart_data(user_id, period):
                 )
                 db.session.add(chart_cache)
             
-            db.session.commit()
+            # NOTE: Do NOT commit here - let the market close cron handle atomic commit
+            # Committing mid-transaction breaks atomicity and can cause data loss
             logger.info(f"Updated chart cache for user {user_id}, period {period}")
         except Exception as e:
             logger.error(f"Failed to update chart cache: {e}")
-            db.session.rollback()
+            # NOTE: Do NOT rollback here - it would wipe user snapshots and S&P 500 data
+            # Just log the error and continue - caller decides whether to rollback entire transaction
+            import traceback
+            logger.error(f"Chart cache update error traceback: {traceback.format_exc()}")
     
     return fresh_data
 
