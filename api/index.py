@@ -4176,6 +4176,22 @@ def admin_command_center():
                         </div>
                     </div>
                 </div>
+                
+                <!-- Diagnose Portfolio Calculations -->
+                <div class="col-md-6">
+                    <div class="card command-card">
+                        <div class="card-header bg-danger text-white">
+                            <h5>🔍 Diagnose Portfolio Calculations</h5>
+                        </div>
+                        <div class="card-body">
+                            <p>Test portfolio value calculations for users with stale snapshots</p>
+                            <button class="btn btn-danger" onclick="runCommand('diagnose-calc')">
+                                Run Diagnostic
+                            </button>
+                            <div id="diagnose-calc-result" class="result-box" style="display:none;"></div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -4202,6 +4218,9 @@ def admin_command_center():
                 } else if (cmd === 'check-snapshots') {
                     url = '/admin/check-recent-snapshots';
                     method = 'GET';
+                } else if (cmd === 'diagnose-calc') {
+                    url = '/admin/diagnose-portfolio-calculations';
+                    method = 'GET';
                 }
                 
                 const response = await fetch(url, { method });
@@ -4225,6 +4244,97 @@ def admin_command_center():
     </body>
     </html>
     '''
+
+@app.route('/admin/diagnose-portfolio-calculations')
+@login_required
+def diagnose_portfolio_calculations():
+    """Diagnose why portfolio calculations are failing for specific users"""
+    try:
+        if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import User, Transaction
+        from cash_tracking import calculate_portfolio_value_with_cash
+        from portfolio_performance import PortfolioPerformanceCalculator
+        from datetime import date
+        
+        # Test the 4 users with stale snapshots
+        problem_users = ['testing2', 'testing3', 'wild-bronco', 'wise-buffalo']
+        results = {
+            'test_date': date.today().isoformat(),
+            'users': []
+        }
+        
+        for username in problem_users:
+            user = User.query.filter_by(username=username).first()
+            if not user:
+                results['users'].append({'username': username, 'error': 'User not found'})
+                continue
+            
+            user_diag = {
+                'username': username,
+                'user_id': user.id,
+                'email': user.email,
+                'max_cash_deployed': user.max_cash_deployed,
+                'cash_proceeds': user.cash_proceeds
+            }
+            
+            # Get transaction count
+            txn_count = Transaction.query.filter_by(user_id=user.id).count()
+            user_diag['transaction_count'] = txn_count
+            
+            # Get recent transactions
+            recent_txns = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.timestamp.desc()).limit(3).all()
+            user_diag['recent_transactions'] = [
+                {
+                    'ticker': t.ticker,
+                    'type': t.transaction_type,
+                    'quantity': t.quantity,
+                    'price': t.price,
+                    'date': t.timestamp.isoformat()
+                } for t in recent_txns
+            ]
+            
+            # Try to calculate portfolio value
+            try:
+                portfolio_data = calculate_portfolio_value_with_cash(user.id, date.today())
+                user_diag['calculation_result'] = {
+                    'stock_value': portfolio_data['stock_value'],
+                    'cash_proceeds': portfolio_data['cash_proceeds'],
+                    'total_value': portfolio_data['total_value'],
+                    'status': 'SUCCESS' if portfolio_data['total_value'] > 0 else 'ZERO_VALUE'
+                }
+                
+                # Also test the raw calculator
+                calculator = PortfolioPerformanceCalculator()
+                raw_stock_value = calculator.calculate_portfolio_value(user.id, date.today())
+                user_diag['raw_stock_calculation'] = {
+                    'value': raw_stock_value,
+                    'status': 'SUCCESS' if raw_stock_value > 0 else 'ZERO_OR_NONE'
+                }
+                
+            except Exception as e:
+                user_diag['calculation_result'] = {
+                    'error': str(e),
+                    'status': 'FAILED'
+                }
+                import traceback
+                user_diag['traceback'] = traceback.format_exc()
+            
+            results['users'].append(user_diag)
+        
+        return jsonify({
+            'success': True,
+            'results': results
+        })
+    
+    except Exception as e:
+        logger.error(f"Error diagnosing portfolio calculations: {e}")
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
 
 @app.route('/admin/check-recent-snapshots')
 @login_required
