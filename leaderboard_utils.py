@@ -849,11 +849,9 @@ def update_leaderboard_cache(periods=None):
                 print(f"Error updating leaderboard cache for period {period}, category {category}: {str(e)}")
                 import traceback
                 print(f"Full traceback: {traceback.format_exc()}")
-                # Important: rollback so the session can continue processing the next items
-                try:
-                    db.session.rollback()
-                except Exception:
-                    pass
+                # NOTE: Do NOT rollback - let caller handle transaction
+                # Just skip this period/category and continue with others
+                print(f"Skipping period {period}, category {category} due to error")
                 continue
     
     # Generate portfolio charts only for users who made any leaderboard
@@ -921,15 +919,10 @@ def update_leaderboard_cache(periods=None):
     for obj in list(db.session.new)[:3]:  # Show first 3 new objects
         print(f"New object: {obj}")
     
-    try:
-        db.session.commit()
-        print(f"Leaderboard cache updated: {updated_count} periods, {charts_generated} charts generated for {len(leaderboard_users)} users")
-    except Exception as e:
-        db.session.rollback()
-        import traceback
-        print(f"Error committing leaderboard and chart cache updates: {str(e)}")
-        print(f"Full traceback: {traceback.format_exc()}")
-        return 0
+    # NOTE: Do NOT commit here - let caller handle transaction
+    # This allows atomic commits with other operations (snapshots, S&P 500 data)
+    print(f"Leaderboard cache prepared: {updated_count} periods, {charts_generated} charts generated for {len(leaderboard_users)} users")
+    print(f"Added {len(db.session.new)} new objects to session - caller must commit")
     
     return updated_count
 

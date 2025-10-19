@@ -4041,10 +4041,12 @@ def backfill_sp500_data():
             try:
                 from leaderboard_utils import update_leaderboard_cache
                 updated_count = update_leaderboard_cache()
+                db.session.commit()  # Commit chart cache updates
                 results['chart_cache_regenerated'] = True
                 results['chart_cache_entries'] = updated_count
             except Exception as e:
                 results['chart_cache_error'] = str(e)
+                db.session.rollback()
         
         return jsonify({
             'success': True,
@@ -4157,6 +4159,8 @@ def regenerate_chart_cache():
         
         # Force regenerate all chart caches
         updated_count = update_leaderboard_cache()
+        db.session.commit()  # Commit the cache updates
+        
         results['leaderboard_entries_updated'] = updated_count
         results['cache_updated'] = True
         results['completed_at'] = datetime.now().isoformat()
@@ -4169,6 +4173,7 @@ def regenerate_chart_cache():
     
     except Exception as e:
         logger.error(f"Chart cache regeneration error: {str(e)}")
+        db.session.rollback()  # Rollback on error
         import traceback
         return jsonify({
             'success': False,
@@ -16555,6 +16560,7 @@ def update_leaderboard_cron():
         
         # Update leaderboard cache (all periods)
         updated_count = update_leaderboard_cache()
+        db.session.commit()  # Commit the cache updates
         
         logger.info(f"Automated leaderboard update completed: {updated_count} entries updated")
         
@@ -16566,6 +16572,7 @@ def update_leaderboard_cron():
         
     except Exception as e:
         logger.error(f"Automated leaderboard update error: {str(e)}")
+        db.session.rollback()  # Rollback on error
         return jsonify({'error': f'Leaderboard update error: {str(e)}'}), 500
 
 @app.route('/api/cron/update-leaderboard-chunk', methods=['POST'])
