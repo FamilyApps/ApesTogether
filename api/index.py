@@ -4192,6 +4192,22 @@ def admin_command_center():
                         </div>
                     </div>
                 </div>
+                
+                <!-- Check Historical Stock Data -->
+                <div class="col-md-6">
+                    <div class="card command-card">
+                        <div class="card-header bg-info text-white">
+                            <h5>📊 Check Historical Stock Data (Oct 7-17)</h5>
+                        </div>
+                        <div class="card-body">
+                            <p>Check if stock prices were collected for users' holdings during the gap period</p>
+                            <button class="btn btn-info" onclick="runCommand('check-stock-data')">
+                                Check Stock Data
+                            </button>
+                            <div id="check-stock-data-result" class="result-box" style="display:none;"></div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -4221,6 +4237,9 @@ def admin_command_center():
                 } else if (cmd === 'diagnose-calc') {
                     url = '/admin/diagnose-portfolio-calculations';
                     method = 'GET';
+                } else if (cmd === 'check-stock-data') {
+                    url = '/admin/check-historical-stock-data';
+                    method = 'GET';
                 }
                 
                 const response = await fetch(url, { method });
@@ -4244,6 +4263,106 @@ def admin_command_center():
     </body>
     </html>
     '''
+
+@app.route('/admin/check-historical-stock-data')
+@login_required
+def check_historical_stock_data():
+    """Check if stock price data exists for users' holdings during Oct 7-17"""
+    try:
+        if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import User, Transaction, MarketData, UserPortfolioChartCache
+        from datetime import date, datetime, timedelta
+        from sqlalchemy import and_
+        
+        # Check the 4 users with missing snapshots
+        problem_users = ['testing2', 'testing3', 'wild-bronco', 'wise-buffalo']
+        oct_7 = date(2025, 10, 7)
+        oct_17 = date(2025, 10, 17)
+        oct_7_dt = datetime(2025, 10, 7)
+        oct_17_dt = datetime(2025, 10, 17, 23, 59, 59)
+        
+        results = {
+            'date_range': f'{oct_7.isoformat()} to {oct_17.isoformat()}',
+            'users': []
+        }
+        
+        for username in problem_users:
+            user = User.query.filter_by(username=username).first()
+            if not user:
+                continue
+            
+            user_data = {
+                'username': username,
+                'user_id': user.id,
+                'holdings': [],
+                'chart_cache_entries': []
+            }
+            
+            # Check if chart cache was generated during this period (indicates calculations worked)
+            chart_caches = UserPortfolioChartCache.query.filter(
+                and_(
+                    UserPortfolioChartCache.user_id == user.id,
+                    UserPortfolioChartCache.generated_at >= oct_7_dt,
+                    UserPortfolioChartCache.generated_at <= oct_17_dt
+                )
+            ).all()
+            
+            for cache in chart_caches:
+                user_data['chart_cache_entries'].append({
+                    'period': cache.period,
+                    'generated_at': cache.generated_at.isoformat() if cache.generated_at else None
+                })
+            
+            # Get all transactions to determine holdings
+            transactions = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.timestamp).all()
+            
+            # Calculate current holdings
+            holdings = {}
+            for txn in transactions:
+                if txn.transaction_type in ('buy', 'initial'):
+                    holdings[txn.ticker] = holdings.get(txn.ticker, 0) + txn.quantity
+                elif txn.transaction_type == 'sell':
+                    holdings[txn.ticker] = holdings.get(txn.ticker, 0) - txn.quantity
+            
+            # Check if price data exists for each holding during Oct 7-17
+            for ticker, quantity in holdings.items():
+                if quantity <= 0:
+                    continue
+                
+                # Check MarketData table for this ticker during the period
+                price_data = MarketData.query.filter(
+                    and_(
+                        MarketData.ticker == ticker,
+                        MarketData.date >= oct_7,
+                        MarketData.date <= oct_17
+                    )
+                ).order_by(MarketData.date).all()
+                
+                holding_info = {
+                    'ticker': ticker,
+                    'quantity': quantity,
+                    'price_data_points': len(price_data),
+                    'dates_with_data': [p.date.isoformat() for p in price_data]
+                }
+                
+                user_data['holdings'].append(holding_info)
+            
+            results['users'].append(user_data)
+        
+        return jsonify({
+            'success': True,
+            'results': results
+        })
+    
+    except Exception as e:
+        logger.error(f"Error checking historical stock data: {e}")
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
 
 @app.route('/admin/diagnose-portfolio-calculations')
 @login_required
