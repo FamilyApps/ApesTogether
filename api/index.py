@@ -15287,8 +15287,8 @@ def admin_trigger_market_close_backfill():
             try:
                 calculator = PortfolioPerformanceCalculator()
                 
-                # For historical dates, get historical price
-                spy_price = calculator.get_historical_price('SPY', target_date)
+                # For historical dates, get historical price (force_fetch to avoid cache issues)
+                spy_price = calculator.get_historical_price('SPY', target_date, force_fetch=True)
                 
                 if spy_price and spy_price > 0:
                     sp500_value = spy_price * 10  # Convert SPY to S&P 500 approximation
@@ -15375,6 +15375,52 @@ def admin_trigger_market_close_backfill():
         import traceback
         return jsonify({
             'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/test-spy-historical-price')
+@login_required
+def test_spy_historical_price():
+    """Test endpoint to diagnose SPY historical price fetching for specific date"""
+    try:
+        if not current_user.is_admin:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime, date
+        from portfolio_performance import PortfolioPerformanceCalculator
+        from models import MarketData
+        
+        # Test for Oct 20, 2025
+        target_date = date(2025, 10, 20)
+        
+        calculator = PortfolioPerformanceCalculator()
+        
+        # Try to get historical SPY price
+        spy_price = calculator.get_historical_price('SPY', target_date)
+        
+        # Check if S&P 500 data exists
+        existing_sp500 = MarketData.query.filter_by(
+            ticker='SPY_SP500',
+            date=target_date
+        ).first()
+        
+        return jsonify({
+            'test_date': target_date.isoformat(),
+            'spy_historical_price': spy_price,
+            'sp500_value_calculated': spy_price * 10 if spy_price else None,
+            'sp500_data_exists_in_db': existing_sp500 is not None,
+            'sp500_value_in_db': float(existing_sp500.close_price) if existing_sp500 else None,
+            'diagnosis': {
+                'can_fetch_spy': spy_price is not None and spy_price > 0,
+                'sp500_in_database': existing_sp500 is not None,
+                'issue': 'Phase 1.5 might be failing silently' if not existing_sp500 and spy_price else None
+            }
+        })
+    
+    except Exception as e:
+        import traceback
+        return jsonify({
             'error': str(e),
             'traceback': traceback.format_exc()
         }), 500
