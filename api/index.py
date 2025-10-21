@@ -15280,6 +15280,54 @@ def admin_trigger_market_close_backfill():
             results['pipeline_phases'].append('snapshots_completed')
             logger.info(f"PHASE 1 Complete: {results['snapshots_created']} created, {results['snapshots_updated']} updated")
             
+            # PHASE 1.5: Collect S&P 500 Market Close Data for target date
+            logger.info(f"PHASE 1.5: Collecting S&P 500 market close data for {target_date}...")
+            results['pipeline_phases'].append('sp500_started')
+            
+            try:
+                calculator = PortfolioPerformanceCalculator()
+                
+                # For historical dates, get historical price
+                spy_price = calculator.get_historical_price('SPY', target_date)
+                
+                if spy_price and spy_price > 0:
+                    sp500_value = spy_price * 10  # Convert SPY to S&P 500 approximation
+                    
+                    # Check if S&P 500 data already exists for target date
+                    from models import MarketData
+                    existing_sp500 = MarketData.query.filter_by(
+                        ticker='SPY_SP500',
+                        date=target_date
+                    ).first()
+                    
+                    if existing_sp500:
+                        existing_sp500.close_price = sp500_value
+                        logger.info(f"Updated S&P 500 data for {target_date}: ${sp500_value:.2f}")
+                    else:
+                        market_data = MarketData(
+                            ticker='SPY_SP500',
+                            date=target_date,
+                            close_price=sp500_value
+                        )
+                        db.session.add(market_data)
+                        logger.info(f"Created S&P 500 data for {target_date}: ${sp500_value:.2f}")
+                    
+                    results['sp500_data_collected'] = True
+                else:
+                    error_msg = f"Failed to fetch SPY historical price for {target_date}"
+                    results['errors'].append(error_msg)
+                    logger.error(error_msg)
+                    results['sp500_data_collected'] = False
+            
+            except Exception as e:
+                error_msg = f"Error collecting S&P 500 data for {target_date}: {str(e)}"
+                results['errors'].append(error_msg)
+                logger.error(error_msg)
+                results['sp500_data_collected'] = False
+            
+            results['pipeline_phases'].append('sp500_completed')
+            logger.info(f"PHASE 1.5 Complete: S&P 500 data collection {'succeeded' if results.get('sp500_data_collected') else 'failed'}")
+            
             # PHASE 2: Update Leaderboard Cache (includes chart cache generation)
             logger.info("PHASE 2: Updating leaderboard and chart caches...")
             results['pipeline_phases'].append('leaderboard_started')
