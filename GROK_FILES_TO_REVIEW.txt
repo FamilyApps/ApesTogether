@@ -1,0 +1,168 @@
+CRITICAL FILES FOR GROK REVIEW - S&P 500 Data Persistence Failure
+
+========================================
+FILE 1: api/index.py
+========================================
+FOCUS: Lines 14737-15065 (market_close_cron function)
+
+KEY SECTIONS:
+- Line 14868-14917: Phase 1.5 (S&P 500 data creation & flush)
+- Line 14919-14929: Phase 2 (leaderboard cache update)
+- Line 14931-15007: Phase 2.5 (HTML pre-rendering with EXCEPTION)
+- Line 15009-15016: Phase 3 (atomic commit)
+- Line 15018-15038: Phase 3.5 (verification that FAILS)
+- Line 15040-15055: Exception handler with rollback
+
+SPECIFIC ISSUE:
+Line 14987 tries to create LeaderboardCache(category=category) but model has no category field
+
+========================================
+FILE 2: leaderboard_utils.py  
+========================================
+FOCUS: Lines 726-935 (update_leaderboard_cache function)
+
+KEY SECTIONS:
+- Line 729: Imports db, LeaderboardCache, UserPortfolioChartCache
+- Line 740-758: Collects leaderboard_users set
+- Line 775-863: Creates LeaderboardCache entries (NO commit)
+- Line 867-904: Creates UserPortfolioChartCache entries (NO commit)
+- Line 906-918: Deletes old chart cache entries
+- Line 924-934: Session state debugging (prints new/dirty objects)
+- Line 930-935: NOTE: "Do NOT commit here - let caller handle transaction"
+
+POTENTIAL ISSUES:
+- Does this function modify session state in ways that affect MarketData?
+- Are there any session.expunge() or session.clear() calls?
+- Could the delete operations affect other pending adds?
+
+========================================
+FILE 3: models.py
+========================================
+FOCUS: Lines 1-348 (all model definitions)
+
+KEY MODELS:
+- Line 158-172: LeaderboardCache (NO category field!)
+- Line 174-187: UserPortfolioChartCache
+- Line ???: MarketData (need to find this)
+- Line ???: PortfolioSnapshot (need to find this)
+
+VERIFY:
+- MarketData table definition
+- Any custom __init__ methods that might affect session behavior
+- Any SQLAlchemy events or listeners
+
+========================================
+FILE 4: portfolio_performance.py
+========================================
+FOCUS: get_stock_data() function
+
+CONTEXT:
+- Called at line 14874: calculator.get_stock_data('SPY')
+- Should NOT commit (we removed that in previous fix)
+- Returns price data used to create MarketData object
+
+VERIFY:
+- No hidden db.session.commit() calls
+- No session manipulation
+
+========================================
+ADDITIONAL CONTEXT FILES
+========================================
+
+FILE: api/index.py (working manual backfill)
+Lines 4773-4832: backfill_sp500_for_date function
+This WORKS - creates MarketData, commits, persists successfully
+Compare against market_close_cron to find differences
+
+FILE: api/index.py (working trigger-market-close-backfill)  
+Lines 15067-15380: admin_trigger_market_close_backfill function
+Similar to market_close_cron but might have differences
+
+========================================
+DEBUGGING EVIDENCE
+========================================
+
+From logs (2025-10-21 20:00:22 UTC):
+✅ "Created S&P 500 data for 2025-10-21: $6712.30"
+✅ "Flushed S&P 500 data to session" 
+✅ "PHASE 3 Complete: All changes committed successfully"
+⚠️ "HTML pre-rendering error: 'category' is an invalid keyword argument"
+❌ "VERIFICATION FAILED: S&P 500 data NOT found in DB"
+
+From /check-snapshot-data API:
+- 2025-10-21: portfolio_snapshots=1 ✅, sp500_data_exists=false ❌
+- PortfolioSnapshot objects persist
+- MarketData objects do NOT persist
+- Both in same transaction, same commit
+
+========================================
+QUESTIONS FOR GROK
+========================================
+
+1. SESSION STATE:
+   - Can a caught TypeError in Phase 2.5 corrupt the session?
+   - Does failed object instantiation leave session in dirty state?
+   - Should we rollback after exception before continuing?
+
+2. TRANSACTION ISOLATION:
+   - Is db.session.flush() sufficient before commit?
+   - Could Postgres transaction isolation level cause this?
+   - Is there a replication lag in Vercel Postgres?
+
+3. SQLALCHEMY BEHAVIOR:
+   - Does update_leaderboard_cache() detach objects from session?
+   - Can session.new or session.dirty affect commit behavior?
+   - Is expire_all() in Phase 3.5 causing false negative?
+
+4. ORDER OF OPERATIONS:
+   - Should MarketData be created AFTER leaderboard cache?
+   - Should we commit MarketData in separate transaction?
+   - Is the atomic transaction approach fundamentally flawed?
+
+5. IMMEDIATE FIX:
+   - Remove Phase 2.5 entirely (it's broken)?
+   - Fix LeaderboardCache model to add category field?
+   - Commit MarketData in Phase 1.5 before Phase 2?
+   - Use separate transactions for different data types?
+
+========================================
+WORKING MANUAL BACKFILL CODE (FOR COMPARISON)
+========================================
+
+This code WORKS every time:
+
+```python
+@app.route('/admin/backfill-sp500/<date_str>')
+def backfill_sp500_for_date(date_str):
+    target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    
+    calculator = PortfolioPerformanceCalculator()
+    spy_price = calculator.get_historical_price('SPY', target_date, force_fetch=True)
+    
+    sp500_value = spy_price * 10
+    
+    existing = MarketData.query.filter_by(
+        ticker='SPY_SP500',
+        date=target_date
+    ).first()
+    
+    if existing:
+        existing.close_price = sp500_value
+    else:
+        market_data = MarketData(
+            ticker='SPY_SP500',
+            date=target_date,
+            close_price=sp500_value
+        )
+        db.session.add(market_data)
+    
+    db.session.commit()  # ✅ WORKS!
+    
+    return jsonify({'success': True, 'sp500_value': sp500_value})
+```
+
+Key differences from market_close_cron:
+- No flush() before commit
+- No leaderboard cache update
+- No Phase 2.5 with exception
+- Simpler, single-purpose transaction

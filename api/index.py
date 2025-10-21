@@ -14916,6 +14916,19 @@ def market_close_cron():
             results['pipeline_phases'].append('sp500_completed')
             logger.info(f"PHASE 1.5 Complete: S&P 500 data collection {'succeeded' if results.get('sp500_data_collected') else 'failed'}")
             
+            # PHASE 1.75: Commit S&P 500 data immediately to ensure persistence
+            # This prevents it from being lost if later phases have issues
+            if results.get('sp500_data_collected'):
+                logger.info("PHASE 1.75: Committing S&P 500 data independently...")
+                try:
+                    db.session.commit()
+                    logger.info("PHASE 1.75 Complete: S&P 500 data committed successfully")
+                    results['sp500_committed_early'] = True
+                except Exception as e:
+                    logger.error(f"PHASE 1.75 FAILED: Could not commit S&P 500 data: {e}")
+                    results['sp500_committed_early'] = False
+                    # Continue anyway - will try full commit later
+            
             # PHASE 2: Update Leaderboard Cache (includes chart cache generation)
             logger.info("PHASE 2: Updating leaderboard and chart caches...")
             results['pipeline_phases'].append('leaderboard_started')
@@ -14984,7 +14997,6 @@ def market_close_cron():
                             if not cache_entry:
                                 cache_entry = LeaderboardCache(
                                     period=cache_key,
-                                    category=category,
                                     leaderboard_data={}
                                 )
                                 db.session.add(cache_entry)
