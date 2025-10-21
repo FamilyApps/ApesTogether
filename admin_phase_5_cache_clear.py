@@ -168,7 +168,7 @@ def register_phase_5_cache_routes(app, db):
     
     @app.route('/admin/phase5/check-recent-snapshots')
     @login_required
-    def check_recent_snapshots():
+    def phase5_check_recent_snapshots():
         """Check if recent snapshots exist for all users"""
         if not current_user.is_admin:
             return jsonify({'error': 'Admin access required'}), 403

@@ -82,10 +82,12 @@ class PortfolioPerformanceCalculator:
             time.sleep(0.1)  # 100ms delay between API calls
             
             url = f'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker_symbol}&entitlement=realtime&apikey={api_key}'
-            response = requests.get(url, timeout=5)
+            # 10-second timeout is reasonable for premium API
+            # Real timeouts were caused by db.session.commit() bottleneck (now fixed)
+            response = requests.get(url, timeout=10)
             data = response.json()
             
-            # Log the API call (but don't commit immediately for performance)
+            # Log the API call (NOTE: Do NOT commit - let caller handle atomic transaction)
             try:
                 from models import AlphaVantageAPILog, db
                 success = 'Global Quote' in data and '05. price' in data.get('Global Quote', {})
@@ -100,7 +102,8 @@ class PortfolioPerformanceCalculator:
                     timestamp=current_time
                 )
                 db.session.add(api_log)
-                # Commit will happen at end of batch operation
+                # NOTE: Do NOT commit here - atomic transaction controlled by caller
+                # Committing here breaks atomicity and causes cascading timeouts
             except Exception as log_error:
                 logger.error(f"Failed to log API call: {log_error}")
             
@@ -123,17 +126,9 @@ class PortfolioPerformanceCalculator:
             if ticker_upper in stock_price_cache:
                 return {'price': stock_price_cache[ticker_upper]['price']}
             return None
-        finally:
-            # Commit any pending API logs
-            try:
-                from models import db
-                db.session.commit()
-            except Exception as commit_error:
-                logger.error(f"Error committing API logs: {commit_error}")
-                try:
-                    db.session.rollback()
-                except:
-                    pass
+        # NOTE: Removed finally block that was committing after every API call
+        # This was breaking atomic transactions and causing cascading timeouts
+        # API logs will be committed with the main transaction by the caller
     
     def get_historical_price(self, ticker: str, target_date: date, force_fetch: bool = False) -> float:
         """
