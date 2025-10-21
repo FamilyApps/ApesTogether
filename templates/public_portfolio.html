@@ -634,71 +634,73 @@
                 type: 'line',
                 data: {
                     labels: labels,
-                    datasets: [{
-                        label: username + "'s Portfolio",
-                        data: portfolioData,
-                        borderColor: 'rgb(75, 192, 192)',
-                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
-                        tension: 0.4,
-                        fill: true,
-                        pointRadius: 0,
-                        pointHoverRadius: 4
-                    }, {
-                        label: 'S&P 500',
-                        data: sp500Data,
-                        borderColor: 'rgb(255, 99, 132)',
-                        backgroundColor: 'rgba(255, 99, 132, 0.1)',
-                        tension: 0.4,
-                        fill: true,
-                        pointRadius: 0,
-                        pointHoverRadius: 4
-                    }]
+                    datasets: [
+                        {
+                            label: username + "'s Portfolio",
+                            data: portfolioData,
+                            borderColor: '#28a745',
+                            backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                            borderWidth: 3,
+                            fill: false,
+                            tension: 0.1,
+                            pointRadius: 0,
+                            pointHoverRadius: 4
+                        },
+                        {
+                            label: 'S&P 500',
+                            data: sp500Data,
+                            borderColor: '#6c757d',
+                            backgroundColor: 'rgba(108, 117, 125, 0.1)',
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.1,
+                            borderDash: [5, 5],
+                            pointRadius: 0,
+                            pointHoverRadius: 4
+                        }
+                    ]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
                     interaction: {
-                        mode: 'index',
-                        intersect: false
+                        intersect: false,
+                        mode: 'index'
                     },
                     plugins: {
                         legend: {
-                            display: true,
-                            position: 'top'
+                            position: 'top',
+                            align: 'end'
                         },
                         tooltip: {
-                            mode: 'index',
-                            intersect: false,
                             callbacks: {
                                 label: function(context) {
-                                    let label = context.dataset.label || '';
-                                    if (label) {
-                                        label += ': ';
-                                    }
-                                    label += context.parsed.y.toFixed(2) + '%';
-                                    return label;
+                                    return context.dataset.label + ': ' + (context.parsed.y >= 0 ? '+' : '') + context.parsed.y.toFixed(2) + '%';
                                 }
                             }
                         }
                     },
                     scales: {
                         x: {
+                            type: 'category',
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Date'
+                            },
                             grid: {
                                 display: false
-                            },
-                            ticks: {
-                                maxRotation: 45,
-                                minRotation: 45
                             }
                         },
                         y: {
-                            beginAtZero: false,
-                            grid: {
-                                color: 'rgba(0, 0, 0, 0.05)'
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Return (%)'
                             },
                             ticks: {
                                 callback: function(value) {
-                                    return value.toFixed(2) + '%';
+                                    return (value >= 0 ? '+' : '') + value.toFixed(1) + '%';
                                 }
                             }
                         }
