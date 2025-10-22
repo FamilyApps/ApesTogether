@@ -955,96 +955,164 @@ def generate_chart_from_snapshots(user_id, period):
     """Generate chart data from snapshots using same logic as leaderboards"""
     from datetime import datetime, date, timedelta
     import json
+    from models import PortfolioSnapshotIntraday, MarketData
+    from sqlalchemy import func, cast, Date
     
     # Use same date calculation logic as calculate_leaderboard_data
     today = get_last_market_day()
     
-    if period == '1D':
-        start_date = today - timedelta(days=1)
-    elif period == '5D':
-        # Get 5 business days back (same logic as leaderboards)
-        business_days_back = 0
-        check_date = today
-        while business_days_back < 5:
-            check_date = check_date - timedelta(days=1)
-            if check_date.weekday() < 5:  # Monday=0, Friday=4
-                business_days_back += 1
-        start_date = check_date
-    elif period == '1M':
-        start_date = today - timedelta(days=30)
-    elif period == '3M':
-        start_date = today - timedelta(days=90)
-    elif period == 'YTD':
-        start_date = date(today.year, 1, 1)
-    elif period == '1Y':
-        start_date = today - timedelta(days=365)
-    elif period == '5Y':
-        start_date = today - timedelta(days=1825)
-    elif period == 'MAX':
-        start_date = date(2020, 1, 1)  # Reasonable start date
-    else:
-        start_date = date(today.year, 1, 1)  # Default to YTD
-    
-    # Get all snapshots for user in date range
-    snapshots = PortfolioSnapshot.query.filter(
-        PortfolioSnapshot.user_id == user_id,
-        PortfolioSnapshot.date >= start_date,
-        PortfolioSnapshot.date <= today
-    ).order_by(PortfolioSnapshot.date.asc()).all()
-    
-    if not snapshots:
-        return None
-    
-    # Build chart data
-    labels = []
-    portfolio_data = []
-    
-    for snapshot in snapshots:
-        labels.append(snapshot.date.strftime('%Y-%m-%d'))
-        portfolio_data.append(float(snapshot.total_value))
-    
-    # Calculate performance percentage for each point
-    if len(portfolio_data) > 0:
-        start_value = portfolio_data[0]
-        performance_data = []
+    # For 1D and 5D, use intraday snapshots with time labels
+    if period in ['1D', '5D']:
+        if period == '1D':
+            start_date = today
+            end_date = today
+        else:  # 5D
+            # Get 5 business days back
+            business_days_back = 0
+            check_date = today
+            while business_days_back < 5:
+                check_date = check_date - timedelta(days=1)
+                if check_date.weekday() < 5:  # Monday=0, Friday=4
+                    business_days_back += 1
+            start_date = check_date
+            end_date = today
         
-        for value in portfolio_data:
-            if start_value > 0:
-                performance_pct = ((value - start_value) / start_value) * 100
+        # Get intraday snapshots
+        from pytz import timezone
+        MARKET_TZ = timezone('America/New_York')
+        
+        intraday_snapshots = PortfolioSnapshotIntraday.query.filter(
+            PortfolioSnapshotIntraday.user_id == user_id,
+            cast(func.timezone('America/New_York', PortfolioSnapshotIntraday.timestamp), Date) >= start_date,
+            cast(func.timezone('America/New_York', PortfolioSnapshotIntraday.timestamp), Date) <= end_date
+        ).order_by(PortfolioSnapshotIntraday.timestamp).all()
+        
+        if not intraday_snapshots:
+            return None
+        
+        # Build chart data with formatted time labels
+        labels = []
+        portfolio_data = []
+        first_value = intraday_snapshots[0].total_value
+        
+        for snapshot in intraday_snapshots:
+            # Format label based on period
+            et_timestamp = snapshot.timestamp.astimezone(MARKET_TZ)
+            if period == '1D':
+                # For 1D: "Oct 21 9:30 AM"
+                label = et_timestamp.strftime('%b %d %I:%M %p')
+            else:  # 5D
+                # For 5D: "Oct 21" (date only, but keep all intraday points)
+                label = et_timestamp.strftime('%b %d')
+            
+            labels.append(label)
+            
+            # Calculate performance percentage
+            if first_value > 0:
+                performance_pct = ((snapshot.total_value - first_value) / first_value) * 100
             else:
                 performance_pct = 0.0
-            performance_data.append(round(performance_pct, 2))
-    else:
-        performance_data = []
-    
-    # Fetch S&P 500 data for the same date range
-    sp500_performance = []
-    from models import MarketData
-    
-    sp500_snapshots = MarketData.query.filter(
-        MarketData.ticker == 'SPY_SP500',
-        MarketData.date >= start_date,
-        MarketData.date <= today
-    ).order_by(MarketData.date.asc()).all()
-    
-    if sp500_snapshots and len(sp500_snapshots) > 0:
-        sp500_values = [float(s.close_price) for s in sp500_snapshots]
-        start_sp500 = sp500_values[0]
+            portfolio_data.append(round(performance_pct, 2))
         
-        for value in sp500_values:
-            if start_sp500 > 0:
-                sp500_pct = ((value - start_sp500) / start_sp500) * 100
+        # Get S&P 500 intraday data
+        sp500_data = MarketData.query.filter(
+            MarketData.ticker == 'SPY_INTRADAY',
+            MarketData.date >= start_date,
+            MarketData.date <= end_date,
+            MarketData.timestamp.isnot(None)
+        ).order_by(MarketData.timestamp).all()
+        
+        sp500_performance = []
+        if sp500_data and len(sp500_data) > 0:
+            first_sp500 = sp500_data[0].close_price
+            sp500_values = [float(s.close_price) for s in sp500_data]
+            
+            # Match S&P 500 data to snapshot timestamps
+            for snapshot in intraday_snapshots:
+                # Find closest S&P 500 value at or before this timestamp
+                spy_value = first_sp500
+                for spy_point in sp500_data:
+                    if spy_point.timestamp <= snapshot.timestamp:
+                        spy_value = spy_point.close_price
+                    else:
+                        break
+                
+                if first_sp500 > 0:
+                    sp500_pct = ((spy_value - first_sp500) / first_sp500) * 100
+                else:
+                    sp500_pct = 0.0
+                sp500_performance.append(round(sp500_pct, 2))
+        
+    else:
+        # For longer periods, use EOD snapshots
+        if period == '1M':
+            start_date = today - timedelta(days=30)
+        elif period == '3M':
+            start_date = today - timedelta(days=90)
+        elif period == 'YTD':
+            start_date = date(today.year, 1, 1)
+        elif period == '1Y':
+            start_date = today - timedelta(days=365)
+        elif period == '5Y':
+            start_date = today - timedelta(days=1825)
+        elif period == 'MAX':
+            start_date = date(2020, 1, 1)
+        else:
+            start_date = date(today.year, 1, 1)  # Default to YTD
+        
+        # Get all snapshots for user in date range
+        snapshots = PortfolioSnapshot.query.filter(
+            PortfolioSnapshot.user_id == user_id,
+            PortfolioSnapshot.date >= start_date,
+            PortfolioSnapshot.date <= today
+        ).order_by(PortfolioSnapshot.date.asc()).all()
+        
+        if not snapshots:
+            return None
+        
+        # Build chart data
+        labels = []
+        portfolio_data = []
+        first_value = snapshots[0].total_value
+        
+        for snapshot in snapshots:
+            labels.append(snapshot.date.strftime('%b %d'))
+            
+            # Calculate performance percentage
+            if first_value > 0:
+                performance_pct = ((snapshot.total_value - first_value) / first_value) * 100
             else:
-                sp500_pct = 0.0
-            sp500_performance.append(round(sp500_pct, 2))
+                performance_pct = 0.0
+            portfolio_data.append(round(performance_pct, 2))
+        
+        # Get S&P 500 EOD data
+        from models import MarketData
+        sp500_snapshots = MarketData.query.filter(
+            MarketData.ticker == 'SPY_SP500',
+            MarketData.date >= start_date,
+            MarketData.date <= today
+        ).order_by(MarketData.date.asc()).all()
+        
+        sp500_performance = []
+        if sp500_snapshots and len(sp500_snapshots) > 0:
+            sp500_values = [float(s.close_price) for s in sp500_snapshots]
+            start_sp500 = sp500_values[0]
+            
+            for value in sp500_values:
+                if start_sp500 > 0:
+                    sp500_pct = ((value - start_sp500) / start_sp500) * 100
+                else:
+                    sp500_pct = 0.0
+                sp500_performance.append(round(sp500_pct, 2))
     
     # Format as Chart.js compatible data
+    # portfolio_data already contains performance percentages calculated above
     chart_data = {
         'labels': labels,
         'datasets': [
             {
                 'label': 'Your Portfolio',
-                'data': performance_data,
+                'data': portfolio_data,
                 'borderColor': 'rgb(40, 167, 69)',
                 'backgroundColor': 'rgba(40, 167, 69, 0.1)',
                 'tension': 0.1,
