@@ -14916,116 +14916,141 @@ def market_close_cron():
             results['pipeline_phases'].append('sp500_completed')
             logger.info(f"PHASE 1.5 Complete: S&P 500 data collection {'succeeded' if results.get('sp500_data_collected') else 'failed'}")
             
-            # PHASE 1.75: Commit S&P 500 data immediately to ensure persistence
-            # This prevents it from being lost if later phases have issues
-            if results.get('sp500_data_collected'):
-                logger.info("PHASE 1.75: Committing S&P 500 data independently...")
-                try:
-                    db.session.commit()
-                    logger.info("PHASE 1.75 Complete: S&P 500 data committed successfully")
-                    results['sp500_committed_early'] = True
-                except Exception as e:
-                    logger.error(f"PHASE 1.75 FAILED: Could not commit S&P 500 data: {e}")
-                    results['sp500_committed_early'] = False
-                    # Continue anyway - will try full commit later
-            
-            # PHASE 2: Update Leaderboard Cache (includes chart cache generation)
-            logger.info("PHASE 2: Updating leaderboard and chart caches...")
-            results['pipeline_phases'].append('leaderboard_started')
-            
-            updated_count = update_leaderboard_cache()
-            results['leaderboard_updated'] = True
-            results['leaderboard_entries_updated'] = updated_count
-            results['chart_cache_updated'] = True  # update_leaderboard_cache also updates chart cache
-            
-            results['pipeline_phases'].append('leaderboard_completed')
-            logger.info(f"PHASE 2 Complete: {updated_count} leaderboard entries updated")
-            
-            # PHASE 2.5: Pre-render HTML for leaderboards (auth-aware caching)
-            logger.info("PHASE 2.5: Pre-rendering HTML for lightning-fast page loads...")
-            results['pipeline_phases'].append('html_prerender_started')
+            # PHASE 1.75: Commit ALL core data (snapshots + S&P 500) before cache operations
+            # This isolates critical data from potential session corruption in later phases
+            # Grok recommendation: Separate transactions for core data vs cache
+            logger.info("PHASE 1.75: Committing core data (snapshots + S&P 500) atomically...")
+            results['pipeline_phases'].append('core_commit_started')
             
             try:
-                from flask import render_template_string
-                from leaderboard_utils import get_leaderboard_data
-                from models import LeaderboardCache, Subscription
+                db.session.commit()
+                logger.info(f"✅ PHASE 1.75 Complete: Committed {results['snapshots_created']} snapshots + S&P 500 data")
+                results['core_data_committed'] = True
+                results['pipeline_phases'].append('core_commit_completed')
+            except Exception as e:
+                logger.error(f"❌ PHASE 1.75 FAILED: Core data commit failed: {e}")
+                db.session.rollback()
+                results['core_data_committed'] = False
+                results['errors'].append(f"Core data commit failed: {str(e)}")
+                # CRITICAL FAILURE - return immediately
+                return jsonify({
+                    'success': False,
+                    'message': 'Core data commit failed - snapshots and S&P 500 not saved',
+                    'results': results
+                }), 500
+            
+            # PHASE 2: Update Leaderboard Cache (includes chart cache generation)
+            # Now in separate transaction - if this fails, core data is already safe
+            # Grok recommendation: Wrap in try-catch with rollback to prevent session corruption
+            try:
+                logger.info("PHASE 2: Updating leaderboard and chart caches...")
+                results['pipeline_phases'].append('leaderboard_started')
                 
-                periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']
-                categories = ['all', 'small_cap', 'large_cap']
-                html_generated = 0
+                updated_count = update_leaderboard_cache()
+                results['leaderboard_updated'] = True
+                results['leaderboard_entries_updated'] = updated_count
+                results['chart_cache_updated'] = True  # update_leaderboard_cache also updates chart cache
                 
-                for period in periods:
-                    for category in categories:
-                        # Generate leaderboard data once
-                        leaderboard_data = get_leaderboard_data(period, limit=50)
-                        
-                        # Filter by category
-                        if category == 'small_cap':
-                            filtered_data = [e for e in leaderboard_data if e.get('small_cap_percent', 0) > 50]
-                        elif category == 'large_cap':
-                            filtered_data = [e for e in leaderboard_data if e.get('large_cap_percent', 0) > 50]
-                        else:
-                            filtered_data = leaderboard_data
-                        
-                        # Generate TWO versions: _anon and _auth
-                        for auth_state in ['anon', 'auth']:
-                            cache_key = f"{period}_{category}_{auth_state}"
-                            
-                            # Simulate user authentication state for template rendering
-                            # For _anon: nav shows Login/Sign Up
-                            # For _auth: nav shows Dashboard/Explore/etc
-                            context = {
-                                'leaderboard_data': filtered_data,
-                                'current_period': period,
-                                'current_category': category,
-                                'periods': periods,
-                                'categories': [
-                                    ('all', 'All Portfolios'),
-                                    ('small_cap', 'Small Cap Focus'),
-                                    ('large_cap', 'Large Cap Focus')
-                                ],
-                                'now': datetime.now(),
-                                'is_authenticated': (auth_state == 'auth')
-                            }
-                            
-                            # Render the HTML with appropriate auth context
-                            # NOTE: This would need actual template rendering
-                            # For now, just mark that we would do this
-                            
-                            # Find or create cache entry
-                            cache_entry = LeaderboardCache.query.filter_by(period=cache_key).first()
-                            if not cache_entry:
-                                cache_entry = LeaderboardCache(
-                                    period=cache_key,
-                                    leaderboard_data={}
-                                )
-                                db.session.add(cache_entry)
-                            
-                            # TODO: Actually render the template
-                            # cache_entry.rendered_html = render_template('leaderboard.html', **context)
-                            # For now, just mark it as ready to be rendered on-demand
-                            cache_entry.generated_at = datetime.now()
-                            html_generated += 1
+                results['pipeline_phases'].append('leaderboard_completed')
+                logger.info(f"PHASE 2 Complete: {updated_count} leaderboard entries updated")
                 
-                results['html_prerendered'] = html_generated
-                logger.info(f"PHASE 2.5 Complete: Prepared {html_generated} HTML cache entries")
+                # PHASE 2.5: Pre-render HTML for leaderboards (auth-aware caching)
+                logger.info("PHASE 2.5: Pre-rendering HTML for lightning-fast page loads...")
+                results['pipeline_phases'].append('html_prerender_started')
+                
+                try:
+                    from flask import render_template_string
+                    from leaderboard_utils import get_leaderboard_data
+                    from models import LeaderboardCache, Subscription
+                    
+                    periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']
+                    categories = ['all', 'small_cap', 'large_cap']
+                    html_generated = 0
+                    
+                    for period in periods:
+                        for category in categories:
+                            # Generate leaderboard data once
+                            leaderboard_data = get_leaderboard_data(period, limit=50)
+                            
+                            # Filter by category
+                            if category == 'small_cap':
+                                filtered_data = [e for e in leaderboard_data if e.get('small_cap_percent', 0) > 50]
+                            elif category == 'large_cap':
+                                filtered_data = [e for e in leaderboard_data if e.get('large_cap_percent', 0) > 50]
+                            else:
+                                filtered_data = leaderboard_data
+                            
+                            # Generate TWO versions: _anon and _auth
+                            for auth_state in ['anon', 'auth']:
+                                cache_key = f"{period}_{category}_{auth_state}"
+                                
+                                # Simulate user authentication state for template rendering
+                                # For _anon: nav shows Login/Sign Up
+                                # For _auth: nav shows Dashboard/Explore/etc
+                                context = {
+                                    'leaderboard_data': filtered_data,
+                                    'current_period': period,
+                                    'current_category': category,
+                                    'periods': periods,
+                                    'categories': [
+                                        ('all', 'All Portfolios'),
+                                        ('small_cap', 'Small Cap Focus'),
+                                        ('large_cap', 'Large Cap Focus')
+                                    ],
+                                    'now': datetime.now(),
+                                    'is_authenticated': (auth_state == 'auth')
+                                }
+                                
+                                # Render the HTML with appropriate auth context
+                                # NOTE: This would need actual template rendering
+                                # For now, just mark that we would do this
+                                
+                                # Find or create cache entry
+                                cache_entry = LeaderboardCache.query.filter_by(period=cache_key).first()
+                                if not cache_entry:
+                                    cache_entry = LeaderboardCache(
+                                        period=cache_key,
+                                        leaderboard_data={}
+                                    )
+                                    db.session.add(cache_entry)
+                                
+                                # TODO: Actually render the template
+                                # cache_entry.rendered_html = render_template('leaderboard.html', **context)
+                                # For now, just mark it as ready to be rendered on-demand
+                                cache_entry.generated_at = datetime.now()
+                                html_generated += 1
+                    
+                    results['html_prerendered'] = html_generated
+                    logger.info(f"PHASE 2.5 Complete: Prepared {html_generated} HTML cache entries")
+                    
+                except Exception as e:
+                    error_msg = f"HTML pre-rendering error: {str(e)}"
+                    results['errors'].append(error_msg)
+                    logger.warning(error_msg)
+                    # Grok recommendation: Rollback on exception to clean session state
+                    db.session.rollback()
+                    logger.info("Session rolled back due to Phase 2.5 error")
+                
+                results['pipeline_phases'].append('html_prerender_completed')
+                
+                # PHASE 3: Commit Cache Updates (separate transaction from core data)
+                logger.info("PHASE 3: Committing cache updates...")
+                results['pipeline_phases'].append('cache_commit_started')
+                
+                db.session.commit()
+                
+                results['pipeline_phases'].append('cache_commit_completed')
+                logger.info("✅ PHASE 3 Complete: Cache updates committed successfully")
+                results['cache_committed'] = True
                 
             except Exception as e:
-                error_msg = f"HTML pre-rendering error: {str(e)}"
+                # Cache update failed but core data is safe (already committed in Phase 1.75)
+                error_msg = f"Cache update failed: {str(e)}"
                 results['errors'].append(error_msg)
-                logger.warning(error_msg)
-                # Don't fail the pipeline for HTML rendering issues
-            
-            results['pipeline_phases'].append('html_prerender_completed')
-            
-            # PHASE 3: Atomic Database Commit
-            logger.info("PHASE 3: Committing all changes atomically...")
-            results['pipeline_phases'].append('commit_started')
-            
-            db.session.commit()
-            
-            results['pipeline_phases'].append('commit_completed')
-            logger.info("PHASE 3 Complete: All changes committed successfully")
+                logger.error(f"⚠️ {error_msg} - Core data (snapshots + S&P 500) is safe")
+                db.session.rollback()
+                results['cache_committed'] = False
+                # Don't fail entire pipeline - core data is what matters
             
             # PHASE 3.5: VERIFICATION - Confirm S&P 500 data actually persisted
             logger.info("PHASE 3.5: Verifying S&P 500 data persistence...")
@@ -15050,21 +15075,32 @@ def market_close_cron():
                 results['errors'].append(f"S&P 500 data missing after commit for {today_et}")
             
         except Exception as e:
-            # ROLLBACK: Any failure rolls back entire pipeline
-            logger.error(f"ATOMIC PIPELINE FAILURE: {str(e)}")
+            # ROLLBACK: Only affects uncommitted changes (cache operations)
+            # Core data (snapshots + S&P 500) already committed in Phase 1.75
+            logger.error(f"PIPELINE FAILURE: {str(e)}")
             db.session.rollback()
             
-            error_msg = f"Atomic pipeline failure: {str(e)}"
+            error_msg = f"Pipeline failure: {str(e)}"
             results['errors'].append(error_msg)
             results['pipeline_phases'].append('rollback_completed')
             
-            # Return partial success info but mark as failed
-            return jsonify({
-                'success': False,
-                'message': 'Market close pipeline failed - all changes rolled back',
-                'results': results,
-                'error': error_msg
-            }), 500
+            # Check if core data was committed before failure
+            if results.get('core_data_committed'):
+                logger.info("✅ Core data (snapshots + S&P 500) is safe despite failure")
+                return jsonify({
+                    'success': True,  # Partial success - core data saved
+                    'partial': True,
+                    'message': 'Core data saved successfully, but cache updates failed',
+                    'results': results,
+                    'error': error_msg
+                }), 200
+            else:
+                return jsonify({
+                    'success': False,
+                    'message': 'Market close pipeline failed - no data saved',
+                    'results': results,
+                    'error': error_msg
+                }), 500
         
         return jsonify({
             'success': True,
