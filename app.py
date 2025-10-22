@@ -426,8 +426,15 @@ def dashboard():
         leaderboard_positions = get_user_leaderboard_positions(current_user.id, top_n=20)
     except Exception as e:
         print(f"Error fetching leaderboard positions: {str(e)}")
+    
+    # Generate share URL for portfolio sharing card
+    share_url = f"https://apestogether.com/p/{current_user.portfolio_slug}" if current_user.portfolio_slug else ""
 
-    return render_template('dashboard.html', stocks=portfolio_data, total_portfolio_value=total_portfolio_value, leaderboard_positions=leaderboard_positions)
+    return render_template('dashboard.html', 
+                         stocks=portfolio_data, 
+                         total_portfolio_value=total_portfolio_value, 
+                         leaderboard_positions=leaderboard_positions,
+                         share_url=share_url)
 
 @app.route('/onboarding')
 @login_required

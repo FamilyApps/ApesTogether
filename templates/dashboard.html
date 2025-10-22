@@ -461,10 +461,9 @@ function loadPerformanceData(period) {
     document.getElementById('portfolio-return').textContent = 'Loading...';
     document.getElementById('sp500-return').textContent = 'Loading...';
     
-    // Use intraday API for 1D and 5D to get market hours data (9:30 AM - 4:00 PM)
-    const apiEndpoint = (period === '1D' || period === '5D') 
-        ? `/api/portfolio/intraday/${period}`
-        : `/api/portfolio/performance/${period}`;
+    // For all periods, use the performance API which checks chart cache first
+    // This ensures 1D and 5D use intraday data from chart cache (populated at market close)
+    const apiEndpoint = `/api/portfolio/performance/${period}`;
     
     fetch(apiEndpoint)
         .then(response => {
@@ -635,33 +634,15 @@ function updatePerformanceChart(data) {
     setTimeout(() => {
         console.log('Inside setTimeout, creating chart...');
         
-        // FIX (Grok-validated): Use category scale for multi-day periods to eliminate empty spaces
-        // Category treats dates as discrete labels (no time gaps), while time scale for 1D preserves intraday spacing
-        const useCategoryScale = currentPeriod !== '1D';
+        // Use category scale for ALL periods including 1D
+        // Category scale treats date labels as strings, avoiding Date parsing issues
+        // Backend sends pre-formatted labels (e.g., "Oct 21 9:30 AM" for 1D, "Oct 21" for 5D)
+        const useCategoryScale = true;
         
-        // For category scale, extract labels and y-values separately
-        let labels = [];
-        let portfolioDataPoints = [];
-        let sp500DataPoints = [];
-        
-        if (useCategoryScale) {
-            // Category scale: Use date labels from backend, map to y-values only
-            labels = data.chart_data.map(item => item.date);  // Backend sends formatted labels like 'Sep 26'
-            portfolioDataPoints = data.chart_data.map(item => item.portfolio);
-            sp500DataPoints = data.chart_data.map(item => item.sp500);
-        } else {
-            // Time scale (1D only): Use {x: Date, y: value} format for proper time positioning
-            portfolioDataPoints = data.chart_data.map(item => {
-                const dateStr = item.date;
-                const xValue = dateStr.includes('T') ? new Date(dateStr) : new Date(dateStr + 'T12:00:00');
-                return { x: xValue, y: item.portfolio };
-            });
-            sp500DataPoints = data.chart_data.map(item => {
-                const dateStr = item.date;
-                const xValue = dateStr.includes('T') ? new Date(dateStr) : new Date(dateStr + 'T12:00:00');
-                return { x: xValue, y: item.sp500 };
-            });
-        }
+        // Extract labels and y-values from backend data
+        const labels = data.chart_data.map(item => item.date);
+        const portfolioDataPoints = data.chart_data.map(item => item.portfolio);
+        const sp500DataPoints = data.chart_data.map(item => item.sp500);
         
         console.log('Chart data points sample:', {
             useCategoryScale,
@@ -676,7 +657,7 @@ function updatePerformanceChart(data) {
             performanceChart = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: useCategoryScale ? labels : undefined,  // Only for category scale
+                    labels: labels,  // Category scale always uses labels
                     datasets: [
                         {
                             label: 'Your Portfolio',
@@ -725,16 +706,14 @@ function updatePerformanceChart(data) {
                         tooltip: {
                             callbacks: {
                                 title: function(context) {
-                                    // For category scale, show formatted date from data
-                                    if (useCategoryScale && context[0] && data.chart_data) {
+                                    // Show formatted date from backend (already includes year for context)
+                                    if (context[0] && data.chart_data) {
                                         const dataIndex = context[0].dataIndex;
                                         if (data.chart_data[dataIndex]) {
-                                            // Backend date might be short format - expand for tooltip
-                                            return labels[dataIndex] + ', 2025';  // Add year for context
+                                            return data.chart_data[dataIndex].date;
                                         }
                                     }
-                                    // For time scale (1D), use default behavior
-                                    return Chart.defaults.plugins.tooltip.callbacks.title(context);
+                                    return '';
                                 },
                                 label: function(context) {
                                     return context.dataset.label + ': ' + (context.parsed.y >= 0 ? '+' : '') + context.parsed.y.toFixed(2) + '%';
@@ -744,26 +723,23 @@ function updatePerformanceChart(data) {
                     },
                     scales: {
                         x: {
-                            type: useCategoryScale ? 'category' : 'time',  // FIX: Category for multi-day to skip gaps
+                            type: 'category',  // Always use category scale for all periods
                             display: true,
                             title: {
                                 display: true,
                                 text: currentPeriod === '1D' ? 'Time (ET)' : 'Date'
                             },
-                            // Time scale config only applies to 1D
-                            ...(useCategoryScale ? {} : {
-                                time: {
-                                    unit: 'hour',
-                                    displayFormats: {
-                                        hour: 'h:mm a'
-                                    },
-                                    tooltipFormat: 'MMM dd, h:mm a'
-                                }
-                            }),
                             ticks: {
-                                maxTicksLimit: currentPeriod === '1D' ? 8 : 10,
+                                maxTicksLimit: currentPeriod === '1D' ? 8 : (currentPeriod === '5D' ? 5 : 10),
                                 maxRotation: 45,
-                                minRotation: 0
+                                minRotation: 0,
+                                autoSkip: true,
+                                autoSkipPadding: 15
+                            },
+                            grid: {
+                                display: true,
+                                drawOnChartArea: true,
+                                drawTicks: true
                             }
                         },
                         y: {

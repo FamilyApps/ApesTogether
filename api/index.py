@@ -18687,8 +18687,7 @@ def portfolio_performance_intraday(period):
                 et_timestamp = snapshot.timestamp.astimezone(MARKET_TZ)
                 date_label = et_timestamp.strftime('%b %d %I:%M %p')
             elif period == '5D':
-                # For 5D charts, use short date format (e.g., "Sep 30")
-                # GROK-VALIDATED FIX: Category scale needs discrete labels, not ISO timestamps
+                # For 5D charts, use date-only format since we now show only one snapshot per day
                 et_timestamp = snapshot.timestamp.astimezone(MARKET_TZ)
                 date_label = et_timestamp.strftime('%b %d')
             else:
