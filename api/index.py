@@ -20996,6 +20996,14 @@ def public_portfolio_view(slug):
                     'gain_loss_pct': gain_loss_pct
                 })
         
+        # Get user's leaderboard positions (if in top 20)
+        leaderboard_positions = {}
+        try:
+            from leaderboard_utils import get_user_leaderboard_positions
+            leaderboard_positions = get_user_leaderboard_positions(user.id, top_n=20)
+        except Exception as e:
+            logger.error(f"Error fetching leaderboard positions: {str(e)}")
+        
         return render_template('public_portfolio.html',
             username=user.username,
             current_value=current_value,
@@ -21008,6 +21016,7 @@ def public_portfolio_view(slug):
             holdings=holdings,
             num_stocks=num_stocks,
             avg_trades_per_week=avg_trades_per_week,
+            leaderboard_positions=leaderboard_positions,
             stripe_public_key=app.config.get('STRIPE_PUBLIC_KEY', '')
         )
     

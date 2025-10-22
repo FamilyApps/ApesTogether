@@ -418,8 +418,16 @@ def dashboard():
                 'total_value': 'N/A'
             }
             portfolio_data.append(stock_info)
+    
+    # Get user's leaderboard positions (if in top 20)
+    leaderboard_positions = {}
+    try:
+        from leaderboard_utils import get_user_leaderboard_positions
+        leaderboard_positions = get_user_leaderboard_positions(current_user.id, top_n=20)
+    except Exception as e:
+        print(f"Error fetching leaderboard positions: {str(e)}")
 
-    return render_template('dashboard.html', stocks=portfolio_data, total_portfolio_value=total_portfolio_value)
+    return render_template('dashboard.html', stocks=portfolio_data, total_portfolio_value=total_portfolio_value, leaderboard_positions=leaderboard_positions)
 
 @app.route('/onboarding')
 @login_required

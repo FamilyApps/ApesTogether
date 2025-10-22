@@ -82,6 +82,31 @@
                     </div>
                 </div>
 
+                <!-- Leaderboard Positions Card -->
+                {% if leaderboard_positions %}
+                <div class="card shadow-sm mb-4 border-success">
+                    <div class="card-body">
+                        <h5 class="mb-3"><i class="fas fa-trophy text-warning me-2"></i>Leaderboard Rankings</h5>
+                        <div class="row">
+                            {% for period, position in leaderboard_positions.items() %}
+                            <div class="col-6 col-md-2 mb-2">
+                                <div class="text-center">
+                                    <div class="badge bg-success fs-6 w-100 py-2">
+                                        <strong>{{ period }}</strong><br>
+                                        #{{ position }}
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        <p class="text-muted small mb-0 mt-2">
+                            <i class="fas fa-star me-1"></i>
+                            Ranked in the top 20 performers across multiple time periods!
+                        </p>
+                    </div>
+                </div>
+                {% endif %}
+
                 <!-- Performance Chart -->
                 <div class="card shadow-sm mb-4">
                     <div class="card-header bg-white">

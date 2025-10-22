@@ -61,7 +61,7 @@ def leaderboard_home():
                          leaderboard_data=leaderboard_data,
                          current_period=period,
                          current_category=category,
-                         periods=['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX'],
+                         periods=['1D', '5D', '1M', '3M', 'YTD', '1Y'],
                          categories=[
                              ('all', 'All Portfolios'),
                              ('small_cap', 'Small Cap Focus'),

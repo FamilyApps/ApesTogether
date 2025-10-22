@@ -1098,3 +1098,22 @@ def update_user_chart_cache(user_id, period):
         db.session.add(cache_entry)
     
     return True
+
+def get_user_leaderboard_positions(user_id, top_n=20):
+    """
+    Get a user's leaderboard positions across all time periods (if they're in top N).
+    Returns dict of {period: position} for periods where user ranks in top N.
+    """
+    positions = {}
+    periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y']
+    
+    for period in periods:
+        leaderboard_data = get_leaderboard_data(period, limit=top_n)
+        
+        # Find user's position in this leaderboard
+        for idx, entry in enumerate(leaderboard_data, 1):
+            if entry.get('user_id') == user_id:
+                positions[period] = idx
+                break
+    
+    return positions
