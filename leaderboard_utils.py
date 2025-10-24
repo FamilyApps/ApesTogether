@@ -862,24 +862,21 @@ def update_leaderboard_cache(periods=None):
                 print(f"Skipping period {period}, category {category} due to error")
                 continue
     
-    # Generate portfolio charts only for users who made any leaderboard
-    # FIX #3: Skip 1D chart caching since it uses live intraday data via API endpoint
-    for user_id in leaderboard_users:
+    # Generate portfolio charts for ALL users (not just leaderboard users)
+    # Use generate_chart_from_snapshots() which includes intraday data for 1D/5D and S&P 500 benchmark
+    from models import User
+    all_users = User.query.all()
+    
+    for user in all_users:
         for period in periods:
-            # Skip 1D charts - they use live intraday data via /api/portfolio/intraday/1D
-            # Caching them here would be stale and cause errors
-            if period == '1D':
-                print(f"⏭ Skipping 1D chart cache for user {user_id} (uses live endpoint)")
-                continue
-            
             try:
-                # Generate chart data for this user and period
-                chart_data = generate_user_portfolio_chart(user_id, period)
+                # Generate chart data for this user and period using updated function
+                chart_data = generate_chart_from_snapshots(user.id, period)
                 
                 if chart_data:
                     # Update or create chart cache entry
                     chart_cache = UserPortfolioChartCache.query.filter_by(
-                        user_id=user_id, period=period
+                        user_id=user.id, period=period
                     ).first()
                     
                     if chart_cache:
@@ -887,7 +884,7 @@ def update_leaderboard_cache(periods=None):
                         chart_cache.generated_at = datetime.now()
                     else:
                         chart_cache = UserPortfolioChartCache(
-                            user_id=user_id,
+                            user_id=user.id,
                             period=period,
                             chart_data=json.dumps(chart_data),
                             generated_at=datetime.now()
@@ -895,26 +892,13 @@ def update_leaderboard_cache(periods=None):
                         db.session.add(chart_cache)
                     
                     charts_generated += 1
-                    print(f"✓ Generated chart cache for user {user_id}, period {period}")
+                    print(f"✓ Generated chart cache for user {user.id}, period {period}")
                 else:
-                    print(f"⚠ No chart data generated for user {user_id}, period {period} - insufficient snapshots")
+                    print(f"⚠ No chart data generated for user {user.id}, period {period} - insufficient snapshots")
                     
             except Exception as e:
-                print(f"Error generating chart cache for user {user_id}, period {period}: {str(e)}")
+                print(f"Error generating chart cache for user {user.id}, period {period}: {str(e)}")
                 continue
-    
-    # Clean up old chart cache entries for users no longer on leaderboards
-    try:
-        old_charts = UserPortfolioChartCache.query.filter(
-            ~UserPortfolioChartCache.user_id.in_(leaderboard_users)
-        ).all()
-        
-        for old_chart in old_charts:
-            db.session.delete(old_chart)
-        
-        print(f"Cleaned up {len(old_charts)} old chart cache entries")
-    except Exception as e:
-        print(f"Error cleaning up old chart cache: {str(e)}")
     
     print(f"\n=== LEADERBOARD CACHE UPDATE COMPLETE ===")
     print(f"Updated {updated_count} leaderboard cache entries")

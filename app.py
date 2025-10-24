@@ -424,8 +424,11 @@ def dashboard():
     try:
         from leaderboard_utils import get_user_leaderboard_positions
         leaderboard_positions = get_user_leaderboard_positions(current_user.id, top_n=20)
+        print(f"DEBUG: Leaderboard positions for user {current_user.id}: {leaderboard_positions}")
     except Exception as e:
         print(f"Error fetching leaderboard positions: {str(e)}")
+        import traceback
+        traceback.print_exc()
     
     # Generate share URL for portfolio sharing card
     share_url = f"https://apestogether.com/p/{current_user.portfolio_slug}" if current_user.portfolio_slug else ""
