@@ -22676,6 +22676,53 @@ def admin_emergency_cache_rebuild():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/api/test-chart-cache-version', methods=['GET'])
+def test_chart_cache_version():
+    """Test endpoint to verify deployment and manually test cache generation"""
+    try:
+        import inspect
+        from leaderboard_utils import update_leaderboard_cache, generate_chart_from_snapshots
+        
+        # Check the source code of update_leaderboard_cache to see which version is deployed
+        source_code = inspect.getsource(update_leaderboard_cache)
+        
+        # Look for the key indicator of the NEW code
+        has_new_code = "Generate portfolio charts for ALL users" in source_code
+        has_old_code = "Skipping 1D chart cache" in source_code
+        uses_correct_function = "generate_chart_from_snapshots" in source_code
+        uses_old_function = "generate_user_portfolio_chart" in source_code
+        
+        # Test cache generation for current user
+        from flask_login import current_user
+        test_result = {}
+        if current_user.is_authenticated:
+            try:
+                cache_data = generate_chart_from_snapshots(current_user.id, '1D')
+                if cache_data:
+                    test_result['1D_cache_test'] = {
+                        'success': True,
+                        'labels_count': len(cache_data.get('labels', [])),
+                        'sample_labels': cache_data.get('labels', [])[:3],
+                        'datasets_count': len(cache_data.get('datasets', []))
+                    }
+                else:
+                    test_result['1D_cache_test'] = {'success': False, 'error': 'No cache data generated'}
+            except Exception as e:
+                test_result['1D_cache_test'] = {'success': False, 'error': str(e)}
+        
+        return jsonify({
+            'deployment_status': {
+                'has_new_code': has_new_code,
+                'has_old_code': has_old_code,
+                'uses_correct_function': uses_correct_function,
+                'uses_old_function': uses_old_function,
+                'verdict': 'NEW CODE DEPLOYED ' if (has_new_code and not has_old_code) else 'OLD CODE STILL RUNNING '
+            },
+            'test_result': test_result
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # Export the Flask app for Vercel serverless function
 # This is required for Vercel's Python runtime
 app.debug = False
