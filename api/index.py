@@ -22862,7 +22862,7 @@ def admin_test_portfolio_stats():
             'traceback': traceback.format_exc()
         }), 500
 
-@app.route('/admin/populate-portfolio-stats', methods=['POST'])
+@app.route('/admin/populate-portfolio-stats', methods=['GET', 'POST'])
 @login_required
 def admin_populate_portfolio_stats():
     """
@@ -22949,7 +22949,7 @@ def admin_populate_portfolio_stats():
             'traceback': traceback.format_exc()
         }), 500
 
-@app.route('/admin/create-portfolio-stats-table', methods=['POST'])
+@app.route('/admin/create-portfolio-stats-table', methods=['GET', 'POST'])
 @login_required
 def admin_create_portfolio_stats_table():
     """
