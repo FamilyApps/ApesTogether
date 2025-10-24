@@ -1453,10 +1453,21 @@ def dashboard():
     # Build share URL
     share_url = f"https://apestogether.ai/p/{current_user.portfolio_slug}" if current_user.is_authenticated and current_user.portfolio_slug else ""
     
+    # Get user's leaderboard positions (if in top 20)
+    leaderboard_positions = {}
+    try:
+        from leaderboard_utils import get_user_leaderboard_positions
+        leaderboard_positions = get_user_leaderboard_positions(current_user.id, top_n=20)
+        logger.info(f"DEBUG: Leaderboard positions for user {current_user.id}: {leaderboard_positions}")
+    except Exception as e:
+        logger.error(f"Error fetching leaderboard positions: {str(e)}")
+        logger.error(traceback.format_exc())
+    
     return render_template_with_defaults('dashboard.html', 
                                        portfolio_data=portfolio_data,
                                        stocks=portfolio_data,  # Template expects 'stocks' variable
                                        total_portfolio_value=total_portfolio_value,
+                                       leaderboard_positions=leaderboard_positions,
                                        share_url=share_url,
                                        now=datetime.now())
 
