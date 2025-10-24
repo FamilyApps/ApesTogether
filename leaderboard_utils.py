@@ -1237,7 +1237,7 @@ def calculate_user_portfolio_stats(user_id):
     
     # Calculate avg trades per week (last 30 days)
     thirty_days_ago = datetime.now() - timedelta(days=30)
-    recent_transactions = [t for t in transactions if t.transaction_date >= thirty_days_ago]
+    recent_transactions = [t for t in transactions if t.timestamp >= thirty_days_ago]
     avg_trades_per_day = len(recent_transactions) / 30
     stats['avg_trades_per_week'] = round(avg_trades_per_day * 7, 2)
     
