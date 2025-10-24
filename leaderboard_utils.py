@@ -1100,7 +1100,7 @@ def generate_chart_from_snapshots(user_id, period):
                 'borderColor': 'rgb(40, 167, 69)',
                 'backgroundColor': 'rgba(40, 167, 69, 0.1)',
                 'tension': 0.1,
-                'fill': false
+                'fill': False
             }
         ]
     }
@@ -1113,7 +1113,7 @@ def generate_chart_from_snapshots(user_id, period):
             'borderColor': 'rgb(108, 117, 125)',
             'backgroundColor': 'rgba(108, 117, 125, 0.1)',
             'tension': 0.1,
-            'fill': false,
+            'fill': False,
             'borderDash': [5, 5]
         })
     
