@@ -22949,6 +22949,56 @@ def admin_populate_portfolio_stats():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/view-all-portfolio-stats', methods=['GET'])
+@login_required
+def admin_view_all_portfolio_stats():
+    """
+    View portfolio stats for all users (for verification)
+    Shows a summary table of all user stats
+    """
+    try:
+        from models import User, UserPortfolioStats
+        
+        all_stats = []
+        users = User.query.all()
+        
+        for user in users:
+            stats = UserPortfolioStats.query.filter_by(user_id=user.id).first()
+            if stats:
+                all_stats.append({
+                    'user_id': user.id,
+                    'username': user.username,
+                    'unique_stocks': stats.unique_stocks_count,
+                    'avg_trades_per_week': stats.avg_trades_per_week,
+                    'total_trades': stats.total_trades,
+                    'large_cap_percent': stats.large_cap_percent,
+                    'small_cap_percent': stats.small_cap_percent,
+                    'industry_mix': stats.industry_mix,
+                    'subscriber_count': stats.subscriber_count,
+                    'last_updated': stats.last_updated.isoformat() if stats.last_updated else None
+                })
+            else:
+                all_stats.append({
+                    'user_id': user.id,
+                    'username': user.username,
+                    'status': 'NO STATS ENTRY'
+                })
+        
+        return jsonify({
+            'success': True,
+            'total_users': len(users),
+            'users_with_stats': sum(1 for s in all_stats if 'status' not in s),
+            'all_stats': all_stats
+        })
+        
+    except Exception as e:
+        logger.error(f"Error viewing all portfolio stats: {str(e)}")
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/create-portfolio-stats-table', methods=['GET', 'POST'])
 @login_required
 def admin_create_portfolio_stats_table():
