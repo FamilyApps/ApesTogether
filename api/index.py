@@ -22723,6 +22723,43 @@ def test_chart_cache_version():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/test-leaderboard-badges', methods=['GET'])
+@login_required
+def test_leaderboard_badges():
+    """Test endpoint to debug why leaderboard badges aren't showing"""
+    try:
+        from leaderboard_utils import get_user_leaderboard_positions, get_leaderboard_data
+        from flask_login import current_user
+        
+        # Test the leaderboard position function
+        positions = get_user_leaderboard_positions(current_user.id, top_n=20)
+        
+        # Get sample leaderboard data for debugging
+        sample_leaderboards = {}
+        for period in ['1D', '5D', '1M']:
+            leaderboard = get_leaderboard_data(period, limit=20)
+            sample_leaderboards[period] = {
+                'total_entries': len(leaderboard),
+                'user_in_list': any(e.get('user_id') == current_user.id for e in leaderboard),
+                'top_3': [{'user_id': e.get('user_id'), 'username': e.get('username'), 'performance': e.get('performance_percent')} 
+                         for e in leaderboard[:3]]
+            }
+        
+        return jsonify({
+            'user_id': current_user.id,
+            'username': current_user.username,
+            'leaderboard_positions': positions,
+            'positions_count': len(positions),
+            'sample_leaderboards': sample_leaderboards,
+            'verdict': 'BADGES SHOULD SHOW' if len(positions) > 0 else 'NO POSITIONS FOUND - BADGES HIDDEN'
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 # Export the Flask app for Vercel serverless function
 # This is required for Vercel's Python runtime
 app.debug = False
