@@ -962,8 +962,8 @@ def generate_chart_from_snapshots(user_id, period):
             end_date = today
         
         # Get intraday snapshots
-        from pytz import timezone
-        MARKET_TZ = timezone('America/New_York')
+        from zoneinfo import ZoneInfo
+        MARKET_TZ = ZoneInfo('America/New_York')
         
         intraday_snapshots = PortfolioSnapshotIntraday.query.filter(
             PortfolioSnapshotIntraday.user_id == user_id,
