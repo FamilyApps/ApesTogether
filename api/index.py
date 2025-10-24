@@ -22771,6 +22771,225 @@ def test_leaderboard_badges():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/test-portfolio-stats', methods=['GET'])
+@login_required
+def admin_test_portfolio_stats():
+    """
+    Diagnostic endpoint to test portfolio stats calculation
+    Shows sample data for verification before deploying to production
+    """
+    try:
+        from models import User, UserPortfolioStats, Stock
+        from leaderboard_utils import calculate_user_portfolio_stats, calculate_industry_mix
+        
+        results = {
+            'sample_user': None,
+            'all_users_summary': {},
+            'data_quality_checks': {},
+            'calculation_breakdown': {}
+        }
+        
+        # Get current user for sample
+        sample_user = User.query.get(current_user.id)
+        if not sample_user:
+            return jsonify({'error': 'No users found'}), 404
+        
+        # Calculate stats for sample user
+        logger.info(f"Calculating stats for user {sample_user.id}")
+        stats = calculate_user_portfolio_stats(sample_user.id)
+        
+        # Get breakdown for transparency
+        stocks = Stock.query.filter_by(user_id=sample_user.id).all()
+        stock_tickers = [s.ticker for s in stocks]
+        
+        results['sample_user'] = {
+            'user_id': sample_user.id,
+            'username': sample_user.username,
+            'stats': {
+                'unique_stocks_count': stats['unique_stocks_count'],
+                'avg_trades_per_week': stats['avg_trades_per_week'],
+                'total_trades': stats['total_trades'],
+                'large_cap_percent': stats['large_cap_percent'],
+                'small_cap_percent': stats['small_cap_percent'],
+                'industry_mix': stats['industry_mix'],
+                'subscriber_count': stats['subscriber_count'],
+                'last_updated': stats['last_updated'].isoformat()
+            },
+            'calculation_breakdown': {
+                'stock_tickers': stock_tickers,
+                'stock_count': len(stock_tickers),
+                'industry_breakdown': stats['industry_mix']
+            }
+        }
+        
+        # Calculate summary across all users
+        all_users = User.query.all()
+        all_stats = []
+        for user in all_users:
+            try:
+                user_stats = calculate_user_portfolio_stats(user.id)
+                all_stats.append(user_stats)
+            except Exception as e:
+                logger.warning(f"Could not calculate stats for user {user.id}: {str(e)}")
+        
+        if all_stats:
+            results['all_users_summary'] = {
+                'total_users_processed': len(all_stats),
+                'avg_unique_stocks': round(sum(s['unique_stocks_count'] for s in all_stats) / len(all_stats), 1),
+                'avg_trades_per_week': round(sum(s['avg_trades_per_week'] for s in all_stats) / len(all_stats), 1),
+                'users_with_subscribers': sum(1 for s in all_stats if s['subscriber_count'] > 0),
+                'total_subscribers': sum(s['subscriber_count'] for s in all_stats)
+            }
+        
+        # Data quality checks
+        results['data_quality_checks'] = {
+            'all_users_have_calculable_stats': len(all_stats) == len(all_users),
+            'sample_industry_mix_valid': len(stats.get('industry_mix', {})) > 0,
+            'sample_percentages_reasonable': (
+                0 <= stats.get('large_cap_percent', 0) <= 100 and
+                0 <= stats.get('small_cap_percent', 0) <= 100
+            ),
+            'sample_has_stocks': stats.get('unique_stocks_count', 0) > 0
+        }
+        
+        return jsonify(results)
+        
+    except Exception as e:
+        logger.error(f"Error in test-portfolio-stats: {str(e)}")
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/populate-portfolio-stats', methods=['POST'])
+@login_required
+def admin_populate_portfolio_stats():
+    """
+    One-time population of portfolio stats for all users
+    Creates UserPortfolioStats entries for all users
+    """
+    try:
+        from models import User, UserPortfolioStats, db
+        from leaderboard_utils import calculate_user_portfolio_stats
+        from datetime import datetime
+        
+        results = {
+            'users_processed': 0,
+            'users_created': 0,
+            'users_updated': 0,
+            'errors': []
+        }
+        
+        # Get all users
+        all_users = User.query.all()
+        logger.info(f"Populating portfolio stats for {len(all_users)} users")
+        
+        for user in all_users:
+            try:
+                # Calculate stats
+                stats = calculate_user_portfolio_stats(user.id)
+                
+                # Check if entry exists
+                existing_stats = UserPortfolioStats.query.filter_by(user_id=user.id).first()
+                
+                if existing_stats:
+                    # Update existing
+                    existing_stats.unique_stocks_count = stats['unique_stocks_count']
+                    existing_stats.avg_trades_per_week = stats['avg_trades_per_week']
+                    existing_stats.total_trades = stats['total_trades']
+                    existing_stats.large_cap_percent = stats['large_cap_percent']
+                    existing_stats.small_cap_percent = stats['small_cap_percent']
+                    existing_stats.industry_mix = stats['industry_mix']
+                    existing_stats.subscriber_count = stats['subscriber_count']
+                    existing_stats.last_updated = datetime.utcnow()
+                    results['users_updated'] += 1
+                    logger.info(f"Updated stats for user {user.id} ({user.username})")
+                else:
+                    # Create new
+                    new_stats = UserPortfolioStats(
+                        user_id=user.id,
+                        unique_stocks_count=stats['unique_stocks_count'],
+                        avg_trades_per_week=stats['avg_trades_per_week'],
+                        total_trades=stats['total_trades'],
+                        large_cap_percent=stats['large_cap_percent'],
+                        small_cap_percent=stats['small_cap_percent'],
+                        industry_mix=stats['industry_mix'],
+                        subscriber_count=stats['subscriber_count'],
+                        last_updated=datetime.utcnow()
+                    )
+                    db.session.add(new_stats)
+                    results['users_created'] += 1
+                    logger.info(f"Created stats for user {user.id} ({user.username})")
+                
+                results['users_processed'] += 1
+                
+            except Exception as e:
+                error_msg = f"Error processing user {user.id}: {str(e)}"
+                results['errors'].append(error_msg)
+                logger.error(error_msg)
+        
+        # Commit all changes
+        db.session.commit()
+        logger.info(f"Portfolio stats population complete: {results['users_processed']} users processed")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Portfolio stats populated successfully',
+            'results': results
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error in populate-portfolio-stats: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/create-portfolio-stats-table', methods=['POST'])
+@login_required
+def admin_create_portfolio_stats_table():
+    """
+    Create the user_portfolio_stats table in production database
+    Migration endpoint - run once before populating data
+    """
+    try:
+        from models import db, UserPortfolioStats
+        from sqlalchemy import inspect
+        
+        # Check if table already exists
+        inspector = inspect(db.engine)
+        existing_tables = inspector.get_table_names()
+        
+        if 'user_portfolio_stats' in existing_tables:
+            return jsonify({
+                'success': True,
+                'message': 'Table already exists',
+                'table_name': 'user_portfolio_stats'
+            })
+        
+        # Create the table
+        UserPortfolioStats.__table__.create(db.engine)
+        logger.info("Created user_portfolio_stats table")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Table created successfully',
+            'table_name': 'user_portfolio_stats'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error creating portfolio stats table: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 # Export the Flask app for Vercel serverless function
 # This is required for Vercel's Python runtime
 app.debug = False

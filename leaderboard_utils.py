@@ -1169,3 +1169,94 @@ def get_user_leaderboard_positions(user_id, top_n=20):
                 break
     
     return positions
+
+def calculate_industry_mix(user_id):
+    """
+    Calculate industry distribution as percentage of portfolio value
+    Returns: {'Technology': 45.2, 'Healthcare': 30.5, ...}
+    """
+    from models import Stock, StockInfo, PortfolioSnapshot
+    
+    # Get latest portfolio value
+    latest_snapshot = PortfolioSnapshot.query.filter_by(user_id=user_id)\
+        .order_by(PortfolioSnapshot.date.desc()).first()
+    
+    if not latest_snapshot:
+        return {}
+    
+    total_value = latest_snapshot.total_value
+    stocks = Stock.query.filter_by(user_id=user_id).all()
+    
+    if not stocks or total_value == 0:
+        return {}
+    
+    # Calculate industry values
+    industry_values = {}
+    total_purchase_value = sum(stock.quantity * stock.purchase_price for stock in stocks)
+    
+    for stock in stocks:
+        stock_info = StockInfo.query.filter_by(ticker=stock.ticker.upper()).first()
+        
+        if total_purchase_value > 0:
+            stock_purchase_value = stock.quantity * stock.purchase_price
+            stock_current_value = (stock_purchase_value / total_purchase_value) * total_value
+            
+            # Get industry (default to 'Other' if not available)
+            industry = stock_info.industry if stock_info and stock_info.industry else 'Other'
+            
+            industry_values[industry] = industry_values.get(industry, 0) + stock_current_value
+    
+    # Convert to percentages
+    industry_percentages = {
+        industry: round((value / total_value) * 100, 1)
+        for industry, value in industry_values.items()
+    }
+    
+    # Sort by percentage (highest first)
+    return dict(sorted(industry_percentages.items(), key=lambda x: x[1], reverse=True))
+
+def calculate_user_portfolio_stats(user_id):
+    """
+    Calculate all portfolio statistics for a user
+    Called during market close cron
+    Returns dict of stats
+    """
+    from models import Stock, Transaction, Subscription, StockInfo
+    from datetime import datetime, timedelta
+    
+    stats = {}
+    
+    # 1. UNIQUE STOCKS COUNT
+    stocks = Stock.query.filter_by(user_id=user_id).all()
+    stats['unique_stocks_count'] = len(stocks)
+    
+    # 2. TRADING ACTIVITY
+    # Get all transactions
+    transactions = Transaction.query.filter_by(user_id=user_id).all()
+    stats['total_trades'] = len(transactions)
+    
+    # Calculate avg trades per week (last 30 days)
+    thirty_days_ago = datetime.now() - timedelta(days=30)
+    recent_transactions = [t for t in transactions if t.transaction_date >= thirty_days_ago]
+    avg_trades_per_day = len(recent_transactions) / 30
+    stats['avg_trades_per_week'] = round(avg_trades_per_day * 7, 2)
+    
+    # 3. LARGE CAP %
+    small_cap_percent, large_cap_percent = calculate_portfolio_cap_percentages(user_id)
+    stats['small_cap_percent'] = small_cap_percent
+    stats['large_cap_percent'] = large_cap_percent
+    
+    # 4. INDUSTRY MIX
+    industry_mix = calculate_industry_mix(user_id)
+    stats['industry_mix'] = industry_mix
+    
+    # 5. SUBSCRIBER COUNT
+    subscriber_count = Subscription.query.filter_by(
+        subscribed_to_id=user_id,
+        status='active'
+    ).count()
+    stats['subscriber_count'] = subscriber_count
+    
+    stats['last_updated'] = datetime.utcnow()
+    
+    return stats

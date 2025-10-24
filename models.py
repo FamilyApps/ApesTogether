@@ -345,3 +345,37 @@ class LeaderboardEntry(db.Model):
     
     def __repr__(self):
         return f"<LeaderboardEntry {self.user_id} {self.period} {self.performance_percent}%>"
+
+class UserPortfolioStats(db.Model):
+    """
+    Cache table for portfolio statistics
+    Updated daily during market close cron
+    """
+    __tablename__ = 'user_portfolio_stats'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, unique=True)
+    
+    # Trading activity
+    avg_trades_per_week = db.Column(db.Float, default=0.0)
+    total_trades = db.Column(db.Integer, default=0)
+    
+    # Portfolio composition
+    unique_stocks_count = db.Column(db.Integer, default=0)
+    large_cap_percent = db.Column(db.Float, default=0.0)
+    small_cap_percent = db.Column(db.Float, default=0.0)
+    
+    # Industry mix (JSON: {'Technology': 45.2, 'Healthcare': 30.5, ...})
+    industry_mix = db.Column(db.JSON)
+    
+    # Social metrics
+    subscriber_count = db.Column(db.Integer, default=0)
+    
+    # Metadata
+    last_updated = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationship
+    user = db.relationship('User', backref=db.backref('portfolio_stats', uselist=False))
+    
+    def __repr__(self):
+        return f"<UserPortfolioStats user_id={self.user_id} stocks={self.unique_stocks_count}>"
