@@ -15882,13 +15882,13 @@ def admin_force_chart_cache_regeneration():
                         
                         if cache_entry:
                             cache_entry.chart_data = json.dumps(chart_data)
-                            cache_entry.last_updated = datetime.now()
+                            cache_entry.generated_at = datetime.now()
                         else:
                             cache_entry = UserPortfolioChartCache(
                                 user_id=user.id,
                                 period=period,
                                 chart_data=json.dumps(chart_data),
-                                last_updated=datetime.now()
+                                generated_at=datetime.now()
                             )
                             db.session.add(cache_entry)
                         
@@ -23601,7 +23601,7 @@ def admin_inspect_chart_cache_raw():
             'cache_exists': True,
             'user_id': user_id,
             'period': period,
-            'last_updated': cache.last_updated.isoformat() if cache.last_updated else None,
+            'generated_at': cache.generated_at.isoformat() if cache.generated_at else None,
             'chart_data_keys': list(chart_data.keys()),
             'has_sp500_performance': 'sp500_performance' in chart_data,
             'datasets_count': len(chart_data.get('datasets', [])),
