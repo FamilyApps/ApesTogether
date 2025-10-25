@@ -23298,65 +23298,118 @@ def admin_fix_sp500_data():
             'traceback': traceback.format_exc()
         }), 500
 
-@app.route('/admin/debug-chart-cache-sp500', methods=['GET'])
+@app.route('/admin/find-corrupted-sp500-dates', methods=['GET', 'POST'])
 @login_required
-def admin_debug_chart_cache_sp500():
-    """Check what S&P 500 RAW data is in MarketData table for YTD period"""
+def admin_find_corrupted_sp500_dates():
+    """Find and optionally DELETE corrupted S&P 500 values"""
+    email = session.get('email', '')
+    if email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
     try:
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
+        from models import MarketData, db
+        from datetime import date
         
-        from models import MarketData
-        from datetime import date, datetime
-        
-        # Check YTD S&P 500 data
-        today = date.today()
-        year_start = date(today.year, 1, 1)
-        
-        ytd_sp500 = MarketData.query.filter(
+        # Find all S&P 500 records with suspicious low values
+        corrupted = MarketData.query.filter(
             MarketData.ticker == 'SPY_SP500',
-            MarketData.date >= year_start,
-            MarketData.date <= today
-        ).order_by(MarketData.date.asc()).all()
+            MarketData.close_price < 1000  # Way too low for S&P 500
+        ).order_by(MarketData.date.desc()).all()
         
-        # Also check 1Y data
-        one_year_ago = date(today.year - 1, today.month, today.day)
-        one_year_sp500 = MarketData.query.filter(
-            MarketData.ticker == 'SPY_SP500',
-            MarketData.date >= one_year_ago,
-            MarketData.date <= today
-        ).order_by(MarketData.date.asc()).all()
+        corrupted_list = [{
+            'date': record.date.isoformat(),
+            'value': float(record.close_price),
+            'id': record.id
+        } for record in corrupted]
         
-        return jsonify({
-            'success': True,
-            'ytd_data': {
-                'count': len(ytd_sp500),
-                'start_date': ytd_sp500[0].date.isoformat() if ytd_sp500 else None,
-                'end_date': ytd_sp500[-1].date.isoformat() if ytd_sp500 else None,
-                'first_value': float(ytd_sp500[0].close_price) if ytd_sp500 else None,
-                'last_value': float(ytd_sp500[-1].close_price) if ytd_sp500 else None,
-                'first_5_values': [float(s.close_price) for s in ytd_sp500[:5]] if ytd_sp500 else [],
-                'last_5_values': [float(s.close_price) for s in ytd_sp500[-5:]] if ytd_sp500 else [],
-                'min_value': min([float(s.close_price) for s in ytd_sp500]) if ytd_sp500 else None,
-                'max_value': max([float(s.close_price) for s in ytd_sp500]) if ytd_sp500 else None,
-            },
-            '1y_data': {
-                'count': len(one_year_sp500),
-                'start_date': one_year_sp500[0].date.isoformat() if one_year_sp500 else None,
-                'end_date': one_year_sp500[-1].date.isoformat() if one_year_sp500 else None,
-                'first_value': float(one_year_sp500[0].close_price) if one_year_sp500 else None,
-                'last_value': float(one_year_sp500[-1].close_price) if one_year_sp500 else None,
-                'first_5_values': [float(s.close_price) for s in one_year_sp500[:5]] if one_year_sp500 else [],
-                'last_5_values': [float(s.close_price) for s in one_year_sp500[-5:]] if one_year_sp500 else [],
-                'min_value': min([float(s.close_price) for s in one_year_sp500]) if one_year_sp500 else None,
-                'max_value': max([float(s.close_price) for s in one_year_sp500]) if one_year_sp500 else None,
-            },
-            'message': 'RAW S&P 500 values from MarketData table (should be 5000-7000 range for 2024-2025)'
-        })
+        # GET: Just show the corrupted records
+        if request.method == 'GET':
+            return f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Corrupted S&P 500 Records</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; max-width: 1000px; margin: 50px auto; padding: 20px; }}
+                    .warning-box {{ background: #fff3cd; border: 2px solid #ffc107; padding: 20px; border-radius: 8px; margin: 20px 0; }}
+                    table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
+                    th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
+                    th {{ background: #f0f0f0; }}
+                    button {{ background: #dc3545; color: white; border: none; padding: 15px 30px; font-size: 16px; border-radius: 5px; cursor: pointer; margin: 10px 0; }}
+                    button:hover {{ background: #c82333; }}
+                    .success {{ background: #d4edda; border: 2px solid #28a745; padding: 20px; border-radius: 8px; display: none; }}
+                </style>
+            </head>
+            <body>
+                <h1>🚨 Corrupted S&P 500 Records</h1>
+                
+                <div class="warning-box">
+                    <h2>Found {len(corrupted)} corrupted records with values < 1000</h2>
+                    <p>These records have S&P 500 values that are impossibly low (should be 5000-7000 for recent years).</p>
+                    <p><strong>Solution:</strong> Delete these records, then run the replacement again to fetch correct data.</p>
+                </div>
+                
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Corrupted Value</th>
+                            <th>Expected Range</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {''.join([f'<tr><td>{r["date"]}</td><td style="color: red;"><strong>{r["value"]}</strong></td><td>5000-7000</td></tr>' for r in corrupted_list[:20]])}
+                    </tbody>
+                </table>
+                
+                <button onclick="deleteCorrupted()">🗑️ DELETE All {len(corrupted)} Corrupted Records</button>
+                <div id="success" class="success"></div>
+                
+                <script>
+                    function deleteCorrupted() {{
+                        if (!confirm('Delete {len(corrupted)} corrupted records? You will need to re-run the S&P 500 replacement after this.')) {{
+                            return;
+                        }}
+                        
+                        fetch('/admin/find-corrupted-sp500-dates', {{
+                            method: 'POST'
+                        }})
+                        .then(response => response.json())
+                        .then(data => {{
+                            if (data.success) {{
+                                document.getElementById('success').innerHTML = `
+                                    <h2>✅ Deleted ${{data.deleted_count}} records</h2>
+                                    <p>Now run the S&P 500 replacement again to fetch correct data for these dates.</p>
+                                    <p><a href="/admin/replace-sp500-with-real-data">Click here to run replacement</a></p>
+                                `;
+                                document.getElementById('success').style.display = 'block';
+                            }}
+                        }});
+                    }}
+                </script>
+            </body>
+            </html>
+            """
+        
+        # POST: Delete the corrupted records
+        if request.method == 'POST':
+            deleted_count = 0
+            for record in corrupted:
+                db.session.delete(record)
+                deleted_count += 1
+            
+            db.session.commit()
+            logger.info(f"Deleted {deleted_count} corrupted S&P 500 records")
+            
+            return jsonify({
+                'success': True,
+                'deleted_count': deleted_count,
+                'message': f'Deleted {deleted_count} corrupted records. Run replacement again to fetch correct data.'
+            })
         
     except Exception as e:
-        logger.error(f"Error in debug-chart-cache-sp500: {str(e)}")
+        db.session.rollback()
+        logger.error(f"Error finding/deleting corrupted S&P 500 dates: {str(e)}")
         import traceback
         return jsonify({
             'success': False,
