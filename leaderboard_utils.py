@@ -1132,7 +1132,7 @@ def generate_chart_from_snapshots(user_id, period):
                 performance_pct = 0.0
             portfolio_data.append(round(performance_pct, 2))
         
-        # Get S&P 500 EOD data
+        # Get S&P 500 EOD data - MUST align with portfolio snapshot dates!
         from models import MarketData
         sp500_snapshots = MarketData.query.filter(
             MarketData.ticker == 'SPY_SP500',
@@ -1142,15 +1142,36 @@ def generate_chart_from_snapshots(user_id, period):
         
         sp500_performance = []
         if sp500_snapshots and len(sp500_snapshots) > 0:
-            sp500_values = [float(s.close_price) for s in sp500_snapshots]
-            start_sp500 = sp500_values[0]
+            # Build a date-to-value map for S&P 500
+            sp500_map = {s.date: float(s.close_price) for s in sp500_snapshots}
             
-            for value in sp500_values:
-                if start_sp500 > 0:
-                    sp500_pct = ((value - start_sp500) / start_sp500) * 100
+            # Get first S&P 500 value (from first portfolio snapshot date)
+            first_snapshot_date = snapshots[0].date
+            start_sp500 = sp500_map.get(first_snapshot_date)
+            
+            if not start_sp500:
+                # If no S&P 500 data for first portfolio date, find closest previous date
+                for sp500_record in sp500_snapshots:
+                    if sp500_record.date <= first_snapshot_date:
+                        start_sp500 = float(sp500_record.close_price)
+                    else:
+                        break
+            
+            # CRITICAL: Align S&P 500 performance with portfolio snapshot dates
+            # This ensures arrays have same length and values correspond to same dates
+            for snapshot in snapshots:
+                snapshot_date = snapshot.date
+                sp500_value = sp500_map.get(snapshot_date)
+                
+                if sp500_value and start_sp500 and start_sp500 > 0:
+                    sp500_pct = ((sp500_value - start_sp500) / start_sp500) * 100
+                    sp500_performance.append(round(sp500_pct, 2))
+                elif sp500_performance:
+                    # If S&P 500 data missing for this date, repeat last value
+                    sp500_performance.append(sp500_performance[-1])
                 else:
-                    sp500_pct = 0.0
-                sp500_performance.append(round(sp500_pct, 2))
+                    # No data yet, use 0
+                    sp500_performance.append(0.0)
     
     # Format as Chart.js compatible data
     # portfolio_data already contains performance percentages calculated above
