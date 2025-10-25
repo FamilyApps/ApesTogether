@@ -4592,7 +4592,7 @@ def clear_leaderboard_html():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-@app.route('/admin/clear-leaderboard-cache', methods=['POST'])
+@app.route('/admin/clear-leaderboard-cache', methods=['GET', 'POST'])
 @login_required
 def clear_leaderboard_cache():
     """
