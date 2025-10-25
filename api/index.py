@@ -23634,6 +23634,98 @@ def admin_inspect_chart_cache_raw():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/verify-batch-api-optimization', methods=['GET'])
+@login_required
+def admin_verify_batch_api_optimization():
+    """Verify that batch API optimization is working correctly"""
+    try:
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import User, Stock
+        from portfolio_performance import PortfolioPerformanceCalculator
+        import time
+        
+        # Get all unique tickers across all users
+        users = User.query.all()
+        unique_tickers = set()
+        unique_tickers.add('SPY')
+        
+        for user in users:
+            user_stocks = Stock.query.filter_by(user_id=user.id).all()
+            for stock in user_stocks:
+                if stock.quantity > 0:
+                    unique_tickers.add(stock.ticker.upper())
+        
+        ticker_list = list(unique_tickers)
+        
+        # Test 1: Batch API call (what market close uses)
+        calculator = PortfolioPerformanceCalculator()
+        
+        logger.info("Testing BATCH API call...")
+        batch_start = time.time()
+        batch_results = calculator.get_batch_stock_data(ticker_list)
+        batch_duration = time.time() - batch_start
+        
+        batch_success_count = len(batch_results)
+        api_calls_made = 1 if len(ticker_list) <= 75 else 2  # Batch size is 75
+        
+        # Test 2: Individual API calls (old method - for comparison)
+        logger.info("Testing INDIVIDUAL API calls (for comparison)...")
+        individual_start = time.time()
+        individual_success = 0
+        individual_api_calls = 0
+        
+        for ticker in ticker_list[:5]:  # Only test 5 to avoid rate limits
+            try:
+                result = calculator.get_stock_data(ticker)
+                if result and result.get('price'):
+                    individual_success += 1
+                individual_api_calls += 1
+            except:
+                pass
+        
+        individual_duration = time.time() - individual_start
+        
+        # Extrapolate individual results to full ticker list
+        estimated_individual_time = (individual_duration / 5) * len(ticker_list)
+        estimated_individual_calls = len(ticker_list)
+        
+        return jsonify({
+            'success': True,
+            'timestamp': datetime.now().isoformat(),
+            'ticker_count': len(ticker_list),
+            'tickers': ticker_list,
+            'batch_api': {
+                'success_count': batch_success_count,
+                'api_calls_made': api_calls_made,
+                'duration_seconds': round(batch_duration, 2),
+                'tickers_per_call': round(len(ticker_list) / api_calls_made, 1)
+            },
+            'individual_api_comparison': {
+                'tested_count': 5,
+                'success_count': individual_success,
+                'duration_seconds': round(individual_duration, 2),
+                'estimated_full_duration': round(estimated_individual_time, 2),
+                'estimated_api_calls': estimated_individual_calls
+            },
+            'efficiency_gains': {
+                'time_saved_percent': round((1 - batch_duration / estimated_individual_time) * 100, 1),
+                'api_calls_saved': estimated_individual_calls - api_calls_made,
+                'speedup_factor': round(estimated_individual_time / batch_duration, 1)
+            },
+            'verdict': 'BATCH OPTIMIZATION WORKING' if batch_success_count >= len(ticker_list) * 0.9 else 'ISSUES DETECTED'
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/find-user-id', methods=['GET'])
 @login_required
 def admin_find_user_id():
