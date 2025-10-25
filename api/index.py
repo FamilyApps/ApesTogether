@@ -23567,6 +23567,73 @@ def admin_diagnose_chart_sp500_mismatch():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/inspect-chart-cache-raw', methods=['GET'])
+@login_required
+def admin_inspect_chart_cache_raw():
+    """Inspect the RAW chart cache data to see exactly what's stored"""
+    try:
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import UserPortfolioChartCache
+        import json
+        
+        user_id = request.args.get('user_id', 5)
+        period = request.args.get('period', 'YTD')
+        
+        cache = UserPortfolioChartCache.query.filter_by(
+            user_id=user_id,
+            period=period
+        ).first()
+        
+        if not cache:
+            return jsonify({
+                'success': False,
+                'error': f'No cache found for user_id={user_id}, period={period}'
+            })
+        
+        # Parse the chart_data JSON
+        chart_data = json.loads(cache.chart_data)
+        
+        # Analyze structure
+        analysis = {
+            'cache_exists': True,
+            'user_id': user_id,
+            'period': period,
+            'last_updated': cache.last_updated.isoformat() if cache.last_updated else None,
+            'chart_data_keys': list(chart_data.keys()),
+            'has_sp500_performance': 'sp500_performance' in chart_data,
+            'datasets_count': len(chart_data.get('datasets', [])),
+            'labels_count': len(chart_data.get('labels', [])),
+            'raw_chart_data': chart_data  # Full data for inspection
+        }
+        
+        # If sp500_performance exists, show its structure
+        if 'sp500_performance' in chart_data:
+            sp500 = chart_data['sp500_performance']
+            analysis['sp500_structure'] = {
+                'type': type(sp500).__name__,
+                'keys': list(sp500.keys()) if isinstance(sp500, dict) else None,
+                'dates_count': len(sp500.get('dates', [])) if isinstance(sp500, dict) else None,
+                'values_count': len(sp500.get('values', [])) if isinstance(sp500, dict) else None,
+                'first_3_dates': sp500.get('dates', [])[:3] if isinstance(sp500, dict) else None,
+                'first_3_values': sp500.get('values', [])[:3] if isinstance(sp500, dict) else None
+            }
+        
+        return jsonify({
+            'success': True,
+            'analysis': analysis
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/find-user-id', methods=['GET'])
 @login_required
 def admin_find_user_id():
