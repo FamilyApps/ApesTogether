@@ -23313,6 +23313,238 @@ def admin_fix_sp500_data():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/diagnose-chart-sp500-mismatch', methods=['GET'])
+@login_required
+def admin_diagnose_chart_sp500_mismatch():
+    """Diagnose EXACTLY what S&P 500 data each source has for specific dates"""
+    try:
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import UserPortfolioChartCache, MarketData, SP500ChartCache, PortfolioSnapshot
+        from datetime import datetime
+        import json
+        
+        # Test dates that show different patterns
+        test_dates = ['2025-09-11', '2025-09-18', '2025-10-23', '2025-10-24']
+        periods = ['1M', '3M', 'YTD', '1Y']
+        
+        # Get a user's chart caches
+        user_id = request.args.get('user_id', 1)
+        
+        results = {
+            'source_1_market_data': {},
+            'source_2_sp500_chart_cache': {},
+            'source_3_user_chart_cache': {},
+            'source_4_portfolio_snapshots': {},
+            'mismatches': [],
+            'data_flow_analysis': {}
+        }
+        
+        # SOURCE 1: MarketData table (raw SPY_SP500 daily closes)
+        logger.info("Checking SOURCE 1: MarketData table")
+        for date_str in test_dates:
+            date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+            sp500_record = MarketData.query.filter_by(
+                ticker='SPY_SP500',
+                date=date_obj
+            ).first()
+            
+            results['source_1_market_data'][date_str] = {
+                'value': float(sp500_record.close_price) if sp500_record else None,
+                'exists': sp500_record is not None,
+                'record_id': sp500_record.id if sp500_record else None
+            }
+        
+        # SOURCE 2: SP500ChartCache (pre-generated S&P 500 charts)
+        logger.info("Checking SOURCE 2: SP500ChartCache")
+        for period in periods:
+            sp500_cache = SP500ChartCache.query.filter_by(period=period).first()
+            
+            if not sp500_cache:
+                if period not in results['source_2_sp500_chart_cache']:
+                    results['source_2_sp500_chart_cache'][period] = {}
+                results['source_2_sp500_chart_cache'][period]['error'] = 'No cache found'
+                continue
+            
+            cache_data = json.loads(sp500_cache.chart_data)
+            dates = cache_data.get('dates', [])
+            values = cache_data.get('values', [])
+            
+            if period not in results['source_2_sp500_chart_cache']:
+                results['source_2_sp500_chart_cache'][period] = {}
+            
+            results['source_2_sp500_chart_cache'][period]['total_points'] = len(dates)
+            results['source_2_sp500_chart_cache'][period]['date_range'] = f"{dates[0]} to {dates[-1]}" if dates else "Empty"
+            results['source_2_sp500_chart_cache'][period]['last_updated'] = sp500_cache.last_updated.isoformat() if sp500_cache.last_updated else None
+            results['source_2_sp500_chart_cache'][period]['test_dates'] = {}
+            
+            for test_date in test_dates:
+                if test_date in dates:
+                    idx = dates.index(test_date)
+                    cache_value = values[idx] if idx < len(values) else None
+                    results['source_2_sp500_chart_cache'][period]['test_dates'][test_date] = {
+                        'value': cache_value,
+                        'in_cache': True
+                    }
+                else:
+                    results['source_2_sp500_chart_cache'][period]['test_dates'][test_date] = {
+                        'value': None,
+                        'in_cache': False
+                    }
+        
+        # SOURCE 3: UserPortfolioChartCache (actual displayed charts)
+        logger.info("Checking SOURCE 3: UserPortfolioChartCache")
+        for period in periods:
+            cache = UserPortfolioChartCache.query.filter_by(
+                user_id=user_id,
+                period=period
+            ).first()
+            
+            if not cache:
+                if period not in results['source_3_user_chart_cache']:
+                    results['source_3_user_chart_cache'][period] = {}
+                results['source_3_user_chart_cache'][period]['error'] = 'No cache found'
+                continue
+            
+            chart_data = json.loads(cache.chart_data)
+            sp500_data = chart_data.get('sp500_performance', {})
+            
+            if period not in results['source_3_user_chart_cache']:
+                results['source_3_user_chart_cache'][period] = {}
+            
+            if not sp500_data:
+                results['source_3_user_chart_cache'][period]['error'] = 'No sp500_performance in cache'
+                continue
+            
+            dates = sp500_data.get('dates', [])
+            values = sp500_data.get('values', [])
+            
+            results['source_3_user_chart_cache'][period]['total_points'] = len(dates)
+            results['source_3_user_chart_cache'][period]['date_range'] = f"{dates[0]} to {dates[-1]}" if dates else "Empty"
+            results['source_3_user_chart_cache'][period]['last_updated'] = cache.last_updated.isoformat() if cache.last_updated else None
+            results['source_3_user_chart_cache'][period]['test_dates'] = {}
+            
+            # Find our test dates in this chart
+            for test_date in test_dates:
+                if test_date in dates:
+                    idx = dates.index(test_date)
+                    chart_value = values[idx] if idx < len(values) else None
+                    results['source_3_user_chart_cache'][period]['test_dates'][test_date] = {
+                        'value': chart_value,
+                        'in_cache': True
+                    }
+                else:
+                    results['source_3_user_chart_cache'][period]['test_dates'][test_date] = {
+                        'value': None,
+                        'in_cache': False
+                    }
+        
+        # SOURCE 4: PortfolioSnapshot (daily snapshots - might have embedded S&P 500 data)
+        logger.info("Checking SOURCE 4: PortfolioSnapshot")
+        for date_str in test_dates:
+            date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+            snapshot = PortfolioSnapshot.query.filter_by(
+                user_id=user_id,
+                date=date_obj
+            ).first()
+            
+            results['source_4_portfolio_snapshots'][date_str] = {
+                'exists': snapshot is not None,
+                'total_value': float(snapshot.total_value) if snapshot else None,
+                'snapshot_id': snapshot.id if snapshot else None
+            }
+        
+        # CROSS-SOURCE ANALYSIS: Compare all sources for each date
+        logger.info("Performing cross-source analysis")
+        for test_date in test_dates:
+            results['data_flow_analysis'][test_date] = {
+                'market_data': results['source_1_market_data'][test_date]['value'],
+                'sp500_chart_cache': {},
+                'user_chart_cache': {},
+                'all_sources_match': None,
+                'discrepancies': []
+            }
+            
+            # Get values from SP500ChartCache for this date across all periods
+            for period in periods:
+                if period in results['source_2_sp500_chart_cache']:
+                    period_data = results['source_2_sp500_chart_cache'][period]
+                    if 'test_dates' in period_data and test_date in period_data['test_dates']:
+                        results['data_flow_analysis'][test_date]['sp500_chart_cache'][period] = period_data['test_dates'][test_date]['value']
+            
+            # Get values from UserPortfolioChartCache for this date across all periods
+            for period in periods:
+                if period in results['source_3_user_chart_cache']:
+                    period_data = results['source_3_user_chart_cache'][period]
+                    if 'test_dates' in period_data and test_date in period_data['test_dates']:
+                        results['data_flow_analysis'][test_date]['user_chart_cache'][period] = period_data['test_dates'][test_date]['value']
+            
+            # Check for discrepancies
+            market_data_value = results['data_flow_analysis'][test_date]['market_data']
+            
+            # Check SP500ChartCache vs MarketData
+            for period, cache_value in results['data_flow_analysis'][test_date]['sp500_chart_cache'].items():
+                if cache_value and market_data_value and abs(cache_value - market_data_value) > 1:
+                    results['data_flow_analysis'][test_date]['discrepancies'].append({
+                        'source': f'SP500ChartCache[{period}]',
+                        'value': cache_value,
+                        'expected': market_data_value,
+                        'difference': abs(cache_value - market_data_value)
+                    })
+            
+            # Check UserChartCache vs MarketData
+            for period, cache_value in results['data_flow_analysis'][test_date]['user_chart_cache'].items():
+                if cache_value and market_data_value and abs(cache_value - market_data_value) > 1:
+                    results['data_flow_analysis'][test_date]['discrepancies'].append({
+                        'source': f'UserChartCache[{period}]',
+                        'value': cache_value,
+                        'expected': market_data_value,
+                        'difference': abs(cache_value - market_data_value)
+                    })
+            
+            # Check if user chart values differ across periods for SAME date
+            user_cache_values = list(results['data_flow_analysis'][test_date]['user_chart_cache'].values())
+            if user_cache_values:
+                unique_user_values = set([v for v in user_cache_values if v is not None])
+                if len(unique_user_values) > 1:
+                    results['data_flow_analysis'][test_date]['discrepancies'].append({
+                        'source': 'UserChartCache cross-period inconsistency',
+                        'issue': f'Same date shows different S&P 500 values across periods: {list(unique_user_values)}',
+                        'periods': {period: val for period, val in results['data_flow_analysis'][test_date]['user_chart_cache'].items() if val is not None}
+                    })
+        
+        # Calculate summary statistics
+        total_discrepancies = sum(len(data['discrepancies']) for data in results['data_flow_analysis'].values())
+        dates_with_issues = [date for date, data in results['data_flow_analysis'].items() if data['discrepancies']]
+        
+        return jsonify({
+            'success': True,
+            'user_id': user_id,
+            'test_dates': test_dates,
+            'source_1_market_data': results['source_1_market_data'],
+            'source_2_sp500_chart_cache': results['source_2_sp500_chart_cache'],
+            'source_3_user_chart_cache': results['source_3_user_chart_cache'],
+            'source_4_portfolio_snapshots': results['source_4_portfolio_snapshots'],
+            'data_flow_analysis': results['data_flow_analysis'],
+            'summary': {
+                'total_discrepancies': total_discrepancies,
+                'dates_with_issues': dates_with_issues,
+                'sources_checked': 4,
+                'smoking_gun': 'Check data_flow_analysis for each date to see where values diverge'
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error diagnosing chart S&P 500 mismatch: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/check-sp500-duplicates', methods=['GET'])
 @login_required
 def admin_check_sp500_duplicates():
