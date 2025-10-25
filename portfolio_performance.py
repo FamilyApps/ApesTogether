@@ -107,6 +107,10 @@ class PortfolioPerformanceCalculator:
                 response = requests.get(url, timeout=10)
                 data = response.json()
                 
+                # CRITICAL: Log the full response for debugging
+                logger.info(f"📡 Batch API Response Keys: {list(data.keys())}")
+                logger.debug(f"📡 Full Batch API Response: {data}")
+                
                 # Log the batch API call
                 try:
                     from models import AlphaVantageAPILog, db

@@ -22975,6 +22975,63 @@ def admin_populate_portfolio_stats():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/fix-sp500-data', methods=['POST'])
+@login_required
+def admin_fix_sp500_data():
+    """Fix S&P 500 data points that are too low (missing × 10 multiplier)"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import MarketData
+        
+        # Find all S&P 500 data points that are suspiciously low
+        # SPY price is ~$600, so S&P 500 should be ~$6000
+        # Any value < $1000 is likely missing the × 10 multiplier
+        
+        low_values = MarketData.query.filter(
+            MarketData.ticker == 'SPY_SP500',
+            MarketData.close_price < 1000
+        ).all()
+        
+        fixed_count = 0
+        results = []
+        
+        for data_point in low_values:
+            old_value = float(data_point.close_price)
+            new_value = old_value * 10
+            
+            results.append({
+                'date': data_point.date.isoformat(),
+                'old_value': old_value,
+                'new_value': new_value,
+                'multiplier_applied': 10
+            })
+            
+            data_point.close_price = new_value
+            fixed_count += 1
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'fixed_count': fixed_count,
+            'fixed_records': results,
+            'message': f'Fixed {fixed_count} S&P 500 records by applying × 10 multiplier'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error fixing S&P 500 data: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/check-sp500-data', methods=['GET'])
 @login_required
 def admin_check_sp500_data():
