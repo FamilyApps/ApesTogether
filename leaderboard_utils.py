@@ -695,6 +695,34 @@ def generate_user_portfolio_chart(user_id, period):
                 # For longer periods, show full dates (YYYY-MM-DD)
                 labels = [snapshot.date.strftime('%Y-%m-%d') for snapshot in snapshots]
             
+            # Fetch S&P 500 benchmark data for the same period
+            from models import MarketData
+            sp500_data = MarketData.query.filter_by(ticker='SPY_SP500')\
+                .filter(MarketData.date >= start_date)\
+                .filter(MarketData.date <= today)\
+                .order_by(MarketData.date.asc()).all()
+            
+            # Create S&P 500 performance array aligned with portfolio dates
+            sp500_performance = {
+                'dates': [],
+                'values': []
+            }
+            
+            if sp500_data:
+                # Build a date-to-value map for S&P 500
+                sp500_map = {data.date: float(data.close_price) for data in sp500_data}
+                
+                # Align S&P 500 values with portfolio snapshot dates
+                for snapshot in snapshots:
+                    snapshot_date = snapshot.date
+                    if snapshot_date in sp500_map:
+                        sp500_performance['dates'].append(snapshot_date.strftime('%Y-%m-%d'))
+                        sp500_performance['values'].append(sp500_map[snapshot_date])
+                
+                print(f"✅ Generated S&P 500 benchmark data: {len(sp500_performance['dates'])} points for {period}")
+            else:
+                print(f"⚠️ No S&P 500 data found for period {period} (start: {start_date}, end: {today})")
+            
             chart_data = {
                 'labels': labels,
                 'datasets': [{
@@ -704,6 +732,7 @@ def generate_user_portfolio_chart(user_id, period):
                     'backgroundColor': 'rgba(75, 192, 192, 0.2)',
                     'tension': 0.1
                 }],
+                'sp500_performance': sp500_performance,  # ADD S&P 500 BENCHMARK!
                 'period': period,
                 'user_id': user_id,
                 'generated_at': datetime.now().isoformat()

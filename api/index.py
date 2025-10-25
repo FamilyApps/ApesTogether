@@ -23545,6 +23545,54 @@ def admin_diagnose_chart_sp500_mismatch():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/find-user-id', methods=['GET'])
+@login_required
+def admin_find_user_id():
+    """Find user_id by username or email"""
+    try:
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import User
+        
+        username = request.args.get('username', '')
+        search_email = request.args.get('email', '')
+        
+        if username:
+            user = User.query.filter_by(username=username).first()
+            if user:
+                return jsonify({
+                    'success': True,
+                    'user_id': user.id,
+                    'username': user.username,
+                    'email': user.email
+                })
+        
+        if search_email:
+            user = User.query.filter_by(email=search_email).first()
+            if user:
+                return jsonify({
+                    'success': True,
+                    'user_id': user.id,
+                    'username': user.username,
+                    'email': user.email
+                })
+        
+        # List all users
+        all_users = User.query.all()
+        return jsonify({
+            'success': True,
+            'users': [{
+                'user_id': u.id,
+                'username': u.username,
+                'email': u.email
+            } for u in all_users]
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/check-sp500-duplicates', methods=['GET'])
 @login_required
 def admin_check_sp500_duplicates():
