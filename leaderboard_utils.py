@@ -528,6 +528,9 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
         # Convert to trades per week for display
         avg_trades_per_week = round(avg_trades_per_day * 7, 1)
         
+        # Get current portfolio value from latest snapshot
+        current_value = latest_snapshot.total_value if latest_snapshot else 0.0
+        
         # Ensure all numeric values are properly typed - only include users with real data
         if current_value is None or performance_percent is None:
             continue  # Skip users without real portfolio data
