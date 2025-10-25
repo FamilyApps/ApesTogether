@@ -23298,6 +23298,61 @@ def admin_fix_sp500_data():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/check-sp500-duplicates', methods=['GET'])
+@login_required
+def admin_check_sp500_duplicates():
+    """Check if there are duplicate SPY_SP500 records for the same date"""
+    try:
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import MarketData
+        from sqlalchemy import func
+        
+        # Find dates with multiple records
+        duplicates = db.session.query(
+            MarketData.date,
+            func.count(MarketData.id).label('count'),
+            func.group_concat(MarketData.close_price).label('values')
+        ).filter(
+            MarketData.ticker == 'SPY_SP500'
+        ).group_by(
+            MarketData.date
+        ).having(
+            func.count(MarketData.id) > 1
+        ).all()
+        
+        duplicate_list = [{
+            'date': dup.date.isoformat(),
+            'count': dup.count,
+            'values': str(dup.values)
+        } for dup in duplicates]
+        
+        # Also check total record count
+        total_count = MarketData.query.filter_by(ticker='SPY_SP500').count()
+        unique_dates = db.session.query(func.count(func.distinct(MarketData.date))).filter(
+            MarketData.ticker == 'SPY_SP500'
+        ).scalar()
+        
+        return jsonify({
+            'success': True,
+            'total_records': total_count,
+            'unique_dates': unique_dates,
+            'duplicate_dates_count': len(duplicates),
+            'duplicates': duplicate_list[:50],  # Show first 50
+            'message': f'Total: {total_count}, Unique dates: {unique_dates}. If these differ, we have duplicates!'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error checking duplicates: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/find-corrupted-sp500-dates', methods=['GET', 'POST'])
 @login_required
 def admin_find_corrupted_sp500_dates():
