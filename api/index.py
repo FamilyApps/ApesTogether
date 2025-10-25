@@ -4629,6 +4629,75 @@ def clear_leaderboard_cache():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/check-intraday-dates')
+@login_required
+def check_intraday_dates():
+    """Check what dates have intraday snapshots - debug weekend data loss"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import PortfolioSnapshotIntraday
+        from sqlalchemy import func, cast, Date
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+        
+        # Get ET timezone
+        ET = ZoneInfo('America/New_York')
+        now_et = datetime.now(ET)
+        today_et = now_et.date()
+        
+        # Get all distinct dates with intraday data
+        dates_with_data = db.session.query(
+            cast(PortfolioSnapshotIntraday.timestamp, Date).label('snapshot_date'),
+            func.count(PortfolioSnapshotIntraday.id).label('count')
+        ).group_by('snapshot_date').order_by('snapshot_date').all()
+        
+        # Get last 7 days to see what's missing
+        last_7_days = []
+        for i in range(7):
+            check_date = today_et - timedelta(days=i)
+            count = db.session.query(func.count(PortfolioSnapshotIntraday.id)).filter(
+                cast(PortfolioSnapshotIntraday.timestamp, Date) == check_date
+            ).scalar()
+            
+            # Check if it's a weekday
+            is_weekday = check_date.weekday() < 5  # Monday=0, Friday=4
+            
+            last_7_days.append({
+                'date': check_date.isoformat(),
+                'day_name': check_date.strftime('%A'),
+                'is_weekday': is_weekday,
+                'snapshot_count': count,
+                'expected': 'Should have data' if is_weekday else 'Weekend - no data expected',
+                'status': '✅ OK' if (is_weekday and count > 0) or (not is_weekday and count == 0) else '❌ MISSING' if is_weekday else '⚠️ Unexpected data'
+            })
+        
+        return jsonify({
+            'success': True,
+            'current_time_et': now_et.isoformat(),
+            'today_et': today_et.isoformat(),
+            'all_dates_with_data': [{'date': str(d[0]), 'count': d[1]} for d in dates_with_data],
+            'last_7_days_analysis': last_7_days,
+            'diagnosis': {
+                'friday_data_missing': last_7_days[1]['status'] == '❌ MISSING' if len(last_7_days) > 1 and last_7_days[1]['day_name'] == 'Friday' else None,
+                'possible_causes': [
+                    'Intraday cleanup ran with wrong days_to_keep value',
+                    'Timezone mismatch in cleanup logic (using UTC instead of ET)',
+                    'Intraday collection cron failed on Friday',
+                    'Manual deletion via /admin/cleanup-intraday-data'
+                ]
+            }
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/trace-leaderboard-value/<username>/<period>')
 @login_required
 def trace_leaderboard_value(username, period):
