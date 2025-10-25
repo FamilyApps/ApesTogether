@@ -14970,6 +14970,7 @@ def market_close_cron():
                 results['pipeline_phases'].append('html_prerender_started')
                 
                 try:
+                    import json
                     from flask import render_template_string
                     from leaderboard_utils import get_leaderboard_data
                     from models import LeaderboardCache, Subscription
@@ -15021,7 +15022,7 @@ def market_close_cron():
                                 if not cache_entry:
                                     cache_entry = LeaderboardCache(
                                         period=cache_key,
-                                        leaderboard_data={}
+                                        leaderboard_data=json.dumps({})  # Must be JSON string, not dict
                                     )
                                     db.session.add(cache_entry)
                                 
@@ -22942,6 +22943,89 @@ def admin_populate_portfolio_stats():
     except Exception as e:
         db.session.rollback()
         logger.error(f"Error in populate-portfolio-stats: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/trigger-chart-cache-generation', methods=['GET', 'POST'])
+@login_required
+def admin_trigger_chart_cache_generation():
+    """
+    Manually trigger chart cache generation for all users
+    This bypasses the market close cron to test chart generation directly
+    """
+    try:
+        from leaderboard_utils import generate_chart_from_snapshots
+        from models import User, UserPortfolioChartCache, db
+        import json
+        from datetime import datetime
+        
+        results = {
+            'users_processed': 0,
+            'charts_generated': 0,
+            'errors': []
+        }
+        
+        users = User.query.all()
+        periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']
+        
+        for user in users:
+            for period in periods:
+                try:
+                    logger.info(f"Generating chart cache for user {user.id} ({user.username}), period {period}")
+                    chart_data = generate_chart_from_snapshots(user.id, period)
+                    
+                    if chart_data:
+                        # Update or create chart cache entry
+                        chart_cache = UserPortfolioChartCache.query.filter_by(
+                            user_id=user.id, period=period
+                        ).first()
+                        
+                        if chart_cache:
+                            chart_cache.chart_data = json.dumps(chart_data)
+                            chart_cache.generated_at = datetime.now()
+                            logger.info(f"Updated chart cache for user {user.id}, period {period}")
+                        else:
+                            chart_cache = UserPortfolioChartCache(
+                                user_id=user.id,
+                                period=period,
+                                chart_data=json.dumps(chart_data),
+                                generated_at=datetime.now()
+                            )
+                            db.session.add(chart_cache)
+                            logger.info(f"Created chart cache for user {user.id}, period {period}")
+                        
+                        results['charts_generated'] += 1
+                    else:
+                        error_msg = f"No chart data generated for user {user.id}, period {period}"
+                        results['errors'].append(error_msg)
+                        logger.warning(error_msg)
+                        
+                except Exception as e:
+                    error_msg = f"Error generating chart for user {user.id}, period {period}: {str(e)}"
+                    results['errors'].append(error_msg)
+                    logger.error(error_msg)
+                    import traceback
+                    logger.error(traceback.format_exc())
+            
+            results['users_processed'] += 1
+        
+        # Commit all chart caches
+        db.session.commit()
+        logger.info(f"Chart cache generation complete: {results['charts_generated']} charts for {results['users_processed']} users")
+        
+        return jsonify({
+            'success': True,
+            'message': f"Generated {results['charts_generated']} chart caches for {results['users_processed']} users",
+            'results': results
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error in trigger-chart-cache-generation: {str(e)}")
         import traceback
         return jsonify({
             'success': False,
