@@ -4731,7 +4731,7 @@ def trace_leaderboard_value(username, period):
             'calculate_leaderboard_data_value': trace['data_sources']['calculate_leaderboard_data_result'].get('performance_percent'),
             'mismatch_detected': len(set(filter(None, [
                 trace['data_sources']['leaderboard_cache'].get('user_performance'),
-                trace['data_sources']['chart_cache_value'].get('last_performance_value') if trace['data_sources']['chart_cache_value'] else None,
+                trace['data_sources']['user_portfolio_chart_cache'].get('last_performance_value'),
                 trace['data_sources']['get_leaderboard_data_result'].get('performance_percent'),
                 trace['data_sources']['calculate_leaderboard_data_result'].get('performance_percent')
             ]))) > 1
