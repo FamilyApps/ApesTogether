@@ -11788,6 +11788,126 @@ def admin_populate_leaderboard():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/diagnose-leaderboard-population')
+@login_required
+def admin_diagnose_leaderboard_population():
+    """Diagnose why leaderboard population is timing out with only 5 users"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime
+        from models import User, PortfolioSnapshot, UserPortfolioChartCache, LeaderboardCache
+        import json
+        
+        diagnosis = {
+            'basic_stats': {},
+            'chart_cache_status': {},
+            'leaderboard_cache_status': {},
+            'chicken_egg_problem': {},
+            'bottleneck_analysis': {}
+        }
+        
+        # Basic stats
+        total_users = User.query.count()
+        total_snapshots = PortfolioSnapshot.query.count()
+        diagnosis['basic_stats'] = {
+            'total_users': total_users,
+            'total_snapshots': total_snapshots,
+            'users_with_snapshots': PortfolioSnapshot.query.distinct(PortfolioSnapshot.user_id).count()
+        }
+        
+        # Check chart cache status for each user/period
+        periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']
+        chart_cache_matrix = {}
+        
+        for user in User.query.all():
+            chart_cache_matrix[user.username] = {}
+            for period in periods:
+                cache = UserPortfolioChartCache.query.filter_by(user_id=user.id, period=period).first()
+                chart_cache_matrix[user.username][period] = 'EXISTS' if cache else 'MISSING'
+        
+        diagnosis['chart_cache_status'] = {
+            'matrix': chart_cache_matrix,
+            'total_chart_caches': UserPortfolioChartCache.query.count(),
+            'expected_count': total_users * len(periods)
+        }
+        
+        # Check leaderboard cache status
+        leaderboard_caches = LeaderboardCache.query.all()
+        diagnosis['leaderboard_cache_status'] = {
+            'total_entries': len(leaderboard_caches),
+            'periods_cached': [c.period for c in leaderboard_caches],
+            'expected_count': len(periods) * 3 * 2  # 8 periods × 3 categories × 2 versions
+        }
+        
+        # Identify chicken-egg problem
+        diagnosis['chicken_egg_problem'] = {
+            'issue': 'calculate_leaderboard_data() REQUIRES UserPortfolioChartCache to exist',
+            'problem': 'But update_leaderboard_cache() is supposed to CREATE that cache',
+            'current_behavior': 'Leaderboard calculation skips users without chart cache',
+            'solution_needed': 'Generate chart cache FIRST, then calculate leaderboard'
+        }
+        
+        # Test performance of key operations
+        import time
+        
+        # Test 1: How long does calculate_leaderboard_data take?
+        start = time.time()
+        from leaderboard_utils import calculate_leaderboard_data
+        test_data = calculate_leaderboard_data('YTD', 20, 'all')
+        calc_time = time.time() - start
+        
+        diagnosis['bottleneck_analysis']['calculate_leaderboard_data'] = {
+            'duration_seconds': round(calc_time, 2),
+            'entries_found': len(test_data),
+            'users_skipped': total_users - len(test_data),
+            'reason_for_skip': 'Missing UserPortfolioChartCache'
+        }
+        
+        # Test 2: Check if chart generation is the bottleneck
+        from leaderboard_utils import generate_chart_from_snapshots
+        if total_users > 0:
+            test_user = User.query.first()
+            start = time.time()
+            try:
+                chart_data = generate_chart_from_snapshots(test_user.id, 'YTD')
+                chart_gen_time = time.time() - start
+                diagnosis['bottleneck_analysis']['generate_chart_from_snapshots'] = {
+                    'duration_seconds': round(chart_gen_time, 2),
+                    'success': chart_data is not None,
+                    'estimated_total_time': round(chart_gen_time * total_users * len(periods), 2),
+                    'warning': 'If estimated_total_time > 30 seconds, this is the bottleneck'
+                }
+            except Exception as e:
+                diagnosis['bottleneck_analysis']['generate_chart_from_snapshots'] = {
+                    'error': str(e),
+                    'likely_cause': 'Infinite loop or slow query in generate_chart_from_snapshots()'
+                }
+        
+        # Recommendations
+        diagnosis['recommendations'] = [
+            '1. Generate chart cache FIRST using a separate endpoint',
+            '2. Then run leaderboard population (which now reads from chart cache)',
+            '3. OR: Fix calculate_leaderboard_data() to calculate from snapshots when chart cache missing',
+            '4. OR: Run chart generation and leaderboard separately in chunks'
+        ]
+        
+        return jsonify({
+            'success': True,
+            'diagnosis': diagnosis
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/run-stock-info-migration')
 @login_required
 def admin_run_stock_info_migration():
