@@ -14974,6 +14974,55 @@ def market_close_cron():
                 results['pipeline_phases'].append('leaderboard_completed')
                 logger.info(f"PHASE 2 Complete: {updated_count} leaderboard entries updated")
                 
+                # PHASE 2.25: Update Portfolio Stats (unique stocks, trades/week, cap mix, industry mix, subscribers)
+                logger.info("PHASE 2.25: Updating portfolio stats for all users...")
+                results['pipeline_phases'].append('portfolio_stats_started')
+                
+                try:
+                    from leaderboard_utils import calculate_user_portfolio_stats
+                    from models import UserPortfolioStats
+                    
+                    stats_updated = 0
+                    for user in users:
+                        try:
+                            # Calculate all stats for this user
+                            stats = calculate_user_portfolio_stats(user.id)
+                            
+                            # Find or create UserPortfolioStats entry
+                            user_stats = UserPortfolioStats.query.filter_by(user_id=user.id).first()
+                            if not user_stats:
+                                user_stats = UserPortfolioStats(user_id=user.id)
+                                db.session.add(user_stats)
+                            
+                            # Update all fields
+                            user_stats.unique_stocks_count = stats['unique_stocks_count']
+                            user_stats.avg_trades_per_week = stats['avg_trades_per_week']
+                            user_stats.total_trades = stats['total_trades']
+                            user_stats.large_cap_percent = stats['large_cap_percent']
+                            user_stats.small_cap_percent = stats['small_cap_percent']
+                            user_stats.industry_mix = stats['industry_mix']
+                            user_stats.subscriber_count = stats['subscriber_count']
+                            user_stats.last_updated = stats['last_updated']
+                            
+                            stats_updated += 1
+                            logger.info(f"Updated portfolio stats for user {user.id} ({user.username})")
+                            
+                        except Exception as e:
+                            error_msg = f"Error updating stats for user {user.id}: {str(e)}"
+                            results['errors'].append(error_msg)
+                            logger.error(error_msg)
+                            # Continue processing other users
+                    
+                    results['portfolio_stats_updated'] = stats_updated
+                    results['pipeline_phases'].append('portfolio_stats_completed')
+                    logger.info(f"PHASE 2.25 Complete: {stats_updated} user portfolio stats updated")
+                    
+                except Exception as e:
+                    error_msg = f"Portfolio stats update error: {str(e)}"
+                    results['errors'].append(error_msg)
+                    logger.warning(error_msg)
+                    # Non-critical - continue with pipeline
+                
                 # PHASE 2.5: Pre-render HTML for leaderboards (auth-aware caching)
                 logger.info("PHASE 2.5: Pre-rendering HTML for lightning-fast page loads...")
                 results['pipeline_phases'].append('html_prerender_started')

@@ -6,6 +6,9 @@ from models import db, User, Stock, StockInfo, LeaderboardEntry, PortfolioSnapsh
 from flask import current_app
 import requests
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 def classify_market_cap(market_cap):
     """
@@ -440,8 +443,8 @@ def get_last_market_day():
 
 def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
     """
-    Calculate leaderboard data directly from portfolio snapshots
-    Used for cache generation and fallback
+    Calculate leaderboard data using CACHED performance from UserPortfolioChartCache
+    This ensures leaderboard shows EXACTLY the same performance as user's dashboard
     
     Args:
         period: Time period for performance calculation
@@ -449,76 +452,50 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
         category: 'all', 'small_cap', or 'large_cap' for filtering
     """
     from datetime import datetime, date, timedelta
+    import json
+    from models import UserPortfolioChartCache
     
-    # Calculate date range for the period - use last market day for end date
-    today = get_last_market_day()  # Use last market day instead of actual today
-    
-    if period == '1D':
-        start_date = today - timedelta(days=1)
-    elif period == '5D':
-        # Get 5 business days back (excluding weekends)
-        business_days_back = 0
-        check_date = today
-        while business_days_back < 5:
-            check_date = check_date - timedelta(days=1)
-            if check_date.weekday() < 5:  # Monday=0, Friday=4
-                business_days_back += 1
-        start_date = check_date
-    elif period == '7D':
-        start_date = today - timedelta(days=7)
-    elif period == '1M':
-        start_date = today - timedelta(days=30)
-    elif period == '3M':
-        start_date = today - timedelta(days=90)
-    elif period == 'YTD':
-        start_date = date(today.year, 1, 1)
-    elif period == '1Y':
-        start_date = today - timedelta(days=365)
-    elif period == '5Y':
-        start_date = today - timedelta(days=1825)
-    elif period == 'MAX':
-        start_date = date(2020, 1, 1)  # Reasonable start date
-    else:
-        start_date = date(today.year, 1, 1)  # Default to YTD
-    
-    # Get all users with portfolio snapshots
+    # Get all users
     users = User.query.all()
     leaderboard_data = []
     
     for user in users:
-        # Get latest snapshot for current value
+        # Get latest snapshot to verify user has data
         latest_snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id)\
             .order_by(PortfolioSnapshot.date.desc()).first()
         
         if not latest_snapshot:
             continue
+        
+        # Get performance from UserPortfolioChartCache (SAME SOURCE AS DASHBOARD)
+        chart_cache = UserPortfolioChartCache.query.filter_by(
+            user_id=user.id, 
+            period=period
+        ).first()
+        
+        if not chart_cache:
+            # No cached data for this period, skip user
+            continue
+        
+        try:
+            # Extract performance from cached chart data (same format as dashboard)
+            cached_data = json.loads(chart_cache.chart_data)
+            datasets = cached_data.get('datasets', [])
             
-        # Get the user's first snapshot (actual portfolio start date)
-        first_snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id)\
-            .order_by(PortfolioSnapshot.date.asc()).first()
-        
-        if not first_snapshot:
+            if not datasets or len(datasets) == 0:
+                continue
+            
+            # Portfolio performance is the last value in the first dataset
+            portfolio_dataset = datasets[0].get('data', [])
+            if not portfolio_dataset:
+                continue
+            
+            # This is the EXACT same value shown on the user's dashboard
+            performance_percent = portfolio_dataset[-1] if portfolio_dataset else 0.0
+            
+        except (json.JSONDecodeError, KeyError, IndexError) as e:
+            logger.warning(f"Error parsing chart cache for user {user.id}: {e}")
             continue
-        
-        # Use the later of: period start date OR user's actual first snapshot date
-        actual_start_date = max(start_date, first_snapshot.date)
-        
-        # Get snapshot closest to actual start date
-        start_snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id)\
-            .filter(PortfolioSnapshot.date >= actual_start_date)\
-            .order_by(PortfolioSnapshot.date.asc()).first()
-        
-        if not start_snapshot:
-            continue
-        
-        # Calculate performance from actual portfolio start, not arbitrary period start
-        current_value = latest_snapshot.total_value or 0.0
-        start_value = start_snapshot.total_value or 0.0
-        
-        if start_value > 0:
-            performance_percent = ((current_value - start_value) / start_value) * 100
-        else:
-            performance_percent = 0.0
         
         # Calculate market cap percentages using existing stock info
         small_cap_percent, large_cap_percent = calculate_portfolio_cap_percentages(user.id)
