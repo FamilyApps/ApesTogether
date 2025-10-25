@@ -22975,6 +22975,105 @@ def admin_populate_portfolio_stats():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/check-sp500-data', methods=['GET'])
+@login_required
+def admin_check_sp500_data():
+    """Diagnose S&P 500 historical data quality"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import MarketData
+        from datetime import date, timedelta
+        
+        today = date.today()
+        
+        # Get S&P 500 data for different periods
+        periods = {
+            '1M': today - timedelta(days=30),
+            '3M': today - timedelta(days=90),
+            'YTD': date(today.year, 1, 1),
+            '1Y': today - timedelta(days=365),
+        }
+        
+        results = {}
+        
+        for period_name, start_date in periods.items():
+            data_points = MarketData.query.filter(
+                MarketData.ticker == 'SPY_SP500',
+                MarketData.date >= start_date,
+                MarketData.date <= today
+            ).order_by(MarketData.date.asc()).all()
+            
+            if data_points:
+                values = [float(d.close_price) for d in data_points]
+                dates = [d.date.isoformat() for d in data_points]
+                
+                results[period_name] = {
+                    'count': len(data_points),
+                    'first_date': dates[0] if dates else None,
+                    'last_date': dates[-1] if dates else None,
+                    'first_value': values[0] if values else None,
+                    'last_value': values[-1] if values else None,
+                    'min_value': min(values) if values else None,
+                    'max_value': max(values) if values else None,
+                    'avg_value': sum(values) / len(values) if values else None,
+                    'sample_data': [
+                        {'date': d.date.isoformat(), 'value': float(d.close_price)}
+                        for d in data_points[:5]  # First 5
+                    ] + [
+                        {'date': d.date.isoformat(), 'value': float(d.close_price)}
+                        for d in data_points[-5:]  # Last 5
+                    ],
+                    'issues': []
+                }
+                
+                # Detect issues
+                if min(values) < 100:
+                    results[period_name]['issues'].append(f"Suspiciously low value: ${min(values):.2f}")
+                if max(values) > 10000:
+                    results[period_name]['issues'].append(f"Suspiciously high value: ${max(values):.2f}")
+                if max(values) - min(values) < 10:
+                    results[period_name]['issues'].append(f"Almost no variation: ${max(values) - min(values):.2f} range")
+                
+                # Check for duplicates
+                if len(set(values)) < len(values) * 0.8:
+                    results[period_name]['issues'].append("Many duplicate values detected")
+            else:
+                results[period_name] = {
+                    'count': 0,
+                    'error': f'No S&P 500 data found for {period_name}'
+                }
+        
+        # Check total data availability
+        all_data = MarketData.query.filter_by(ticker='SPY_SP500').order_by(MarketData.date).all()
+        
+        return jsonify({
+            'success': True,
+            'total_sp500_records': len(all_data),
+            'date_range': {
+                'earliest': all_data[0].date.isoformat() if all_data else None,
+                'latest': all_data[-1].date.isoformat() if all_data else None
+            },
+            'periods': results,
+            'diagnosis': {
+                'expected_sp500_range': '6000-7500 (Oct 2025)',
+                'spy_price_range': '600-750 (SPY × 10 = S&P 500)',
+                'data_quality_check': 'Look for values outside expected range or duplicates'
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error checking S&P 500 data: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/test-batch-api', methods=['GET'])
 @login_required
 def admin_test_batch_api():
