@@ -11760,6 +11760,10 @@ def admin_populate_leaderboard():
         from leaderboard_utils import update_leaderboard_cache
         updated_count = update_leaderboard_cache()
         
+        # CRITICAL: Commit the cache updates (update_leaderboard_cache doesn't commit)
+        db.session.commit()
+        logger.info(f" Committed {updated_count} leaderboard cache entries to database")
+        
         # Test the API endpoint
         from leaderboard_utils import get_leaderboard_data
         test_data = get_leaderboard_data('YTD', 10, 'all')  # Get more entries to match homepage
