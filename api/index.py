@@ -10690,38 +10690,19 @@ def admin_update_metrics():
             return jsonify({'error': 'Admin access required'}), 403
         
         from admin_metrics import update_daily_metrics
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
         
-        from models import db, LeaderboardCache, UserPortfolioChartCache
+        # Actually call the update function
+        success = update_daily_metrics()
         
-        # Create the tables
-        try:
-            db.create_all()
-            
-            # Verify tables were created
-            from sqlalchemy import inspect
-            inspector = inspect(db.engine)
-            existing_tables = inspector.get_table_names()
-            
-            results = {
-                'leaderboard_cache_exists': 'leaderboard_cache' in existing_tables,
-                'user_portfolio_chart_cache_exists': 'user_portfolio_chart_cache' in existing_tables,
-                'all_tables': existing_tables
-            }
-            
+        if success:
             return jsonify({
                 'success': True,
-                'message': 'Database tables created successfully',
-                'results': results
+                'message': 'Platform metrics updated successfully'
             })
-            
-        except Exception as e:
+        else:
             return jsonify({
                 'success': False,
-                'error': f'Failed to create tables: {str(e)}'
+                'error': 'Failed to update metrics - check server logs'
             }), 500
         
     except Exception as e:
