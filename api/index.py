@@ -23301,50 +23301,58 @@ def admin_fix_sp500_data():
 @app.route('/admin/debug-chart-cache-sp500', methods=['GET'])
 @login_required
 def admin_debug_chart_cache_sp500():
-    """Check what S&P 500 data is actually in the chart caches"""
+    """Check what S&P 500 RAW data is in MarketData table for YTD period"""
     try:
         email = session.get('email', '')
         if email != ADMIN_EMAIL:
             return jsonify({'error': 'Admin access required'}), 403
         
-        from models import UserPortfolioChartCache
-        import json
+        from models import MarketData
+        from datetime import date, datetime
         
-        # Get first user's chart caches
-        caches = UserPortfolioChartCache.query.limit(5).all()
+        # Check YTD S&P 500 data
+        today = date.today()
+        year_start = date(today.year, 1, 1)
         
-        results = []
-        for cache in caches:
-            try:
-                chart_data = json.loads(cache.chart_data)
-                datasets = chart_data.get('datasets', [])
-                labels = chart_data.get('labels', [])
-                
-                sp500_data = datasets[1].get('data', []) if len(datasets) > 1 else []
-                
-                results.append({
-                    'user_id': cache.user_id,
-                    'period': cache.period,
-                    'generated_at': cache.generated_at.isoformat(),
-                    'num_labels': len(labels),
-                    'num_sp500_points': len(sp500_data),
-                    'first_5_labels': labels[:5] if labels else [],
-                    'first_5_sp500_values': sp500_data[:5] if sp500_data else [],
-                    'last_5_sp500_values': sp500_data[-5:] if sp500_data else [],
-                    'sp500_min': min(sp500_data) if sp500_data else None,
-                    'sp500_max': max(sp500_data) if sp500_data else None
-                })
-            except Exception as e:
-                results.append({
-                    'user_id': cache.user_id,
-                    'period': cache.period,
-                    'error': str(e)
-                })
+        ytd_sp500 = MarketData.query.filter(
+            MarketData.ticker == 'SPY_SP500',
+            MarketData.date >= year_start,
+            MarketData.date <= today
+        ).order_by(MarketData.date.asc()).all()
+        
+        # Also check 1Y data
+        one_year_ago = date(today.year - 1, today.month, today.day)
+        one_year_sp500 = MarketData.query.filter(
+            MarketData.ticker == 'SPY_SP500',
+            MarketData.date >= one_year_ago,
+            MarketData.date <= today
+        ).order_by(MarketData.date.asc()).all()
         
         return jsonify({
             'success': True,
-            'cache_samples': results,
-            'message': 'Check if S&P 500 values look reasonable (should be 6000-7000 range for recent data)'
+            'ytd_data': {
+                'count': len(ytd_sp500),
+                'start_date': ytd_sp500[0].date.isoformat() if ytd_sp500 else None,
+                'end_date': ytd_sp500[-1].date.isoformat() if ytd_sp500 else None,
+                'first_value': float(ytd_sp500[0].close_price) if ytd_sp500 else None,
+                'last_value': float(ytd_sp500[-1].close_price) if ytd_sp500 else None,
+                'first_5_values': [float(s.close_price) for s in ytd_sp500[:5]] if ytd_sp500 else [],
+                'last_5_values': [float(s.close_price) for s in ytd_sp500[-5:]] if ytd_sp500 else [],
+                'min_value': min([float(s.close_price) for s in ytd_sp500]) if ytd_sp500 else None,
+                'max_value': max([float(s.close_price) for s in ytd_sp500]) if ytd_sp500 else None,
+            },
+            '1y_data': {
+                'count': len(one_year_sp500),
+                'start_date': one_year_sp500[0].date.isoformat() if one_year_sp500 else None,
+                'end_date': one_year_sp500[-1].date.isoformat() if one_year_sp500 else None,
+                'first_value': float(one_year_sp500[0].close_price) if one_year_sp500 else None,
+                'last_value': float(one_year_sp500[-1].close_price) if one_year_sp500 else None,
+                'first_5_values': [float(s.close_price) for s in one_year_sp500[:5]] if one_year_sp500 else [],
+                'last_5_values': [float(s.close_price) for s in one_year_sp500[-5:]] if one_year_sp500 else [],
+                'min_value': min([float(s.close_price) for s in one_year_sp500]) if one_year_sp500 else None,
+                'max_value': max([float(s.close_price) for s in one_year_sp500]) if one_year_sp500 else None,
+            },
+            'message': 'RAW S&P 500 values from MarketData table (should be 5000-7000 range for 2024-2025)'
         })
         
     except Exception as e:
