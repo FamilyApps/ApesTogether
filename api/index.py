@@ -22975,6 +22975,119 @@ def admin_populate_portfolio_stats():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/replace-sp500-with-real-data', methods=['POST'])
+@login_required
+def admin_replace_sp500_with_real_data():
+    """Replace ALL S&P 500 historical data with REAL data from Alpha Vantage"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import MarketData
+        from portfolio_performance import PortfolioPerformanceCalculator
+        import requests
+        from datetime import date, timedelta
+        
+        # Replace ALL historical data (no date limit)
+        # The API gives us 20+ years of data, use all of it!
+        today = date.today()
+        
+        logger.info(f"🔄 Replacing ALL S&P 500 historical data with REAL Alpha Vantage data")
+        
+        # Fetch TIME_SERIES_DAILY for SPY
+        api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
+        url = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=SPY&apikey={api_key}&outputsize=full'
+        
+        response = requests.get(url, timeout=30)
+        data = response.json()
+        
+        if 'Time Series (Daily)' not in data:
+            logger.error(f"❌ Alpha Vantage returned error: {data}")
+            return jsonify({
+                'success': False,
+                'error': 'Alpha Vantage API error',
+                'response': data
+            }), 500
+        
+        time_series = data['Time Series (Daily)']
+        replaced_count = 0
+        new_count = 0
+        results = []
+        
+        for date_str, values in time_series.items():
+            data_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+            
+            # Replace all historical data (no date filtering)
+            # This ensures 5Y and MAX charts have accurate data
+            spy_close = float(values['4. close'])
+            sp500_value = spy_close * 10  # SPY ETF × 10 = S&P 500 index approximation
+            
+            # Find existing record
+            existing = MarketData.query.filter_by(
+                ticker='SPY_SP500',
+                date=data_date
+            ).first()
+            
+            if existing:
+                old_value = float(existing.close_price)
+                existing.close_price = sp500_value
+                replaced_count += 1
+                
+                if abs(old_value - sp500_value) > 50:  # Significant difference
+                    results.append({
+                        'date': date_str,
+                        'old_value': old_value,
+                        'new_value': sp500_value,
+                        'difference': sp500_value - old_value,
+                        'action': 'replaced'
+                    })
+            else:
+                market_data = MarketData(
+                    ticker='SPY_SP500',
+                    date=data_date,
+                    close_price=sp500_value
+                )
+                db.session.add(market_data)
+                new_count += 1
+                results.append({
+                    'date': date_str,
+                    'value': sp500_value,
+                    'action': 'created'
+                })
+        
+        db.session.commit()
+        
+        # Find actual date range processed
+        all_sp500 = MarketData.query.filter_by(ticker='SPY_SP500').order_by(MarketData.date).all()
+        earliest_date = all_sp500[0].date.isoformat() if all_sp500 else None
+        latest_date = all_sp500[-1].date.isoformat() if all_sp500 else None
+        
+        return jsonify({
+            'success': True,
+            'replaced_count': replaced_count,
+            'new_count': new_count,
+            'total_processed': replaced_count + new_count,
+            'date_range': {
+                'earliest': earliest_date,
+                'latest': latest_date,
+                'years_of_data': len(all_sp500) / 252 if all_sp500 else 0  # ~252 trading days/year
+            },
+            'significant_changes': results[:20],  # Show first 20 significant changes
+            'message': f'Replaced {replaced_count} records and created {new_count} new records with REAL Alpha Vantage data (ALL historical data)'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error replacing S&P 500 data: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/fix-sp500-data', methods=['POST'])
 @login_required
 def admin_fix_sp500_data():
