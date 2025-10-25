@@ -22975,6 +22975,79 @@ def admin_populate_portfolio_stats():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/test-batch-api', methods=['GET'])
+@login_required
+def admin_test_batch_api():
+    """Test batch API to verify it works correctly"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import Stock, User
+        from portfolio_performance import PortfolioPerformanceCalculator
+        import json
+        
+        # Collect real tickers from database
+        unique_tickers = set(['SPY', 'AAPL', 'MSFT', 'GOOGL'])  # Start with common ones
+        
+        all_stocks = Stock.query.limit(20).all()
+        for stock in all_stocks:
+            if stock.quantity > 0:
+                unique_tickers.add(stock.ticker.upper())
+        
+        ticker_list = list(unique_tickers)[:10]  # Limit to 10 for testing
+        
+        logger.info(f"Testing batch API with tickers: {ticker_list}")
+        
+        # Test batch call
+        calculator = PortfolioPerformanceCalculator()
+        batch_results = calculator.get_batch_stock_data(ticker_list)
+        
+        # Also test individual calls for comparison
+        individual_results = {}
+        for ticker in ticker_list[:3]:  # Only test 3 individually
+            result = calculator.get_stock_data(ticker)
+            if result and 'price' in result:
+                individual_results[ticker] = result['price']
+        
+        return jsonify({
+            'success': True,
+            'test_tickers': ticker_list,
+            'batch_results': {
+                'count': len(batch_results),
+                'prices': {ticker: price for ticker, price in batch_results.items()},
+                'api_calls_made': 1 if len(ticker_list) <= 256 else (len(ticker_list) // 256) + 1
+            },
+            'individual_results': {
+                'count': len(individual_results),
+                'prices': individual_results,
+                'api_calls_made': len(individual_results)
+            },
+            'comparison': {
+                'batch_vs_individual': {
+                    ticker: {
+                        'batch': batch_results.get(ticker),
+                        'individual': individual_results.get(ticker),
+                        'match': batch_results.get(ticker) == individual_results.get(ticker)
+                    }
+                    for ticker in individual_results.keys()
+                },
+                'efficiency_gain': f"{len(individual_results)}x fewer API calls" if len(batch_results) > 0 else "N/A"
+            },
+            'message': f'Batch API test complete: {len(batch_results)}/{len(ticker_list)} tickers fetched successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error testing batch API: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/trigger-chart-cache-generation', methods=['GET', 'POST'])
 @login_required
 def admin_trigger_chart_cache_generation():
