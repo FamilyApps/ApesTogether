@@ -23156,15 +23156,30 @@ def admin_replace_sp500_with_real_data():
         response = requests.get(url, timeout=30)
         data = response.json()
         
+        # Log what Alpha Vantage actually returned
+        logger.info(f"🔍 Alpha Vantage Response Keys: {list(data.keys())}")
+        if 'Note' in data:
+            logger.error(f"❌ Alpha Vantage Rate Limit: {data['Note']}")
+        if 'Error Message' in data:
+            logger.error(f"❌ Alpha Vantage Error: {data['Error Message']}")
+        
         if 'Time Series (Daily)' not in data:
             logger.error(f"❌ Alpha Vantage returned error: {data}")
             return jsonify({
                 'success': False,
-                'error': 'Alpha Vantage API error',
-                'response': data
+                'error': 'Alpha Vantage API error - check logs for details',
+                'response': data,
+                'possible_causes': [
+                    'Rate limit exceeded (5 calls/min for free tier, 150/min for premium)',
+                    'Invalid API key',
+                    'Network timeout',
+                    'Invalid symbol'
+                ]
             }), 500
         
+        # Log how many dates we got
         time_series = data['Time Series (Daily)']
+        logger.info(f"✅ Alpha Vantage returned {len(time_series)} dates of SPY data")
         replaced_count = 0
         new_count = 0
         results = []
@@ -23346,6 +23361,110 @@ def admin_check_sp500_duplicates():
         
     except Exception as e:
         logger.error(f"Error checking duplicates: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/delete-all-sp500-data', methods=['GET', 'POST'])
+@login_required
+def admin_delete_all_sp500_data():
+    """DELETE ALL S&P 500 data and start completely fresh"""
+    email = session.get('email', '')
+    if email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import MarketData, db
+        
+        # Count total records
+        total_count = MarketData.query.filter_by(ticker='SPY_SP500').count()
+        
+        # GET: Show warning page
+        if request.method == 'GET':
+            return f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>⚠️ DELETE ALL S&P 500 Data</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }}
+                    .danger-box {{ background: #f8d7da; border: 3px solid #dc3545; padding: 30px; border-radius: 8px; margin: 20px 0; }}
+                    button {{ background: #dc3545; color: white; border: none; padding: 20px 40px; font-size: 18px; border-radius: 5px; cursor: pointer; margin: 20px 0; }}
+                    button:hover {{ background: #c82333; }}
+                    .success {{ background: #d4edda; border: 2px solid #28a745; padding: 20px; border-radius: 8px; display: none; }}
+                    h1 {{ color: #dc3545; }}
+                </style>
+            </head>
+            <body>
+                <h1>⚠️ NUCLEAR OPTION: Delete ALL S&P 500 Data</h1>
+                
+                <div class="danger-box">
+                    <h2>THIS WILL DELETE {total_count} RECORDS</h2>
+                    <p><strong>This action:</strong></p>
+                    <ul>
+                        <li>❌ Deletes ALL {total_count} SPY_SP500 records from MarketData</li>
+                        <li>❌ Removes ALL historical S&P 500 data (1999-2025)</li>
+                        <li>❌ Cannot be undone</li>
+                        <li>✅ Provides a clean slate for fresh Alpha Vantage fetch</li>
+                    </ul>
+                    <p><strong>After deletion:</strong></p>
+                    <ol>
+                        <li>Run /admin/replace-sp500-with-real-data to fetch fresh data</li>
+                        <li>Regenerate chart caches</li>
+                    </ol>
+                    <p style="color: #dc3545; font-size: 20px; font-weight: bold;">⚠️ ONLY USE THIS IF THE DATA IS COMPLETELY CORRUPTED ⚠️</p>
+                </div>
+                
+                <button onclick="deleteAll()">🗑️ YES, DELETE ALL {total_count} S&P 500 RECORDS</button>
+                <div id="success" class="success"></div>
+                
+                <script>
+                    function deleteAll() {{
+                        if (!confirm('⚠️ FINAL WARNING: Delete ALL {total_count} S&P 500 records? This CANNOT be undone!')) {{
+                            return;
+                        }}
+                        
+                        fetch('/admin/delete-all-sp500-data', {{
+                            method: 'POST'
+                        }})
+                        .then(response => response.json())
+                        .then(data => {{
+                            if (data.success) {{
+                                document.getElementById('success').innerHTML = `
+                                    <h2>✅ Deleted ${{data.deleted_count}} records</h2>
+                                    <p>Database is now clean. Next steps:</p>
+                                    <ol>
+                                        <li><a href="/admin/replace-sp500-with-real-data">Fetch fresh S&P 500 data from Alpha Vantage</a></li>
+                                        <li>Regenerate chart caches</li>
+                                    </ol>
+                                `;
+                                document.getElementById('success').style.display = 'block';
+                            }}
+                        }});
+                    }}
+                </script>
+            </body>
+            </html>
+            """
+        
+        # POST: Actually delete
+        if request.method == 'POST':
+            MarketData.query.filter_by(ticker='SPY_SP500').delete()
+            db.session.commit()
+            logger.info(f"🗑️ DELETED ALL {total_count} SPY_SP500 records from MarketData")
+            
+            return jsonify({
+                'success': True,
+                'deleted_count': total_count,
+                'message': f'Deleted ALL {total_count} S&P 500 records. Database is clean.'
+            })
+    
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error deleting S&P 500 data: {str(e)}")
         import traceback
         return jsonify({
             'success': False,
