@@ -23298,6 +23298,64 @@ def admin_fix_sp500_data():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/debug-chart-cache-sp500', methods=['GET'])
+@login_required
+def admin_debug_chart_cache_sp500():
+    """Check what S&P 500 data is actually in the chart caches"""
+    try:
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import UserPortfolioChartCache
+        import json
+        
+        # Get first user's chart caches
+        caches = UserPortfolioChartCache.query.limit(5).all()
+        
+        results = []
+        for cache in caches:
+            try:
+                chart_data = json.loads(cache.chart_data)
+                datasets = chart_data.get('datasets', [])
+                labels = chart_data.get('labels', [])
+                
+                sp500_data = datasets[1].get('data', []) if len(datasets) > 1 else []
+                
+                results.append({
+                    'user_id': cache.user_id,
+                    'period': cache.period,
+                    'generated_at': cache.generated_at.isoformat(),
+                    'num_labels': len(labels),
+                    'num_sp500_points': len(sp500_data),
+                    'first_5_labels': labels[:5] if labels else [],
+                    'first_5_sp500_values': sp500_data[:5] if sp500_data else [],
+                    'last_5_sp500_values': sp500_data[-5:] if sp500_data else [],
+                    'sp500_min': min(sp500_data) if sp500_data else None,
+                    'sp500_max': max(sp500_data) if sp500_data else None
+                })
+            except Exception as e:
+                results.append({
+                    'user_id': cache.user_id,
+                    'period': cache.period,
+                    'error': str(e)
+                })
+        
+        return jsonify({
+            'success': True,
+            'cache_samples': results,
+            'message': 'Check if S&P 500 values look reasonable (should be 6000-7000 range for recent data)'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in debug-chart-cache-sp500: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/check-sp500-data', methods=['GET'])
 @login_required
 def admin_check_sp500_data():
