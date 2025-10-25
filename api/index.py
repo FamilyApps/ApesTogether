@@ -4776,6 +4776,77 @@ def check_intraday_dates():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/check-all-caches')
+@login_required
+def check_all_caches():
+    """Check ALL cache tables to see what's actually stored"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import LeaderboardCache, UserPortfolioChartCache
+        import json
+        
+        # Get ALL LeaderboardCache entries
+        all_leaderboard_caches = LeaderboardCache.query.all()
+        leaderboard_summary = []
+        for cache in all_leaderboard_caches:
+            try:
+                data = json.loads(cache.leaderboard_data)
+                sample_entry = data[0] if data else None
+            except:
+                sample_entry = None
+            
+            leaderboard_summary.append({
+                'period': cache.period,
+                'generated_at': cache.generated_at.isoformat() if cache.generated_at else None,
+                'has_rendered_html': cache.rendered_html is not None,
+                'entry_count': len(data) if isinstance(data, list) else 0,
+                'sample_performance': sample_entry.get('performance_percent') if sample_entry else None,
+                'sample_user': sample_entry.get('username') if sample_entry else None
+            })
+        
+        # Get ALL UserPortfolioChartCache entries
+        all_chart_caches = UserPortfolioChartCache.query.all()
+        chart_summary = {}
+        for cache in all_chart_caches:
+            if cache.user_id not in chart_summary:
+                chart_summary[cache.user_id] = {}
+            
+            try:
+                chart_data = json.loads(cache.chart_data)
+                datasets = chart_data.get('datasets', [])
+                last_value = datasets[0].get('data', [])[-1] if datasets else None
+            except:
+                last_value = None
+            
+            chart_summary[cache.user_id][cache.period] = {
+                'generated_at': cache.generated_at.isoformat(),
+                'last_performance_value': last_value
+            }
+        
+        return jsonify({
+            'success': True,
+            'timestamp': datetime.now().isoformat(),
+            'leaderboard_cache_count': len(all_leaderboard_caches),
+            'leaderboard_cache_entries': leaderboard_summary,
+            'chart_cache_count': len(all_chart_caches),
+            'chart_cache_by_user': chart_summary,
+            'diagnosis': {
+                'leaderboard_cache_recreated': len(all_leaderboard_caches) > 0,
+                'chart_cache_exists': len(all_chart_caches) > 0,
+                'next_steps': 'If leaderboard_cache_count > 0, something recreated the cache after clear'
+            }
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/trace-leaderboard-value/<username>/<period>')
 @login_required
 def trace_leaderboard_value(username, period):
