@@ -455,6 +455,9 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
     import json
     from models import UserPortfolioChartCache
     
+    # Get today's date for calculating recent trades
+    today = get_last_market_day()
+    
     # Get all users
     users = User.query.all()
     leaderboard_data = []
