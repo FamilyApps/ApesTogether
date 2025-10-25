@@ -22984,7 +22984,7 @@ def admin_replace_sp500_with_real_data():
     if email != ADMIN_EMAIL:
         return jsonify({'error': 'Admin access required'}), 403
     
-    # GET: Show preview of what will happen
+    # GET: Show preview with button to execute
     if request.method == 'GET':
         from models import MarketData
         
@@ -23002,28 +23002,138 @@ def admin_replace_sp500_with_real_data():
             MarketData.close_price < 1000
         ).count()
         
-        return jsonify({
-            'success': True,
-            'action': 'PREVIEW - No changes made yet',
-            'current_state': {
-                'total_records': existing_count,
-                'date_range': {'earliest': earliest, 'latest': latest},
-                'suspicious_low_values': low_values,
-                'years_of_data': existing_count / 252 if existing_count > 0 else 0
-            },
-            'what_will_happen': {
-                'api_call': 'TIME_SERIES_DAILY for SPY (outputsize=full)',
-                'api_cost': '1 API call',
-                'expected_records': '~5000+ days of historical data',
-                'action': 'Replace ALL existing records with real Alpha Vantage data',
-                'formula': 'SPY close price × 10 = S&P 500 index'
-            },
-            'to_execute': {
-                'method': 'POST',
-                'url': '/admin/replace-sp500-with-real-data',
-                'note': 'Use POST method to execute the replacement'
-            }
-        })
+        # Return HTML with button to execute
+        return f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Replace S&P 500 Data</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }}
+                .info-box {{ background: #f0f0f0; padding: 20px; border-radius: 8px; margin: 20px 0; }}
+                .warning-box {{ background: #fff3cd; border: 2px solid #ffc107; padding: 20px; border-radius: 8px; margin: 20px 0; }}
+                .success-box {{ background: #d4edda; border: 2px solid #28a745; padding: 20px; border-radius: 8px; margin: 20px 0; display: none; }}
+                .error-box {{ background: #f8d7da; border: 2px solid #dc3545; padding: 20px; border-radius: 8px; margin: 20px 0; display: none; }}
+                button {{ background: #007bff; color: white; border: none; padding: 15px 30px; font-size: 16px; border-radius: 5px; cursor: pointer; }}
+                button:hover {{ background: #0056b3; }}
+                button:disabled {{ background: #ccc; cursor: not-allowed; }}
+                .stats {{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }}
+                .stat {{ background: white; padding: 10px; border-radius: 5px; }}
+                .stat-label {{ font-weight: bold; color: #666; }}
+                .stat-value {{ font-size: 24px; color: #333; }}
+                #loading {{ display: none; }}
+            </style>
+        </head>
+        <body>
+            <h1>🔄 Replace S&P 500 Historical Data</h1>
+            
+            <div class="info-box">
+                <h2>Current S&P 500 Data Status</h2>
+                <div class="stats">
+                    <div class="stat">
+                        <div class="stat-label">Total Records</div>
+                        <div class="stat-value">{existing_count}</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-label">Years of Data</div>
+                        <div class="stat-value">{existing_count / 252:.1f}</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-label">Date Range</div>
+                        <div class="stat-value">{earliest} to {latest}</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-label">⚠️ Suspicious Values</div>
+                        <div class="stat-value" style="color: #dc3545;">{low_values}</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="warning-box">
+                <h2>⚠️ What This Will Do:</h2>
+                <ul>
+                    <li><strong>API Call:</strong> TIME_SERIES_DAILY for SPY (outputsize=full)</li>
+                    <li><strong>API Cost:</strong> 1 API call to Alpha Vantage</li>
+                    <li><strong>Data Fetched:</strong> ~5,000+ days of historical SPY data</li>
+                    <li><strong>Action:</strong> Replace ALL existing S&P 500 records with real market data</li>
+                    <li><strong>Formula:</strong> SPY close price × 10 = S&P 500 index</li>
+                    <li><strong>Impact:</strong> Fixes YTD, 1Y, 5Y, MAX charts across entire app</li>
+                </ul>
+                <p><strong>This will take ~10-15 seconds to complete.</strong></p>
+            </div>
+            
+            <div style="text-align: center; margin: 30px 0;">
+                <button id="executeBtn" onclick="executeReplacement()">
+                    🚀 Execute S&P 500 Data Replacement
+                </button>
+                <div id="loading">
+                    <p>⏳ Fetching data from Alpha Vantage and replacing records...</p>
+                    <p>This may take 10-15 seconds...</p>
+                </div>
+            </div>
+            
+            <div id="successBox" class="success-box"></div>
+            <div id="errorBox" class="error-box"></div>
+            
+            <script>
+                function executeReplacement() {{
+                    const btn = document.getElementById('executeBtn');
+                    const loading = document.getElementById('loading');
+                    const successBox = document.getElementById('successBox');
+                    const errorBox = document.getElementById('errorBox');
+                    
+                    btn.disabled = true;
+                    loading.style.display = 'block';
+                    successBox.style.display = 'none';
+                    errorBox.style.display = 'none';
+                    
+                    fetch('/admin/replace-sp500-with-real-data', {{
+                        method: 'POST',
+                        headers: {{
+                            'Content-Type': 'application/json'
+                        }}
+                    }})
+                    .then(response => response.json())
+                    .then(data => {{
+                        loading.style.display = 'none';
+                        
+                        if (data.success) {{
+                            successBox.innerHTML = `
+                                <h2>✅ Success!</h2>
+                                <p><strong>Replaced:</strong> ${{data.replaced_count}} records</p>
+                                <p><strong>Created:</strong> ${{data.new_count}} new records</p>
+                                <p><strong>Total Processed:</strong> ${{data.total_processed}} records</p>
+                                <p><strong>Date Range:</strong> ${{data.date_range.earliest}} to ${{data.date_range.latest}}</p>
+                                <p><strong>Years of Data:</strong> ${{data.date_range.years_of_data.toFixed(1)}} years</p>
+                                <hr>
+                                <p><strong>Next Step:</strong> Regenerate chart caches to see the fixed data</p>
+                                <p><a href="/admin/trigger-chart-cache-generation" style="color: #007bff;">Click here to regenerate chart caches</a></p>
+                            `;
+                            successBox.style.display = 'block';
+                        }} else {{
+                            errorBox.innerHTML = `
+                                <h2>❌ Error</h2>
+                                <p>${{data.error}}</p>
+                                <pre>${{data.traceback || ''}}</pre>
+                            `;
+                            errorBox.style.display = 'block';
+                            btn.disabled = false;
+                        }}
+                    }})
+                    .catch(error => {{
+                        loading.style.display = 'none';
+                        errorBox.innerHTML = `
+                            <h2>❌ Error</h2>
+                            <p>${{error.message}}</p>
+                        `;
+                        errorBox.style.display = 'block';
+                        btn.disabled = false;
+                    }});
+                }}
+            </script>
+        </body>
+        </html>
+        """
     
     # POST: Execute the replacement
     try:
