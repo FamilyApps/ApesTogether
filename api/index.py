@@ -1463,11 +1463,21 @@ def dashboard():
         logger.error(f"Error fetching leaderboard positions: {str(e)}")
         logger.error(traceback.format_exc())
     
+    # Get user's portfolio stats (Phase 3)
+    portfolio_stats = None
+    try:
+        from models import UserPortfolioStats
+        portfolio_stats = UserPortfolioStats.query.filter_by(user_id=current_user.id).first()
+        logger.info(f"DEBUG: Portfolio stats for user {current_user.id}: {portfolio_stats}")
+    except Exception as e:
+        logger.error(f"Error fetching portfolio stats: {str(e)}")
+    
     return render_template_with_defaults('dashboard.html', 
                                        portfolio_data=portfolio_data,
                                        stocks=portfolio_data,  # Template expects 'stocks' variable
                                        total_portfolio_value=total_portfolio_value,
                                        leaderboard_positions=leaderboard_positions,
+                                       portfolio_stats=portfolio_stats,
                                        share_url=share_url,
                                        now=datetime.now())
 

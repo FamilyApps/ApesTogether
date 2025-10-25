@@ -91,6 +91,94 @@
 </div>
 {% endif %}
 
+<!-- Portfolio Stats Card (Phase 3) -->
+{% if portfolio_stats %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow border-info">
+            <div class="card-body">
+                <h5 class="mb-3"><i class="fas fa-chart-pie text-info me-2"></i>Portfolio Insights</h5>
+                <div class="row">
+                    <div class="col-6 col-md-2 mb-3">
+                        <div class="text-center">
+                            <div class="text-muted small">Unique Stocks</div>
+                            <div class="h4 mb-0">{{ portfolio_stats.unique_stocks_count }}</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-2 mb-3">
+                        <div class="text-center">
+                            <div class="text-muted small">Trades/Week</div>
+                            <div class="h4 mb-0">{{ portfolio_stats.avg_trades_per_week|round(1) }}</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-2 mb-3">
+                        <div class="text-center">
+                            <div class="text-muted small">Large Cap</div>
+                            <div class="h4 mb-0">{{ portfolio_stats.large_cap_percent|round(0)|int }}%</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-2 mb-3">
+                        <div class="text-center">
+                            <div class="text-muted small">Small Cap</div>
+                            <div class="h4 mb-0">{{ portfolio_stats.small_cap_percent|round(0)|int }}%</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-2 mb-3">
+                        <div class="text-center">
+                            <div class="text-muted small">Subscribers</div>
+                            <div class="h4 mb-0">{{ portfolio_stats.subscriber_count }}</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-2 mb-3">
+                        <div class="text-center">
+                            <div class="text-muted small">Total Trades</div>
+                            <div class="h4 mb-0">{{ portfolio_stats.total_trades }}</div>
+                        </div>
+                    </div>
+                </div>
+                {% if portfolio_stats.industry_mix %}
+                <div class="mt-3">
+                    <div class="text-muted small mb-2">Industry Distribution</div>
+                    <div class="progress" style="height: 30px;">
+                        {% set total_shown = 0 %}
+                        {% for industry, percent in portfolio_stats.industry_mix.items() %}
+                            {% if percent >= 5 %}
+                                {% set total_shown = total_shown + percent %}
+                                <div class="progress-bar {% if loop.index0 % 5 == 0 %}bg-primary{% elif loop.index0 % 5 == 1 %}bg-success{% elif loop.index0 % 5 == 2 %}bg-info{% elif loop.index0 % 5 == 3 %}bg-warning{% else %}bg-danger{% endif %}" 
+                                     role="progressbar" 
+                                     style="width: {{ percent }}%;" 
+                                     data-bs-toggle="tooltip" 
+                                     title="{{ industry }}: {{ percent|round(1) }}%">
+                                    {% if percent >= 10 %}
+                                        <span class="small">{{ industry[:12] }} {{ percent|round(0)|int }}%</span>
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+                        {% endfor %}
+                        {% if total_shown < 100 %}
+                            <div class="progress-bar bg-secondary" 
+                                 role="progressbar" 
+                                 style="width: {{ (100 - total_shown) }}%;" 
+                                 data-bs-toggle="tooltip" 
+                                 title="Other: {{ (100 - total_shown)|round(1) }}%">
+                                {% if (100 - total_shown) >= 10 %}
+                                    <span class="small">Other {{ (100 - total_shown)|round(0)|int }}%</span>
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+                <p class="text-muted small mb-0 mt-3">
+                    <i class="fas fa-clock me-1"></i>
+                    Last updated: {{ portfolio_stats.last_updated.strftime('%Y-%m-%d %I:%M %p') if portfolio_stats.last_updated else 'Never' }}
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <div class="row mb-4">
     <div class="col-md-6">
         <div class="card shadow">
