@@ -22975,15 +22975,58 @@ def admin_populate_portfolio_stats():
             'traceback': traceback.format_exc()
         }), 500
 
-@app.route('/admin/replace-sp500-with-real-data', methods=['POST'])
+@app.route('/admin/replace-sp500-with-real-data', methods=['GET', 'POST'])
 @login_required
 def admin_replace_sp500_with_real_data():
     """Replace ALL S&P 500 historical data with REAL data from Alpha Vantage"""
+    # Check if user is admin
+    email = session.get('email', '')
+    if email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    # GET: Show preview of what will happen
+    if request.method == 'GET':
+        from models import MarketData
+        
+        # Count existing records
+        existing_count = MarketData.query.filter_by(ticker='SPY_SP500').count()
+        
+        # Get date range
+        all_sp500 = MarketData.query.filter_by(ticker='SPY_SP500').order_by(MarketData.date).all()
+        earliest = all_sp500[0].date.isoformat() if all_sp500 else 'None'
+        latest = all_sp500[-1].date.isoformat() if all_sp500 else 'None'
+        
+        # Count suspicious values
+        low_values = MarketData.query.filter(
+            MarketData.ticker == 'SPY_SP500',
+            MarketData.close_price < 1000
+        ).count()
+        
+        return jsonify({
+            'success': True,
+            'action': 'PREVIEW - No changes made yet',
+            'current_state': {
+                'total_records': existing_count,
+                'date_range': {'earliest': earliest, 'latest': latest},
+                'suspicious_low_values': low_values,
+                'years_of_data': existing_count / 252 if existing_count > 0 else 0
+            },
+            'what_will_happen': {
+                'api_call': 'TIME_SERIES_DAILY for SPY (outputsize=full)',
+                'api_cost': '1 API call',
+                'expected_records': '~5000+ days of historical data',
+                'action': 'Replace ALL existing records with real Alpha Vantage data',
+                'formula': 'SPY close price × 10 = S&P 500 index'
+            },
+            'to_execute': {
+                'method': 'POST',
+                'url': '/admin/replace-sp500-with-real-data',
+                'note': 'Use POST method to execute the replacement'
+            }
+        })
+    
+    # POST: Execute the replacement
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
         
         from models import MarketData
         from portfolio_performance import PortfolioPerformanceCalculator
