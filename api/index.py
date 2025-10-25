@@ -4592,6 +4592,43 @@ def clear_leaderboard_html():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/clear-leaderboard-cache', methods=['POST'])
+@login_required
+def clear_leaderboard_cache():
+    """
+    DELETE old leaderboard cache entries to force use of new calculate_leaderboard_data() code
+    
+    This will make get_leaderboard_data() fall back to calculate_leaderboard_data(),
+    which now uses UserPortfolioChartCache (correct source)
+    """
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import LeaderboardCache
+        
+        # Get count before deletion
+        before_count = LeaderboardCache.query.count()
+        
+        # DELETE all cache entries
+        LeaderboardCache.query.delete()
+        db.session.commit()
+        
+        logger.info(f"DELETED {before_count} old leaderboard cache entries - will force on-demand calculation")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Deleted {before_count} old cache entries',
+            'deleted_count': before_count,
+            'next_step': 'Visit /leaderboard - it will now use NEW calculate_leaderboard_data() code with UserPortfolioChartCache',
+            'warning': 'First page load will be slower (~1 second) as it calculates on-demand'
+        })
+    
+    except Exception as e:
+        logger.error(f"Error clearing leaderboard cache: {e}")
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/check-snapshot-data')
 @login_required
 def check_snapshot_data():
