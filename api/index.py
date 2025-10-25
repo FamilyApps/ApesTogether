@@ -22949,6 +22949,52 @@ def admin_populate_portfolio_stats():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/check-chart-caches', methods=['GET'])
+@login_required
+def admin_check_chart_caches():
+    """
+    Check if chart caches exist and when they were generated
+    Diagnostic to see if market close cron generated the caches
+    """
+    try:
+        from models import UserPortfolioChartCache, User
+        import json
+        
+        results = {}
+        users = User.query.all()
+        
+        for user in users:
+            user_caches = {}
+            for period in ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']:
+                cache = UserPortfolioChartCache.query.filter_by(user_id=user.id, period=period).first()
+                if cache:
+                    chart_data = json.loads(cache.chart_data) if cache.chart_data else {}
+                    labels = chart_data.get('labels', [])
+                    user_caches[period] = {
+                        'exists': True,
+                        'generated_at': cache.generated_at.isoformat() if cache.generated_at else None,
+                        'labels_count': len(labels),
+                        'sample_labels': labels[:3] if labels else [],
+                        'last_label': labels[-1] if labels else None
+                    }
+                else:
+                    user_caches[period] = {'exists': False}
+            
+            results[user.username] = user_caches
+        
+        return jsonify({
+            'success': True,
+            'chart_caches': results
+        })
+        
+    except Exception as e:
+        logger.error(f"Error checking chart caches: {str(e)}")
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/view-all-portfolio-stats', methods=['GET'])
 @login_required
 def admin_view_all_portfolio_stats():
