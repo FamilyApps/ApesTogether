@@ -15870,11 +15870,33 @@ def admin_force_chart_cache_regeneration():
         for user in users:
             for period in periods:
                 try:
+                    # Generate chart data with S&P 500 benchmark
                     chart_data = generate_user_portfolio_chart(user.id, period)
                     if chart_data:
+                        # CRITICAL: Save to UserPortfolioChartCache table!
+                        import json
+                        cache_entry = UserPortfolioChartCache.query.filter_by(
+                            user_id=user.id,
+                            period=period
+                        ).first()
+                        
+                        if cache_entry:
+                            cache_entry.chart_data = json.dumps(chart_data)
+                            cache_entry.last_updated = datetime.now()
+                        else:
+                            cache_entry = UserPortfolioChartCache(
+                                user_id=user.id,
+                                period=period,
+                                chart_data=json.dumps(chart_data),
+                                last_updated=datetime.now()
+                            )
+                            db.session.add(cache_entry)
+                        
+                        db.session.commit()
                         results['caches_regenerated'] += 1
-                        logger.info(f"Generated {period} chart for {user.username}")
+                        logger.info(f"✅ Generated and SAVED {period} chart for {user.username} (includes S&P 500: {'sp500_performance' in chart_data})")
                 except Exception as e:
+                    db.session.rollback()
                     error_msg = f"Error generating {period} chart for user {user.id}: {str(e)}"
                     results['errors'].append(error_msg)
                     logger.error(error_msg)
