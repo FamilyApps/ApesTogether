@@ -123,16 +123,10 @@
                             <div class="h4 mb-0">{{ portfolio_stats.small_cap_percent|round(0)|int }}%</div>
                         </div>
                     </div>
-                    <div class="col-6 col-md-2 mb-3">
+                    <div class="col-6 col-md-3 mb-3">
                         <div class="text-center">
                             <div class="text-muted small">Subscribers</div>
                             <div class="h4 mb-0">{{ portfolio_stats.subscriber_count }}</div>
-                        </div>
-                    </div>
-                    <div class="col-6 col-md-2 mb-3">
-                        <div class="text-center">
-                            <div class="text-muted small">Total Trades</div>
-                            <div class="h4 mb-0">{{ portfolio_stats.total_trades }}</div>
                         </div>
                     </div>
                 </div>
@@ -141,8 +135,9 @@
                     <div class="text-muted small mb-2">Industry Distribution</div>
                     <div class="progress" style="height: 30px;">
                         {% set total_shown = 0 %}
+                        {% set other_total = 0 %}
                         {% for industry, percent in portfolio_stats.industry_mix.items() %}
-                            {% if percent >= 5 %}
+                            {% if industry != 'Other' and percent >= 5 %}
                                 {% set total_shown = total_shown + percent %}
                                 <div class="progress-bar {% if loop.index0 % 5 == 0 %}bg-primary{% elif loop.index0 % 5 == 1 %}bg-success{% elif loop.index0 % 5 == 2 %}bg-info{% elif loop.index0 % 5 == 3 %}bg-warning{% else %}bg-danger{% endif %}" 
                                      role="progressbar" 
@@ -153,16 +148,18 @@
                                         <span class="small">{{ industry[:12] }} {{ percent|round(0)|int }}%</span>
                                     {% endif %}
                                 </div>
+                            {% elif industry == 'Other' or percent < 5 %}
+                                {% set other_total = other_total + percent %}
                             {% endif %}
                         {% endfor %}
-                        {% if total_shown < 100 %}
+                        {% if other_total > 0 %}
                             <div class="progress-bar bg-secondary" 
                                  role="progressbar" 
-                                 style="width: {{ (100 - total_shown) }}%;" 
+                                 style="width: {{ other_total }}%;" 
                                  data-bs-toggle="tooltip" 
-                                 title="Other: {{ (100 - total_shown)|round(1) }}%">
-                                {% if (100 - total_shown) >= 10 %}
-                                    <span class="small">Other {{ (100 - total_shown)|round(0)|int }}%</span>
+                                 title="Other: {{ other_total|round(1) }}%">
+                                {% if other_total >= 10 %}
+                                    <span class="small">Other {{ other_total|round(0)|int }}%</span>
                                 {% endif %}
                             </div>
                         {% endif %}
