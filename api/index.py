@@ -4629,6 +4629,127 @@ def clear_leaderboard_cache():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/trace-leaderboard-value/<username>/<period>')
+@login_required
+def trace_leaderboard_value(username, period):
+    """
+    Trace EXACTLY where a leaderboard value comes from
+    
+    Example: /admin/trace-leaderboard-value/witty-raven/YTD
+    This will show where the 6.69% value originates
+    """
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import User, LeaderboardCache, UserPortfolioChartCache
+        import json
+        
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': f'User {username} not found'}), 404
+        
+        trace = {
+            'username': username,
+            'user_id': user.id,
+            'period': period,
+            'timestamp': datetime.now().isoformat(),
+            'data_sources': {}
+        }
+        
+        # 1. Check LeaderboardCache table (what get_leaderboard_data reads)
+        cache_key = f"{period}_all"
+        leaderboard_cache = LeaderboardCache.query.filter_by(period=cache_key).first()
+        
+        if leaderboard_cache:
+            cached_data = json.loads(leaderboard_cache.leaderboard_data)
+            user_entry = next((e for e in cached_data if e['user_id'] == user.id), None)
+            trace['data_sources']['leaderboard_cache'] = {
+                'exists': True,
+                'cache_key': cache_key,
+                'generated_at': leaderboard_cache.generated_at.isoformat() if leaderboard_cache.generated_at else None,
+                'user_performance': user_entry['performance_percent'] if user_entry else None,
+                'full_entry': user_entry
+            }
+        else:
+            trace['data_sources']['leaderboard_cache'] = {
+                'exists': False,
+                'note': 'Should trigger calculate_leaderboard_data() fallback'
+            }
+        
+        # 2. Check UserPortfolioChartCache (what NEW code should use)
+        chart_cache = UserPortfolioChartCache.query.filter_by(user_id=user.id, period=period).first()
+        
+        if chart_cache:
+            chart_data = json.loads(chart_cache.chart_data)
+            datasets = chart_data.get('datasets', [])
+            portfolio_data = datasets[0].get('data', []) if datasets else []
+            last_value = portfolio_data[-1] if portfolio_data else None
+            
+            trace['data_sources']['user_portfolio_chart_cache'] = {
+                'exists': True,
+                'generated_at': chart_cache.generated_at.isoformat(),
+                'last_performance_value': last_value,
+                'data_points_count': len(portfolio_data),
+                'note': 'This is what calculate_leaderboard_data() should return'
+            }
+        else:
+            trace['data_sources']['user_portfolio_chart_cache'] = {
+                'exists': False,
+                'error': 'Chart cache missing - calculate_leaderboard_data() will skip this user!'
+            }
+        
+        # 3. Call get_leaderboard_data() and see what it returns
+        from leaderboard_utils import get_leaderboard_data
+        leaderboard_result = get_leaderboard_data(period, limit=50, category='all')
+        user_leaderboard_entry = next((e for e in leaderboard_result if e['user_id'] == user.id), None)
+        
+        trace['data_sources']['get_leaderboard_data_result'] = {
+            'user_found': user_leaderboard_entry is not None,
+            'performance_percent': user_leaderboard_entry['performance_percent'] if user_leaderboard_entry else None,
+            'full_entry': user_leaderboard_entry,
+            'note': 'This is what the leaderboard page actually displays'
+        }
+        
+        # 4. Call calculate_leaderboard_data() directly to see what NEW code returns
+        from leaderboard_utils import calculate_leaderboard_data
+        calculated_result = calculate_leaderboard_data(period, limit=50, category='all')
+        user_calculated_entry = next((e for e in calculated_result if e['user_id'] == user.id), None)
+        
+        trace['data_sources']['calculate_leaderboard_data_result'] = {
+            'user_found': user_calculated_entry is not None,
+            'performance_percent': user_calculated_entry['performance_percent'] if user_calculated_entry else None,
+            'full_entry': user_calculated_entry,
+            'note': 'This is what NEW fixed code calculates'
+        }
+        
+        # 5. Compare all sources
+        trace['comparison'] = {
+            'leaderboard_cache_value': trace['data_sources']['leaderboard_cache'].get('user_performance'),
+            'chart_cache_value': trace['data_sources']['user_portfolio_chart_cache'].get('last_performance_value'),
+            'get_leaderboard_data_value': trace['data_sources']['get_leaderboard_data_result'].get('performance_percent'),
+            'calculate_leaderboard_data_value': trace['data_sources']['calculate_leaderboard_data_result'].get('performance_percent'),
+            'mismatch_detected': len(set(filter(None, [
+                trace['data_sources']['leaderboard_cache'].get('user_performance'),
+                trace['data_sources']['chart_cache_value'].get('last_performance_value') if trace['data_sources']['chart_cache_value'] else None,
+                trace['data_sources']['get_leaderboard_data_result'].get('performance_percent'),
+                trace['data_sources']['calculate_leaderboard_data_result'].get('performance_percent')
+            ]))) > 1
+        }
+        
+        return jsonify({
+            'success': True,
+            'trace': trace
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/check-snapshot-data')
 @login_required
 def check_snapshot_data():
