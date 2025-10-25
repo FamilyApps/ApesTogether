@@ -4629,6 +4629,84 @@ def clear_leaderboard_cache():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/generate-chart-cache-only')
+@login_required
+def generate_chart_cache_only():
+    """Generate ONLY UserPortfolioChartCache without leaderboard calculation - fixes chicken-egg problem"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import User, UserPortfolioChartCache
+        from leaderboard_utils import generate_chart_from_snapshots
+        import json
+        
+        periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']
+        all_users = User.query.all()
+        
+        results = {
+            'users_processed': 0,
+            'charts_generated': 0,
+            'charts_skipped': 0,
+            'errors': []
+        }
+        
+        for user in all_users:
+            results['users_processed'] += 1
+            
+            for period in periods:
+                try:
+                    # Generate chart data
+                    chart_data = generate_chart_from_snapshots(user.id, period)
+                    
+                    if chart_data:
+                        # Update or create chart cache
+                        chart_cache = UserPortfolioChartCache.query.filter_by(
+                            user_id=user.id, period=period
+                        ).first()
+                        
+                        if chart_cache:
+                            chart_cache.chart_data = json.dumps(chart_data)
+                            chart_cache.generated_at = datetime.now()
+                        else:
+                            chart_cache = UserPortfolioChartCache(
+                                user_id=user.id,
+                                period=period,
+                                chart_data=json.dumps(chart_data),
+                                generated_at=datetime.now()
+                            )
+                            db.session.add(chart_cache)
+                        
+                        results['charts_generated'] += 1
+                        logger.info(f"Generated chart cache for user {user.id}, period {period}")
+                    else:
+                        results['charts_skipped'] += 1
+                        logger.warning(f"No chart data for user {user.id}, period {period}")
+                        
+                except Exception as e:
+                    error_msg = f"Error for user {user.id}, period {period}: {str(e)}"
+                    results['errors'].append(error_msg)
+                    logger.error(error_msg)
+        
+        # Commit all chart caches
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Generated {results["charts_generated"]} chart caches for {results["users_processed"]} users',
+            'results': results,
+            'next_step': 'Now run /admin/clear-leaderboard-cache then visit /leaderboard'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/check-intraday-dates')
 @login_required
 def check_intraday_dates():
