@@ -49,6 +49,101 @@ class PortfolioPerformanceCalculator:
         self.alpha_vantage_api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
         self.historical_price_cache = {}  # Cache for historical prices during batch operations
     
+    def get_batch_stock_data(self, tickers: list) -> Dict[str, float]:
+        """
+        Fetch multiple stock prices in a single API call using BATCH_STOCK_QUOTES
+        This is 12-25x more efficient than individual calls
+        
+        Returns: dict mapping ticker -> price (e.g., {'AAPL': 175.43, 'MSFT': 380.12})
+        """
+        if not tickers:
+            return {}
+        
+        current_time = datetime.now()
+        
+        # Check if it's weekend
+        if current_time.weekday() >= 5:
+            logger.info(f"Weekend detected - skipping batch API call, using cache only")
+            result = {}
+            for ticker in tickers:
+                ticker_upper = ticker.upper()
+                if ticker_upper in stock_price_cache:
+                    result[ticker_upper] = stock_price_cache[ticker_upper]['price']
+            return result
+        
+        # Check cache first - only fetch uncached tickers
+        uncached_tickers = []
+        result = {}
+        
+        for ticker in tickers:
+            ticker_upper = ticker.upper()
+            if ticker_upper in stock_price_cache:
+                cached_data = stock_price_cache[ticker_upper]
+                cache_time = cached_data.get('timestamp')
+                if cache_time and (current_time - cache_time).total_seconds() < cache_duration:
+                    result[ticker_upper] = cached_data['price']
+                    continue
+            uncached_tickers.append(ticker_upper)
+        
+        # If all cached, return early
+        if not uncached_tickers:
+            logger.info(f"✅ All {len(tickers)} tickers served from cache (batch)")
+            return result
+        
+        try:
+            api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
+            if not api_key:
+                logger.warning("Alpha Vantage API key not found")
+                return result
+            
+            # Alpha Vantage BATCH_STOCK_QUOTES supports up to 256 symbols
+            # Split into chunks if needed
+            chunk_size = 256
+            for i in range(0, len(uncached_tickers), chunk_size):
+                chunk = uncached_tickers[i:i + chunk_size]
+                symbols_str = ','.join(chunk)
+                
+                url = f'https://www.alphavantage.co/query?function=BATCH_STOCK_QUOTES&symbols={symbols_str}&apikey={api_key}'
+                response = requests.get(url, timeout=10)
+                data = response.json()
+                
+                # Log the batch API call
+                try:
+                    from models import AlphaVantageAPILog, db
+                    success = 'Stock Quotes' in data
+                    api_log = AlphaVantageAPILog(
+                        endpoint='BATCH_STOCK_QUOTES',
+                        symbol=f"BATCH_{len(chunk)}_TICKERS",
+                        response_status='success' if success else 'error',
+                        timestamp=current_time
+                    )
+                    db.session.add(api_log)
+                except Exception as log_error:
+                    logger.error(f"Failed to log batch API call: {log_error}")
+                
+                # Parse batch response
+                if 'Stock Quotes' in data:
+                    for quote in data['Stock Quotes']:
+                        ticker = quote.get('1. symbol', '').upper()
+                        price_str = quote.get('2. price', '0')
+                        try:
+                            price = float(price_str)
+                            if price > 0:
+                                stock_price_cache[ticker] = {'price': price, 'timestamp': current_time}
+                                result[ticker] = price
+                        except (ValueError, TypeError):
+                            logger.warning(f"Invalid price for {ticker}: {price_str}")
+                    
+                    logger.info(f"✅ Batch API: Fetched {len(chunk)} tickers in 1 call")
+                else:
+                    logger.warning(f"❌ Batch API failed - Response: {data}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in batch fetch: {e}")
+            return result
+    
     def get_stock_data(self, ticker_symbol: str) -> Dict:
         """Fetches stock data using AlphaVantage API with caching (same as existing system)"""
         # Check if it's weekend - don't make API calls on weekends

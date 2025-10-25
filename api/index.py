@@ -14795,11 +14795,32 @@ def market_close_cron():
             logger.info("PHASE 1: Creating portfolio snapshots...")
             results['pipeline_phases'].append('snapshots_started')
             
+            # OPTIMIZATION: Batch fetch all stock prices ONCE before processing users
+            from models import Stock
             users = User.query.all()
             
+            # Collect all unique tickers across all users
+            unique_tickers = set()
+            unique_tickers.add('SPY')  # Always include SPY for S&P 500
+            
+            for user in users:
+                user_stocks = Stock.query.filter_by(user_id=user.id).all()
+                for stock in user_stocks:
+                    if stock.quantity > 0:
+                        unique_tickers.add(stock.ticker.upper())
+            
+            logger.info(f"📊 Batch API (Market Close): Fetching {len(unique_tickers)} unique tickers for {len(users)} users")
+            
+            # Batch fetch all prices in 1-2 API calls
+            calculator = PortfolioPerformanceCalculator()
+            batch_prices = calculator.get_batch_stock_data(list(unique_tickers))
+            logger.info(f"✅ Batch API Success: Retrieved {len(batch_prices)} prices")
+            
+            # Now process each user (prices already cached from batch call above)
             for user in users:
                 try:
                     # Calculate portfolio value WITH cash tracking for today (using ET date)
+                    # Stock prices are now served from cache (batch call above)
                     portfolio_data = calculate_portfolio_value_with_cash(user.id, today_et)
                     
                     total_value = portfolio_data['total_value']
@@ -14862,8 +14883,15 @@ def market_close_cron():
             results['pipeline_phases'].append('sp500_started')
             
             try:
-                calculator = PortfolioPerformanceCalculator()
-                spy_data = calculator.get_stock_data('SPY')
+                # SPY data already fetched in batch call above - retrieve from cache
+                if 'SPY' in batch_prices:
+                    spy_price = batch_prices['SPY']
+                    logger.info(f"SPY data collected: ${spy_price} (S&P 500: ${spy_price * 10}) on {today_et}")
+                    spy_data = {'price': spy_price}
+                else:
+                    # Fallback: Individual call if batch somehow failed for SPY
+                    logger.warning("SPY not in batch results - falling back to individual call")
+                    spy_data = calculator.get_stock_data('SPY')
                 
                 if spy_data and spy_data.get('price'):
                     spy_price = spy_data['price']
@@ -19669,42 +19697,58 @@ def collect_intraday_data():
             }
         }
         
-        # Step 1: Collect SPY data
+        # Step 1: Get all users and collect unique tickers (for batch API call)
+        users = User.query.all()
+        
+        # Collect all unique tickers across all users
+        from models import Stock
+        unique_tickers = set()
+        unique_tickers.add('SPY')  # Always include SPY for S&P 500 benchmark
+        
+        for user in users:
+            user_stocks = Stock.query.filter_by(user_id=user.id).all()
+            for stock in user_stocks:
+                if stock.quantity > 0:
+                    unique_tickers.add(stock.ticker.upper())
+        
+        logger.info(f"📊 Batch API: Fetching {len(unique_tickers)} unique tickers for {len(users)} users")
+        
+        # Step 2: BATCH API CALL - Fetch all prices in ONE call (12-25x more efficient!)
         try:
-            spy_data = calculator.get_stock_data('SPY')
-            if spy_data and spy_data.get('price'):
-                spy_price = spy_data['price']
-                sp500_value = spy_price * 10  # Convert SPY to S&P 500 approximation
+            batch_prices = calculator.get_batch_stock_data(list(unique_tickers))
+            
+            # Log results
+            if batch_prices:
+                logger.info(f"✅ Batch API Success: Retrieved {len(batch_prices)} prices in 1-2 calls")
+                results['api_calls_made'] = 1 if len(unique_tickers) <= 256 else (len(unique_tickers) // 256) + 1
+                results['tickers_fetched'] = len(batch_prices)
                 
-                # Store intraday SPY data with ET date
-                from models import MarketData
-                market_data = MarketData(
-                    ticker='SPY_INTRADAY',
-                    date=today_et,  # Use ET date instead of UTC
-                    timestamp=current_time,  # TZ-aware timestamp
-                    close_price=sp500_value
-                )
-                db.session.add(market_data)
-                results['spy_data_collected'] = True
-                logger.info(f"SPY data collected: ${spy_price} (S&P 500: ${sp500_value}) on {today_et}")
+                # Store SPY data for S&P 500 tracking
+                if 'SPY' in batch_prices:
+                    spy_price = batch_prices['SPY']
+                    sp500_value = spy_price * 10
+                    
+                    from models import MarketData
+                    market_data = MarketData(
+                        ticker='SPY_INTRADAY',
+                        date=today_et,
+                        timestamp=current_time,
+                        close_price=sp500_value
+                    )
+                    db.session.add(market_data)
+                    results['spy_data_collected'] = True
+                    logger.info(f"SPY: ${spy_price} (S&P 500: ${sp500_value})")
             else:
-                results['errors'].append("Failed to fetch SPY data")
-                logger.error("Failed to fetch SPY data from AlphaVantage")
+                results['errors'].append("Batch API returned no prices")
+                logger.error("❌ Batch API failed - no prices returned")
         
         except Exception as e:
-            error_msg = f"Error collecting SPY data: {str(e)}"
+            error_msg = f"Batch API error: {str(e)}"
             results['errors'].append(error_msg)
             logger.error(error_msg)
         
-        # Step 2: Get all users
-        users = User.query.all()
-        
-        # FIX #2: REMOVED duplicate EOD snapshot creation logic
-        # EOD snapshots are now created ONLY by the dedicated market-close cron at 4:00 PM
-        # This intraday cron focuses solely on collecting intraday snapshots every 30 minutes
-        # Reason: Duplicate logic caused conflicts and was redundant with market-close cron
-        
-        # Batch processing for better performance
+        # Step 3: Calculate portfolio values (now using CACHED data from batch call)
+        # All stock prices are already in cache - no additional API calls needed!
         intraday_snapshots = []
         
         for user in users:

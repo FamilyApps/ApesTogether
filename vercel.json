@@ -23,7 +23,7 @@
     },
     {
       "path": "/api/cron/collect-intraday-data",
-      "schedule": "0,30 13-20 * * 1-5"
+      "schedule": "*/15 13-19 * * 1-5"
     },
     {
       "path": "/api/cron/market-close", 

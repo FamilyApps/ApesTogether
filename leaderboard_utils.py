@@ -947,29 +947,63 @@ def generate_chart_from_snapshots(user_id, period):
     
     # For 1D and 5D, use intraday snapshots with time labels
     if period in ['1D', '5D']:
+        from zoneinfo import ZoneInfo
+        from datetime import time as dt_time
+        MARKET_TZ = ZoneInfo('America/New_York')
+        
         if period == '1D':
             start_date = today
             end_date = today
+            
+            # CRITICAL FIX: Only include market hours (9:30 AM - 4:00 PM ET)
+            market_open_time = dt_time(9, 30)  # 9:30 AM
+            market_close_time = dt_time(16, 0)  # 4:00 PM
+            
+            # Get all intraday snapshots for today
+            all_snapshots = PortfolioSnapshotIntraday.query.filter(
+                PortfolioSnapshotIntraday.user_id == user_id,
+                cast(func.timezone('America/New_York', PortfolioSnapshotIntraday.timestamp), Date) == start_date
+            ).order_by(PortfolioSnapshotIntraday.timestamp).all()
+            
+            # Filter to only include market hours
+            intraday_snapshots = []
+            for snapshot in all_snapshots:
+                et_timestamp = snapshot.timestamp.astimezone(MARKET_TZ)
+                snapshot_time = et_timestamp.time()
+                if market_open_time <= snapshot_time <= market_close_time:
+                    intraday_snapshots.append(snapshot)
+            
         else:  # 5D
-            # Get 5 business days back
+            # Get last 5 business days (not including today if after hours)
             business_days_back = 0
             check_date = today
-            while business_days_back < 5:
+            target_days = 5
+            
+            # If it's after market close today, include today in the 5 days
+            # Otherwise start from yesterday
+            current_time = datetime.now(MARKET_TZ)
+            if current_time.time() >= dt_time(16, 0):  # After 4 PM
+                # Include today as one of the 5 days
+                pass
+            else:
+                # Start from yesterday
+                check_date = check_date - timedelta(days=1)
+                target_days = 4  # Only need 4 more days since today is partial
+            
+            # Count back to get start date
+            while business_days_back < target_days:
                 check_date = check_date - timedelta(days=1)
                 if check_date.weekday() < 5:  # Monday=0, Friday=4
                     business_days_back += 1
             start_date = check_date
             end_date = today
-        
-        # Get intraday snapshots
-        from zoneinfo import ZoneInfo
-        MARKET_TZ = ZoneInfo('America/New_York')
-        
-        intraday_snapshots = PortfolioSnapshotIntraday.query.filter(
-            PortfolioSnapshotIntraday.user_id == user_id,
-            cast(func.timezone('America/New_York', PortfolioSnapshotIntraday.timestamp), Date) >= start_date,
-            cast(func.timezone('America/New_York', PortfolioSnapshotIntraday.timestamp), Date) <= end_date
-        ).order_by(PortfolioSnapshotIntraday.timestamp).all()
+            
+            # Get intraday snapshots for date range
+            intraday_snapshots = PortfolioSnapshotIntraday.query.filter(
+                PortfolioSnapshotIntraday.user_id == user_id,
+                cast(func.timezone('America/New_York', PortfolioSnapshotIntraday.timestamp), Date) >= start_date,
+                cast(func.timezone('America/New_York', PortfolioSnapshotIntraday.timestamp), Date) <= end_date
+            ).order_by(PortfolioSnapshotIntraday.timestamp).all()
         
         if not intraday_snapshots:
             return None
