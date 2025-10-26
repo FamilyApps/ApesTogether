@@ -97,63 +97,47 @@ def calculate_portfolio_performance(
     first_snapshot = snapshots[0]
     last_snapshot = snapshots[-1]
     
-    # CRITICAL FIX: Handle users who joined mid-period
-    # If first snapshot is AFTER start_date, user joined mid-period.
-    # Their initial capital should count as CF that occurred on that date.
-    user_joined_mid_period = first_snapshot.date > start_date
+    # Use first snapshot as baseline (regardless of when user joined)
+    # This shows ACTUAL return from when they started, not time-adjusted
+    V_start = first_snapshot.total_value
+    V_end = last_snapshot.total_value
+    CF_net = last_snapshot.max_cash_deployed - first_snapshot.max_cash_deployed
     
-    # Set V_start and V_end
-    if user_joined_mid_period:
-        # User didn't exist at period start, so V_start = 0
-        # Their entire initial portfolio value is from capital deployed mid-period
-        V_start = 0.0
-        V_end = last_snapshot.total_value
-        # CF_net includes their initial capital
-        CF_net = last_snapshot.max_cash_deployed
-        logger.info(f"User joined mid-period on {first_snapshot.date}. V_start=0, treating initial ${first_snapshot.max_cash_deployed:.2f} as CF")
-    else:
-        # User existed at period start, use first snapshot as baseline
-        V_start = first_snapshot.total_value
-        V_end = last_snapshot.total_value
-        CF_net = last_snapshot.max_cash_deployed - first_snapshot.max_cash_deployed
+    # Log if user joined mid-period (for informational purposes)
+    if first_snapshot.date > start_date:
+        logger.info(
+            f"User joined mid-period on {first_snapshot.date}. "
+            f"Showing actual return from {first_snapshot.date} to {end_date}, not time-adjusted."
+        )
     
     # Calculate time-weighted cash flows (W factor)
-    total_days = (end_date - start_date).days
-    if total_days == 0:
-        # Same-day period (1D)
+    # Use the user's ACTUAL active period (from first snapshot to end)
+    actual_period_days = (end_date - first_snapshot.date).days
+    
+    if actual_period_days == 0:
+        # Same-day period (1D) or user just joined today
         W = 0.0
         weighted_cf = 0.0
     else:
         # Calculate weighted cash flows based on when capital was deployed
+        # during the user's active period
         weighted_cf = 0.0
+        prev_deployed = first_snapshot.max_cash_deployed
         
-        # If user joined mid-period, weight their initial capital deployment
-        if user_joined_mid_period:
-            days_remaining = (end_date - first_snapshot.date).days
-            weight = days_remaining / total_days
-            weighted_cf += first_snapshot.max_cash_deployed * weight
-            logger.info(
-                f"User joined mid-period on {first_snapshot.date}. "
-                f"Initial capital ${first_snapshot.max_cash_deployed:.2f} weighted by {weight:.3f} = ${weighted_cf:.2f}"
-            )
-            prev_deployed = first_snapshot.max_cash_deployed
-        else:
-            prev_deployed = first_snapshot.max_cash_deployed
-        
-        # Track additional capital deployed after joining
+        # Track capital deployed after user's first snapshot
         for snapshot in snapshots[1:]:
             capital_added = snapshot.max_cash_deployed - prev_deployed
             if capital_added > 0:
-                # Weight by remaining days in period (capital deployed later has less time to grow)
+                # Weight by remaining days in user's active period
                 days_remaining = (end_date - snapshot.date).days
-                weight = days_remaining / total_days
+                weight = days_remaining / actual_period_days
                 weighted_cf += capital_added * weight
                 logger.debug(f"Date {snapshot.date}: Added ${capital_added:.2f}, weight={weight:.3f}, weighted=${capital_added * weight:.2f}")
             prev_deployed = snapshot.max_cash_deployed
         
         # W is used in denominator: (V_start + W * CF_net)
         # For Modified Dietz, W represents the time-weighted average of when flows occurred
-        # If CF_net = 0 (no new capital), W doesn't matter; default to 0.5 (mid-period)
+        # If CF_net = 0 (no new capital after joining), W doesn't matter; default to 0.5
         W = weighted_cf / CF_net if CF_net != 0 else 0.5
     
     # Modified Dietz formula
