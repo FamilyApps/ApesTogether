@@ -276,7 +276,15 @@ def get_period_dates(period: str, user_id: Optional[int] = None) -> Tuple[date, 
     Raises:
         ValueError: If period is invalid
     """
-    from utils import get_market_date
+    # Import here to avoid circular dependency
+    try:
+        from portfolio_performance import get_market_date
+    except ImportError:
+        # Fallback: define inline if portfolio_performance not available
+        from zoneinfo import ZoneInfo
+        MARKET_TZ = ZoneInfo('America/New_York')
+        def get_market_date():
+            return datetime.now(MARKET_TZ).date()
     
     end_date = get_market_date()  # Today in ET timezone
     
