@@ -33,7 +33,7 @@ def leaderboard_home():
         return Response(cache_entry.rendered_html, mimetype='text/html')
     
     # Fallback to dynamic rendering if no pre-rendered HTML available
-    leaderboard_data = get_leaderboard_data(period, limit=50)
+    leaderboard_data = get_leaderboard_data(period, limit=50, category=category, use_auth_suffix=True)
     
     # Filter by category if specified
     if category == 'small_cap':
@@ -76,7 +76,7 @@ def api_leaderboard_data():
     category = request.args.get('category', 'all')
     limit = int(request.args.get('limit', 20))
     
-    leaderboard_data = get_leaderboard_data(period, limit, category)
+    leaderboard_data = get_leaderboard_data(period, limit, category, use_auth_suffix=True)
     return jsonify({
         'period': period,
         'category': category,

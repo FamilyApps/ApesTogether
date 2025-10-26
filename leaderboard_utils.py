@@ -310,19 +310,38 @@ def update_leaderboard_entry(user_id, period):
     # But if it's still called, it should not break atomic transactions
     return entry
 
-def get_leaderboard_data(period='YTD', limit=20, category='all'):
+def get_leaderboard_data(period='YTD', limit=20, category='all', use_auth_suffix=False):
     """
     Get cached leaderboard data from LeaderboardCache table with chart data
     Returns pre-calculated leaderboard data updated at market close
+    
+    Args:
+        period: Time period (1D, 5D, 1M, etc.)
+        limit: Max number of entries to return
+        category: Portfolio category (all, small_cap, large_cap)
+        use_auth_suffix: If True, looks for _auth/_anon suffixed cache keys (used by route)
     """
     import json
     from models import LeaderboardCache, UserPortfolioChartCache
     
     # Create cache key for period + category
+    # MODERN FORMAT: period_category_auth or period_category_anon
+    # LEGACY FORMAT: period_category (no suffix)
     cache_key = f"{period}_{category}"
     
-    # Try to get cached data first
-    cache_entry = LeaderboardCache.query.filter_by(period=cache_key).first()
+    # Try modern auth-aware cache first if requested
+    if use_auth_suffix:
+        # Try _auth suffix first (most routes use this)
+        auth_cache_key = f"{cache_key}_auth"
+        cache_entry = LeaderboardCache.query.filter_by(period=auth_cache_key).first()
+        
+        # Fallback to _anon if _auth not found
+        if not cache_entry:
+            anon_cache_key = f"{cache_key}_anon"
+            cache_entry = LeaderboardCache.query.filter_by(period=anon_cache_key).first()
+    else:
+        # Try exact cache key (legacy or backward compatibility)
+        cache_entry = LeaderboardCache.query.filter_by(period=cache_key).first()
     
     if cache_entry:
         # Return cached data with chart data included
