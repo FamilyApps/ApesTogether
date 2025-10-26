@@ -149,20 +149,17 @@ class PortfolioPerformanceCalculator:
             return result
     
     def get_stock_data(self, ticker_symbol: str) -> Dict:
-        """Fetches stock data using AlphaVantage API with caching (same as existing system)"""
-        # Check if it's weekend - don't make API calls on weekends
+        """
+        Fetches stock data using AlphaVantage API with caching.
+        
+        Premium API ($99.99/mo) works 24/7 including weekends.
+        On weekends, API returns last market close (Friday) price.
+        """
         current_time = datetime.now()
-        if current_time.weekday() >= 5:  # Saturday = 5, Sunday = 6
-            logger.info(f"Weekend detected - skipping API call for {ticker_symbol}, using cache only")
-            # Return cached data if available, otherwise return None
-            ticker_upper = ticker_symbol.upper()
-            if ticker_upper in stock_price_cache:
-                cached_data = stock_price_cache[ticker_upper]
-                return {'price': cached_data['price']}
-            return None
+        ticker_upper = ticker_symbol.upper()
         
         # Check cache first
-        ticker_upper = ticker_symbol.upper()
+
         
         if ticker_upper in stock_price_cache:
             cached_data = stock_price_cache[ticker_upper]
@@ -212,9 +209,6 @@ class PortfolioPerformanceCalculator:
                 from models import AlphaVantageAPILog, db
                 success = 'Global Quote' in data and '05. price' in data.get('Global Quote', {})
                 
-                # Add extra logging for weekend API calls to track source
-                if current_time.weekday() >= 5:
-                    logger.warning(f"WEEKEND API CALL DETECTED: {ticker_symbol} - This should not happen!")
                 api_log = AlphaVantageAPILog(
                     endpoint='GLOBAL_QUOTE',
                     symbol=ticker_symbol,
