@@ -101,8 +101,9 @@ def process_transaction(db, user_id, ticker, quantity, price, transaction_type, 
     )
     db.session.add(transaction)
     
-    # CRITICAL: Add user to session to track cash_deployed/proceeds updates
-    db.session.add(user)
+    # CRITICAL: Merge user to handle cross-session scenarios (Vercel serverless)
+    # merge() updates the session's copy of the user with our changes
+    db.session.merge(user)
     
     return {
         'max_cash_deployed': user.max_cash_deployed,
