@@ -4971,6 +4971,72 @@ def test_database_persistence():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/compare-chart-vs-live/<username>/<period>')
+@login_required
+def compare_chart_vs_live(username, period):
+    """Compare cached chart data vs live calculation for debugging mismatches"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import User, UserPortfolioChartCache
+        from portfolio_performance import PortfolioPerformanceCalculator
+        import json
+        
+        # Find user
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': f'User {username} not found'}), 404
+        
+        # Get cached chart data
+        chart_cache = UserPortfolioChartCache.query.filter_by(
+            user_id=user.id, period=period.upper()
+        ).first()
+        
+        cached_data = None
+        if chart_cache:
+            cached_chart = json.loads(chart_cache.chart_data)
+            datasets = cached_chart.get('datasets', [])
+            if datasets:
+                portfolio_data = datasets[0].get('data', [])
+                sp500_data = datasets[1].get('data', []) if len(datasets) > 1 else []
+                cached_data = {
+                    'last_portfolio_value': portfolio_data[-1] if portfolio_data else None,
+                    'last_sp500_value': sp500_data[-1] if sp500_data else None,
+                    'portfolio_data_points': len(portfolio_data),
+                    'sp500_data_points': len(sp500_data),
+                    'labels': cached_chart.get('labels', [])[:3] + ['...'] + cached_chart.get('labels', [])[-3:],
+                    'generated_at': chart_cache.generated_at.isoformat()
+                }
+        
+        # Get live calculation (what dashboard uses when no cache)
+        calculator = PortfolioPerformanceCalculator()
+        live_data = calculator.get_performance_data(user.id, period.upper())
+        
+        live_performance = {
+            'portfolio_return': live_data.get('portfolio_return'),
+            'sp500_return': live_data.get('sp500_return'),
+            'chart_data_points': len(live_data.get('chart_data', []))
+        }
+        
+        return jsonify({
+            'success': True,
+            'user': username,
+            'period': period.upper(),
+            'cached_chart_data': cached_data,
+            'live_calculation': live_performance,
+            'mismatch': cached_data['last_portfolio_value'] != live_performance['portfolio_return'] if cached_data else None,
+            'diagnosis': 'Values should match - if not, chart cache generation has different logic than live calculation'
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/check-all-caches')
 @login_required
 def check_all_caches():
