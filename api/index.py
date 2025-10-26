@@ -4776,6 +4776,76 @@ def check_intraday_dates():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/test-database-persistence')
+@login_required
+def test_database_persistence():
+    """Test if database changes actually persist - debugging cache resurrection"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import LeaderboardCache, UserPortfolioChartCache
+        
+        # Test both cache tables
+        results = {}
+        
+        # ===== TEST 1: LeaderboardCache =====
+        lb_count_before = LeaderboardCache.query.count()
+        chart_count_before = UserPortfolioChartCache.query.count()
+        
+        results['before_any_changes'] = {
+            'leaderboard_cache_count': lb_count_before,
+            'chart_cache_count': chart_count_before
+        }
+        
+        # Only delete if they exist
+        if lb_count_before > 0:
+            LeaderboardCache.query.delete()
+        if chart_count_before > 0:
+            UserPortfolioChartCache.query.delete()
+        
+        results['after_delete_before_commit'] = {
+            'leaderboard_cache_count': LeaderboardCache.query.count(),
+            'chart_cache_count': UserPortfolioChartCache.query.count()
+        }
+        
+        # Commit
+        db.session.commit()
+        
+        results['after_commit_same_request'] = {
+            'leaderboard_cache_count': LeaderboardCache.query.count(),
+            'chart_cache_count': UserPortfolioChartCache.query.count()
+        }
+        
+        # Force fresh query
+        db.session.expire_all()
+        
+        results['after_expire_fresh_query'] = {
+            'leaderboard_cache_count': LeaderboardCache.query.count(),
+            'chart_cache_count': UserPortfolioChartCache.query.count()
+        }
+        
+        return jsonify({
+            'success': True,
+            'test_results': results,
+            'diagnosis': {
+                'leaderboard_delete_persisted': results['after_expire_fresh_query']['leaderboard_cache_count'] == 0,
+                'chart_delete_persisted': results['after_expire_fresh_query']['chart_cache_count'] == 0,
+                'issue_detected': results['after_expire_fresh_query']['leaderboard_cache_count'] > 0 or results['after_expire_fresh_query']['chart_cache_count'] > 0,
+                'likely_cause': 'Database replication lag or read-replica caching' if results['after_expire_fresh_query']['leaderboard_cache_count'] > 0 else 'Unknown'
+            },
+            'next_action': 'Wait 5 seconds, then visit /admin/check-all-caches to see if caches reappear'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/check-all-caches')
 @login_required
 def check_all_caches():
