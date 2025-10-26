@@ -181,10 +181,31 @@ class PortfolioPerformanceCalculator:
             time.sleep(0.1)  # 100ms delay between API calls
             
             url = f'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker_symbol}&entitlement=realtime&apikey={api_key}'
+            logger.info(f"Fetching stock price: {ticker_symbol} from Alpha Vantage (premium $99.99/mo subscription)")
+            
             # 10-second timeout is reasonable for premium API
             # Real timeouts were caused by db.session.commit() bottleneck (now fixed)
             response = requests.get(url, timeout=10)
-            data = response.json()
+            
+            # Check HTTP status first
+            if response.status_code != 200:
+                logger.error(f"❌ HTTP {response.status_code} for {ticker_symbol}: {response.text}")
+                return None
+            
+            try:
+                data = response.json()
+            except Exception as json_error:
+                logger.error(f"❌ JSON parse error for {ticker_symbol}: {json_error}. Response: {response.text[:500]}")
+                return None
+            
+            # Check for API error messages
+            if 'Error Message' in data:
+                logger.error(f"❌ Alpha Vantage API Error for {ticker_symbol}: {data['Error Message']}")
+                return None
+            
+            if 'Note' in data:
+                logger.error(f"❌ Alpha Vantage Rate Limit for {ticker_symbol}: {data['Note']}")
+                return None
             
             # Log the API call (NOTE: Do NOT commit - let caller handle atomic transaction)
             try:
@@ -216,7 +237,8 @@ class PortfolioPerformanceCalculator:
                 
                 return {'price': price}
             else:
-                logger.warning(f"❌ Could not get price for {ticker_symbol} from API - Response: {data}")
+                logger.error(f"❌ Unexpected API response structure for {ticker_symbol}. Full response: {data}")
+                logger.error(f"Expected 'Global Quote' with '05. price', but got keys: {list(data.keys())}")
                 return None
                 
         except Exception as e:
