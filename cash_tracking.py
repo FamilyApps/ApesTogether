@@ -101,6 +101,9 @@ def process_transaction(db, user_id, ticker, quantity, price, transaction_type, 
     )
     db.session.add(transaction)
     
+    # CRITICAL: Add user to session to track cash_deployed/proceeds updates
+    db.session.add(user)
+    
     return {
         'max_cash_deployed': user.max_cash_deployed,
         'cash_proceeds': user.cash_proceeds,
