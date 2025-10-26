@@ -97,9 +97,25 @@ def calculate_portfolio_performance(
     first_snapshot = snapshots[0]
     last_snapshot = snapshots[-1]
     
-    V_start = first_snapshot.total_value
-    V_end = last_snapshot.total_value
-    CF_net = last_snapshot.max_cash_deployed - first_snapshot.max_cash_deployed
+    # CRITICAL FIX: Handle users who joined mid-period
+    # If first snapshot is AFTER start_date, user joined mid-period.
+    # Their initial capital should count as CF that occurred on that date.
+    user_joined_mid_period = first_snapshot.date > start_date
+    
+    # Set V_start and V_end
+    if user_joined_mid_period:
+        # User didn't exist at period start, so V_start = 0
+        # Their entire initial portfolio value is from capital deployed mid-period
+        V_start = 0.0
+        V_end = last_snapshot.total_value
+        # CF_net includes their initial capital
+        CF_net = last_snapshot.max_cash_deployed
+        logger.info(f"User joined mid-period on {first_snapshot.date}. V_start=0, treating initial ${first_snapshot.max_cash_deployed:.2f} as CF")
+    else:
+        # User existed at period start, use first snapshot as baseline
+        V_start = first_snapshot.total_value
+        V_end = last_snapshot.total_value
+        CF_net = last_snapshot.max_cash_deployed - first_snapshot.max_cash_deployed
     
     # Calculate time-weighted cash flows (W factor)
     total_days = (end_date - start_date).days
@@ -110,8 +126,21 @@ def calculate_portfolio_performance(
     else:
         # Calculate weighted cash flows based on when capital was deployed
         weighted_cf = 0.0
-        prev_deployed = first_snapshot.max_cash_deployed
         
+        # If user joined mid-period, weight their initial capital deployment
+        if user_joined_mid_period:
+            days_remaining = (end_date - first_snapshot.date).days
+            weight = days_remaining / total_days
+            weighted_cf += first_snapshot.max_cash_deployed * weight
+            logger.info(
+                f"User joined mid-period on {first_snapshot.date}. "
+                f"Initial capital ${first_snapshot.max_cash_deployed:.2f} weighted by {weight:.3f} = ${weighted_cf:.2f}"
+            )
+            prev_deployed = first_snapshot.max_cash_deployed
+        else:
+            prev_deployed = first_snapshot.max_cash_deployed
+        
+        # Track additional capital deployed after joining
         for snapshot in snapshots[1:]:
             capital_added = snapshot.max_cash_deployed - prev_deployed
             if capital_added > 0:
