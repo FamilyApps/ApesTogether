@@ -3192,6 +3192,40 @@ def add_stock():
         except Exception as stock_info_error:
             logger.warning(f"Failed to populate stock info for {ticker}: {str(stock_info_error)}")
         
+        # Recalculate portfolio stats immediately so dashboard updates
+        try:
+            from leaderboard_utils import calculate_user_portfolio_stats
+            from models import UserPortfolioStats
+            
+            stats = calculate_user_portfolio_stats(session['user_id'])
+            user_stats = UserPortfolioStats.query.filter_by(user_id=session['user_id']).first()
+            
+            if user_stats:
+                # Update existing stats
+                user_stats.unique_stocks_count = stats['unique_stocks_count']
+                user_stats.avg_trades_per_week = stats['avg_trades_per_week']
+                user_stats.market_cap_mix = stats['market_cap_mix']
+                user_stats.industry_mix = stats['industry_mix']
+                user_stats.subscriber_count = stats['subscriber_count']
+                user_stats.updated_at = datetime.utcnow()
+            else:
+                # Create new stats entry
+                user_stats = UserPortfolioStats(
+                    user_id=session['user_id'],
+                    unique_stocks_count=stats['unique_stocks_count'],
+                    avg_trades_per_week=stats['avg_trades_per_week'],
+                    market_cap_mix=stats['market_cap_mix'],
+                    industry_mix=stats['industry_mix'],
+                    subscriber_count=stats['subscriber_count']
+                )
+                db.session.add(user_stats)
+            
+            db.session.commit()
+            logger.info(f"Updated portfolio stats: {stats['unique_stocks_count']} unique stocks")
+        except Exception as stats_error:
+            logger.warning(f"Failed to update portfolio stats: {str(stats_error)}")
+            # Don't fail the whole operation if stats update fails
+        
         flash(f'Added {quantity} shares of {ticker}', 'success')
         logger.info(f"Created stock + transaction: {quantity} {ticker} @ ${purchase_price}")
         logger.info(f"Cash tracking: max_deployed=${cash_result['max_cash_deployed']}, proceeds=${cash_result['cash_proceeds']}")
