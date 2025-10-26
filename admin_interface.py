@@ -228,16 +228,6 @@ def add_stock(user_id):
         if existing_stock:
             # Update existing stock
             existing_stock.quantity += quantity
-            # Create a transaction record
-            transaction = Transaction(
-                user_id=user.id,
-                ticker=ticker,
-                quantity=quantity,
-                price=price,
-                transaction_type='buy',
-                timestamp=datetime.now()
-            )
-            db.session.add(transaction)
         else:
             # Create new stock
             stock = Stock(
@@ -245,8 +235,13 @@ def add_stock(user_id):
                 ticker=ticker,
                 quantity=quantity
             )
-            # Create a transaction record
-            transaction = Transaction(
+            db.session.add(stock)
+        
+        try:
+            # CRITICAL FIX: Process transaction to update cash tracking
+            from cash_tracking import process_transaction
+            cash_result = process_transaction(
+                db=db,
                 user_id=user.id,
                 ticker=ticker,
                 quantity=quantity,
@@ -254,12 +249,14 @@ def add_stock(user_id):
                 transaction_type='buy',
                 timestamp=datetime.now()
             )
-            db.session.add(stock)
-            db.session.add(transaction)
-        
-        try:
+            
             db.session.commit()
-            flash(f'Added {quantity} shares of {ticker} at ${price}/share', 'success')
+            flash(
+                f'Added {quantity} shares of {ticker} at ${price}/share. '
+                f'Max deployed: ${cash_result["max_cash_deployed"]:.2f}, '
+                f'Cash proceeds: ${cash_result["cash_proceeds"]:.2f}',
+                'success'
+            )
         except Exception as e:
             db.session.rollback()
             flash(f'Error adding stock: {str(e)}', 'danger')
@@ -290,17 +287,6 @@ def add_transaction(user_id):
             flash('Invalid date format. Please use YYYY-MM-DD', 'danger')
             return render_template('admin/add_transaction.html', user=user, now=datetime.now())
         
-        # Create the transaction record
-        transaction = Transaction(
-            user_id=user.id,
-            ticker=ticker,
-            quantity=quantity,
-            price=price,
-            transaction_type=transaction_type,
-            timestamp=transaction_date,
-            # notes=notes  # Notes column doesn't exist in database
-        )
-        
         # Update the stock position
         existing_stock = Stock.query.filter_by(user_id=user.id, ticker=ticker).first()
         
@@ -325,11 +311,50 @@ def add_transaction(user_id):
             if existing_stock.quantity <= 0:
                 db.session.delete(existing_stock)
         
+        # Create the transaction record
+        transaction = Transaction(
+            user_id=user.id,
+            ticker=ticker,
+            quantity=quantity,
+            price=price,
+            transaction_type=transaction_type,
+            timestamp=transaction_date
+        )
         db.session.add(transaction)
         
         try:
+            # CRITICAL FIX: Rebuild cash tracking from scratch for backdated transactions
+            # Get all transactions for this user in chronological order
+            all_transactions = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.timestamp).all()
+            
+            # Rebuild max_cash_deployed and cash_proceeds
+            max_cash_deployed = 0.0
+            cash_proceeds = 0.0
+            
+            for txn in all_transactions:
+                transaction_value = txn.quantity * txn.price
+                
+                if txn.transaction_type in ('buy', 'initial'):
+                    # Use cash proceeds first, then deploy new capital
+                    if cash_proceeds >= transaction_value:
+                        cash_proceeds -= transaction_value
+                    else:
+                        new_capital = transaction_value - cash_proceeds
+                        cash_proceeds = 0
+                        max_cash_deployed += new_capital
+                elif txn.transaction_type == 'sell':
+                    cash_proceeds += transaction_value
+            
+            # Update user's cash tracking
+            user.max_cash_deployed = max_cash_deployed
+            user.cash_proceeds = cash_proceeds
+            
             db.session.commit()
-            flash(f'Added {transaction_type} transaction of {quantity} shares of {ticker} at ${price}/share on {date_str}', 'success')
+            flash(
+                f'Added {transaction_type} transaction of {quantity} shares of {ticker} at ${price}/share on {date_str}. '
+                f'Rebuilt cash tracking: Max deployed=${max_cash_deployed:.2f}, Cash proceeds=${cash_proceeds:.2f}',
+                'success'
+            )
         except Exception as e:
             db.session.rollback()
             flash(f'Error adding transaction: {str(e)}', 'danger')

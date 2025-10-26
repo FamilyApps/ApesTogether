@@ -5390,6 +5390,167 @@ def verify_calculator_consistency():
             'traceback': traceback.format_exc()
         }), 500
 
+
+@app.route('/admin/rebuild-cash-tracking')
+@login_required
+def rebuild_cash_tracking():
+    """
+    Rebuild max_cash_deployed and cash_proceeds for all users.
+    
+    This fixes historical data where transactions were added via admin interface
+    without calling process_transaction().
+    
+    Usage: /admin/rebuild-cash-tracking?user_id=5 (single user)
+           /admin/rebuild-cash-tracking (all users)
+    """
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from rebuild_cash_tracking import rebuild_user_cash_tracking, rebuild_all_users_cash_tracking
+        
+        user_id_param = request.args.get('user_id')
+        
+        if user_id_param:
+            # Rebuild single user
+            user_id = int(user_id_param)
+            result = rebuild_user_cash_tracking(user_id)
+            db.session.commit()
+            
+            return jsonify({
+                'success': True,
+                'mode': 'single_user',
+                'result': result,
+                'message': (
+                    f"Rebuilt cash tracking for user {user_id}. "
+                    f"Max deployed: ${result['old_max_deployed']:.2f} → ${result['new_max_deployed']:.2f}, "
+                    f"Cash proceeds: ${result['old_cash_proceeds']:.2f} → ${result['new_cash_proceeds']:.2f}"
+                )
+            })
+        else:
+            # Rebuild all users
+            summary = rebuild_all_users_cash_tracking()
+            
+            return jsonify({
+                'success': True,
+                'mode': 'all_users',
+                'summary': summary,
+                'message': (
+                    f"Rebuilt cash tracking for {summary['total_users']} users. "
+                    f"{summary['users_changed']} changed, {summary['users_unchanged']} unchanged."
+                )
+            })
+        
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+
+@app.route('/admin/diagnose-max-cash-deployed')
+@login_required
+def diagnose_max_cash_deployed():
+    """
+    Check if max_cash_deployed is being properly tracked in snapshots.
+    
+    Usage: /admin/diagnose-max-cash-deployed?username=witty-raven
+    """
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import PortfolioSnapshot
+        from datetime import date
+        
+        username = request.args.get('username', 'witty-raven')
+        
+        # Get user
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': f'User {username} not found'}), 404
+        
+        # Get YTD snapshots
+        start_date = date(2025, 1, 1)
+        end_date = date.today()
+        
+        snapshots = PortfolioSnapshot.query.filter(
+            PortfolioSnapshot.user_id == user.id,
+            PortfolioSnapshot.date >= start_date,
+            PortfolioSnapshot.date <= end_date
+        ).order_by(PortfolioSnapshot.date.asc()).all()
+        
+        if not snapshots:
+            return jsonify({'error': 'No snapshots found'}), 404
+        
+        # Analyze max_cash_deployed changes
+        first = snapshots[0]
+        last = snapshots[-1]
+        
+        changes = []
+        prev_deployed = first.max_cash_deployed
+        
+        for snapshot in snapshots:
+            if snapshot.max_cash_deployed != prev_deployed:
+                changes.append({
+                    'date': snapshot.date.isoformat(),
+                    'old_deployed': prev_deployed,
+                    'new_deployed': snapshot.max_cash_deployed,
+                    'change': snapshot.max_cash_deployed - prev_deployed,
+                    'total_value': snapshot.total_value,
+                    'stock_value': snapshot.stock_value,
+                    'cash_proceeds': snapshot.cash_proceeds
+                })
+                prev_deployed = snapshot.max_cash_deployed
+        
+        # Sample snapshots
+        sample_snapshots = []
+        indices = [0, len(snapshots)//4, len(snapshots)//2, 3*len(snapshots)//4, -1]
+        for i in indices:
+            s = snapshots[i]
+            sample_snapshots.append({
+                'date': s.date.isoformat(),
+                'total_value': s.total_value,
+                'stock_value': s.stock_value,
+                'cash_proceeds': s.cash_proceeds,
+                'max_cash_deployed': s.max_cash_deployed
+            })
+        
+        return jsonify({
+            'success': True,
+            'user': username,
+            'period': f'{start_date} to {end_date}',
+            'summary': {
+                'total_snapshots': len(snapshots),
+                'first_deployed': first.max_cash_deployed,
+                'last_deployed': last.max_cash_deployed,
+                'net_change': last.max_cash_deployed - first.max_cash_deployed,
+                'changes_count': len(changes)
+            },
+            'deployed_changes': changes,
+            'sample_snapshots': sample_snapshots,
+            'diagnosis': {
+                'issue': 'max_cash_deployed not changing' if len(changes) == 0 else 'max_cash_deployed is being tracked',
+                'impact': (
+                    'Modified Dietz collapses to simple % when CF_net = 0'
+                    if len(changes) == 0
+                    else 'Modified Dietz should account for capital deployment timing'
+                ),
+                'question': 'Is this a paper trading app where users start with virtual cash and never add more?'
+            }
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 # End of unified calculator test routes
 # ============================================================================
 
