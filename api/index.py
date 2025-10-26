@@ -1526,94 +1526,48 @@ def portfolio_value():
     current_hour = get_market_time().hour  # FIX: Use ET not UTC
     is_after_hours = current_hour < 9 or current_hour >= 16  # Before 9 AM or after 4 PM
     
-    # Use cached snapshots on weekends or after hours, live data during market hours on weekdays
-    use_cached_data = is_weekend or is_after_hours
-    
+    # ALWAYS fetch actual stock prices (smart cache handles efficiency)
+    # Smart cache returns:
+    # - Market hours: 90-second fresh cache
+    # - After hours/weekends: Friday's closing price from cache (or API if not cached)
     stocks = Stock.query.filter_by(user_id=current_user_id).all()
     portfolio_data = []
     total_value = 0
     
-    if use_cached_data:
-        # Get most recent portfolio snapshot (Friday's close or latest available)
-        latest_snapshot = PortfolioSnapshot.query.filter_by(user_id=current_user_id)\
-            .order_by(PortfolioSnapshot.date.desc()).first()
-        
-        if latest_snapshot:
-            total_value = latest_snapshot.total_value
-            
-            # For cached data, calculate individual stock values proportionally
-            total_cost_basis = sum(stock.quantity * stock.purchase_price for stock in stocks if stock.purchase_price)
-            
-            for stock in stocks:
-                if total_cost_basis > 0:
-                    # Estimate current price based on proportional portfolio performance
-                    cost_basis = stock.quantity * stock.purchase_price if stock.purchase_price else 0
-                    portfolio_multiplier = total_value / total_cost_basis if total_cost_basis > 0 else 1
-                    estimated_current_price = stock.purchase_price * portfolio_multiplier if stock.purchase_price else 0
-                    
-                    value = stock.quantity * estimated_current_price
-                    gain_loss = value - cost_basis
-                    
-                    stock_info = {
-                        'id': stock.id,
-                        'ticker': stock.ticker,
-                        'quantity': stock.quantity,
-                        'purchase_price': stock.purchase_price,
-                        'current_price': estimated_current_price,
-                        'value': value,
-                        'gain_loss': gain_loss
-                    }
-                    portfolio_data.append(stock_info)
-                else:
-                    stock_info = {
-                        'id': stock.id,
-                        'ticker': stock.ticker,
-                        'quantity': stock.quantity,
-                        'purchase_price': stock.purchase_price,
-                        'current_price': 'N/A',
-                        'value': 'N/A',
-                        'gain_loss': 'N/A'
-                    }
-                    portfolio_data.append(stock_info)
-        else:
-            # No cached data available, fall back to live data
-            use_cached_data = False
+    # Get all tickers for batch processing
+    tickers = [stock.ticker for stock in stocks]
+    batch_prices = get_batch_stock_data(tickers)
     
-    if not use_cached_data:
-        # Use live API data during market hours on weekdays
-        # Get all tickers for batch processing
-        tickers = [stock.ticker for stock in stocks]
-        batch_prices = get_batch_stock_data(tickers)
+    # Use actual stock prices (not proportional estimates)
+    for stock in stocks:
+        ticker_upper = stock.ticker.upper()
+        current_price = batch_prices.get(ticker_upper)
         
-        for stock in stocks:
-            ticker_upper = stock.ticker.upper()
-            current_price = batch_prices.get(ticker_upper)
-            
-            if current_price is not None:
-                value = stock.quantity * current_price
-                total_value += value
-                stock_info = {
-                    'id': stock.id,
-                    'ticker': stock.ticker,
-                    'quantity': stock.quantity,
-                    'purchase_price': stock.purchase_price,
-                    'current_price': current_price,
-                    'value': value,
-                    'gain_loss': (current_price - stock.purchase_price) * stock.quantity if stock.purchase_price else 0
-                }
-                portfolio_data.append(stock_info)
-            else:
-                # Handle cases where stock data couldn't be fetched
-                stock_info = {
-                    'id': stock.id,
-                    'ticker': stock.ticker,
-                    'quantity': stock.quantity,
-                    'purchase_price': stock.purchase_price,
-                    'current_price': 'N/A',
-                    'value': 'N/A',
-                    'gain_loss': 'N/A'
-                }
-                portfolio_data.append(stock_info)
+        if current_price is not None:
+            value = stock.quantity * current_price
+            total_value += value
+            stock_info = {
+                'id': stock.id,
+                'ticker': stock.ticker,
+                'quantity': stock.quantity,
+                'purchase_price': stock.purchase_price,
+                'current_price': current_price,
+                'value': value,
+                'gain_loss': (current_price - stock.purchase_price) * stock.quantity if stock.purchase_price else 0
+            }
+            portfolio_data.append(stock_info)
+        else:
+            # Handle cases where stock data couldn't be fetched
+            stock_info = {
+                'id': stock.id,
+                'ticker': stock.ticker,
+                'quantity': stock.quantity,
+                'purchase_price': stock.purchase_price,
+                'current_price': 'N/A',
+                'value': 'N/A',
+                'gain_loss': 'N/A'
+            }
+            portfolio_data.append(stock_info)
     
     return jsonify({
         'stocks': portfolio_data,
