@@ -1,0 +1,95 @@
+# Files to Send to Grok for Performance Calculation Consultation
+
+## START HERE: Complete Audit Documents
+
+**PERFORMANCE_CALCULATION_AUDIT.md** (entire file)
+- Complete deep dive analysis of all calculation paths
+- Data flow diagrams showing which formula is used where
+- Caching layer analysis
+- Duplication problem documentation
+- Recommended path forward
+- **READ THIS FIRST** before looking at code files
+
+**ACCESS_PATTERNS_ANALYSIS.md** (entire file)
+- Different use cases: Leaderboard, Dashboard, Public portfolios
+- Performance requirements for each (speed, freshness, traffic)
+- Caching architecture impact
+- Pre-rendering strategy considerations
+- **READ THIS SECOND** for architecture context
+
+## Priority 1: Core Calculation Logic (MUST INCLUDE)
+
+1. **leaderboard_utils.py** (lines 969-1210)
+   - Contains generate_chart_from_snapshots() function
+   - Currently uses WRONG simple percentage formula
+   - This is what chart cache and leaderboard use
+
+2. **portfolio_performance.py** (lines 541-660)
+   - Contains calculate_modified_dietz_return() function  
+   - Uses cash_flow instead of max_cash_deployed
+   - This is what dashboard live calculation uses
+
+3. **migrations/versions/20251005_add_cash_tracking.py** (entire file)
+   - Design philosophy document
+   - Shows intended performance formula
+   - Has examples of max_cash_deployed logic
+
+4. **cash_tracking.py** (lines 1-100 for context)
+   - Shows how max_cash_deployed is calculated
+   - Transaction logic for buys/sells
+
+## Priority 2: Data Models (IMPORTANT)
+
+5. **models.py** (lines 1-130)
+   - User model with max_cash_deployed field
+   - PortfolioSnapshot model with all cash tracking fields
+   - PortfolioSnapshotIntraday model
+
+## Priority 3: How Calculations Are Used (CONTEXT)
+
+6. **api/index.py** (lines 12814-12913)
+   - get_portfolio_performance() route
+   - Shows how dashboard chooses between cache and live calc
+   - Shows the fallback logic
+
+7. **leaderboard_routes.py** (entire file, it's short - 122 lines)
+   - Shows how leaderboard calls get_leaderboard_data()
+   - Shows the flow from route → cache → calculation
+
+## Optional Supporting Files (if Grok wants more context)
+
+8. **migrations/versions/20251005_add_snapshot_cash_fields.py**
+   - More details on Modified Dietz formula intent
+   - Shows snapshot-level cash tracking
+
+9. **api/index.py** (lines 15309-15560)
+   - market_close_cron() function
+   - Shows how snapshots are created daily
+   - Context for how data flows through system
+
+## Key Questions to Ask Grok
+
+After uploading the GROK_PROMPT_PERFORMANCE_CALCULATION.md file and the files above, ask:
+
+"I've uploaded the relevant code files. Please review:
+1. Which option (simple max_cash_deployed vs Modified Dietz) is better for our use case?
+2. Should we consolidate into a single function that everything calls?
+3. Are there edge cases with the simple formula we should worry about?
+4. What's the best way to fix generate_chart_from_snapshots() to use the correct baseline?"
+
+## File Upload Order
+
+1. Start with GROK_PROMPT_PERFORMANCE_CALCULATION.md (the prompt)
+2. Then upload Priority 1 files (core logic)
+3. Add Priority 2 files (models)
+4. Add Priority 3 if Grok asks for more context
+5. Optional files only if Grok specifically asks
+
+## Expected File Sizes
+- leaderboard_utils.py: ~1350 lines (send lines 969-1210 = ~240 lines)
+- portfolio_performance.py: ~1350 lines (send lines 541-660 = ~120 lines)  
+- migrations/20251005_add_cash_tracking.py: ~47 lines (send all)
+- cash_tracking.py: ~870 lines (send lines 1-100 = ~100 lines)
+- models.py: ~400 lines (send lines 1-130 = ~130 lines)
+
+Total: ~640 lines to review (manageable for Grok)
