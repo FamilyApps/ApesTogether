@@ -3236,6 +3236,141 @@ def add_stock():
     
     return redirect(url_for('dashboard'))
 
+@app.route('/sell_stock', methods=['POST'])
+def sell_stock():
+    """Sell stock from user's portfolio"""
+    if 'user_id' not in session:
+        flash('Please login to sell stocks', 'warning')
+        return redirect(url_for('login'))
+    
+    # Validate and parse form inputs
+    ticker = request.form.get('ticker')
+    if not ticker:
+        flash('Ticker symbol is required', 'danger')
+        return redirect(url_for('dashboard'))
+    
+    ticker = ticker.upper().strip()
+    
+    try:
+        quantity = request.form.get('quantity')
+        if not quantity:
+            flash('Quantity is required', 'danger')
+            return redirect(url_for('dashboard'))
+        quantity = float(quantity)
+        
+        if quantity <= 0:
+            flash('Quantity must be greater than zero', 'danger')
+            return redirect(url_for('dashboard'))
+        
+    except ValueError as e:
+        logger.error(f"Invalid quantity for sell_stock: ticker={ticker}, quantity={request.form.get('quantity')}")
+        flash(f'Invalid input: Please enter a valid number for quantity', 'danger')
+        return redirect(url_for('dashboard'))
+    
+    # Find the stock in user's portfolio
+    stock = Stock.query.filter_by(user_id=session['user_id'], ticker=ticker).first()
+    if not stock:
+        flash(f'You do not own any shares of {ticker}', 'danger')
+        return redirect(url_for('dashboard'))
+    
+    # Check if user has enough shares
+    if stock.quantity < quantity:
+        flash(f'You only have {stock.quantity} shares of {ticker}, cannot sell {quantity}', 'danger')
+        return redirect(url_for('dashboard'))
+    
+    # Fetch current stock price (with caching and API logic)
+    try:
+        from portfolio_performance import PortfolioPerformanceCalculator
+        calculator = PortfolioPerformanceCalculator()
+        stock_data = calculator.get_stock_data(ticker)
+        
+        if not stock_data or 'price' not in stock_data:
+            flash(f'Could not fetch current price for {ticker}. Please try again.', 'danger')
+            logger.warning(f"Failed to fetch price for {ticker} when selling stock")
+            return redirect(url_for('dashboard'))
+        
+        sale_price = stock_data['price']
+        logger.info(f"Fetched price for {ticker}: ${sale_price:.2f}")
+        
+    except Exception as price_fetch_error:
+        logger.error(f"Error fetching stock price for {ticker}: {str(price_fetch_error)}")
+        flash(f'Error fetching stock price. Please try again later.', 'danger')
+        return redirect(url_for('dashboard'))
+    
+    try:
+        # Determine transaction type
+        from models import Transaction
+        existing_transactions = Transaction.query.filter_by(user_id=session['user_id']).count()
+        transaction_type = 'sell'
+        
+        # Process transaction and update cash tracking
+        from cash_tracking import process_transaction
+        cash_result = process_transaction(
+            db=db,
+            user_id=session['user_id'],
+            ticker=ticker,
+            quantity=quantity,
+            price=sale_price,
+            transaction_type=transaction_type,
+            timestamp=datetime.utcnow()
+        )
+        
+        # Update or remove stock
+        if stock.quantity == quantity:
+            # Selling all shares, remove stock
+            db.session.delete(stock)
+            logger.info(f"Removed {ticker} from portfolio (sold all shares)")
+        else:
+            # Selling partial shares, reduce quantity
+            stock.quantity -= quantity
+            logger.info(f"Reduced {ticker} quantity from {stock.quantity + quantity} to {stock.quantity}")
+        
+        db.session.commit()
+        
+        # Recalculate portfolio stats immediately so dashboard updates
+        try:
+            from leaderboard_utils import calculate_user_portfolio_stats
+            from models import UserPortfolioStats
+            
+            stats = calculate_user_portfolio_stats(session['user_id'])
+            user_stats = UserPortfolioStats.query.filter_by(user_id=session['user_id']).first()
+            
+            if user_stats:
+                # Update existing stats
+                user_stats.unique_stocks_count = stats['unique_stocks_count']
+                user_stats.avg_trades_per_week = stats['avg_trades_per_week']
+                user_stats.market_cap_mix = stats['market_cap_mix']
+                user_stats.industry_mix = stats['industry_mix']
+                user_stats.subscriber_count = stats['subscriber_count']
+                user_stats.updated_at = datetime.utcnow()
+            else:
+                # Create new stats entry
+                user_stats = UserPortfolioStats(
+                    user_id=session['user_id'],
+                    unique_stocks_count=stats['unique_stocks_count'],
+                    avg_trades_per_week=stats['avg_trades_per_week'],
+                    market_cap_mix=stats['market_cap_mix'],
+                    industry_mix=stats['industry_mix'],
+                    subscriber_count=stats['subscriber_count']
+                )
+                db.session.add(user_stats)
+            
+            db.session.commit()
+            logger.info(f"Updated portfolio stats: {stats['unique_stocks_count']} unique stocks")
+        except Exception as stats_error:
+            logger.warning(f"Failed to update portfolio stats: {str(stats_error)}")
+            # Don't fail the whole operation if stats update fails
+        
+        flash(f'Sold {quantity} shares of {ticker} at ${sale_price:.2f}', 'success')
+        logger.info(f"Sold stock: {quantity} {ticker} @ ${sale_price}")
+        logger.info(f"Cash tracking: max_deployed=${cash_result['max_cash_deployed']}, proceeds=${cash_result['cash_proceeds']}")
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error selling stock: {str(e)}', 'danger')
+        logger.error(f"Failed to sell stock: {str(e)}")
+    
+    return redirect(url_for('dashboard'))
+
 @app.route('/delete_stock/<int:stock_id>', methods=['POST'])
 def delete_stock(stock_id):
     """Delete a stock from user's portfolio"""
