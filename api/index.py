@@ -3167,6 +3167,11 @@ def add_stock():
     try:
         db.session.add(new_stock)
         
+        # Determine transaction type: 'initial' for first purchase, 'buy' for subsequent
+        from models import Transaction
+        existing_transactions = Transaction.query.filter_by(user_id=session['user_id']).count()
+        transaction_type = 'initial' if existing_transactions == 0 else 'buy'
+        
         # CRITICAL FIX: Process transaction and update cash tracking
         from cash_tracking import process_transaction
         cash_result = process_transaction(
@@ -3175,7 +3180,7 @@ def add_stock():
             ticker=ticker,
             quantity=quantity,
             price=purchase_price,
-            transaction_type='initial',  # Account setup/manual addition
+            transaction_type=transaction_type,
             timestamp=datetime.utcnow()
         )
         

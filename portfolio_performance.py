@@ -51,8 +51,12 @@ class PortfolioPerformanceCalculator:
     
     def get_batch_stock_data(self, tickers: list) -> Dict[str, float]:
         """
-        Fetch multiple stock prices in a single API call using BATCH_STOCK_QUOTES
-        This is 12-25x more efficient than individual calls
+        Fetch multiple stock prices in a single API call using BATCH_STOCK_QUOTES.
+        Uses smart caching (same logic as get_stock_data).
+        
+        Cache strategy:
+        - During market hours (9:30am-4pm ET Mon-Fri): 90-second cache for real-time prices
+        - After hours + weekends: Use any cached closing price from most recent market close
         
         Returns: dict mapping ticker -> price (e.g., {'AAPL': 175.43, 'MSFT': 380.12})
         """
@@ -61,17 +65,29 @@ class PortfolioPerformanceCalculator:
         
         current_time = datetime.now()
         
-        # Check if it's weekend
-        if current_time.weekday() >= 5:
-            logger.info(f"Weekend detected - skipping batch API call, using cache only")
-            result = {}
-            for ticker in tickers:
-                ticker_upper = ticker.upper()
-                if ticker_upper in stock_price_cache:
-                    result[ticker_upper] = stock_price_cache[ticker_upper]['price']
-            return result
+        # Determine if market is open for real-time pricing
+        market_tz_time = datetime.now(MARKET_TZ)
+        is_weekday = market_tz_time.weekday() < 5
+        is_market_hours = (
+            is_weekday and 
+            market_tz_time.hour >= 9 and 
+            (market_tz_time.hour < 16 or (market_tz_time.hour == 9 and market_tz_time.minute >= 30))
+        )
         
-        # Check cache first - only fetch uncached tickers
+        # Determine the most recent market close date (for cache validation)
+        if is_weekday:
+            if market_tz_time.hour >= 16:
+                most_recent_close_date = market_tz_time.date()
+            else:
+                if market_tz_time.weekday() == 0:  # Monday
+                    most_recent_close_date = (market_tz_time - timedelta(days=3)).date()  # Friday
+                else:
+                    most_recent_close_date = (market_tz_time - timedelta(days=1)).date()
+        else:
+            days_since_friday = (market_tz_time.weekday() - 4) % 7
+            most_recent_close_date = (market_tz_time - timedelta(days=days_since_friday)).date()
+        
+        # Check cache first with smart cache validation
         uncached_tickers = []
         result = {}
         
@@ -80,9 +96,20 @@ class PortfolioPerformanceCalculator:
             if ticker_upper in stock_price_cache:
                 cached_data = stock_price_cache[ticker_upper]
                 cache_time = cached_data.get('timestamp')
-                if cache_time and (current_time - cache_time).total_seconds() < cache_duration:
-                    result[ticker_upper] = cached_data['price']
-                    continue
+                
+                if cache_time:
+                    if is_market_hours:
+                        # Market hours: require fresh cache (90 seconds)
+                        if (current_time - cache_time).total_seconds() < cache_duration:
+                            result[ticker_upper] = cached_data['price']
+                            continue
+                    else:
+                        # After hours/weekends: only use cache if from most recent market close
+                        cache_date = cache_time.date() if hasattr(cache_time, 'date') else cache_time.astimezone(MARKET_TZ).date()
+                        if cache_date >= most_recent_close_date:
+                            result[ticker_upper] = cached_data['price']
+                            continue
+            
             uncached_tickers.append(ticker_upper)
         
         # If all cached, return early
