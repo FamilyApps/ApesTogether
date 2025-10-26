@@ -5463,7 +5463,7 @@ def diagnose_all_users_cash_tracking():
         return jsonify({'error': 'Admin access required'}), 403
     
     try:
-        from models import Transaction
+        from models import Transaction, PortfolioSnapshot
         from datetime import date
         
         all_users = User.query.all()
