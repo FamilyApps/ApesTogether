@@ -865,6 +865,14 @@ try:
 except ImportError as e:
     print(f"Could not register admin debug blueprint: {e}")
 
+# Register the admin performance test routes
+try:
+    from admin_performance_test_routes import admin_perf_bp
+    app.register_blueprint(admin_perf_bp)
+    print("Admin performance test routes registered successfully")
+except ImportError as e:
+    print(f"Could not register admin performance test routes: {e}")
+
 # Register the main debug blueprint
 try:
     from debug_routes import debug_bp as main_debug_bp
