@@ -4776,6 +4776,131 @@ def check_intraday_dates():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/force-regenerate-all-caches')
+@login_required
+def force_regenerate_all_caches():
+    """Force regenerate both chart cache AND leaderboard cache in correct order"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import User, UserPortfolioChartCache, LeaderboardCache
+        from leaderboard_utils import generate_chart_from_snapshots, calculate_leaderboard_data
+        import json
+        
+        results = {
+            'started_at': datetime.now().isoformat(),
+            'phase1_chart_cache': {},
+            'phase2_leaderboard_cache': {},
+            'errors': []
+        }
+        
+        periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']
+        categories = ['all', 'small_cap', 'large_cap']
+        
+        # PHASE 1: Generate Chart Cache for ALL users and periods
+        logger.info("PHASE 1: Generating chart cache...")
+        all_users = User.query.all()
+        charts_generated = 0
+        
+        for user in all_users:
+            for period in periods:
+                try:
+                    chart_data = generate_chart_from_snapshots(user.id, period)
+                    
+                    if chart_data:
+                        chart_cache = UserPortfolioChartCache.query.filter_by(
+                            user_id=user.id, period=period
+                        ).first()
+                        
+                        if chart_cache:
+                            chart_cache.chart_data = json.dumps(chart_data)
+                            chart_cache.generated_at = datetime.now()
+                        else:
+                            chart_cache = UserPortfolioChartCache(
+                                user_id=user.id,
+                                period=period,
+                                chart_data=json.dumps(chart_data),
+                                generated_at=datetime.now()
+                            )
+                            db.session.add(chart_cache)
+                        
+                        charts_generated += 1
+                except Exception as e:
+                    error_msg = f"Chart gen failed for user {user.id}, period {period}: {str(e)}"
+                    results['errors'].append(error_msg)
+                    logger.error(error_msg)
+        
+        # Commit chart caches
+        db.session.commit()
+        results['phase1_chart_cache'] = {
+            'charts_generated': charts_generated,
+            'status': 'completed'
+        }
+        logger.info(f"PHASE 1 Complete: {charts_generated} chart caches generated")
+        
+        # PHASE 2: Generate Leaderboard Cache using the chart caches
+        logger.info("PHASE 2: Generating leaderboard cache...")
+        leaderboards_generated = 0
+        
+        for period in periods:
+            for category in categories:
+                try:
+                    # Calculate using chart cache
+                    leaderboard_data = calculate_leaderboard_data(period, 20, category)
+                    
+                    if leaderboard_data:
+                        cache_key = f"{period}_{category}"
+                        
+                        # Store both auth and anon versions
+                        for suffix in ['_auth', '_anon']:
+                            full_key = cache_key + suffix
+                            cache_entry = LeaderboardCache.query.filter_by(period=full_key).first()
+                            
+                            if cache_entry:
+                                cache_entry.leaderboard_data = json.dumps(leaderboard_data)
+                                cache_entry.generated_at = datetime.now()
+                            else:
+                                cache_entry = LeaderboardCache(
+                                    period=full_key,
+                                    leaderboard_data=json.dumps(leaderboard_data),
+                                    generated_at=datetime.now()
+                                )
+                                db.session.add(cache_entry)
+                            
+                            leaderboards_generated += 1
+                
+                except Exception as e:
+                    error_msg = f"Leaderboard gen failed for {period}_{category}: {str(e)}"
+                    results['errors'].append(error_msg)
+                    logger.error(error_msg)
+        
+        # Commit leaderboard caches
+        db.session.commit()
+        results['phase2_leaderboard_cache'] = {
+            'leaderboards_generated': leaderboards_generated,
+            'status': 'completed'
+        }
+        logger.info(f"PHASE 2 Complete: {leaderboards_generated} leaderboard caches generated")
+        
+        results['completed_at'] = datetime.now().isoformat()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Generated {charts_generated} chart caches and {leaderboards_generated} leaderboard caches',
+            'results': results,
+            'next_step': 'Visit /leaderboard to see correct data'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/test-database-persistence')
 @login_required
 def test_database_persistence():
