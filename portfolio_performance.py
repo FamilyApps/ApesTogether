@@ -150,7 +150,11 @@ class PortfolioPerformanceCalculator:
     
     def get_stock_data(self, ticker_symbol: str) -> Dict:
         """
-        Fetches stock data using AlphaVantage API with caching.
+        Fetches stock data using AlphaVantage API with smart caching.
+        
+        Cache strategy:
+        - During market hours (9:30am-4pm ET Mon-Fri): 90-second cache for real-time prices
+        - After hours + weekends: Use any cached closing price (doesn't expire)
         
         Premium API ($99.99/mo) works 24/7 including weekends.
         On weekends, API returns last market close (Friday) price.
@@ -158,14 +162,50 @@ class PortfolioPerformanceCalculator:
         current_time = datetime.now()
         ticker_upper = ticker_symbol.upper()
         
-        # Check cache first
-
+        # Determine if market is open for real-time pricing
+        market_tz_time = datetime.now(MARKET_TZ)
+        is_weekday = market_tz_time.weekday() < 5  # Monday=0, Friday=4
+        is_market_hours = (
+            is_weekday and 
+            market_tz_time.hour >= 9 and 
+            (market_tz_time.hour < 16 or (market_tz_time.hour == 9 and market_tz_time.minute >= 30))
+        )
         
+        # Determine the most recent market close date (for cache validation)
+        if is_weekday:
+            if market_tz_time.hour >= 16:
+                # After 4pm on weekday: most recent close is today
+                most_recent_close_date = market_tz_time.date()
+            else:
+                # Before market close: most recent close is previous trading day
+                if market_tz_time.weekday() == 0:  # Monday
+                    most_recent_close_date = (market_tz_time - timedelta(days=3)).date()  # Friday
+                else:
+                    most_recent_close_date = (market_tz_time - timedelta(days=1)).date()  # Yesterday
+        else:
+            # Weekend: most recent close is Friday
+            days_since_friday = (market_tz_time.weekday() - 4) % 7
+            most_recent_close_date = (market_tz_time - timedelta(days=days_since_friday)).date()
+        
+        # Check cache first
         if ticker_upper in stock_price_cache:
             cached_data = stock_price_cache[ticker_upper]
             cache_time = cached_data.get('timestamp')
-            if cache_time and (current_time - cache_time).total_seconds() < cache_duration:
-                return {'price': cached_data['price']}
+            
+            if cache_time:
+                if is_market_hours:
+                    # During market hours: require fresh cache (90 seconds)
+                    if (current_time - cache_time).total_seconds() < cache_duration:
+                        logger.debug(f"Cache hit (market hours): {ticker_symbol} = ${cached_data['price']}")
+                        return {'price': cached_data['price']}
+                else:
+                    # After hours/weekends: only use cache if from most recent market close
+                    cache_date = cache_time.date() if hasattr(cache_time, 'date') else cache_time.astimezone(MARKET_TZ).date()
+                    if cache_date >= most_recent_close_date:
+                        logger.debug(f"Cache hit (closing price from {cache_date}): {ticker_symbol} = ${cached_data['price']}")
+                        return {'price': cached_data['price']}
+                    else:
+                        logger.debug(f"Cache stale (from {cache_date}, need {most_recent_close_date}): {ticker_symbol}")
         
         try:
             api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
@@ -178,7 +218,12 @@ class PortfolioPerformanceCalculator:
             time.sleep(0.1)  # 100ms delay between API calls
             
             url = f'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker_symbol}&entitlement=realtime&apikey={api_key}'
-            logger.info(f"Fetching stock price: {ticker_symbol} from Alpha Vantage (premium $99.99/mo subscription)")
+            
+            # Log why we're making API call
+            if is_market_hours:
+                logger.info(f"API call: {ticker_symbol} (market open, cache stale or missing)")
+            else:
+                logger.info(f"API call: {ticker_symbol} (after hours/weekend, no cached closing price)")
             
             # 10-second timeout is reasonable for premium API
             # Real timeouts were caused by db.session.commit() bottleneck (now fixed)
