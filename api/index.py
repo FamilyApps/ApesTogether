@@ -5451,6 +5451,105 @@ def rebuild_cash_tracking():
         }), 500
 
 
+@app.route('/admin/diagnose-all-users-cash-tracking')
+@login_required
+def diagnose_all_users_cash_tracking():
+    """
+    Check max_cash_deployed tracking and transaction history for ALL users.
+    
+    Shows which users have transactions that should have changed max_cash_deployed.
+    """
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import Transaction
+        from datetime import date
+        
+        all_users = User.query.all()
+        results = []
+        
+        for user in all_users:
+            # Get transactions
+            transactions = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.timestamp).all()
+            
+            # Analyze transaction types
+            initial_txns = [t for t in transactions if t.transaction_type == 'initial']
+            buy_txns = [t for t in transactions if t.transaction_type == 'buy']
+            sell_txns = [t for t in transactions if t.transaction_type == 'sell']
+            
+            # Check first and last snapshot for this user
+            first_snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id).order_by(PortfolioSnapshot.date.asc()).first()
+            last_snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id).order_by(PortfolioSnapshot.date.desc()).first()
+            
+            # Simulate what max_cash_deployed SHOULD be
+            simulated_deployed = 0.0
+            simulated_proceeds = 0.0
+            for txn in transactions:
+                value = txn.quantity * txn.price
+                if txn.transaction_type in ('buy', 'initial'):
+                    if simulated_proceeds >= value:
+                        simulated_proceeds -= value
+                    else:
+                        new_capital = value - simulated_proceeds
+                        simulated_proceeds = 0
+                        simulated_deployed += new_capital
+                elif txn.transaction_type == 'sell':
+                    simulated_proceeds += value
+            
+            user_data = {
+                'user_id': user.id,
+                'username': user.username,
+                'current_max_deployed': user.max_cash_deployed,
+                'simulated_max_deployed': round(simulated_deployed, 2),
+                'match': abs(user.max_cash_deployed - simulated_deployed) < 0.01,
+                'transactions': {
+                    'total': len(transactions),
+                    'initial': len(initial_txns),
+                    'buy': len(buy_txns),
+                    'sell': len(sell_txns)
+                },
+                'snapshots': {
+                    'first_date': first_snapshot.date.isoformat() if first_snapshot else None,
+                    'first_deployed': first_snapshot.max_cash_deployed if first_snapshot else None,
+                    'last_date': last_snapshot.date.isoformat() if last_snapshot else None,
+                    'last_deployed': last_snapshot.max_cash_deployed if last_snapshot else None,
+                    'changed_over_time': (
+                        first_snapshot.max_cash_deployed != last_snapshot.max_cash_deployed 
+                        if first_snapshot and last_snapshot else False
+                    )
+                }
+            }
+            
+            results.append(user_data)
+        
+        # Summary
+        users_with_issues = [r for r in results if not r['match']]
+        users_with_unchanging_deployed = [r for r in results if not r['snapshots']['changed_over_time'] and r['transactions']['total'] > 1]
+        
+        return jsonify({
+            'success': True,
+            'total_users': len(all_users),
+            'results': results,
+            'issues': {
+                'users_with_mismatched_values': len(users_with_issues),
+                'details': users_with_issues if users_with_issues else None
+            },
+            'analysis': {
+                'users_with_unchanging_deployed': len(users_with_unchanging_deployed),
+                'note': 'Unchanging max_cash_deployed is CORRECT if users only trade with proceeds from sales'
+            }
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+
 @app.route('/admin/diagnose-max-cash-deployed')
 @login_required
 def diagnose_max_cash_deployed():
