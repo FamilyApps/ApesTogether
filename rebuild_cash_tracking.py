@@ -67,6 +67,9 @@ def rebuild_user_cash_tracking(user_id):
     user.max_cash_deployed = max_cash_deployed
     user.cash_proceeds = cash_proceeds
     
+    # Ensure changes are tracked by the session
+    db.session.add(user)
+    
     changed = (old_max_deployed != max_cash_deployed or old_cash_proceeds != cash_proceeds)
     
     logger.info(
