@@ -11,6 +11,20 @@ Where:
 - V_start, V_end = Portfolio values (stock_value + cash_proceeds or total_value)
 - CF_net = max_cash_deployed_end - max_cash_deployed_start (net capital deployed)
 - W = Time-weighted factor for when capital was deployed
+
+VALIDATED by Grok (Oct 26, 2025):
+✓ Mathematically correct Modified Dietz implementation
+✓ Time-weighting appropriate for paper trading (internal flows)
+✓ "Actual return" approach correct for leaderboards (non-extrapolated)
+✓ CF_net calculation correctly tracks only NEW capital deployment
+✓ Edge cases handled (CF_net=0 simplifies to simple %, zero denominator)
+
+Key Design Decisions:
+1. Actual Return (not time-adjusted): Users show performance from their join date,
+   not extrapolated to full period. Prevents gaming leaderboards with hot streaks.
+2. CF_net floored at 0: Handles rare edge case where sells > buys (negative CF).
+3. W = 0.5 when CF_net = 0: Standard mid-period assumption (doesn't affect result).
+4. Baseline = first snapshot: Shows return from when user actually started trading.
 """
 
 from datetime import date, timedelta, datetime
@@ -101,14 +115,20 @@ def calculate_portfolio_performance(
     # This shows ACTUAL return from when they started, not time-adjusted
     V_start = first_snapshot.total_value
     V_end = last_snapshot.total_value
-    CF_net = last_snapshot.max_cash_deployed - first_snapshot.max_cash_deployed
+    
+    # Calculate CF_net (net new capital deployed during user's active period)
+    # NOTE: In our system, max_cash_deployed only increases (never decreases), so CF_net >= 0 always.
+    # The max(0, ...) is defensive programming for theoretical edge case.
+    CF_net = max(0.0, last_snapshot.max_cash_deployed - first_snapshot.max_cash_deployed)
     
     # Log if user joined mid-period (for informational purposes)
     if first_snapshot.date > start_date:
         logger.info(
-            f"User joined mid-period on {first_snapshot.date}. "
+            f"User {user_id} joined mid-period on {first_snapshot.date}. "
             f"Showing actual return from {first_snapshot.date} to {end_date}, not time-adjusted."
         )
+    
+    logger.debug(f"User {user_id}: V_start=${V_start:.2f}, V_end=${V_end:.2f}, CF_net=${CF_net:.2f}")
     
     # Calculate time-weighted cash flows (W factor)
     # Use the user's ACTUAL active period (from first snapshot to end)
@@ -137,18 +157,31 @@ def calculate_portfolio_performance(
         
         # W is used in denominator: (V_start + W * CF_net)
         # For Modified Dietz, W represents the time-weighted average of when flows occurred
-        # If CF_net = 0 (no new capital after joining), W doesn't matter; default to 0.5
-        W = weighted_cf / CF_net if CF_net != 0 else 0.5
+        if CF_net != 0:
+            W = weighted_cf / CF_net
+            logger.debug(f"User {user_id}: W={W:.3f} (weighted_cf=${weighted_cf:.2f} / CF_net=${CF_net:.2f})")
+        else:
+            # When CF_net = 0, W is mathematically irrelevant (multiplied by 0)
+            # Set to 0.5 for consistency in logging, but any value would give same result
+            W = 0.5
+            logger.debug(f"User {user_id}: W={W:.3f} (irrelevant - CF_net=0)")
     
-    # Modified Dietz formula
+    # Modified Dietz formula: Return = (V_end - V_start - CF_net) / (V_start + W * CF_net)
+    # Validated by Grok (Oct 26, 2025): Mathematically correct, adapted for snapshot-based data
     denominator = V_start + (W * CF_net)
     
-    # Edge case: Zero denominator
+    # Edge case: Zero denominator (rare: V_start=0 and CF_net=0)
     if denominator == 0:
         logger.warning(f"Zero denominator for user {user_id}: V_start={V_start}, W={W:.3f}, CF_net={CF_net}")
         portfolio_return = 0.0
     else:
-        portfolio_return = ((V_end - V_start - CF_net) / denominator) * 100
+        numerator = V_end - V_start - CF_net
+        portfolio_return = (numerator / denominator) * 100
+        logger.debug(
+            f"User {user_id} Modified Dietz: "
+            f"({V_end:.2f} - {V_start:.2f} - {CF_net:.2f}) / ({V_start:.2f} + {W:.3f}*{CF_net:.2f}) = "
+            f"{numerator:.2f} / {denominator:.2f} = {portfolio_return:.2f}%"
+        )
     
     logger.info(
         f"Portfolio return: {portfolio_return:.2f}% "
@@ -170,8 +203,11 @@ def calculate_portfolio_performance(
         'metadata': {
             'start_date': start_date.isoformat(),
             'end_date': end_date.isoformat(),
+            'actual_start_date': first_snapshot.date.isoformat(),  # When user actually started (may differ from period start)
             'snapshots_count': len(snapshots),
-            'net_capital_deployed': round(CF_net, 2)
+            'net_capital_deployed': round(CF_net, 2),
+            'days_active': actual_period_days,  # Days user was actually trading (useful for UI context)
+            'joined_mid_period': first_snapshot.date > start_date  # Flag for UI to show "Active since X"
         }
     }
 
