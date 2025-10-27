@@ -3223,6 +3223,12 @@ def add_stock():
             stats = calculate_user_portfolio_stats(session['user_id'])
             logger.info(f"Stats calculated: unique_stocks={stats['unique_stocks_count']}, trades/week={stats['avg_trades_per_week']:.1f}")
             
+            # Convert cap percentages to market_cap_mix JSON
+            market_cap_mix = {
+                'small_cap': stats.get('small_cap_percent', 0),
+                'large_cap': stats.get('large_cap_percent', 0)
+            }
+            
             user_stats = UserPortfolioStats.query.filter_by(user_id=session['user_id']).first()
             
             if user_stats:
@@ -3230,8 +3236,8 @@ def add_stock():
                 logger.info(f"Updating existing stats for user {session['user_id']}")
                 user_stats.unique_stocks_count = stats['unique_stocks_count']
                 user_stats.avg_trades_per_week = stats['avg_trades_per_week']
-                user_stats.market_cap_mix = stats['market_cap_mix']
-                user_stats.industry_mix = stats['industry_mix']
+                user_stats.market_cap_mix = market_cap_mix
+                user_stats.industry_mix = stats.get('industry_mix', {})
                 user_stats.subscriber_count = stats['subscriber_count']
                 user_stats.updated_at = datetime.utcnow()
                 db.session.merge(user_stats)  # Use merge for cross-session safety
@@ -3242,8 +3248,8 @@ def add_stock():
                     user_id=session['user_id'],
                     unique_stocks_count=stats['unique_stocks_count'],
                     avg_trades_per_week=stats['avg_trades_per_week'],
-                    market_cap_mix=stats['market_cap_mix'],
-                    industry_mix=stats['industry_mix'],
+                    market_cap_mix=market_cap_mix,
+                    industry_mix=stats.get('industry_mix', {}),
                     subscriber_count=stats['subscriber_count']
                 )
                 db.session.add(user_stats)
@@ -3366,6 +3372,12 @@ def sell_stock():
             stats = calculate_user_portfolio_stats(session['user_id'])
             logger.info(f"Stats calculated: unique_stocks={stats['unique_stocks_count']}, trades/week={stats['avg_trades_per_week']:.1f}")
             
+            # Convert cap percentages to market_cap_mix JSON
+            market_cap_mix = {
+                'small_cap': stats.get('small_cap_percent', 0),
+                'large_cap': stats.get('large_cap_percent', 0)
+            }
+            
             user_stats = UserPortfolioStats.query.filter_by(user_id=session['user_id']).first()
             
             if user_stats:
@@ -3373,8 +3385,8 @@ def sell_stock():
                 logger.info(f"Updating existing stats for user {session['user_id']}")
                 user_stats.unique_stocks_count = stats['unique_stocks_count']
                 user_stats.avg_trades_per_week = stats['avg_trades_per_week']
-                user_stats.market_cap_mix = stats['market_cap_mix']
-                user_stats.industry_mix = stats['industry_mix']
+                user_stats.market_cap_mix = market_cap_mix
+                user_stats.industry_mix = stats.get('industry_mix', {})
                 user_stats.subscriber_count = stats['subscriber_count']
                 user_stats.updated_at = datetime.utcnow()
                 db.session.merge(user_stats)  # Use merge for cross-session safety
@@ -3385,8 +3397,8 @@ def sell_stock():
                     user_id=session['user_id'],
                     unique_stocks_count=stats['unique_stocks_count'],
                     avg_trades_per_week=stats['avg_trades_per_week'],
-                    market_cap_mix=stats['market_cap_mix'],
-                    industry_mix=stats['industry_mix'],
+                    market_cap_mix=market_cap_mix,
+                    industry_mix=stats.get('industry_mix', {}),
                     subscriber_count=stats['subscriber_count']
                 )
                 db.session.add(user_stats)
