@@ -14372,14 +14372,65 @@ def get_portfolio_performance(period):
                 logger.info(f"Using session cache for user {user_id}, period {period_upper}")
                 return jsonify(cached_response)
         
-        # Last resort: Live calculation (slow for non-leaderboard users)
-        from portfolio_performance import PortfolioPerformanceCalculator
-        calculator = PortfolioPerformanceCalculator()
+        # Last resort: Live calculation using new unified calculator
+        from leaderboard_utils import generate_chart_from_snapshots
         
         logger.info(f"Performing live calculation for user {user_id}, period {period_upper}")
-        performance_data = calculator.get_performance_data(user_id, period_upper)
+        chart_data_chartjs = generate_chart_from_snapshots(user_id, period_upper)
         
-        # Cache the response in session
+        if not chart_data_chartjs:
+            return jsonify({'error': 'No data available for this period'}), 404
+        
+        # Convert Chart.js format to dashboard format
+        datasets = chart_data_chartjs.get('datasets', [])
+        labels = chart_data_chartjs.get('labels', [])
+        
+        portfolio_dataset = datasets[0].get('data', []) if datasets else []
+        sp500_dataset = datasets[1].get('data', []) if len(datasets) > 1 else []
+        
+        # Convert to dashboard format
+        chart_data = []
+        for i in range(min(len(labels), len(portfolio_dataset))):
+            chart_data.append({
+                'date': labels[i],
+                'portfolio': portfolio_dataset[i],
+                'sp500': sp500_dataset[i] if i < len(sp500_dataset) else 0
+            })
+        
+        performance_data = {
+            'portfolio_return': chart_data_chartjs.get('portfolio_return', 0),
+            'sp500_return': chart_data_chartjs.get('sp500_return', 0),
+            'chart_data': chart_data,
+            'period': period_upper,
+            'from_cache': False
+        }
+        
+        # Cache on-demand: Save to database for next time
+        try:
+            chart_cache = UserPortfolioChartCache.query.filter_by(
+                user_id=user_id, period=period_upper
+            ).first()
+            
+            if chart_cache:
+                chart_cache.chart_data = json.dumps(chart_data_chartjs)
+                chart_cache.generated_at = datetime.now()
+                db.session.merge(chart_cache)
+            else:
+                chart_cache = UserPortfolioChartCache(
+                    user_id=user_id,
+                    period=period_upper,
+                    chart_data=json.dumps(chart_data_chartjs),
+                    generated_at=datetime.now()
+                )
+                db.session.add(chart_cache)
+            
+            db.session.commit()
+            logger.info(f"✓ Cached chart on-demand for user {user_id}, period {period_upper}")
+        except Exception as cache_error:
+            logger.error(f"Failed to cache chart: {cache_error}")
+            # Don't fail the request if caching fails
+        
+        # Also cache in session for immediate reuse
         session[cache_key] = performance_data
         session[f"{cache_key}_time"] = datetime.now().isoformat()
         
