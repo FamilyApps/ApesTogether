@@ -3156,16 +3156,38 @@ def add_stock():
         flash(f'Error fetching stock price. Please try again later.', 'danger')
         return redirect(url_for('dashboard'))
     
-    # Create new stock
-    new_stock = Stock(
-        ticker=ticker,
-        quantity=quantity,
-        purchase_price=purchase_price,
-        user_id=session['user_id']
-    )
+    # Check if user already owns this stock
+    existing_stock = Stock.query.filter_by(user_id=session['user_id'], ticker=ticker).first()
     
     try:
-        db.session.add(new_stock)
+        if existing_stock:
+            # Combine with existing position using weighted average cost basis
+            old_cost_basis = existing_stock.quantity * existing_stock.purchase_price
+            new_cost = quantity * purchase_price
+            total_cost = old_cost_basis + new_cost
+            total_quantity = existing_stock.quantity + quantity
+            weighted_avg_price = total_cost / total_quantity
+            
+            logger.info(f"Combining with existing position: {existing_stock.quantity} @ ${existing_stock.purchase_price:.2f}")
+            logger.info(f"New weighted average: {total_quantity} @ ${weighted_avg_price:.2f}")
+            
+            # Update existing stock
+            existing_stock.quantity = total_quantity
+            existing_stock.purchase_price = weighted_avg_price
+            
+            stock_to_commit = existing_stock
+        else:
+            # Create new stock
+            new_stock = Stock(
+                ticker=ticker,
+                quantity=quantity,
+                purchase_price=purchase_price,
+                user_id=session['user_id']
+            )
+            db.session.add(new_stock)
+            stock_to_commit = new_stock
+            
+            logger.info(f"Creating new stock position: {quantity} {ticker} @ ${purchase_price:.2f}")
         
         # Determine transaction type: 'initial' for first purchase, 'buy' for subsequent
         from models import Transaction
@@ -3197,19 +3219,25 @@ def add_stock():
             from leaderboard_utils import calculate_user_portfolio_stats
             from models import UserPortfolioStats
             
+            logger.info("Calculating portfolio stats after stock addition...")
             stats = calculate_user_portfolio_stats(session['user_id'])
+            logger.info(f"Stats calculated: unique_stocks={stats['unique_stocks_count']}, trades/week={stats['avg_trades_per_week']:.1f}")
+            
             user_stats = UserPortfolioStats.query.filter_by(user_id=session['user_id']).first()
             
             if user_stats:
                 # Update existing stats
+                logger.info(f"Updating existing stats for user {session['user_id']}")
                 user_stats.unique_stocks_count = stats['unique_stocks_count']
                 user_stats.avg_trades_per_week = stats['avg_trades_per_week']
                 user_stats.market_cap_mix = stats['market_cap_mix']
                 user_stats.industry_mix = stats['industry_mix']
                 user_stats.subscriber_count = stats['subscriber_count']
                 user_stats.updated_at = datetime.utcnow()
+                db.session.merge(user_stats)  # Use merge for cross-session safety
             else:
                 # Create new stats entry
+                logger.info(f"Creating new stats entry for user {session['user_id']}")
                 user_stats = UserPortfolioStats(
                     user_id=session['user_id'],
                     unique_stocks_count=stats['unique_stocks_count'],
@@ -3221,9 +3249,11 @@ def add_stock():
                 db.session.add(user_stats)
             
             db.session.commit()
-            logger.info(f"Updated portfolio stats: {stats['unique_stocks_count']} unique stocks")
+            logger.info(f"✓ Portfolio stats committed successfully")
         except Exception as stats_error:
-            logger.warning(f"Failed to update portfolio stats: {str(stats_error)}")
+            logger.error(f"ERROR updating portfolio stats: {str(stats_error)}")
+            import traceback
+            logger.error(traceback.format_exc())
             # Don't fail the whole operation if stats update fails
         
         flash(f'Added {quantity} shares of {ticker}', 'success')
@@ -3332,19 +3362,25 @@ def sell_stock():
             from leaderboard_utils import calculate_user_portfolio_stats
             from models import UserPortfolioStats
             
+            logger.info("Calculating portfolio stats after stock sale...")
             stats = calculate_user_portfolio_stats(session['user_id'])
+            logger.info(f"Stats calculated: unique_stocks={stats['unique_stocks_count']}, trades/week={stats['avg_trades_per_week']:.1f}")
+            
             user_stats = UserPortfolioStats.query.filter_by(user_id=session['user_id']).first()
             
             if user_stats:
                 # Update existing stats
+                logger.info(f"Updating existing stats for user {session['user_id']}")
                 user_stats.unique_stocks_count = stats['unique_stocks_count']
                 user_stats.avg_trades_per_week = stats['avg_trades_per_week']
                 user_stats.market_cap_mix = stats['market_cap_mix']
                 user_stats.industry_mix = stats['industry_mix']
                 user_stats.subscriber_count = stats['subscriber_count']
                 user_stats.updated_at = datetime.utcnow()
+                db.session.merge(user_stats)  # Use merge for cross-session safety
             else:
                 # Create new stats entry
+                logger.info(f"Creating new stats entry for user {session['user_id']}")
                 user_stats = UserPortfolioStats(
                     user_id=session['user_id'],
                     unique_stocks_count=stats['unique_stocks_count'],
@@ -3356,9 +3392,11 @@ def sell_stock():
                 db.session.add(user_stats)
             
             db.session.commit()
-            logger.info(f"Updated portfolio stats: {stats['unique_stocks_count']} unique stocks")
+            logger.info(f"✓ Portfolio stats committed successfully")
         except Exception as stats_error:
-            logger.warning(f"Failed to update portfolio stats: {str(stats_error)}")
+            logger.error(f"ERROR updating portfolio stats: {str(stats_error)}")
+            import traceback
+            logger.error(traceback.format_exc())
             # Don't fail the whole operation if stats update fails
         
         flash(f'Sold {quantity} shares of {ticker} at ${sale_price:.2f}', 'success')
