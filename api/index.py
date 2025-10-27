@@ -5639,6 +5639,99 @@ def verify_calculator_consistency():
         }), 500
 
 
+@app.route('/admin/update-user-caches')
+@login_required
+def update_user_caches():
+    """
+    Update all chart caches for a single user.
+    Usage: /admin/update-user-caches?username=witty-raven
+    
+    Updates: 5D, 1M, 3M, YTD, 1Y, MAX (skips 1D - no intraday data)
+    Takes ~10 seconds per user.
+    """
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from leaderboard_utils import generate_chart_from_snapshots
+        import json
+        
+        username = request.args.get('username')
+        if not username:
+            return jsonify({'error': 'username parameter required'}), 400
+        
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': f'User {username} not found'}), 404
+        
+        periods = ['5D', '1M', '3M', 'YTD', '1Y', 'MAX']
+        results = []
+        
+        for period in periods:
+            try:
+                logger.info(f"Generating chart for {username}, period {period}")
+                chart_data = generate_chart_from_snapshots(user.id, period)
+                
+                if chart_data:
+                    # Save to database
+                    chart_cache = UserPortfolioChartCache.query.filter_by(
+                        user_id=user.id, period=period
+                    ).first()
+                    
+                    if chart_cache:
+                        chart_cache.chart_data = json.dumps(chart_data)
+                        chart_cache.generated_at = datetime.now()
+                        db.session.merge(chart_cache)
+                    else:
+                        chart_cache = UserPortfolioChartCache(
+                            user_id=user.id,
+                            period=period,
+                            chart_data=json.dumps(chart_data),
+                            generated_at=datetime.now()
+                        )
+                        db.session.add(chart_cache)
+                    
+                    db.session.commit()
+                    
+                    results.append({
+                        'period': period,
+                        'status': 'success',
+                        'portfolio_return': chart_data.get('portfolio_return'),
+                        'points': len(chart_data.get('labels', []))
+                    })
+                else:
+                    results.append({
+                        'period': period,
+                        'status': 'no_data'
+                    })
+            except Exception as e:
+                results.append({
+                    'period': period,
+                    'status': 'error',
+                    'error': str(e)
+                })
+                logger.error(f"Failed to update {username} {period}: {str(e)}")
+        
+        success_count = sum(1 for r in results if r['status'] == 'success')
+        
+        return jsonify({
+            'success': True,
+            'username': username,
+            'user_id': user.id,
+            'updated': success_count,
+            'total': len(periods),
+            'results': results
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+
 @app.route('/admin/test-chart-generation')
 @login_required
 def test_chart_generation():
