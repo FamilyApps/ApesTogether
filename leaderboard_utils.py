@@ -997,13 +997,42 @@ def generate_chart_from_snapshots(user_id, period):
             current_app.logger.error(f"No chart_data in result for user {user_id}, period {period}. Result keys: {list(result.keys())}")
             return None
         
-        # Return chart data with portfolio_return and sp500_return included
-        chart_data = result['chart_data']
-        chart_data['portfolio_return'] = result.get('portfolio_return')
-        chart_data['sp500_return'] = result.get('sp500_return')
+        # Transform calculator output (list of points) to Chart.js format
+        raw_chart_data = result['chart_data']
+        
+        # Extract labels and data arrays
+        labels = [point['date'] for point in raw_chart_data]
+        portfolio_data = [point['portfolio'] for point in raw_chart_data]
+        sp500_data = [point['sp500'] for point in raw_chart_data]
+        
+        # Build Chart.js compatible structure
+        chart_data = {
+            'labels': labels,
+            'datasets': [
+                {
+                    'label': 'Your Portfolio',
+                    'data': portfolio_data,
+                    'borderColor': 'rgb(40, 167, 69)',
+                    'backgroundColor': 'rgba(40, 167, 69, 0.1)',
+                    'tension': 0.1,
+                    'fill': False
+                },
+                {
+                    'label': 'S&P 500',
+                    'data': sp500_data,
+                    'borderColor': 'rgb(108, 117, 125)',
+                    'backgroundColor': 'rgba(108, 117, 125, 0.1)',
+                    'tension': 0.1,
+                    'fill': False,
+                    'borderDash': [5, 5]
+                }
+            ],
+            'portfolio_return': result.get('portfolio_return'),
+            'sp500_return': result.get('sp500_return')
+        }
         
         from flask import current_app
-        current_app.logger.info(f"✓ Chart generated for user {user_id}, period {period}: {result.get('portfolio_return')}% return")
+        current_app.logger.info(f"✓ Chart generated for user {user_id}, period {period}: {result.get('portfolio_return')}% return, {len(labels)} points")
         
         return chart_data
         
