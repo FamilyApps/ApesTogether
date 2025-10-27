@@ -5579,6 +5579,160 @@ def rebuild_cash_tracking():
         }), 500
 
 
+@app.route('/admin/diagnose-user-after-trade')
+@login_required
+def diagnose_user_after_trade():
+    """
+    Detailed diagnostic for a single user after buy/sell trade.
+    Shows cash tracking, transactions, portfolio value, and gains.
+    
+    Usage: /admin/diagnose-user-after-trade?user_id=5
+    """
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import Transaction, PortfolioSnapshot
+        from portfolio_performance import PortfolioPerformanceCalculator
+        from datetime import date
+        
+        user_id = request.args.get('user_id', current_user.id, type=int)
+        user = User.query.get(user_id)
+        
+        if not user:
+            return jsonify({'error': f'User {user_id} not found'}), 404
+        
+        # Get all transactions ordered by time
+        transactions = Transaction.query.filter_by(user_id=user_id).order_by(Transaction.timestamp).all()
+        
+        # Build transaction history
+        transaction_history = []
+        simulated_deployed = 0.0
+        simulated_proceeds = 0.0
+        
+        for txn in transactions:
+            value = txn.quantity * txn.price
+            
+            # Simulate cash tracking
+            if txn.transaction_type in ('buy', 'initial'):
+                if simulated_proceeds >= value:
+                    simulated_proceeds -= value
+                    capital_deployed = 0
+                else:
+                    capital_deployed = value - simulated_proceeds
+                    simulated_proceeds = 0
+                    simulated_deployed += capital_deployed
+            elif txn.transaction_type == 'sell':
+                simulated_proceeds += value
+                capital_deployed = 0
+            
+            transaction_history.append({
+                'timestamp': txn.timestamp.isoformat(),
+                'type': txn.transaction_type,
+                'ticker': txn.ticker,
+                'quantity': txn.quantity,
+                'price': txn.price,
+                'value': value,
+                'capital_deployed': capital_deployed,
+                'simulated_proceeds_after': simulated_proceeds,
+                'simulated_deployed_after': simulated_deployed
+            })
+        
+        # Get current portfolio
+        stocks = Stock.query.filter_by(user_id=user_id).all()
+        portfolio_stocks = []
+        total_cost_basis = 0
+        total_current_value = 0
+        
+        calculator = PortfolioPerformanceCalculator()
+        for stock in stocks:
+            stock_data = calculator.get_stock_data(stock.ticker)
+            current_price = stock_data.get('price') if stock_data else None
+            
+            if current_price:
+                current_value = stock.quantity * current_price
+                cost_basis = stock.quantity * stock.purchase_price
+                gain_loss = current_value - cost_basis
+                
+                portfolio_stocks.append({
+                    'ticker': stock.ticker,
+                    'quantity': stock.quantity,
+                    'purchase_price': stock.purchase_price,
+                    'current_price': current_price,
+                    'cost_basis': cost_basis,
+                    'current_value': current_value,
+                    'gain_loss': gain_loss
+                })
+                
+                total_cost_basis += cost_basis
+                total_current_value += current_value
+        
+        total_gain_loss = total_current_value - total_cost_basis
+        
+        # Compare actual vs simulated
+        cash_tracking_match = (
+            abs(user.max_cash_deployed - simulated_deployed) < 0.01 and
+            abs(user.cash_proceeds - simulated_proceeds) < 0.01
+        )
+        
+        return jsonify({
+            'success': True,
+            'user': {
+                'id': user.id,
+                'username': user.username
+            },
+            'cash_tracking': {
+                'actual': {
+                    'max_cash_deployed': user.max_cash_deployed,
+                    'cash_proceeds': user.cash_proceeds
+                },
+                'simulated': {
+                    'max_cash_deployed': simulated_deployed,
+                    'cash_proceeds': simulated_proceeds
+                },
+                'match': cash_tracking_match,
+                'discrepancy': {
+                    'deployed': user.max_cash_deployed - simulated_deployed,
+                    'proceeds': user.cash_proceeds - simulated_proceeds
+                }
+            },
+            'transactions': {
+                'total': len(transactions),
+                'buy_count': len([t for t in transactions if t.transaction_type in ('buy', 'initial')]),
+                'sell_count': len([t for t in transactions if t.transaction_type == 'sell']),
+                'history': transaction_history
+            },
+            'portfolio': {
+                'stocks': portfolio_stocks,
+                'total_cost_basis': total_cost_basis,
+                'total_current_value': total_current_value,
+                'total_gain_loss': total_gain_loss,
+                'total_gain_loss_percent': (total_gain_loss / total_cost_basis * 100) if total_cost_basis > 0 else 0
+            },
+            'summary': {
+                'cash_tracking_correct': cash_tracking_match,
+                'total_capital_deployed': user.max_cash_deployed,
+                'available_cash_proceeds': user.cash_proceeds,
+                'portfolio_value': total_current_value,
+                'total_value_with_cash': total_current_value + user.cash_proceeds,
+                'unrealized_gains': total_gain_loss,
+                'notes': [
+                    'max_cash_deployed = maximum cash ever deployed (never decreases)',
+                    'cash_proceeds = available from sales (used for future purchases)',
+                    'total_value_with_cash = portfolio value + cash proceeds'
+                ]
+            }
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+
 @app.route('/admin/diagnose-all-users-cash-tracking')
 @login_required
 def diagnose_all_users_cash_tracking():
