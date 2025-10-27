@@ -3409,6 +3409,70 @@ def sell_stock():
     
     return redirect(url_for('dashboard'))
 
+@app.route('/admin/merge-duplicate-stocks')
+@login_required
+def merge_duplicate_stocks():
+    """
+    Merge duplicate stock entries for a user with weighted average cost basis.
+    Usage: /admin/merge-duplicate-stocks?user_id=5&ticker=TSLA
+    """
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    user_id = request.args.get('user_id', type=int)
+    ticker = request.args.get('ticker', '').upper()
+    
+    if not user_id or not ticker:
+        return jsonify({'error': 'user_id and ticker required'}), 400
+    
+    try:
+        # Find all stock entries for this user/ticker
+        stocks = Stock.query.filter_by(user_id=user_id, ticker=ticker).all()
+        
+        if len(stocks) <= 1:
+            return jsonify({
+                'success': False,
+                'message': f'No duplicates found for {ticker}',
+                'count': len(stocks)
+            })
+        
+        # Calculate weighted average
+        total_cost = sum(s.quantity * s.purchase_price for s in stocks)
+        total_quantity = sum(s.quantity for s in stocks)
+        weighted_avg_price = total_cost / total_quantity
+        
+        # Keep first entry, update it
+        primary_stock = stocks[0]
+        primary_stock.quantity = total_quantity
+        primary_stock.purchase_price = weighted_avg_price
+        
+        # Delete other entries
+        for stock in stocks[1:]:
+            db.session.delete(stock)
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Merged {len(stocks)} {ticker} entries',
+            'result': {
+                'ticker': ticker,
+                'entries_merged': len(stocks),
+                'final_quantity': total_quantity,
+                'weighted_avg_price': weighted_avg_price,
+                'total_cost_basis': total_cost
+            }
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/delete_stock/<int:stock_id>', methods=['POST'])
 def delete_stock(stock_id):
     """Delete a stock from user's portfolio"""
