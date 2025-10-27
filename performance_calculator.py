@@ -251,11 +251,12 @@ def _generate_chart_points(
     baseline_date = baseline_snapshot.date
     logger.debug(f"Chart baseline: ${baseline_value:.2f} on {baseline_date}")
     
-    # Get S&P 500 data for the period
+    # Get S&P 500 data for the FULL period (not just from user's join date)
+    # This ensures charts show S&P performance for entire period
     sp500_data = MarketData.query.filter(
         and_(
             MarketData.ticker == 'SPY_SP500',
-            MarketData.date >= baseline_date,
+            MarketData.date >= period_start,  # Use period_start, not baseline_date
             MarketData.date <= period_end
         )
     ).order_by(MarketData.date.asc()).all()
