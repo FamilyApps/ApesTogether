@@ -5639,6 +5639,96 @@ def verify_calculator_consistency():
         }), 500
 
 
+@app.route('/admin/update-leaderboard-cache')
+@login_required
+def update_leaderboard_cache():
+    """
+    Update leaderboard cache for a single period.
+    Usage: /admin/update-leaderboard-cache?period=YTD
+    
+    Updates all 3 categories (all, small_cap, large_cap) × 2 versions (auth, anon) = 6 entries
+    Takes ~5 seconds per period.
+    """
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from leaderboard_utils import calculate_leaderboard_data
+        from models import LeaderboardCache
+        import json
+        
+        period = request.args.get('period', 'YTD').upper()
+        periods_to_update = [period]
+        categories = ['all', 'small_cap', 'large_cap']
+        results = []
+        
+        for period_name in periods_to_update:
+            for category in categories:
+                try:
+                    logger.info(f"Calculating leaderboard for {period_name}_{category}")
+                    leaderboard_data = calculate_leaderboard_data(period_name, 20, category)
+                    
+                    if leaderboard_data:
+                        # Store both auth and anon versions
+                        for suffix in ['_auth', '_anon']:
+                            cache_key = f"{period_name}_{category}{suffix}"
+                            
+                            cache_entry = LeaderboardCache.query.filter_by(period=cache_key).first()
+                            
+                            if cache_entry:
+                                cache_entry.leaderboard_data = json.dumps(leaderboard_data)
+                                cache_entry.generated_at = datetime.now()
+                                db.session.merge(cache_entry)
+                            else:
+                                cache_entry = LeaderboardCache(
+                                    period=cache_key,
+                                    leaderboard_data=json.dumps(leaderboard_data),
+                                    generated_at=datetime.now()
+                                )
+                                db.session.add(cache_entry)
+                            
+                            db.session.commit()
+                        
+                        results.append({
+                            'period': period_name,
+                            'category': category,
+                            'status': 'success',
+                            'users': len(leaderboard_data)
+                        })
+                    else:
+                        results.append({
+                            'period': period_name,
+                            'category': category,
+                            'status': 'no_data'
+                        })
+                except Exception as e:
+                    results.append({
+                        'period': period_name,
+                        'category': category,
+                        'status': 'error',
+                        'error': str(e)
+                    })
+                    logger.error(f"Failed to update leaderboard {period_name}_{category}: {str(e)}")
+        
+        success_count = sum(1 for r in results if r['status'] == 'success')
+        
+        return jsonify({
+            'success': True,
+            'period': period,
+            'updated': success_count,
+            'total': len(results),
+            'results': results
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+
 @app.route('/admin/update-user-caches')
 @login_required
 def update_user_caches():

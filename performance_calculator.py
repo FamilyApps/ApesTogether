@@ -248,17 +248,47 @@ def _generate_chart_points(
         return []
     
     baseline_value = baseline_snapshot.total_value
-    logger.debug(f"Chart baseline: ${baseline_value:.2f} on {baseline_snapshot.date}")
+    baseline_date = baseline_snapshot.date
+    logger.debug(f"Chart baseline: ${baseline_value:.2f} on {baseline_date}")
+    
+    # Get S&P 500 data for the period
+    sp500_data = MarketData.query.filter(
+        and_(
+            MarketData.ticker == 'SPY_SP500',
+            MarketData.date >= baseline_date,
+            MarketData.date <= period_end
+        )
+    ).order_by(MarketData.date.asc()).all()
+    
+    # Build date-to-SP500-price map
+    sp500_map = {s.date: float(s.close_price) for s in sp500_data}
+    
+    # Get baseline S&P 500 value
+    baseline_sp500 = sp500_map.get(baseline_date)
+    if not baseline_sp500:
+        # Find closest previous date
+        for sp500_record in sp500_data:
+            if sp500_record.date <= baseline_date:
+                baseline_sp500 = float(sp500_record.close_price)
+            else:
+                break
     
     # Generate points (skip zero-value snapshots)
     for snapshot in snapshots:
         if snapshot.total_value > 0:
-            pct = ((snapshot.total_value - baseline_value) / baseline_value) * 100
+            # Portfolio percentage
+            portfolio_pct = ((snapshot.total_value - baseline_value) / baseline_value) * 100
+            
+            # S&P 500 percentage for this date
+            sp500_pct = 0.0
+            sp500_value = sp500_map.get(snapshot.date)
+            if sp500_value and baseline_sp500 and baseline_sp500 > 0:
+                sp500_pct = ((sp500_value - baseline_sp500) / baseline_sp500) * 100
             
             chart_data.append({
                 'date': snapshot.date.strftime('%b %d'),
-                'portfolio': round(pct, 2),
-                'sp500': 0.0  # TODO: Add S&P 500 per-point data from cache
+                'portfolio': round(portfolio_pct, 2),
+                'sp500': round(sp500_pct, 2)
             })
     
     logger.debug(f"Generated {len(chart_data)} chart points")
