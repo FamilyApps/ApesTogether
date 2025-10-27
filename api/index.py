@@ -5058,6 +5058,7 @@ def force_regenerate_all_caches():
                         if chart_cache:
                             chart_cache.chart_data = json.dumps(chart_data)
                             chart_cache.generated_at = datetime.now()
+                            db.session.merge(chart_cache)  # Use merge for Vercel serverless
                         else:
                             chart_cache = UserPortfolioChartCache(
                                 user_id=user.id,
@@ -5068,6 +5069,7 @@ def force_regenerate_all_caches():
                             db.session.add(chart_cache)
                         
                         charts_generated += 1
+                        logger.info(f"Cached chart for user {user.id}, period {period}")
                 except Exception as e:
                     error_msg = f"Chart gen failed for user {user.id}, period {period}: {str(e)}"
                     results['errors'].append(error_msg)
