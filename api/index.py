@@ -5561,10 +5561,14 @@ def verify_calculator_consistency():
         if dashboard_cache:
             try:
                 cached_data = json.loads(dashboard_cache.chart_data)
+                logger.info(f"Dashboard cache keys: {list(cached_data.keys())}")
                 if 'portfolio_return' in cached_data:
                     dashboard_value = cached_data['portfolio_return']
-            except:
-                pass
+                    logger.info(f"Found portfolio_return in dashboard cache: {dashboard_value}")
+                else:
+                    logger.warning(f"portfolio_return NOT in dashboard cache. Keys present: {list(cached_data.keys())}")
+            except Exception as e:
+                logger.error(f"Error reading dashboard cache: {str(e)}")
         
         # 3. Leaderboard cache
         leaderboard_value = None
