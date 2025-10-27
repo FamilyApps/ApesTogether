@@ -967,7 +967,48 @@ def update_all_user_leaderboards():
     return updated_count
 
 def generate_chart_from_snapshots(user_id, period):
-    """Generate chart data from snapshots using same logic as leaderboards"""
+    """
+    Generate chart data using unified calculator.
+    
+    This replaces the old snapshot-based logic with the new Modified Dietz calculator
+    to ensure consistency across dashboard, leaderboard, and API endpoints.
+    """
+    from performance_calculator import calculate_portfolio_performance, get_period_dates
+    
+    try:
+        # Get date range for period
+        start_date, end_date = get_period_dates(period, user_id=user_id)
+        
+        # Calculate performance using unified calculator
+        result = calculate_portfolio_performance(
+            user_id, 
+            start_date, 
+            end_date, 
+            include_chart_data=True
+        )
+        
+        if not result or not result.get('chart_data'):
+            return None
+        
+        # Return chart data with portfolio_return and sp500_return included
+        chart_data = result['chart_data']
+        chart_data['portfolio_return'] = result['portfolio_return']
+        chart_data['sp500_return'] = result['sp500_return']
+        
+        return chart_data
+        
+    except Exception as e:
+        from flask import current_app
+        current_app.logger.error(f"Error generating chart for user {user_id}, period {period}: {str(e)}")
+        return None
+
+
+def generate_chart_from_snapshots_OLD_DEPRECATED(user_id, period):
+    """
+    OLD DEPRECATED VERSION - Keep for reference only.
+    This uses snapshot-based logic which gave inconsistent results.
+    DO NOT USE - Use generate_chart_from_snapshots() instead.
+    """
     from datetime import datetime, date, timedelta
     import json
     from models import PortfolioSnapshotIntraday, MarketData
