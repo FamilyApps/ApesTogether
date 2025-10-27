@@ -5822,6 +5822,58 @@ def update_user_caches():
         }), 500
 
 
+@app.route('/admin/check-todays-snapshot')
+@login_required
+def check_todays_snapshot():
+    """
+    Check if today's market close snapshot exists for all users.
+    Usage: /admin/check-todays-snapshot
+    """
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from datetime import date
+        from models import PortfolioSnapshot
+        
+        today = date.today()
+        
+        users = User.query.all()
+        results = []
+        
+        for user in users:
+            snapshot = PortfolioSnapshot.query.filter_by(
+                user_id=user.id,
+                date=today
+            ).first()
+            
+            results.append({
+                'username': user.username,
+                'user_id': user.id,
+                'has_snapshot': snapshot is not None,
+                'snapshot_value': float(snapshot.total_value) if snapshot else None,
+                'snapshot_date': str(snapshot.date) if snapshot else None
+            })
+        
+        missing_count = sum(1 for r in results if not r['has_snapshot'])
+        
+        return jsonify({
+            'success': True,
+            'date_checked': str(today),
+            'total_users': len(users),
+            'missing_snapshots': missing_count,
+            'results': results
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+
 @app.route('/admin/test-chart-generation')
 @login_required
 def test_chart_generation():

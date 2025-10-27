@@ -264,30 +264,53 @@ def _generate_chart_points(
     # Build date-to-SP500-price map
     sp500_map = {s.date: float(s.close_price) for s in sp500_data}
     
-    # Get baseline S&P 500 value
-    baseline_sp500 = sp500_map.get(baseline_date)
-    if not baseline_sp500:
-        # Find closest previous date
-        for sp500_record in sp500_data:
-            if sp500_record.date <= baseline_date:
-                baseline_sp500 = float(sp500_record.close_price)
-            else:
-                break
+    # Get baseline S&P 500 value from period start (not user join date)
+    baseline_sp500 = None
+    if sp500_data:
+        baseline_sp500 = float(sp500_data[0].close_price)
     
-    # Generate points (skip zero-value snapshots)
-    for snapshot in snapshots:
-        if snapshot.total_value > 0:
-            # Portfolio percentage
+    if not baseline_sp500:
+        logger.warning(f"No S&P 500 baseline data found for period starting {period_start}")
+        baseline_sp500 = 1.0  # Avoid division by zero
+    
+    # Build snapshot map for quick lookup
+    snapshot_map = {s.date: s for s in snapshots if s.total_value > 0}
+    
+    # Generate points for FULL period (not just user's snapshots)
+    # This shows S&P 500 for entire period, with user's line starting when they joined
+    current_date = period_start
+    user_started = False
+    
+    for sp500_record in sp500_data:
+        date_str = sp500_record.date.strftime('%b %d')
+        
+        # S&P 500 percentage (always calculated from period start)
+        sp500_value = float(sp500_record.close_price)
+        sp500_pct = ((sp500_value - baseline_sp500) / baseline_sp500) * 100
+        
+        # Portfolio percentage (only if user has snapshot for this date)
+        portfolio_pct = None
+        if sp500_record.date in snapshot_map:
+            user_started = True
+            snapshot = snapshot_map[sp500_record.date]
             portfolio_pct = ((snapshot.total_value - baseline_value) / baseline_value) * 100
-            
-            # S&P 500 percentage for this date
-            sp500_pct = 0.0
-            sp500_value = sp500_map.get(snapshot.date)
-            if sp500_value and baseline_sp500 and baseline_sp500 > 0:
-                sp500_pct = ((sp500_value - baseline_sp500) / baseline_sp500) * 100
-            
+        elif user_started:
+            # User has started but no snapshot for this date - use last known value
+            # Find previous snapshot
+            prev_snapshot = None
+            for s in reversed(snapshots):
+                if s.date < sp500_record.date:
+                    prev_snapshot = s
+                    break
+            if prev_snapshot:
+                portfolio_pct = ((prev_snapshot.total_value - baseline_value) / baseline_value) * 100
+        else:
+            # User hasn't started yet - show 0%
+            portfolio_pct = 0.0
+        
+        if portfolio_pct is not None:
             chart_data.append({
-                'date': snapshot.date.strftime('%b %d'),
+                'date': date_str,
                 'portfolio': round(portfolio_pct, 2),
                 'sp500': round(sp500_pct, 2)
             })
