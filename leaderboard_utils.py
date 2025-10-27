@@ -987,20 +987,33 @@ def generate_chart_from_snapshots(user_id, period):
             include_chart_data=True
         )
         
-        if not result or not result.get('chart_data'):
+        if not result:
+            from flask import current_app
+            current_app.logger.error(f"calculate_portfolio_performance returned None for user {user_id}, period {period}")
+            return None
+            
+        if not result.get('chart_data'):
+            from flask import current_app
+            current_app.logger.error(f"No chart_data in result for user {user_id}, period {period}. Result keys: {list(result.keys())}")
             return None
         
         # Return chart data with portfolio_return and sp500_return included
         chart_data = result['chart_data']
-        chart_data['portfolio_return'] = result['portfolio_return']
-        chart_data['sp500_return'] = result['sp500_return']
+        chart_data['portfolio_return'] = result.get('portfolio_return')
+        chart_data['sp500_return'] = result.get('sp500_return')
+        
+        from flask import current_app
+        current_app.logger.info(f"✓ Chart generated for user {user_id}, period {period}: {result.get('portfolio_return')}% return")
         
         return chart_data
         
     except Exception as e:
         from flask import current_app
-        current_app.logger.error(f"Error generating chart for user {user_id}, period {period}: {str(e)}")
-        return None
+        import traceback
+        current_app.logger.error(f"ERROR generating chart for user {user_id}, period {period}: {str(e)}")
+        current_app.logger.error(traceback.format_exc())
+        # Re-raise in development, return None in production to avoid breaking cache generation
+        raise
 
 
 def generate_chart_from_snapshots_OLD_DEPRECATED(user_id, period):
