@@ -1321,10 +1321,10 @@ def calculate_user_portfolio_stats(user_id):
     transactions = Transaction.query.filter_by(user_id=user_id).all()
     stats['total_trades'] = len(transactions)
     
-    # Calculate avg trades per week (last 30 days)
-    thirty_days_ago = datetime.now() - timedelta(days=30)
-    recent_transactions = [t for t in transactions if t.timestamp >= thirty_days_ago]
-    avg_trades_per_day = len(recent_transactions) / 30
+    # Calculate avg trades per week (last 14 days)
+    fourteen_days_ago = datetime.now() - timedelta(days=14)
+    recent_transactions = [t for t in transactions if t.timestamp >= fourteen_days_ago]
+    avg_trades_per_day = len(recent_transactions) / 14
     stats['avg_trades_per_week'] = round(avg_trades_per_day * 7, 2)
     
     # 3. LARGE CAP %
