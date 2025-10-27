@@ -5633,6 +5633,61 @@ def verify_calculator_consistency():
         }), 500
 
 
+@app.route('/admin/test-chart-generation')
+@login_required
+def test_chart_generation():
+    """
+    Test chart generation with new unified calculator.
+    Usage: /admin/test-chart-generation?username=witty-raven&period=YTD
+    """
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from leaderboard_utils import generate_chart_from_snapshots
+        import json
+        
+        username = request.args.get('username', 'witty-raven')
+        period = request.args.get('period', 'YTD').upper()
+        
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': f'User {username} not found'}), 404
+        
+        # Test the new function
+        logger.info(f"Testing chart generation for {username}, period {period}")
+        chart_data = generate_chart_from_snapshots(user.id, period)
+        
+        if chart_data:
+            return jsonify({
+                'success': True,
+                'username': username,
+                'period': period,
+                'chart_data_keys': list(chart_data.keys()),
+                'portfolio_return': chart_data.get('portfolio_return'),
+                'sp500_return': chart_data.get('sp500_return'),
+                'has_datasets': 'datasets' in chart_data,
+                'num_datapoints': len(chart_data.get('labels', [])) if chart_data.get('labels') else 0
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'generate_chart_from_snapshots returned None',
+                'username': username,
+                'period': period
+            })
+    
+    except Exception as e:
+        import traceback
+        logger.error(f"Chart generation test failed: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+
 @app.route('/admin/rebuild-cash-tracking')
 @login_required
 def rebuild_cash_tracking():
