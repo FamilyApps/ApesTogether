@@ -20415,6 +20415,7 @@ def get_public_portfolio_chart(username, period):
     """Get portfolio chart data for public portfolio views (blurred/unblurred)"""
     try:
         from models import User, UserPortfolioChartCache
+        from sqlalchemy import text
         import json
         
         # Find user by username
@@ -20424,19 +20425,27 @@ def get_public_portfolio_chart(username, period):
         
         period_upper = period.upper()
         
-        # Try to use pre-rendered chart data (Chart.js format for direct use)
-        chart_cache = UserPortfolioChartCache.query.filter_by(
-            user_id=user.id, period=period_upper
-        ).first()
+        # CRITICAL FIX: Query PRIMARY to bypass Vercel Postgres replica lag
+        # Regular ORM queries hit replicas with 50-500ms stale data
+        chart_cache_data = None
+        with db.engine.connect() as primary_conn:
+            result = primary_conn.execute(text("""
+                SELECT chart_data
+                FROM user_portfolio_chart_cache
+                WHERE user_id = :user_id AND period = :period
+            """), {'user_id': user.id, 'period': period_upper})
+            row = result.fetchone()
+            if row:
+                chart_cache_data = row[0]
         
-        if chart_cache:
+        if chart_cache_data:
             try:
                 # Return Chart.js format directly for public portfolio pages
-                cached_data = json.loads(chart_cache.chart_data)
-                cached_data['data_source'] = 'pre_rendered_cache'
+                cached_data = json.loads(chart_cache_data)
+                cached_data['data_source'] = 'pre_rendered_cache_PRIMARY'
                 cached_data['username'] = username
                 
-                logger.info(f"Using pre-rendered chart data for public view: {username}, period {period_upper}")
+                logger.info(f"Using pre-rendered chart data (PRIMARY) for public view: {username}, period {period_upper}")
                 return jsonify(cached_data)
                 
             except Exception as e:
