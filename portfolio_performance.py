@@ -123,41 +123,42 @@ class PortfolioPerformanceCalculator:
                 logger.warning("Alpha Vantage API key not found")
                 return result
             
-            # Alpha Vantage BATCH_STOCK_QUOTES supports up to 256 symbols
+            # Alpha Vantage REALTIME_BULK_QUOTES supports up to 100 symbols (premium tier)
             # Split into chunks if needed
-            chunk_size = 256
+            chunk_size = 100
             for i in range(0, len(uncached_tickers), chunk_size):
                 chunk = uncached_tickers[i:i + chunk_size]
                 symbols_str = ','.join(chunk)
                 initial_result_count = len(result)  # Track how many we had before this chunk
                 
-                url = f'https://www.alphavantage.co/query?function=BATCH_STOCK_QUOTES&symbols={symbols_str}&apikey={api_key}'
+                # Use REALTIME_BULK_QUOTES for premium tier (up to 100 symbols)
+                url = f'https://www.alphavantage.co/query?function=REALTIME_BULK_QUOTES&symbol={symbols_str}&apikey={api_key}'
                 response = requests.get(url, timeout=10)
                 data = response.json()
                 
                 # CRITICAL: Log the full response for debugging
-                logger.info(f"📡 Batch API Response Keys: {list(data.keys())}")
-                logger.debug(f"📡 Full Batch API Response: {data}")
+                logger.info(f"📡 Bulk Quotes API Response Keys: {list(data.keys())}")
+                logger.debug(f"📡 Full Bulk Quotes API Response: {data}")
                 
-                # Log the batch API call
+                # Log the bulk quotes API call
                 try:
                     from models import AlphaVantageAPILog, db
-                    success = 'Stock Quotes' in data
+                    success = 'data' in data or 'Global Quote' in data
                     api_log = AlphaVantageAPILog(
-                        endpoint='BATCH_STOCK_QUOTES',
-                        symbol=f"BATCH_{len(chunk)}_TICKERS",
+                        endpoint='REALTIME_BULK_QUOTES',
+                        symbol=f"BULK_{len(chunk)}_TICKERS",
                         response_status='success' if success else 'error',
                         timestamp=current_time
                     )
                     db.session.add(api_log)
                 except Exception as log_error:
-                    logger.error(f"Failed to log batch API call: {log_error}")
+                    logger.error(f"Failed to log bulk quotes API call: {log_error}")
                 
-                # Parse batch response
-                if 'Stock Quotes' in data:
-                    for quote in data['Stock Quotes']:
-                        ticker = quote.get('1. symbol', '').upper()
-                        price_str = quote.get('2. price', '0')
+                # Parse bulk quotes response
+                if 'data' in data:
+                    for quote in data['data']:
+                        ticker = quote.get('symbol', '').upper()
+                        price_str = quote.get('price', '0')
                         try:
                             price = float(price_str)
                             if price > 0:
@@ -166,29 +167,9 @@ class PortfolioPerformanceCalculator:
                         except (ValueError, TypeError):
                             logger.warning(f"Invalid price for {ticker}: {price_str}")
                     
-                    logger.info(f"✅ Batch API: Fetched {len(chunk)} tickers in 1 call")
+                    logger.info(f"✅ Bulk Quotes API: Fetched {len(chunk)} tickers in 1 call")
                 else:
-                    logger.warning(f"❌ Batch API failed - Response: {data}")
-                    logger.info(f"🔄 Falling back to individual GLOBAL_QUOTE calls for {len(chunk)} tickers")
-                    
-                    # FALLBACK: Use individual GLOBAL_QUOTE calls
-                    for ticker in chunk:
-                        try:
-                            quote_url = f'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={api_key}'
-                            quote_response = requests.get(quote_url, timeout=5)
-                            quote_data = quote_response.json()
-                            
-                            if 'Global Quote' in quote_data:
-                                price_str = quote_data['Global Quote'].get('05. price', '0')
-                                price = float(price_str)
-                                if price > 0:
-                                    stock_price_cache[ticker] = {'price': price, 'timestamp': current_time}
-                                    result[ticker] = price
-                                    logger.debug(f"✓ Individual fetch: {ticker} = ${price}")
-                        except Exception as e:
-                            logger.error(f"Failed to fetch {ticker} individually: {e}")
-                    
-                    logger.info(f"✅ Fallback complete: Fetched {len(result) - initial_result_count} of {len(chunk)} tickers")
+                    logger.warning(f"❌ Bulk Quotes API failed - Response: {data}")
             
             return result
             
