@@ -905,39 +905,61 @@ def update_leaderboard_cache(periods=None):
                 chart_data = generate_chart_from_snapshots(user.id, period)
                 
                 if chart_data:
-                    # CRITICAL: Use PostgreSQL UPSERT to atomically handle update/insert
-                    # DELETE+INSERT with UNIQUE constraints can cause race conditions
-                    from sqlalchemy import text
-                    
-                    chart_data_json = json.dumps(chart_data)
-                    now = datetime.now()
-                    
-                    # Use ON CONFLICT to update existing or insert new
-                    upsert_sql = text("""
-                        INSERT INTO user_portfolio_chart_cache (user_id, period, chart_data, generated_at)
-                        VALUES (:user_id, :period, :chart_data, :generated_at)
-                        ON CONFLICT (user_id, period)
-                        DO UPDATE SET
-                            chart_data = EXCLUDED.chart_data,
-                            generated_at = EXCLUDED.generated_at
-                    """)
-                    
-                    db.session.execute(upsert_sql, {
-                        'user_id': user.id,
-                        'period': period,
-                        'chart_data': chart_data_json,
-                        'generated_at': now
-                    })
-                    db.session.flush()
-                    
-                    print(f"UPSERTED chart cache for user {user.id}, period {period} at {now}")
-                    charts_generated += 1
-                    print(f"✓ Generated chart cache for user {user.id}, period {period}")
+                    try:
+                        # CRITICAL: Use PostgreSQL UPSERT to atomically handle update/insert
+                        # DELETE+INSERT with UNIQUE constraints can cause race conditions
+                        from sqlalchemy import text
+                        
+                        chart_data_json = json.dumps(chart_data)
+                        now = datetime.now()
+                        
+                        print(f"🔄 ATTEMPTING UPSERT: user={user.id}, period={period}, labels={len(chart_data.get('labels', []))}")
+                        print(f"   First label: {chart_data.get('labels', [])[0] if chart_data.get('labels') else 'N/A'}")
+                        print(f"   Last label: {chart_data.get('labels', [])[-1] if chart_data.get('labels') else 'N/A'}")
+                        
+                        # Use ON CONFLICT to update existing or insert new
+                        upsert_sql = text("""
+                            INSERT INTO user_portfolio_chart_cache (user_id, period, chart_data, generated_at)
+                            VALUES (:user_id, :period, :chart_data, :generated_at)
+                            ON CONFLICT (user_id, period)
+                            DO UPDATE SET
+                                chart_data = EXCLUDED.chart_data,
+                                generated_at = EXCLUDED.generated_at
+                            RETURNING id, generated_at
+                        """)
+                        
+                        result = db.session.execute(upsert_sql, {
+                            'user_id': user.id,
+                            'period': period,
+                            'chart_data': chart_data_json,
+                            'generated_at': now
+                        })
+                        
+                        returned_row = result.fetchone()
+                        if returned_row:
+                            print(f"✅ UPSERT SUCCESS: id={returned_row[0]}, generated_at={returned_row[1]}")
+                        else:
+                            print(f"⚠️ UPSERT returned no row - this shouldn't happen!")
+                        
+                        db.session.flush()
+                        
+                        print(f"✅ FLUSHED to session for user {user.id}, period {period}")
+                        charts_generated += 1
+                        print(f"✓ Generated chart cache for user {user.id}, period {period}")
+                        
+                    except Exception as upsert_error:
+                        import traceback
+                        print(f"❌ UPSERT FAILED for user {user.id}, period {period}")
+                        print(f"   Error: {str(upsert_error)}")
+                        print(f"   Traceback: {traceback.format_exc()}")
+                        raise  # Re-raise to see in cron logs
                 else:
                     print(f"⚠ No chart data generated for user {user.id}, period {period} - insufficient snapshots")
                     
             except Exception as e:
-                print(f"Error generating chart cache for user {user.id}, period {period}: {str(e)}")
+                import traceback
+                print(f"❌ ERROR generating chart cache for user {user.id}, period {period}: {str(e)}")
+                print(f"   Traceback: {traceback.format_exc()}")
                 continue
     
     print(f"\n=== LEADERBOARD CACHE UPDATE COMPLETE ===")
