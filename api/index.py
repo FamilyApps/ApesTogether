@@ -17485,6 +17485,11 @@ def market_close_cron():
                 
                 db.session.commit()
                 
+                # FIX: Allow Vercel Postgres replicas to sync (50-500ms lag)
+                import time
+                time.sleep(0.5)
+                logger.info("Waited 500ms for cache commit replica sync")
+                
                 results['pipeline_phases'].append('cache_commit_completed')
                 logger.info("✅ PHASE 3 Complete: Cache updates committed successfully")
                 results['cache_committed'] = True
@@ -17501,22 +17506,47 @@ def market_close_cron():
             # PHASE 3.5: VERIFICATION - Confirm S&P 500 data actually persisted
             logger.info("PHASE 3.5: Verifying S&P 500 data persistence...")
             from models import MarketData
+            from sqlalchemy import text
+            import time
             
-            # Force a new query outside the transaction to verify persistence
-            db.session.expire_all()  # Clear any cached objects
+            # FIX: Vercel Postgres uses read replicas with lag (50-500ms)
+            # Solution: Query PRIMARY connection directly + retry with sleep
             
-            verify_sp500 = MarketData.query.filter_by(
-                ticker='SPY_SP500',
-                date=today_et
-            ).first()
+            # Sleep to allow replica sync
+            time.sleep(0.5)
+            logger.info("Waited 500ms for replica sync")
+            
+            # Retry verification 3x with backoff (in case of replica lag)
+            verify_sp500 = None
+            for attempt in range(3):
+                try:
+                    # Use raw SQL on engine to force primary connection
+                    with db.engine.connect() as primary_conn:
+                        result = primary_conn.execute(text("""
+                            SELECT close_price FROM market_data 
+                            WHERE ticker = 'SPY_SP500' AND date = :date
+                        """), {'date': today_et})
+                        row = result.fetchone()
+                        
+                        if row:
+                            verify_sp500 = row[0]
+                            logger.info(f"✅ VERIFIED on PRIMARY (attempt {attempt+1}): S&P 500 data exists for {today_et}: ${float(verify_sp500):.2f}")
+                            break
+                        else:
+                            logger.warning(f"Attempt {attempt+1}: S&P 500 data not yet visible on primary")
+                            if attempt < 2:
+                                time.sleep(0.2 * (attempt + 1))  # Backoff: 200ms, 400ms
+                except Exception as verify_err:
+                    logger.error(f"Verification attempt {attempt+1} error: {verify_err}")
+                    if attempt < 2:
+                        time.sleep(0.2 * (attempt + 1))
             
             if verify_sp500:
-                logger.info(f"✅ VERIFIED: S&P 500 data exists in DB for {today_et}: ${verify_sp500.close_price:.2f}")
                 results['sp500_verification'] = 'SUCCESS'
-                results['sp500_verified_value'] = float(verify_sp500.close_price)
+                results['sp500_verified_value'] = float(verify_sp500)
             else:
-                logger.error(f"❌ VERIFICATION FAILED: S&P 500 data NOT found in DB for {today_et} despite successful commit!")
-                logger.error(f"This indicates a database replication lag or transaction isolation issue")
+                logger.error(f"❌ VERIFICATION FAILED on PRIMARY after 3 attempts: S&P 500 data NOT found for {today_et}")
+                logger.error(f"This indicates a write failure, not just replication lag")
                 results['sp500_verification'] = 'FAILED'
                 results['errors'].append(f"S&P 500 data missing after commit for {today_et}")
             

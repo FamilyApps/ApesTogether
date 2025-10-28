@@ -322,7 +322,11 @@ def _generate_chart_points(
                 'sp500': round(sp500_pct, 2)
             })
     
-    logger.debug(f"Generated {len(chart_data)} chart points")
+    logger.info(f"Generated {len(chart_data)} chart points")
+    if chart_data:
+        dates_generated = [p['date'] for p in chart_data]
+        logger.info(f"Chart dates: FIRST={dates_generated[0]}, LAST={dates_generated[-1]}")
+        logger.info(f"All dates: {dates_generated}")
     return chart_data
 
 

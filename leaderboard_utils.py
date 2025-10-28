@@ -905,7 +905,7 @@ def update_leaderboard_cache(periods=None):
                 chart_data = generate_chart_from_snapshots(user.id, period)
                 
                 if chart_data:
-                    # Update or create chart cache entry
+                    # Delete existing cache and recreate (ensures fresh write)
                     chart_cache = UserPortfolioChartCache.query.filter_by(
                         user_id=user.id, period=period
                     ).first()
@@ -914,28 +914,21 @@ def update_leaderboard_cache(periods=None):
                     now = datetime.now()
                     
                     if chart_cache:
-                        # CRITICAL: Use explicit UPDATE to force database write
-                        from sqlalchemy import update
-                        stmt = update(UserPortfolioChartCache).where(
-                            UserPortfolioChartCache.user_id == user.id,
-                            UserPortfolioChartCache.period == period
-                        ).values(
-                            chart_data=chart_data_json,
-                            generated_at=now
-                        )
-                        db.session.execute(stmt)
+                        # CRITICAL: Delete and recreate to force database write
+                        db.session.delete(chart_cache)
                         db.session.flush()
-                        print(f"Updated existing chart cache for user {user.id}, period {period} at {now}")
-                    else:
-                        chart_cache = UserPortfolioChartCache(
-                            user_id=user.id,
-                            period=period,
-                            chart_data=chart_data_json,
-                            generated_at=now
-                        )
-                        db.session.add(chart_cache)
-                        db.session.flush()
-                        print(f"Created new chart cache for user {user.id}, period {period} at {now}")
+                        print(f"Deleted existing chart cache for user {user.id}, period {period}")
+                    
+                    # Create new cache entry
+                    new_cache = UserPortfolioChartCache(
+                        user_id=user.id,
+                        period=period,
+                        chart_data=chart_data_json,
+                        generated_at=now
+                    )
+                    db.session.add(new_cache)
+                    db.session.flush()
+                    print(f"Created fresh chart cache for user {user.id}, period {period} at {now}")
                     
                     charts_generated += 1
                     print(f"✓ Generated chart cache for user {user.id}, period {period}")
