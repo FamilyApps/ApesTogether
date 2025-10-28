@@ -5822,6 +5822,40 @@ def update_user_caches():
         }), 500
 
 
+@app.route('/admin/fix-api-log-column')
+@login_required
+def fix_api_log_column():
+    """
+    Fix the alpha_vantage_api_log.symbol column size (VARCHAR(10) -> VARCHAR(50))
+    Usage: /admin/fix-api-log-column
+    """
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from sqlalchemy import text
+        
+        # Run the ALTER TABLE command
+        sql = text("ALTER TABLE alpha_vantage_api_log ALTER COLUMN symbol TYPE VARCHAR(50)")
+        db.session.execute(sql)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Successfully increased symbol column to VARCHAR(50)',
+            'sql_executed': 'ALTER TABLE alpha_vantage_api_log ALTER COLUMN symbol TYPE VARCHAR(50)'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+
 @app.route('/admin/check-api-status')
 @login_required
 def check_api_status():
