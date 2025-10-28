@@ -261,6 +261,13 @@ def _generate_chart_points(
         )
     ).order_by(MarketData.date.asc()).all()
     
+    # DEBUG: Log what dates we actually got
+    if sp500_data:
+        logger.info(f"📊 S&P 500 query returned {len(sp500_data)} records from {sp500_data[0].date} to {sp500_data[-1].date}")
+        logger.info(f"📊 Query params: period_start={period_start}, period_end={period_end}")
+    else:
+        logger.warning(f"⚠️ S&P 500 query returned NO DATA for period {period_start} to {period_end}")
+    
     # Build date-to-SP500-price map
     sp500_map = {s.date: float(s.close_price) for s in sp500_data}
     
