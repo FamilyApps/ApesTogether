@@ -5833,12 +5833,15 @@ def fix_api_log_column():
         return jsonify({'error': 'Admin access required'}), 403
     
     try:
-        from sqlalchemy import text
+        # Use raw connection to avoid session issues
+        connection = db.engine.raw_connection()
+        cursor = connection.cursor()
         
         # Run the ALTER TABLE command
-        sql = text("ALTER TABLE alpha_vantage_api_log ALTER COLUMN symbol TYPE VARCHAR(50)")
-        db.session.execute(sql)
-        db.session.commit()
+        cursor.execute("ALTER TABLE alpha_vantage_api_log ALTER COLUMN symbol TYPE VARCHAR(50)")
+        connection.commit()
+        cursor.close()
+        connection.close()
         
         return jsonify({
             'success': True,
@@ -5847,7 +5850,6 @@ def fix_api_log_column():
         })
         
     except Exception as e:
-        db.session.rollback()
         import traceback
         return jsonify({
             'success': False,

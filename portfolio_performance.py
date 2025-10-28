@@ -140,19 +140,20 @@ class PortfolioPerformanceCalculator:
                 logger.info(f"📡 Bulk Quotes API Response Keys: {list(data.keys())}")
                 logger.debug(f"📡 Full Bulk Quotes API Response: {data}")
                 
-                # Log the bulk quotes API call
-                try:
-                    from models import AlphaVantageAPILog, db
-                    success = 'data' in data or 'Global Quote' in data
-                    api_log = AlphaVantageAPILog(
-                        endpoint='REALTIME_BULK_QUOTES',
-                        symbol=f"BULK_{len(chunk)}_TICKERS",
-                        response_status='success' if success else 'error',
-                        timestamp=current_time
-                    )
-                    db.session.add(api_log)
-                except Exception as log_error:
-                    logger.error(f"Failed to log bulk quotes API call: {log_error}")
+                # TODO: Re-enable API logging after fixing column size (symbol VARCHAR(10) -> VARCHAR(50))
+                # Log the bulk quotes API call (TEMPORARILY DISABLED due to column size issue)
+                # try:
+                #     from models import AlphaVantageAPILog, db
+                #     success = 'data' in data or 'Global Quote' in data
+                #     api_log = AlphaVantageAPILog(
+                #         endpoint='REALTIME_BULK_QUOTES',
+                #         symbol=f"BULK_{len(chunk)}_TICKERS",
+                #         response_status='success' if success else 'error',
+                #         timestamp=current_time
+                #     )
+                #     db.session.add(api_log)
+                # except Exception as log_error:
+                #     logger.warning(f"⚠️ API logging failed (non-critical): {log_error}")
                 
                 # Parse bulk quotes response
                 if 'data' in data:
