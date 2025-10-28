@@ -913,6 +913,9 @@ def update_leaderboard_cache(periods=None):
                     if chart_cache:
                         chart_cache.chart_data = json.dumps(chart_data)
                         chart_cache.generated_at = datetime.now()
+                        # CRITICAL: Mark object as modified to ensure SQLAlchemy tracks the change
+                        db.session.add(chart_cache)
+                        print(f"Updated existing chart cache for user {user.id}, period {period}")
                     else:
                         chart_cache = UserPortfolioChartCache(
                             user_id=user.id,
@@ -921,6 +924,10 @@ def update_leaderboard_cache(periods=None):
                             generated_at=datetime.now()
                         )
                         db.session.add(chart_cache)
+                        print(f"Created new chart cache for user {user.id}, period {period}")
+                    
+                    # Flush to ensure it's written to session
+                    db.session.flush()
                     
                     charts_generated += 1
                     print(f"✓ Generated chart cache for user {user.id}, period {period}")
