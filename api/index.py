@@ -4094,25 +4094,33 @@ def inspect_chart_cache(username, period):
     
     try:
         from models import User, UserPortfolioChartCache
+        from sqlalchemy import text
         import json
         
-        # CRITICAL: Expire session to force fresh query from database
-        db.session.expire_all()
+        # FIX: Route to PRIMARY to bypass Vercel Postgres replica lag
+        # Regular ORM queries may hit stale replicas with 50-500ms lag
         
         user = User.query.filter_by(username=username).first()
         if not user:
             return jsonify({'error': 'User not found'}), 404
         
         period_upper = period.upper()
-        chart_cache = UserPortfolioChartCache.query.filter_by(
-            user_id=user.id,
-            period=period_upper
-        ).first()
         
-        if not chart_cache:
-            return jsonify({'error': 'No cache found for this user/period'}), 404
+        # Query PRIMARY directly for fresh data
+        with db.engine.connect() as primary_conn:
+            result = primary_conn.execute(text("""
+                SELECT chart_data, generated_at 
+                FROM user_portfolio_chart_cache 
+                WHERE user_id = :user_id AND period = :period
+            """), {'user_id': user.id, 'period': period_upper})
+            row = result.fetchone()
+            
+            if not row:
+                return jsonify({'error': 'No cache found for this user/period'}), 404
+            
+            chart_data_json, generated_at = row[0], row[1]
         
-        cached_data = json.loads(chart_cache.chart_data)
+        cached_data = json.loads(chart_data_json)
         
         # CRITICAL: Show ALL labels to trace exactly what gets rendered
         all_labels = cached_data.get('labels', [])
@@ -4120,7 +4128,8 @@ def inspect_chart_cache(username, period):
         results = {
             'user': username,
             'period': period_upper,
-            'generated_at': chart_cache.generated_at.isoformat() if chart_cache.generated_at else None,
+            'generated_at': generated_at.isoformat() if generated_at else None,
+            'queried_from': 'PRIMARY',  # Indicate we bypassed replicas
             'cache_structure': {
                 'has_labels': 'labels' in cached_data,
                 'labels_count': len(all_labels),
