@@ -4366,6 +4366,76 @@ def diagnose_full_chart_flow(username, period):
             'partial_results': results
         }), 500
 
+@app.route('/admin/fix-chart-cache-constraint')
+@login_required
+def fix_chart_cache_constraint():
+    """Check and add missing unique constraint for chart cache UPSERT"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    from sqlalchemy import text
+    
+    results = {
+        'timestamp': datetime.now().isoformat(),
+        'actions': []
+    }
+    
+    try:
+        with db.engine.connect() as conn:
+            # Check if constraint exists
+            check_sql = text("""
+                SELECT con.conname
+                FROM pg_constraint con
+                JOIN pg_class rel ON rel.oid = con.conrelid
+                WHERE rel.relname = 'user_portfolio_chart_cache' 
+                  AND con.contype = 'u'
+            """)
+            
+            existing_constraints = conn.execute(check_sql).fetchall()
+            constraint_names = [row[0] for row in existing_constraints]
+            
+            results['actions'].append({
+                'step': 'Check existing constraints',
+                'constraints_found': constraint_names,
+                'has_unique_constraint': 'unique_user_period_chart' in constraint_names
+            })
+            
+            if 'unique_user_period_chart' not in constraint_names:
+                # Add the constraint
+                with db.engine.begin() as trans_conn:
+                    add_constraint_sql = text("""
+                        ALTER TABLE user_portfolio_chart_cache
+                        ADD CONSTRAINT unique_user_period_chart UNIQUE (user_id, period)
+                    """)
+                    
+                    trans_conn.execute(add_constraint_sql)
+                    
+                    results['actions'].append({
+                        'step': 'Add constraint',
+                        'status': 'SUCCESS',
+                        'message': 'Added unique_user_period_chart constraint'
+                    })
+                    
+                results['fix_applied'] = True
+                results['message'] = '✅ Constraint added! Now run market-close cron and UPSERT will work.'
+            else:
+                results['fix_applied'] = False
+                results['message'] = '✅ Constraint already exists - UPSERT should be working.'
+        
+        return jsonify({
+            'success': True,
+            'results': results
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc(),
+            'partial_results': results
+        }), 500
+
 @app.route('/admin/backfill-sp500-data', methods=['GET', 'POST'])
 @login_required
 def backfill_sp500_data():
