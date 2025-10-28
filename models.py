@@ -193,7 +193,7 @@ class AlphaVantageAPILog(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     endpoint = db.Column(db.String(100), nullable=False)  # API endpoint called
-    symbol = db.Column(db.String(10), nullable=True)  # Stock symbol if applicable
+    symbol = db.Column(db.String(50), nullable=True)  # Stock symbol or batch identifier (e.g., BATCH_23_TICKERS)
     timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     response_status = db.Column(db.String(20), nullable=False)  # 'success', 'error', 'rate_limited'
     response_time_ms = db.Column(db.Integer, nullable=True)  # Response time in milliseconds

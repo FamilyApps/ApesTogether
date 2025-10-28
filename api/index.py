@@ -5822,6 +5822,76 @@ def update_user_caches():
         }), 500
 
 
+@app.route('/admin/check-api-status')
+@login_required
+def check_api_status():
+    """
+    Check recent Alpha Vantage API calls and their success/failure status.
+    Usage: /admin/check-api-status
+    """
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import AlphaVantageAPILog
+        from datetime import datetime, timedelta
+        
+        # Get last 50 API calls
+        recent_calls = AlphaVantageAPILog.query.order_by(
+            AlphaVantageAPILog.timestamp.desc()
+        ).limit(50).all()
+        
+        # Get today's calls
+        today = datetime.now().date()
+        today_start = datetime.combine(today, datetime.min.time())
+        today_calls = AlphaVantageAPILog.query.filter(
+            AlphaVantageAPILog.timestamp >= today_start
+        ).all()
+        
+        # Count by status
+        today_success = sum(1 for c in today_calls if c.response_status == 'success')
+        today_error = sum(1 for c in today_calls if c.response_status == 'error')
+        
+        # Format recent calls
+        calls_data = []
+        for call in recent_calls[:20]:  # Show last 20
+            calls_data.append({
+                'timestamp': str(call.timestamp),
+                'endpoint': call.endpoint,
+                'symbol': call.symbol,
+                'status': call.response_status,
+                'response_time_ms': call.response_time_ms
+            })
+        
+        # Check if batch API is failing
+        recent_batch_calls = [c for c in recent_calls if c.endpoint == 'BATCH_STOCK_QUOTES']
+        batch_failing = all(c.response_status == 'error' for c in recent_batch_calls[:5]) if recent_batch_calls else False
+        
+        return jsonify({
+            'success': True,
+            'today_stats': {
+                'total_calls': len(today_calls),
+                'success': today_success,
+                'error': today_error,
+                'success_rate': f"{(today_success / len(today_calls) * 100):.1f}%" if today_calls else "N/A"
+            },
+            'batch_api_status': {
+                'appears_broken': batch_failing,
+                'recent_batch_calls': len(recent_batch_calls),
+                'message': 'BATCH_STOCK_QUOTES API deprecated - using fallback' if batch_failing else 'Working normally'
+            },
+            'recent_calls': calls_data
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+
 @app.route('/admin/check-todays-snapshot')
 @login_required
 def check_todays_snapshot():

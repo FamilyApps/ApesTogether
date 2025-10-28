@@ -129,6 +129,7 @@ class PortfolioPerformanceCalculator:
             for i in range(0, len(uncached_tickers), chunk_size):
                 chunk = uncached_tickers[i:i + chunk_size]
                 symbols_str = ','.join(chunk)
+                initial_result_count = len(result)  # Track how many we had before this chunk
                 
                 url = f'https://www.alphavantage.co/query?function=BATCH_STOCK_QUOTES&symbols={symbols_str}&apikey={api_key}'
                 response = requests.get(url, timeout=10)
@@ -168,6 +169,26 @@ class PortfolioPerformanceCalculator:
                     logger.info(f"✅ Batch API: Fetched {len(chunk)} tickers in 1 call")
                 else:
                     logger.warning(f"❌ Batch API failed - Response: {data}")
+                    logger.info(f"🔄 Falling back to individual GLOBAL_QUOTE calls for {len(chunk)} tickers")
+                    
+                    # FALLBACK: Use individual GLOBAL_QUOTE calls
+                    for ticker in chunk:
+                        try:
+                            quote_url = f'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={api_key}'
+                            quote_response = requests.get(quote_url, timeout=5)
+                            quote_data = quote_response.json()
+                            
+                            if 'Global Quote' in quote_data:
+                                price_str = quote_data['Global Quote'].get('05. price', '0')
+                                price = float(price_str)
+                                if price > 0:
+                                    stock_price_cache[ticker] = {'price': price, 'timestamp': current_time}
+                                    result[ticker] = price
+                                    logger.debug(f"✓ Individual fetch: {ticker} = ${price}")
+                        except Exception as e:
+                            logger.error(f"Failed to fetch {ticker} individually: {e}")
+                    
+                    logger.info(f"✅ Fallback complete: Fetched {len(result) - initial_result_count} of {len(chunk)} tickers")
             
             return result
             
