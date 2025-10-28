@@ -905,31 +905,32 @@ def update_leaderboard_cache(periods=None):
                 chart_data = generate_chart_from_snapshots(user.id, period)
                 
                 if chart_data:
-                    # Delete existing cache and recreate (ensures fresh write)
-                    chart_cache = UserPortfolioChartCache.query.filter_by(
-                        user_id=user.id, period=period
-                    ).first()
+                    # CRITICAL: Use PostgreSQL UPSERT to atomically handle update/insert
+                    # DELETE+INSERT with UNIQUE constraints can cause race conditions
+                    from sqlalchemy import text
                     
                     chart_data_json = json.dumps(chart_data)
                     now = datetime.now()
                     
-                    if chart_cache:
-                        # CRITICAL: Delete and recreate to force database write
-                        db.session.delete(chart_cache)
-                        db.session.flush()
-                        print(f"Deleted existing chart cache for user {user.id}, period {period}")
+                    # Use ON CONFLICT to update existing or insert new
+                    upsert_sql = text("""
+                        INSERT INTO user_portfolio_chart_cache (user_id, period, chart_data, generated_at)
+                        VALUES (:user_id, :period, :chart_data, :generated_at)
+                        ON CONFLICT (user_id, period)
+                        DO UPDATE SET
+                            chart_data = EXCLUDED.chart_data,
+                            generated_at = EXCLUDED.generated_at
+                    """)
                     
-                    # Create new cache entry
-                    new_cache = UserPortfolioChartCache(
-                        user_id=user.id,
-                        period=period,
-                        chart_data=chart_data_json,
-                        generated_at=now
-                    )
-                    db.session.add(new_cache)
+                    db.session.execute(upsert_sql, {
+                        'user_id': user.id,
+                        'period': period,
+                        'chart_data': chart_data_json,
+                        'generated_at': now
+                    })
                     db.session.flush()
-                    print(f"Created fresh chart cache for user {user.id}, period {period} at {now}")
                     
+                    print(f"UPSERTED chart cache for user {user.id}, period {period} at {now}")
                     charts_generated += 1
                     print(f"✓ Generated chart cache for user {user.id}, period {period}")
                 else:
