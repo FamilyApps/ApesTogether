@@ -910,24 +910,32 @@ def update_leaderboard_cache(periods=None):
                         user_id=user.id, period=period
                     ).first()
                     
+                    chart_data_json = json.dumps(chart_data)
+                    now = datetime.now()
+                    
                     if chart_cache:
-                        chart_cache.chart_data = json.dumps(chart_data)
-                        chart_cache.generated_at = datetime.now()
-                        # CRITICAL: Mark object as modified to ensure SQLAlchemy tracks the change
-                        db.session.add(chart_cache)
-                        print(f"Updated existing chart cache for user {user.id}, period {period}")
+                        # CRITICAL: Use explicit UPDATE to force database write
+                        from sqlalchemy import update
+                        stmt = update(UserPortfolioChartCache).where(
+                            UserPortfolioChartCache.user_id == user.id,
+                            UserPortfolioChartCache.period == period
+                        ).values(
+                            chart_data=chart_data_json,
+                            generated_at=now
+                        )
+                        db.session.execute(stmt)
+                        db.session.flush()
+                        print(f"Updated existing chart cache for user {user.id}, period {period} at {now}")
                     else:
                         chart_cache = UserPortfolioChartCache(
                             user_id=user.id,
                             period=period,
-                            chart_data=json.dumps(chart_data),
-                            generated_at=datetime.now()
+                            chart_data=chart_data_json,
+                            generated_at=now
                         )
                         db.session.add(chart_cache)
-                        print(f"Created new chart cache for user {user.id}, period {period}")
-                    
-                    # Flush to ensure it's written to session
-                    db.session.flush()
+                        db.session.flush()
+                        print(f"Created new chart cache for user {user.id}, period {period} at {now}")
                     
                     charts_generated += 1
                     print(f"✓ Generated chart cache for user {user.id}, period {period}")

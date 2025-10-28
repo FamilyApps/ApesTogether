@@ -4096,6 +4096,9 @@ def inspect_chart_cache(username, period):
         from models import User, UserPortfolioChartCache
         import json
         
+        # CRITICAL: Expire session to force fresh query from database
+        db.session.expire_all()
+        
         user = User.query.filter_by(username=username).first()
         if not user:
             return jsonify({'error': 'User not found'}), 404
