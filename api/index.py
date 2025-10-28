@@ -14657,15 +14657,24 @@ def get_portfolio_performance(period):
         
         period_upper = period.upper()
         
+        # CRITICAL FIX: Query PRIMARY to bypass Vercel Postgres replica lag
         # Try to use pre-rendered chart data for leaderboard users (much faster!)
-        chart_cache = UserPortfolioChartCache.query.filter_by(
-            user_id=user_id, period=period_upper
-        ).first()
+        from sqlalchemy import text
+        chart_cache_data = None
+        with db.engine.connect() as primary_conn:
+            result = primary_conn.execute(text("""
+                SELECT chart_data
+                FROM user_portfolio_chart_cache
+                WHERE user_id = :user_id AND period = :period
+            """), {'user_id': user_id, 'period': period_upper})
+            row = result.fetchone()
+            if row:
+                chart_cache_data = row[0]
         
-        if chart_cache:
+        if chart_cache_data:
             try:
                 # Convert Chart.js format to dashboard format
-                cached_data = json.loads(chart_cache.chart_data)
+                cached_data = json.loads(chart_cache_data)
                 
                 # Extract performance percentages from Chart.js data
                 datasets = cached_data.get('datasets', [])
