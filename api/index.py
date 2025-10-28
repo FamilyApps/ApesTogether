@@ -5939,10 +5939,13 @@ def check_todays_snapshot():
         return jsonify({'error': 'Admin access required'}), 403
     
     try:
-        from datetime import date
+        from datetime import datetime
+        import pytz
         from models import PortfolioSnapshot
         
-        today = date.today()
+        # Use ET timezone like market close cron does
+        et_tz = pytz.timezone('America/New_York')
+        today = datetime.now(et_tz).date()
         
         users = User.query.all()
         results = []
