@@ -4170,6 +4170,288 @@ def inspect_chart_cache(username, period):
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/diagnose-atomic-persistence/<username>/<period>')
+@login_required
+def diagnose_atomic_persistence(username, period):
+    """DEEP DIAGNOSTIC: Test transaction atomicity, replica lag, constraints, and code version"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    from models import User, UserPortfolioChartCache
+    from sqlalchemy import text, inspect
+    import json
+    import time
+    
+    diagnostics = {
+        'timestamp': datetime.now().isoformat(),
+        'username': username,
+        'period': period.upper(),
+        'tests': []
+    }
+    
+    try:
+        # Find user
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': f'User {username} not found'}), 404
+        
+        diagnostics['user_id'] = user.id
+        
+        # TEST 1: Code Version Detection
+        # Check if Phase 2.4 code is deployed by looking for unique table or function
+        test1 = {
+            'test': 'Code Version Detection',
+            'description': 'Check if new Phase 2.4 code is deployed',
+            'indicators': {}
+        }
+        
+        # Look for the Phase 2.4 commit logic in recent cron runs
+        # This is indirect - we can't directly check code version, but we can check side effects
+        with db.engine.connect() as conn:
+            # Check if there are any recent cache entries (within last hour)
+            recent_cache = conn.execute(text("""
+                SELECT generated_at, period 
+                FROM user_portfolio_chart_cache 
+                WHERE user_id = :user_id 
+                AND generated_at > NOW() - INTERVAL '1 hour'
+                ORDER BY generated_at DESC
+            """), {'user_id': user.id}).fetchall()
+            
+            test1['indicators']['recent_cache_updates'] = len(recent_cache)
+            test1['indicators']['most_recent_update'] = recent_cache[0][0].isoformat() if recent_cache else None
+            test1['status'] = 'INFO'
+        
+        diagnostics['tests'].append(test1)
+        
+        # TEST 2: Primary vs Replica Lag
+        test2 = {
+            'test': 'Replication Lag Measurement',
+            'description': 'Compare primary vs replica reads',
+            'results': {}
+        }
+        
+        # Read from PRIMARY (force)
+        with db.engine.connect().execution_options(postgresql_readonly=False) as primary_conn:
+            primary_result = primary_conn.execute(text("""
+                SELECT id, chart_data, generated_at 
+                FROM user_portfolio_chart_cache 
+                WHERE user_id = :user_id AND period = :period
+            """), {'user_id': user.id, 'period': period.upper()}).fetchone()
+            
+            if primary_result:
+                primary_data = json.loads(primary_result[1])
+                test2['results']['primary'] = {
+                    'id': primary_result[0],
+                    'generated_at': primary_result[2].isoformat(),
+                    'labels_count': len(primary_data.get('labels', [])),
+                    'last_label': primary_data.get('labels', [])[-1] if primary_data.get('labels') else None
+                }
+            else:
+                test2['results']['primary'] = {'status': 'NOT_FOUND'}
+        
+        # Read from any connection (could be replica)
+        orm_cache = UserPortfolioChartCache.query.filter_by(
+            user_id=user.id, period=period.upper()
+        ).first()
+        
+        if orm_cache:
+            orm_data = json.loads(orm_cache.chart_data)
+            test2['results']['orm_query'] = {
+                'id': orm_cache.id,
+                'generated_at': orm_cache.generated_at.isoformat(),
+                'labels_count': len(orm_data.get('labels', [])),
+                'last_label': orm_data.get('labels', [])[-1] if orm_data.get('labels') else None
+            }
+        else:
+            test2['results']['orm_query'] = {'status': 'NOT_FOUND'}
+        
+        # Compare timestamps
+        if primary_result and orm_cache:
+            lag_seconds = (primary_result[2] - orm_cache.generated_at).total_seconds()
+            test2['results']['lag_seconds'] = abs(lag_seconds)
+            test2['results']['mismatch'] = primary_result[0] != orm_cache.id
+            test2['status'] = 'MISMATCH' if test2['results']['mismatch'] else 'OK'
+        else:
+            test2['status'] = 'INCOMPLETE'
+        
+        diagnostics['tests'].append(test2)
+        
+        # TEST 3: Unique Constraint Verification
+        test3 = {
+            'test': 'Unique Constraint Check',
+            'description': 'Verify unique_user_period_chart constraint exists',
+            'results': {}
+        }
+        
+        with db.engine.connect() as conn:
+            constraint_check = conn.execute(text("""
+                SELECT conname, contype, pg_get_constraintdef(oid) as definition
+                FROM pg_constraint
+                WHERE conrelid = 'user_portfolio_chart_cache'::regclass
+                AND conname = 'unique_user_period_chart'
+            """)).fetchone()
+            
+            if constraint_check:
+                test3['results'] = {
+                    'exists': True,
+                    'name': constraint_check[0],
+                    'type': constraint_check[1],
+                    'definition': constraint_check[2]
+                }
+                test3['status'] = 'OK'
+            else:
+                test3['results'] = {'exists': False}
+                test3['status'] = 'MISSING - UPSERT WILL FAIL'
+        
+        diagnostics['tests'].append(test3)
+        
+        # TEST 4: Transaction Isolation Level
+        test4 = {
+            'test': 'Transaction Isolation',
+            'description': 'Check current transaction isolation level',
+            'results': {}
+        }
+        
+        with db.engine.connect() as conn:
+            isolation = conn.execute(text("SHOW transaction_isolation")).fetchone()
+            test4['results']['isolation_level'] = isolation[0] if isolation else 'unknown'
+            test4['status'] = 'INFO'
+        
+        diagnostics['tests'].append(test4)
+        
+        # TEST 5: Real-time UPSERT Verification
+        test5 = {
+            'test': 'Real-time UPSERT Test',
+            'description': 'Perform test UPSERT and read back immediately',
+            'results': {}
+        }
+        
+        test_period = 'TEST_DIAGNOSTIC'
+        test_data = json.dumps({
+            'labels': ['Test 1', 'Test 2'],
+            'datasets': [{'data': [1, 2]}],
+            'test_timestamp': datetime.now().isoformat()
+        })
+        
+        try:
+            # Perform UPSERT
+            with db.engine.begin() as conn:  # Explicit transaction
+                conn.execute(text("""
+                    INSERT INTO user_portfolio_chart_cache (user_id, period, chart_data, generated_at)
+                    VALUES (:user_id, :period, :chart_data, :generated_at)
+                    ON CONFLICT (user_id, period)
+                    DO UPDATE SET
+                        chart_data = EXCLUDED.chart_data,
+                        generated_at = EXCLUDED.generated_at
+                    RETURNING id, generated_at
+                """), {
+                    'user_id': user.id,
+                    'period': test_period,
+                    'chart_data': test_data,
+                    'generated_at': datetime.now()
+                })
+                # Transaction commits automatically at end of block
+            
+            test5['results']['upsert'] = 'SUCCESS'
+            
+            # Wait for replica sync
+            time.sleep(0.1)
+            
+            # Read back from PRIMARY
+            with db.engine.connect() as conn:
+                readback = conn.execute(text("""
+                    SELECT id, generated_at, chart_data
+                    FROM user_portfolio_chart_cache
+                    WHERE user_id = :user_id AND period = :period
+                """), {'user_id': user.id, 'period': test_period}).fetchone()
+                
+                if readback:
+                    test5['results']['readback'] = {
+                        'id': readback[0],
+                        'generated_at': readback[1].isoformat(),
+                        'data_match': test_data == readback[2]
+                    }
+                    test5['status'] = 'SUCCESS - UPSERT PERSISTED'
+                else:
+                    test5['results']['readback'] = 'NOT_FOUND'
+                    test5['status'] = 'FAILED - DATA DISAPPEARED'
+            
+            # Cleanup
+            with db.engine.begin() as conn:
+                conn.execute(text("""
+                    DELETE FROM user_portfolio_chart_cache
+                    WHERE user_id = :user_id AND period = :period
+                """), {'user_id': user.id, 'period': test_period})
+        
+        except Exception as upsert_err:
+            test5['results']['error'] = str(upsert_err)
+            test5['status'] = 'UPSERT FAILED'
+        
+        diagnostics['tests'].append(test5)
+        
+        # TEST 6: Check for Active Transactions or Locks
+        test6 = {
+            'test': 'Lock and Transaction Check',
+            'description': 'Check for blocking locks or long transactions',
+            'results': {}
+        }
+        
+        with db.engine.connect() as conn:
+            locks = conn.execute(text("""
+                SELECT pid, state, wait_event_type, wait_event, query
+                FROM pg_stat_activity
+                WHERE datname = current_database()
+                AND state != 'idle'
+                AND pid != pg_backend_pid()
+                LIMIT 10
+            """)).fetchall()
+            
+            test6['results']['active_connections'] = len(locks)
+            test6['results']['connections'] = [
+                {
+                    'pid': lock[0],
+                    'state': lock[1],
+                    'wait_type': lock[2],
+                    'wait_event': lock[3],
+                    'query_preview': lock[4][:100] if lock[4] else None
+                }
+                for lock in locks
+            ]
+            test6['status'] = 'INFO'
+        
+        diagnostics['tests'].append(test6)
+        
+        # SUMMARY
+        critical_issues = []
+        warnings = []
+        
+        for test in diagnostics['tests']:
+            if test.get('status') in ['FAILED', 'MISSING - UPSERT WILL FAIL', 'FAILED - DATA DISAPPEARED']:
+                critical_issues.append(f"{test['test']}: {test.get('status')}")
+            elif test.get('status') == 'MISMATCH':
+                warnings.append(f"{test['test']}: Replica lag detected")
+        
+        diagnostics['summary'] = {
+            'critical_issues': critical_issues,
+            'warnings': warnings,
+            'overall_status': 'CRITICAL' if critical_issues else ('WARNING' if warnings else 'HEALTHY')
+        }
+        
+        return jsonify({
+            'success': True,
+            'diagnostics': diagnostics
+        })
+    
+    except Exception as e:
+        import traceback
+        logger.error(f"Atomic persistence diagnostic error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc(),
+            'partial_diagnostics': diagnostics
+        }), 500
+
 @app.route('/admin/diagnose-full-chart-flow/<username>/<period>')
 @login_required
 def diagnose_full_chart_flow(username, period):
