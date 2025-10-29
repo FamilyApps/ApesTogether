@@ -17670,7 +17670,12 @@ def market_open_cron():
 
 @app.route('/api/cron/market-close', methods=['POST', 'GET'])
 def market_close_cron():
-    """Market close cron job endpoint - creates EOD snapshots and updates leaderboards"""
+    """Market close cron job endpoint - creates EOD snapshots and updates leaderboards
+    
+    VERSION: 2024-10-28-PHASE-2.4-FIX
+    This version includes Phase 2.4 commit BEFORE Phase 2.5 HTML rendering
+    to prevent transaction rollback from destroying chart cache UPSERTs.
+    """
     try:
         # Verify authorization token
         auth_header = request.headers.get('Authorization', '')
