@@ -17672,10 +17672,13 @@ def market_open_cron():
 def market_close_cron():
     """Market close cron job endpoint - creates EOD snapshots and updates leaderboards
     
-    VERSION: 2024-10-28-PHASE-2.4-FIX
+    VERSION: 2024-10-28-PHASE-2.4-FIX-v2
     This version includes Phase 2.4 commit BEFORE Phase 2.5 HTML rendering
     to prevent transaction rollback from destroying chart cache UPSERTs.
     """
+    # Force cache invalidation marker
+    _rebuild_marker = os.environ.get('VERCEL_DEPLOYMENT_ID', 'local')
+    
     try:
         # Verify authorization token
         auth_header = request.headers.get('Authorization', '')
