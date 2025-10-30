@@ -7,6 +7,11 @@ import sys
 # Add the current directory to the path so we can import index
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# FORCE REBUILD: Print version info to trigger function bundle refresh
+print(f"🔄 VERCEL BUILD INFO - Commit: {os.environ.get('VERCEL_GIT_COMMIT_SHA', 'UNKNOWN')}")
+print(f"🔄 Deployment ID: {os.environ.get('VERCEL_DEPLOYMENT_ID', 'UNKNOWN')}")
+print(f"🔄 Environment: {os.environ.get('VERCEL_ENV', 'UNKNOWN')}")
+
 # Now import the app from index.py
 error_info = None
 try:

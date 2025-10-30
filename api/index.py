@@ -17776,6 +17776,11 @@ def market_close_cron():
     # Force cache invalidation marker
     _rebuild_marker = os.environ.get('VERCEL_DEPLOYMENT_ID', 'local')
     
+    # LOG DEPLOYMENT VERSION for debugging
+    commit_sha = os.environ.get('VERCEL_GIT_COMMIT_SHA', 'UNKNOWN')
+    logger.info(f"🔄 CRON DEPLOYMENT VERSION - Commit SHA: {commit_sha}")
+    logger.info(f"🔄 Deployment ID: {_rebuild_marker}")
+    
     try:
         # Verify authorization token
         auth_header = request.headers.get('Authorization', '')
@@ -18246,30 +18251,38 @@ def market_close_cron():
             # Check if core data was committed before failure
             if results.get('core_data_committed'):
                 logger.info("✅ Core data (snapshots + S&P 500) is safe despite failure")
-                return jsonify({
+                response = jsonify({
                     'success': True,  # Partial success - core data saved
                     'partial': True,
                     'message': 'Core data saved successfully, but cache updates failed',
                     'results': results,
                     'error': error_msg
-                }), 200
+                })
+                response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+                return response, 200
             else:
-                return jsonify({
+                response = jsonify({
                     'success': False,
                     'message': 'Market close pipeline failed - no data saved',
                     'results': results,
                     'error': error_msg
-                }), 500
+                })
+                response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+                return response, 500
         
-        return jsonify({
+        response = jsonify({
             'success': True,
             'message': 'Atomic market close pipeline completed successfully',
             'results': results
-        }), 200
+        })
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        return response, 200
     
     except Exception as e:
         logger.error(f"Unexpected error in market close: {str(e)}")
-        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+        error_response = jsonify({'error': f'Unexpected error: {str(e)}'})
+        error_response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        return error_response, 500
 
 @app.route('/admin/trigger-market-close-backfill', methods=['GET', 'POST'])
 @login_required
