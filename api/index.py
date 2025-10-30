@@ -18026,74 +18026,107 @@ def market_close_cron():
                 results['pipeline_phases'].append('leaderboard_completed')
                 logger.info(f"PHASE 2 Complete: {updated_count} leaderboard entries updated")
                 
-                # PHASE 2.25: Update Portfolio Stats (unique stocks, trades/week, cap mix, industry mix, subscribers)
-                logger.info("PHASE 2.25: Updating portfolio stats for all users...")
-                results['pipeline_phases'].append('portfolio_stats_started')
+                # === CRITICAL DEBUG: Entry point for Phase 2.25 ===
+                logger.info("="*80)
+                logger.info("🔍 REACHED LINE 18029 - ABOUT TO START PHASE 2.25")
+                logger.info("="*80)
                 
-                try:
-                    from leaderboard_utils import calculate_user_portfolio_stats
-                    from models import UserPortfolioStats
+                # PHASE 2.25: Update Portfolio Stats (unique stocks, trades/week, cap mix, industry mix, subscribers)
+                # DIAGNOSTIC: Set to False to skip Phase 2.25 and test if Phase 2.4 runs without it
+                ENABLE_PHASE_2_25 = True  # Change to False for testing
+                
+                if ENABLE_PHASE_2_25:
+                    logger.info("📊 PHASE 2.25: Updating portfolio stats for all users...")
+                    logger.info(f"Processing {len(users)} users for portfolio stats")
+                    results['pipeline_phases'].append('portfolio_stats_started')
                     
-                    stats_updated = 0
-                    for user in users:
-                        try:
-                            # Calculate all stats for this user
-                            stats = calculate_user_portfolio_stats(user.id)
-                            
-                            # Find or create UserPortfolioStats entry
-                            user_stats = UserPortfolioStats.query.filter_by(user_id=user.id).first()
-                            if not user_stats:
-                                user_stats = UserPortfolioStats(user_id=user.id)
-                                db.session.add(user_stats)
-                            
-                            # Update all fields
-                            user_stats.unique_stocks_count = stats['unique_stocks_count']
-                            user_stats.avg_trades_per_week = stats['avg_trades_per_week']
-                            user_stats.total_trades = stats['total_trades']
-                            user_stats.large_cap_percent = stats['large_cap_percent']
-                            user_stats.small_cap_percent = stats['small_cap_percent']
-                            user_stats.industry_mix = stats['industry_mix']
-                            user_stats.subscriber_count = stats['subscriber_count']
-                            user_stats.last_updated = stats['last_updated']
-                            
-                            stats_updated += 1
-                            logger.info(f"Updated portfolio stats for user {user.id} ({user.username})")
-                            
-                        except Exception as e:
-                            error_msg = f"Error updating stats for user {user.id}: {str(e)}"
-                            results['errors'].append(error_msg)
-                            logger.error(error_msg)
-                            # Continue processing other users
-                    
-                    results['portfolio_stats_updated'] = stats_updated
-                    results['pipeline_phases'].append('portfolio_stats_completed')
-                    logger.info(f"PHASE 2.25 Complete: {stats_updated} user portfolio stats updated")
-                    
-                except Exception as e:
-                    error_msg = f"Portfolio stats update error: {str(e)}"
-                    results['errors'].append(error_msg)
-                    logger.warning(error_msg)
-                    # Non-critical - continue with pipeline
+                    try:
+                        logger.info("Importing calculate_user_portfolio_stats...")
+                        from leaderboard_utils import calculate_user_portfolio_stats
+                        from models import UserPortfolioStats
+                        logger.info("Imports successful")
+                        
+                        stats_updated = 0
+                        for user in users:
+                            logger.info(f"Calculating stats for user {user.id} ({user.username})...")
+                            try:
+                                # Calculate all stats for this user
+                                stats = calculate_user_portfolio_stats(user.id)
+                                
+                                # Find or create UserPortfolioStats entry
+                                user_stats = UserPortfolioStats.query.filter_by(user_id=user.id).first()
+                                if not user_stats:
+                                    user_stats = UserPortfolioStats(user_id=user.id)
+                                    db.session.add(user_stats)
+                                
+                                # Update all fields
+                                user_stats.unique_stocks_count = stats['unique_stocks_count']
+                                user_stats.avg_trades_per_week = stats['avg_trades_per_week']
+                                user_stats.total_trades = stats['total_trades']
+                                user_stats.large_cap_percent = stats['large_cap_percent']
+                                user_stats.small_cap_percent = stats['small_cap_percent']
+                                user_stats.industry_mix = stats['industry_mix']
+                                user_stats.subscriber_count = stats['subscriber_count']
+                                user_stats.last_updated = stats['last_updated']
+                                
+                                stats_updated += 1
+                                logger.info(f"Updated portfolio stats for user {user.id} ({user.username})")
+                                
+                            except Exception as e:
+                                error_msg = f"Error updating stats for user {user.id}: {str(e)}"
+                                results['errors'].append(error_msg)
+                                logger.error(error_msg)
+                                # Continue processing other users
+                        
+                        results['portfolio_stats_updated'] = stats_updated
+                        results['pipeline_phases'].append('portfolio_stats_completed')
+                        logger.info(f"✅ PHASE 2.25 Complete: {stats_updated} user portfolio stats updated")
+                        logger.info("Moving to Phase 2.4 commit...")
+                        
+                    except Exception as e:
+                        error_msg = f"Portfolio stats update error: {str(e)}"
+                        results['errors'].append(error_msg)
+                        logger.error(f"🚨 PHASE 2.25 CRASHED: {error_msg}")
+                        import traceback
+                        logger.error(f"Full traceback:\n{traceback.format_exc()}")
+                        # THIS IS THE BUG: If this crashes, outer except at line 18116 catches it
+                        # and skips Phase 2.4 entirely!
+                        logger.error("⚠️ Phase 2.25 failed but attempting to continue to Phase 2.4...")
+                        # Re-raise to see if outer except is catching this
+                        # raise  # TODO: Enable this to see full error propagation
+                else:
+                    logger.info("⚠️ PHASE 2.25 DISABLED FOR TESTING - Skipping to Phase 2.4")
+                    results['portfolio_stats_updated'] = 0
+                    results['pipeline_phases'].append('portfolio_stats_skipped')
                 
                 # PHASE 2.4: COMMIT CACHE UPDATES BEFORE HTML PRE-RENDERING
                 # CRITICAL: Must commit here so Phase 2.5 rollback doesn't destroy chart cache UPSERTs
+                logger.info("🚀 ABOUT TO ENTER PHASE 2.4 COMMIT BLOCK")
+                logger.info(f"📊 Session state: {len(db.session.new)} new, {len(db.session.dirty)} dirty objects")
                 logger.info("PHASE 2.4: Committing leaderboard and chart cache updates...")
                 results['pipeline_phases'].append('cache_commit_started')
                 
                 try:
+                    logger.info("🔄 Executing db.session.commit()...")
                     db.session.commit()
+                    logger.info("✅ db.session.commit() completed successfully")
                     
                     # FIX: Allow Vercel Postgres replicas to sync (50-500ms lag)
                     import time
                     time.sleep(0.5)
-                    logger.info("✅ PHASE 2.4 Complete: Chart and leaderboard caches committed (waited 500ms for replica sync)")
+                    
+                    # ONLY append cache_commit_completed AFTER successful commit
                     results['cache_committed'] = True
                     results['pipeline_phases'].append('cache_commit_completed')
+                    logger.info("✅ PHASE 2.4 Complete: Chart and leaderboard caches committed (waited 500ms for replica sync)")
+                    logger.info(f"📊 Commit verified - {updated_count} leaderboard entries + charts persisted")
                     
                 except Exception as cache_commit_err:
                     error_msg = f"Cache commit failed: {str(cache_commit_err)}"
                     results['errors'].append(error_msg)
-                    logger.error(f"❌ {error_msg}")
+                    logger.error(f"❌ PHASE 2.4 FAILED: {error_msg}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
                     db.session.rollback()
                     results['cache_committed'] = False
                     # Don't fail entire pipeline - core data is safe
@@ -18102,10 +18135,13 @@ def market_close_cron():
                 # Cache update failed but core data is safe (already committed in Phase 1.75)
                 error_msg = f"Cache update failed: {str(e)}"
                 results['errors'].append(error_msg)
-                logger.error(f"⚠️ {error_msg} - Core data (snapshots + S&P 500) is safe")
+                logger.error(f"🚨 OUTER EXCEPT CAUGHT EXCEPTION (Phase 2/2.25/2.4): {error_msg}")
+                logger.error("Core data (snapshots + S&P 500) is safe but CHART CACHE NOT COMMITTED")
+                import traceback
+                logger.error(f"Full traceback:\n{traceback.format_exc()}")
                 db.session.rollback()
                 results['cache_committed'] = False
-                # Don't fail entire pipeline - core data is what matters
+                # This is the bug - if Phase 2.25 crashes, Phase 2.4 never runs
             
             # PHASE 2.5: Pre-render HTML for leaderboards (auth-aware caching)
             # Separate try block - failures here won't affect chart cache (already committed)

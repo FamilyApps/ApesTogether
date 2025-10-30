@@ -960,7 +960,8 @@ def update_leaderboard_cache(periods=None):
                 import traceback
                 print(f"❌ ERROR generating chart cache for user {user.id}, period {period}: {str(e)}")
                 print(f"   Traceback: {traceback.format_exc()}")
-                continue
+                # REMOVED continue - allow other users/periods to process
+                # Phase 2.4 commit must run even if some charts fail
     
     print(f"\n=== LEADERBOARD CACHE UPDATE COMPLETE ===")
     print(f"Updated {updated_count} leaderboard cache entries")
