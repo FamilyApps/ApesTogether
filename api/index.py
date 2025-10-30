@@ -18099,9 +18099,20 @@ def market_close_cron():
                     results['portfolio_stats_updated'] = 0
                     results['pipeline_phases'].append('portfolio_stats_skipped')
                 
-                # PHASE 2.4: COMMIT CACHE UPDATES BEFORE HTML PRE-RENDERING
-                # CRITICAL: Must commit here so Phase 2.5 rollback doesn't destroy chart cache UPSERTs
-                print("🚀 ABOUT TO ENTER PHASE 2.4 COMMIT BLOCK")
+            except Exception as e:
+                # Cache update (Phase 2 or 2.25) failed but core data is safe (already committed in Phase 1.75)
+                error_msg = f"Cache update failed: {str(e)}"
+                results['errors'].append(error_msg)
+                logger.error(f"🚨 OUTER EXCEPT CAUGHT EXCEPTION (Phase 2 or 2.25): {error_msg}")
+                logger.error("Core data (snapshots + S&P 500) is safe")
+                import traceback
+                logger.error(f"Full traceback:\n{traceback.format_exc()}")
+                # DO NOT rollback here - Phase 2.4 will still run in finally block
+                
+            finally:
+                # PHASE 2.4: COMMIT CACHE UPDATES - ALWAYS RUNS even if Phase 2/2.25 failed
+                # CRITICAL: This must run even if chart generation partially failed
+                print("🚀 ABOUT TO ENTER PHASE 2.4 COMMIT BLOCK (finally)")
                 print(f"📊 Session state: {len(db.session.new)} new, {len(db.session.dirty)} dirty objects")
                 print("PHASE 2.4: Committing leaderboard and chart cache updates...")
                 results['pipeline_phases'].append('cache_commit_started')
@@ -18119,7 +18130,7 @@ def market_close_cron():
                     results['cache_committed'] = True
                     results['pipeline_phases'].append('cache_commit_completed')
                     logger.info("✅ PHASE 2.4 Complete: Chart and leaderboard caches committed (waited 500ms for replica sync)")
-                    logger.info(f"📊 Commit verified - {updated_count} leaderboard entries + charts persisted")
+                    logger.info("📊 Commit verified - charts and leaderboard persisted")
                     
                 except Exception as cache_commit_err:
                     error_msg = f"Cache commit failed: {str(cache_commit_err)}"
@@ -18130,18 +18141,6 @@ def market_close_cron():
                     db.session.rollback()
                     results['cache_committed'] = False
                     # Don't fail entire pipeline - core data is safe
-                
-            except Exception as e:
-                # Cache update failed but core data is safe (already committed in Phase 1.75)
-                error_msg = f"Cache update failed: {str(e)}"
-                results['errors'].append(error_msg)
-                logger.error(f"🚨 OUTER EXCEPT CAUGHT EXCEPTION (Phase 2/2.25/2.4): {error_msg}")
-                logger.error("Core data (snapshots + S&P 500) is safe but CHART CACHE NOT COMMITTED")
-                import traceback
-                logger.error(f"Full traceback:\n{traceback.format_exc()}")
-                db.session.rollback()
-                results['cache_committed'] = False
-                # This is the bug - if Phase 2.25 crashes, Phase 2.4 never runs
             
             # PHASE 2.5: Pre-render HTML for leaderboards (auth-aware caching)
             # Separate try block - failures here won't affect chart cache (already committed)
