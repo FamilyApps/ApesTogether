@@ -4648,6 +4648,107 @@ def diagnose_full_chart_flow(username, period):
             'partial_results': results
         }), 500
 
+@app.route('/admin/check-chart-cache-raw/<username>/<period>')
+@login_required
+def check_chart_cache_raw(username, period):
+    """Query UserPortfolioChartCache directly to see what's actually in the database"""
+    try:
+        from models import User, UserPortfolioChartCache
+        from sqlalchemy import text
+        import json
+        
+        # Find user
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': f'User {username} not found'}), 404
+        
+        # Query using ORM
+        orm_result = UserPortfolioChartCache.query.filter_by(
+            user_id=user.id,
+            period=period
+        ).first()
+        
+        orm_data = None
+        if orm_result:
+            chart_data = json.loads(orm_result.chart_data) if orm_result.chart_data else {}
+            orm_data = {
+                'id': orm_result.id,
+                'user_id': orm_result.user_id,
+                'period': orm_result.period,
+                'generated_at': orm_result.generated_at.isoformat() if orm_result.generated_at else None,
+                'chart_labels_count': len(chart_data.get('labels', [])),
+                'first_label': chart_data.get('labels', [])[0] if chart_data.get('labels') else None,
+                'last_label': chart_data.get('labels', [])[-1] if chart_data.get('labels') else None,
+                'all_labels': chart_data.get('labels', [])
+            }
+        
+        # Query using raw SQL to bypass any ORM caching
+        raw_sql = text("""
+            SELECT id, user_id, period, generated_at, 
+                   chart_data::text,
+                   LENGTH(chart_data::text) as data_length
+            FROM user_portfolio_chart_cache
+            WHERE user_id = :user_id AND period = :period
+        """)
+        
+        with db.engine.connect() as conn:
+            raw_result = conn.execute(raw_sql, {'user_id': user.id, 'period': period}).fetchone()
+        
+        raw_data = None
+        if raw_result:
+            chart_data_str = raw_result[4]
+            chart_data = json.loads(chart_data_str) if chart_data_str else {}
+            raw_data = {
+                'id': raw_result[0],
+                'user_id': raw_result[1],
+                'period': raw_result[2],
+                'generated_at': raw_result[3].isoformat() if raw_result[3] else None,
+                'data_length': raw_result[5],
+                'chart_labels_count': len(chart_data.get('labels', [])),
+                'first_label': chart_data.get('labels', [])[0] if chart_data.get('labels') else None,
+                'last_label': chart_data.get('labels', [])[-1] if chart_data.get('labels') else None,
+                'all_labels': chart_data.get('labels', [])
+            }
+        
+        # Query all entries for this user to see what exists
+        all_entries_sql = text("""
+            SELECT period, generated_at
+            FROM user_portfolio_chart_cache
+            WHERE user_id = :user_id
+            ORDER BY period
+        """)
+        
+        with db.engine.connect() as conn:
+            all_entries = conn.execute(all_entries_sql, {'user_id': user.id}).fetchall()
+        
+        all_periods = [
+            {
+                'period': row[0],
+                'generated_at': row[1].isoformat() if row[1] else None
+            }
+            for row in all_entries
+        ]
+        
+        return jsonify({
+            'success': True,
+            'username': username,
+            'user_id': user.id,
+            'requested_period': period,
+            'orm_query': orm_data,
+            'raw_sql_query': raw_data,
+            'all_cached_periods': all_periods,
+            'match': orm_data == raw_data if (orm_data and raw_data) else None
+        })
+        
+    except Exception as e:
+        import traceback
+        logger.error(f"Error checking chart cache: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/fix-chart-cache-constraint')
 @login_required
 def fix_chart_cache_constraint():
