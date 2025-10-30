@@ -18218,6 +18218,48 @@ def market_close_cron():
                 try:
                     # Commit without any diagnostic logging that could crash
                     db.session.commit()
+                    logger.info("✅ db.session.commit() returned successfully")
+                    
+                    # IMMEDIATE VERIFICATION: Query database to confirm commit persisted
+                    from sqlalchemy import text
+                    verification_results = {}
+                    
+                    try:
+                        # Verify user 5's 1M chart was committed
+                        verify_sql = text("""
+                            SELECT id, period, generated_at 
+                            FROM user_portfolio_chart_cache 
+                            WHERE user_id = 5 AND period = '1M'
+                        """)
+                        
+                        with db.engine.connect() as conn:
+                            verify_result = conn.execute(verify_sql).fetchone()
+                        
+                        if verify_result:
+                            verification_results['user_5_1M_exists'] = True
+                            verification_results['user_5_1M_id'] = verify_result[0]
+                            verification_results['user_5_1M_generated_at'] = verify_result[2].isoformat()
+                            logger.info(f"✅ VERIFICATION: User 5 1M chart exists in DB after commit: id={verify_result[0]}, generated_at={verify_result[2]}")
+                        else:
+                            verification_results['user_5_1M_exists'] = False
+                            logger.error("❌ VERIFICATION FAILED: User 5 1M chart NOT FOUND in database immediately after commit!")
+                        
+                        # Count all chart cache entries for user 5
+                        count_sql = text("""
+                            SELECT COUNT(*) FROM user_portfolio_chart_cache WHERE user_id = 5
+                        """)
+                        
+                        with db.engine.connect() as conn:
+                            count_result = conn.execute(count_sql).fetchone()
+                        
+                        verification_results['user_5_total_charts'] = count_result[0]
+                        logger.info(f"📊 VERIFICATION: User 5 has {count_result[0]} total chart cache entries")
+                        
+                        results['commit_verification'] = verification_results
+                        
+                    except Exception as verify_err:
+                        logger.error(f"⚠️ Verification query failed: {str(verify_err)}")
+                        results['commit_verification_error'] = str(verify_err)
                     
                     # FIX: Allow Vercel Postgres replicas to sync (50-500ms lag)
                     import time
