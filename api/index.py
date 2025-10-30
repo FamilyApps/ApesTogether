@@ -4718,6 +4718,103 @@ def fix_chart_cache_constraint():
             'partial_results': results
         }), 500
 
+@app.route('/admin/show-deployed-code')
+@login_required
+def show_deployed_code():
+    """Show what code is ACTUALLY running on Vercel right now - returns plain text for easy copy/paste"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return "Admin access required", 403
+    
+    import inspect
+    import os
+    from flask import Response
+    
+    output = []
+    output.append("=" * 80)
+    output.append("DEPLOYED CODE VERIFICATION - What's Actually Running on Vercel")
+    output.append("=" * 80)
+    output.append("")
+    
+    # 1. Show environment info
+    output.append("ENVIRONMENT INFO:")
+    output.append(f"  VERCEL_DEPLOYMENT_ID: {os.environ.get('VERCEL_DEPLOYMENT_ID', 'Not set')}")
+    output.append(f"  VERCEL_ENV: {os.environ.get('VERCEL_ENV', 'Not set')}")
+    output.append(f"  VERCEL_GIT_COMMIT_SHA: {os.environ.get('VERCEL_GIT_COMMIT_SHA', 'Not set')}")
+    output.append(f"  Python Path: {os.path.dirname(os.path.abspath(__file__))}")
+    output.append("")
+    
+    # 2. Get the actual source code of market_close_cron function
+    output.append("=" * 80)
+    output.append("MARKET_CLOSE_CRON FUNCTION SOURCE CODE:")
+    output.append("=" * 80)
+    output.append("")
+    
+    try:
+        # Get the function object
+        func = app.view_functions.get('market_close_cron')
+        if func:
+            source = inspect.getsource(func)
+            output.append(source)
+        else:
+            output.append("ERROR: market_close_cron function not found in app.view_functions")
+    except Exception as e:
+        output.append(f"ERROR getting source: {str(e)}")
+    
+    output.append("")
+    output.append("=" * 80)
+    output.append("SEARCH FOR PHASE 2.4:")
+    output.append("=" * 80)
+    output.append("")
+    
+    # 3. Search for Phase 2.4 specifically
+    try:
+        func = app.view_functions.get('market_close_cron')
+        if func:
+            source = inspect.getsource(func)
+            if "PHASE 2.4" in source:
+                output.append("✅ PHASE 2.4 CODE FOUND IN DEPLOYED FUNCTION!")
+                # Show the Phase 2.4 lines
+                lines = source.split('\n')
+                for i, line in enumerate(lines):
+                    if "PHASE 2.4" in line or "Phase 2.4" in line:
+                        # Show context: 3 lines before and after
+                        start = max(0, i - 3)
+                        end = min(len(lines), i + 4)
+                        output.append(f"\n  Found at line {i}:")
+                        for j in range(start, end):
+                            marker = ">>>" if j == i else "   "
+                            output.append(f"{marker} {lines[j]}")
+            else:
+                output.append("❌ PHASE 2.4 CODE NOT FOUND - OLD CODE IS RUNNING!")
+                output.append("")
+                output.append("This means Vercel is serving cached/old code.")
+    except Exception as e:
+        output.append(f"ERROR searching for Phase 2.4: {str(e)}")
+    
+    output.append("")
+    output.append("=" * 80)
+    output.append("FUNCTION METADATA:")
+    output.append("=" * 80)
+    output.append("")
+    
+    try:
+        func = app.view_functions.get('market_close_cron')
+        if func:
+            output.append(f"  Function name: {func.__name__}")
+            output.append(f"  Module: {func.__module__}")
+            output.append(f"  File: {inspect.getfile(func)}")
+            output.append(f"  Docstring: {func.__doc__}")
+    except Exception as e:
+        output.append(f"ERROR getting metadata: {str(e)}")
+    
+    output.append("")
+    output.append("=" * 80)
+    output.append("END OF REPORT")
+    output.append("=" * 80)
+    
+    # Return as plain text for easy copy/paste
+    return Response('\n'.join(output), mimetype='text/plain')
+
 @app.route('/admin/backfill-sp500-data', methods=['GET', 'POST'])
 @login_required
 def backfill_sp500_data():
