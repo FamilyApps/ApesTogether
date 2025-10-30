@@ -928,7 +928,8 @@ def update_leaderboard_cache(periods=None):
                             RETURNING id, generated_at
                         """)
                         
-                        result = db.session.execute(upsert_sql, {
+                        # CRITICAL FIX: Use session's connection to ensure UPSERT runs in same transaction
+                        result = db.session.connection().execute(upsert_sql, {
                             'user_id': user.id,
                             'period': period,
                             'chart_data': chart_data_json,
