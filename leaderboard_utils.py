@@ -913,34 +913,44 @@ def update_leaderboard_cache(periods=None):
                         chart_data_json = json.dumps(chart_data)
                         now = datetime.now()
                         
-                        print(f"🔄 ATTEMPTING UPSERT: user={user.id}, period={period}, labels={len(chart_data.get('labels', []))}")
+                        print(f"🔄 ATTEMPTING DELETE + INSERT: user={user.id}, period={period}, labels={len(chart_data.get('labels', []))}")
                         print(f"   First label: {chart_data.get('labels', [])[0] if chart_data.get('labels') else 'N/A'}")
                         print(f"   Last label: {chart_data.get('labels', [])[-1] if chart_data.get('labels') else 'N/A'}")
                         
-                        # Use ON CONFLICT to update existing or insert new
-                        upsert_sql = text("""
+                        # BYPASS UPSERT: Use explicit DELETE + INSERT
+                        # Step 1: Delete existing entry if it exists
+                        delete_sql = text("""
+                            DELETE FROM user_portfolio_chart_cache
+                            WHERE user_id = :user_id AND period = :period
+                        """)
+                        
+                        delete_result = db.session.connection().execute(delete_sql, {
+                            'user_id': user.id,
+                            'period': period
+                        })
+                        
+                        rows_deleted = delete_result.rowcount
+                        print(f"   🗑️  Deleted {rows_deleted} existing row(s)")
+                        
+                        # Step 2: Insert new entry
+                        insert_sql = text("""
                             INSERT INTO user_portfolio_chart_cache (user_id, period, chart_data, generated_at)
                             VALUES (:user_id, :period, :chart_data, :generated_at)
-                            ON CONFLICT (user_id, period)
-                            DO UPDATE SET
-                                chart_data = EXCLUDED.chart_data,
-                                generated_at = EXCLUDED.generated_at
                             RETURNING id, generated_at
                         """)
                         
-                        # CRITICAL FIX: Use session's connection to ensure UPSERT runs in same transaction
-                        result = db.session.connection().execute(upsert_sql, {
+                        insert_result = db.session.connection().execute(insert_sql, {
                             'user_id': user.id,
                             'period': period,
                             'chart_data': chart_data_json,
                             'generated_at': now
                         })
                         
-                        returned_row = result.fetchone()
+                        returned_row = insert_result.fetchone()
                         if returned_row:
-                            print(f"✅ UPSERT SUCCESS: id={returned_row[0]}, generated_at={returned_row[1]}")
+                            print(f"✅ INSERT SUCCESS: id={returned_row[0]}, generated_at={returned_row[1]}")
                         else:
-                            print(f"⚠️ UPSERT returned no row - this shouldn't happen!")
+                            print(f"⚠️ INSERT returned no row - this shouldn't happen!")
                         
                         db.session.flush()
                         
