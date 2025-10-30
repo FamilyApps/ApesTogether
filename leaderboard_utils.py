@@ -952,7 +952,8 @@ def update_leaderboard_cache(periods=None):
                         print(f"❌ UPSERT FAILED for user {user.id}, period {period}")
                         print(f"   Error: {str(upsert_error)}")
                         print(f"   Traceback: {traceback.format_exc()}")
-                        raise  # Re-raise to see in cron logs
+                        # DO NOT raise - let other charts process and Phase 2.4 commit run
+                        # This allows partial success instead of crashing entire cron job
                 else:
                     print(f"⚠ No chart data generated for user {user.id}, period {period} - insufficient snapshots")
                     
