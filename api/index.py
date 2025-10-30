@@ -18112,35 +18112,41 @@ def market_close_cron():
             finally:
                 # PHASE 2.4: COMMIT CACHE UPDATES - ALWAYS RUNS even if Phase 2/2.25 failed
                 # CRITICAL: This must run even if chart generation partially failed
-                print("🚀 ABOUT TO ENTER PHASE 2.4 COMMIT BLOCK (finally)")
-                print(f"📊 Session state: {len(db.session.new)} new, {len(db.session.dirty)} dirty objects")
-                print("PHASE 2.4: Committing leaderboard and chart cache updates...")
                 results['pipeline_phases'].append('cache_commit_started')
                 
                 try:
-                    print("🔄 Executing db.session.commit()...")
+                    # Commit without any diagnostic logging that could crash
                     db.session.commit()
-                    print("✅ db.session.commit() completed successfully")
                     
                     # FIX: Allow Vercel Postgres replicas to sync (50-500ms lag)
                     import time
                     time.sleep(0.5)
                     
-                    # ONLY append cache_commit_completed AFTER successful commit
+                    # Success - mark as committed
                     results['cache_committed'] = True
                     results['pipeline_phases'].append('cache_commit_completed')
-                    logger.info("✅ PHASE 2.4 Complete: Chart and leaderboard caches committed (waited 500ms for replica sync)")
-                    logger.info("📊 Commit verified - charts and leaderboard persisted")
+                    logger.info("✅ PHASE 2.4: Cache commit succeeded")
                     
                 except Exception as cache_commit_err:
-                    error_msg = f"Cache commit failed: {str(cache_commit_err)}"
-                    results['errors'].append(error_msg)
-                    logger.error(f"❌ PHASE 2.4 FAILED: {error_msg}")
+                    # Commit failed - log extensively
                     import traceback
-                    logger.error(f"Traceback: {traceback.format_exc()}")
-                    db.session.rollback()
+                    error_msg = f"Cache commit failed: {str(cache_commit_err)}"
+                    full_trace = traceback.format_exc()
+                    
+                    results['errors'].append(error_msg)
                     results['cache_committed'] = False
-                    # Don't fail entire pipeline - core data is safe
+                    results['commit_error'] = error_msg
+                    results['commit_traceback'] = full_trace
+                    
+                    logger.error(f"❌ PHASE 2.4 FAILED: {error_msg}")
+                    logger.error(f"Full traceback:\n{full_trace}")
+                    
+                    # Try to rollback
+                    try:
+                        db.session.rollback()
+                        logger.error("Session rolled back after commit failure")
+                    except Exception as rollback_err:
+                        logger.error(f"Rollback also failed: {rollback_err}")
             
             # PHASE 2.5: Pre-render HTML for leaderboards (auth-aware caching)
             # Separate try block - failures here won't affect chart cache (already committed)
