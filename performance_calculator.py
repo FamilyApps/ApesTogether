@@ -83,7 +83,11 @@ def calculate_portfolio_performance(
     """
     logger.info(f"Calculating performance for user {user_id} from {start_date} to {end_date}")
     
-    # Get snapshots for period
+    # Determine if we should include intraday snapshots (for 1D and 5D periods only)
+    days_in_period = (end_date - start_date).days
+    include_intraday = days_in_period <= 5
+    
+    # Get daily snapshots for period
     snapshots = PortfolioSnapshot.query.filter(
         and_(
             PortfolioSnapshot.user_id == user_id,
@@ -91,6 +95,48 @@ def calculate_portfolio_performance(
             PortfolioSnapshot.date <= end_date
         )
     ).order_by(PortfolioSnapshot.date.asc()).all()
+    
+    # For 1D and 5D periods, also include intraday snapshots
+    if include_intraday:
+        from models import PortfolioSnapshotIntraday
+        from datetime import datetime, time
+        
+        start_datetime = datetime.combine(start_date, time.min)
+        end_datetime = datetime.combine(end_date, time.max)
+        
+        intraday_snapshots = PortfolioSnapshotIntraday.query.filter(
+            and_(
+                PortfolioSnapshotIntraday.user_id == user_id,
+                PortfolioSnapshotIntraday.timestamp >= start_datetime,
+                PortfolioSnapshotIntraday.timestamp <= end_datetime
+            )
+        ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
+        
+        if intraday_snapshots:
+            # Wrapper class to make intraday snapshots compatible with daily snapshot interface
+            class IntradayWrapper:
+                def __init__(self, intraday_snap):
+                    self.date = intraday_snap.timestamp.date()
+                    self.timestamp = intraday_snap.timestamp
+                    self.total_value = intraday_snap.total_value
+                    self.stock_value = intraday_snap.stock_value or 0.0
+                    self.cash_proceeds = intraday_snap.cash_proceeds or 0.0
+                    self.max_cash_deployed = intraday_snap.max_cash_deployed or 0.0
+                    self.user_id = intraday_snap.user_id
+                    self.is_intraday = True
+            
+            # Wrap intraday snapshots
+            wrapped_intraday = [IntradayWrapper(s) for s in intraday_snapshots]
+            
+            # Add timestamp to daily snapshots for sorting
+            for snap in snapshots:
+                snap.timestamp = datetime.combine(snap.date, time(16, 0))
+                snap.is_intraday = False
+            
+            # Merge and sort all snapshots by timestamp
+            snapshots = sorted(snapshots + wrapped_intraday, key=lambda s: s.timestamp)
+            
+            logger.info(f"Including {len(intraday_snapshots)} intraday snapshots for {days_in_period}-day period")
     
     # Edge case: No snapshots
     if not snapshots:
@@ -283,51 +329,49 @@ def _generate_chart_points(
     # Build snapshot map for quick lookup
     snapshot_map = {s.date: s for s in snapshots if s.total_value > 0}
     
-    # Generate points for FULL period (not just user's snapshots)
-    # This shows S&P 500 for entire period, with user's line starting when they joined
-    current_date = period_start
-    user_started = False
+    # Check if we have intraday data (snapshots with timestamps)
+    has_intraday = any(hasattr(s, 'is_intraday') and s.is_intraday for s in snapshots)
     
-    for sp500_record in sp500_data:
-        date_str = sp500_record.date.strftime('%b %d')
-        
-        # S&P 500 percentage (always calculated from period start)
-        sp500_value = float(sp500_record.close_price)
-        sp500_pct = ((sp500_value - baseline_sp500) / baseline_sp500) * 100
-        
-        # Portfolio percentage using Modified Dietz (accounts for cash flows)
-        portfolio_pct = None
-        if sp500_record.date in snapshot_map:
-            user_started = True
-            snapshot = snapshot_map[sp500_record.date]
+    if has_intraday:
+        # For intraday periods (1D/5D): Generate point for each snapshot
+        for snapshot in snapshots:
+            if snapshot.total_value <= 0:
+                continue
             
-            # Calculate Modified Dietz return from baseline to this point
+            # Format label with time for intraday, date only for daily close
+            if hasattr(snapshot, 'is_intraday') and snapshot.is_intraday:
+                date_str = snapshot.timestamp.strftime('%b %d %I:%M %p')  # "Oct 31 03:30 PM"
+            else:
+                date_str = snapshot.date.strftime('%b %d')
+            
+            # Get S&P 500 value for this date (use daily close)
+            sp500_value = sp500_map.get(snapshot.date, baseline_sp500)
+            sp500_pct = ((sp500_value - baseline_sp500) / baseline_sp500) * 100
+            
+            # Calculate Modified Dietz for this snapshot
             V_start = baseline_value
             V_end = snapshot.total_value
             CF_net = snapshot.max_cash_deployed - baseline_snapshot.max_cash_deployed
             
-            # Calculate time-weighted cash flows up to this date
             if CF_net <= 0:
-                # No net capital added - use simple percentage
                 if V_start > 0:
                     portfolio_pct = ((V_end - V_start) / V_start) * 100
                 else:
                     portfolio_pct = 0.0
             else:
-                # Calculate W (time-weighted factor) for cash flows up to this date
                 weighted_cf = 0.0
                 prev_deployed = baseline_snapshot.max_cash_deployed
-                period_days = (sp500_record.date - baseline_snapshot.date).days
+                period_days = (snapshot.date - baseline_snapshot.date).days
                 
                 for s in snapshots:
-                    if s.date > sp500_record.date:
+                    if s.date > snapshot.date:
                         break
                     if s.date <= baseline_snapshot.date:
                         continue
                     
                     capital_added = s.max_cash_deployed - prev_deployed
                     if capital_added > 0 and period_days > 0:
-                        days_remaining = (sp500_record.date - s.date).days
+                        days_remaining = (snapshot.date - s.date).days
                         weight = days_remaining / period_days
                         weighted_cf += capital_added * weight
                     prev_deployed = s.max_cash_deployed
@@ -340,37 +384,56 @@ def _generate_chart_points(
                     portfolio_pct = (numerator / denominator) * 100
                 else:
                     portfolio_pct = 0.0
-                    
-        elif user_started:
-            # User has started but no snapshot for this date - use last known value
-            # Find previous snapshot
-            prev_snapshot = None
-            for s in reversed(snapshots):
-                if s.date < sp500_record.date:
-                    prev_snapshot = s
-                    break
-            if prev_snapshot:
-                # Calculate Modified Dietz for previous snapshot
-                V_start = baseline_value
-                V_end = prev_snapshot.total_value
-                CF_net = prev_snapshot.max_cash_deployed - baseline_snapshot.max_cash_deployed
+            
+            chart_data.append({
+                'date': date_str,
+                'portfolio': round(portfolio_pct, 2),
+                'sp500': round(sp500_pct, 2)
+            })
+    else:
+        # For longer periods: Generate points for S&P 500 dates (original logic)
+        user_started = False
+        
+        for sp500_record in sp500_data:
+            date_str = sp500_record.date.strftime('%b %d')
+            
+            # S&P 500 percentage (always calculated from period start)
+            sp500_value = float(sp500_record.close_price)
+            sp500_pct = ((sp500_value - baseline_sp500) / baseline_sp500) * 100
+            
+            # Portfolio percentage using Modified Dietz (accounts for cash flows)
+            portfolio_pct = None
+            if sp500_record.date in snapshot_map:
+                user_started = True
+                snapshot = snapshot_map[sp500_record.date]
                 
-                if CF_net <= 0 and V_start > 0:
-                    portfolio_pct = ((V_end - V_start) / V_start) * 100
-                elif CF_net > 0:
+                # Calculate Modified Dietz return from baseline to this point
+                V_start = baseline_value
+                V_end = snapshot.total_value
+                CF_net = snapshot.max_cash_deployed - baseline_snapshot.max_cash_deployed
+                
+                # Calculate time-weighted cash flows up to this date
+                if CF_net <= 0:
+                    # No net capital added - use simple percentage
+                    if V_start > 0:
+                        portfolio_pct = ((V_end - V_start) / V_start) * 100
+                    else:
+                        portfolio_pct = 0.0
+                else:
+                    # Calculate W (time-weighted factor) for cash flows up to this date
                     weighted_cf = 0.0
                     prev_deployed = baseline_snapshot.max_cash_deployed
-                    period_days = (prev_snapshot.date - baseline_snapshot.date).days
+                    period_days = (sp500_record.date - baseline_snapshot.date).days
                     
                     for s in snapshots:
-                        if s.date > prev_snapshot.date:
+                        if s.date > sp500_record.date:
                             break
                         if s.date <= baseline_snapshot.date:
                             continue
                         
                         capital_added = s.max_cash_deployed - prev_deployed
                         if capital_added > 0 and period_days > 0:
-                            days_remaining = (prev_snapshot.date - s.date).days
+                            days_remaining = (sp500_record.date - s.date).days
                             weight = days_remaining / period_days
                             weighted_cf += capital_added * weight
                         prev_deployed = s.max_cash_deployed
@@ -383,18 +446,61 @@ def _generate_chart_points(
                         portfolio_pct = (numerator / denominator) * 100
                     else:
                         portfolio_pct = 0.0
-                else:
-                    portfolio_pct = 0.0
-        else:
-            # User hasn't started yet - show 0%
-            portfolio_pct = 0.0
-        
-        if portfolio_pct is not None:
-            chart_data.append({
-                'date': date_str,
-                'portfolio': round(portfolio_pct, 2),
-                'sp500': round(sp500_pct, 2)
-            })
+                        
+            elif user_started:
+                # User has started but no snapshot for this date - use last known value
+                # Find previous snapshot
+                prev_snapshot = None
+                for s in reversed(snapshots):
+                    if s.date < sp500_record.date:
+                        prev_snapshot = s
+                        break
+                if prev_snapshot:
+                    # Calculate Modified Dietz for previous snapshot
+                    V_start = baseline_value
+                    V_end = prev_snapshot.total_value
+                    CF_net = prev_snapshot.max_cash_deployed - baseline_snapshot.max_cash_deployed
+                    
+                    if CF_net <= 0 and V_start > 0:
+                        portfolio_pct = ((V_end - V_start) / V_start) * 100
+                    elif CF_net > 0:
+                        weighted_cf = 0.0
+                        prev_deployed = baseline_snapshot.max_cash_deployed
+                        period_days = (prev_snapshot.date - baseline_snapshot.date).days
+                        
+                        for s in snapshots:
+                            if s.date > prev_snapshot.date:
+                                break
+                            if s.date <= baseline_snapshot.date:
+                                continue
+                            
+                            capital_added = s.max_cash_deployed - prev_deployed
+                            if capital_added > 0 and period_days > 0:
+                                days_remaining = (prev_snapshot.date - s.date).days
+                                weight = days_remaining / period_days
+                                weighted_cf += capital_added * weight
+                            prev_deployed = s.max_cash_deployed
+                        
+                        W = weighted_cf / CF_net if CF_net > 0 else 0.5
+                        denominator = V_start + (W * CF_net)
+                        
+                        if denominator > 0:
+                            numerator = V_end - V_start - CF_net
+                            portfolio_pct = (numerator / denominator) * 100
+                        else:
+                            portfolio_pct = 0.0
+                    else:
+                        portfolio_pct = 0.0
+            else:
+                # User hasn't started yet - show 0%
+                portfolio_pct = 0.0
+            
+            if portfolio_pct is not None:
+                chart_data.append({
+                    'date': date_str,
+                    'portfolio': round(portfolio_pct, 2),
+                    'sp500': round(sp500_pct, 2)
+                })
     
     logger.info(f"Generated {len(chart_data)} chart points")
     if chart_data:
