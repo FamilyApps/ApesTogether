@@ -304,7 +304,7 @@ def _generate_chart_points(
             # Calculate Modified Dietz return from baseline to this point
             V_start = baseline_value
             V_end = snapshot.total_value
-            CF_net = snapshot.max_cash_deployed - baseline.max_cash_deployed
+            CF_net = snapshot.max_cash_deployed - baseline_snapshot.max_cash_deployed
             
             # Calculate time-weighted cash flows up to this date
             if CF_net <= 0:
@@ -316,13 +316,13 @@ def _generate_chart_points(
             else:
                 # Calculate W (time-weighted factor) for cash flows up to this date
                 weighted_cf = 0.0
-                prev_deployed = baseline.max_cash_deployed
-                period_days = (sp500_record.date - baseline.date).days
+                prev_deployed = baseline_snapshot.max_cash_deployed
+                period_days = (sp500_record.date - baseline_snapshot.date).days
                 
                 for s in snapshots:
                     if s.date > sp500_record.date:
                         break
-                    if s.date <= baseline.date:
+                    if s.date <= baseline_snapshot.date:
                         continue
                     
                     capital_added = s.max_cash_deployed - prev_deployed
@@ -353,19 +353,19 @@ def _generate_chart_points(
                 # Calculate Modified Dietz for previous snapshot
                 V_start = baseline_value
                 V_end = prev_snapshot.total_value
-                CF_net = prev_snapshot.max_cash_deployed - baseline.max_cash_deployed
+                CF_net = prev_snapshot.max_cash_deployed - baseline_snapshot.max_cash_deployed
                 
                 if CF_net <= 0 and V_start > 0:
                     portfolio_pct = ((V_end - V_start) / V_start) * 100
                 elif CF_net > 0:
                     weighted_cf = 0.0
-                    prev_deployed = baseline.max_cash_deployed
-                    period_days = (prev_snapshot.date - baseline.date).days
+                    prev_deployed = baseline_snapshot.max_cash_deployed
+                    period_days = (prev_snapshot.date - baseline_snapshot.date).days
                     
                     for s in snapshots:
                         if s.date > prev_snapshot.date:
                             break
-                        if s.date <= baseline.date:
+                        if s.date <= baseline_snapshot.date:
                             continue
                         
                         capital_added = s.max_cash_deployed - prev_deployed
