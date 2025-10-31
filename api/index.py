@@ -4819,6 +4819,63 @@ def fix_chart_cache_constraint():
             'partial_results': results
         }), 500
 
+@app.route('/admin/check-chart-cache-schema')
+@login_required
+def check_chart_cache_schema():
+    """Check if user_portfolio_chart_cache table has all required columns"""
+    try:
+        from sqlalchemy import text
+        
+        # Check table columns
+        check_columns_sql = text("""
+            SELECT column_name, data_type, is_nullable
+            FROM information_schema.columns
+            WHERE table_name = 'user_portfolio_chart_cache'
+            ORDER BY ordinal_position
+        """)
+        
+        with db.engine.connect() as conn:
+            columns = conn.execute(check_columns_sql).fetchall()
+        
+        column_info = [
+            {
+                'column_name': row[0],
+                'data_type': row[1],
+                'is_nullable': row[2]
+            }
+            for row in columns
+        ]
+        
+        # Check what model expects
+        from models import UserPortfolioChartCache
+        model_columns = {
+            'id': 'integer',
+            'user_id': 'integer',
+            'period': 'character varying',
+            'chart_data': 'text',
+            'generated_at': 'timestamp without time zone'
+        }
+        
+        # Find missing columns
+        db_column_names = [col['column_name'] for col in column_info]
+        missing_columns = [col for col in model_columns.keys() if col not in db_column_names]
+        
+        return jsonify({
+            'success': True,
+            'table_columns': column_info,
+            'model_expects': model_columns,
+            'missing_columns': missing_columns,
+            'columns_match': len(missing_columns) == 0
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/show-deployed-code')
 @login_required
 def show_deployed_code():
