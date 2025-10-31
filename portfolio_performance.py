@@ -148,11 +148,12 @@ class PortfolioPerformanceCalculator:
                     prices_extracted = 0
                     for quote in data['data']:
                         ticker = quote.get('symbol', '').upper()
-                        price_str = quote.get('price', '0')
+                        # FIXED: Batch API uses 'close' field, not 'price'
+                        price_str = quote.get('close', '0')
                         
                         # Log first few quotes for debugging
                         if len(result) < 3:
-                            logger.info(f"📡 Processing {ticker}: raw price='{price_str}', quote keys={list(quote.keys())}")
+                            logger.info(f"📡 Processing {ticker}: raw close='{price_str}'")
                         
                         try:
                             price = float(price_str)
