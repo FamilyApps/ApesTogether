@@ -771,6 +771,82 @@ def update_leaderboard_cache(periods=None):
     # Track all users who make any leaderboard
     leaderboard_users = set()
     
+    # CRITICAL FIX: Generate portfolio charts for ALL users FIRST
+    # Leaderboard data calculation reads from chart cache, so charts must exist first
+    from models import User
+    all_users = User.query.all()
+    
+    for user in all_users:
+        for period in periods:
+            try:
+                # Generate chart data for this user and period using updated function
+                chart_data = generate_chart_from_snapshots(user.id, period)
+                
+                if chart_data:
+                    try:
+                        # FIX: Force PRIMARY connection to bypass read replica lag (Vercel Postgres)
+                        # ORM queries hit stale replicas, causing "duplicate key" errors
+                        from sqlalchemy import text
+                        
+                        chart_data_json = json.dumps(chart_data)
+                        now = datetime.now()
+                        
+                        print(f"🔄 Generating chart cache: user={user.id}, period={period}")
+                        
+                        # Use explicit PRIMARY connection with transaction
+                        # This ensures SELECT, DELETE, INSERT all hit PRIMARY (not replicas)
+                        with db.engine.connect() as primary_conn:
+                            with primary_conn.begin():  # Auto-commits on exit
+                                # Step 1: SELECT on PRIMARY
+                                select_sql = text("""
+                                    SELECT id FROM user_portfolio_chart_cache 
+                                    WHERE user_id = :uid AND period = :period
+                                """)
+                                result = primary_conn.execute(select_sql, {
+                                    'uid': user.id,
+                                    'period': period
+                                })
+                                existing_id = result.scalar()
+                                
+                                if existing_id:
+                                    # Step 2: DELETE on PRIMARY
+                                    delete_sql = text("""
+                                        DELETE FROM user_portfolio_chart_cache WHERE id = :id
+                                    """)
+                                    primary_conn.execute(delete_sql, {'id': existing_id})
+                                
+                                # Step 3: INSERT on PRIMARY
+                                insert_sql = text("""
+                                    INSERT INTO user_portfolio_chart_cache 
+                                    (user_id, period, chart_data, generated_at)
+                                    VALUES (:uid, :period, :data, :time)
+                                    RETURNING id, generated_at
+                                """)
+                                result = primary_conn.execute(insert_sql, {
+                                    'uid': user.id,
+                                    'period': period,
+                                    'data': chart_data_json,
+                                    'time': now
+                                })
+                                row = result.fetchone()
+                                print(f"   ✅ Chart cache saved: id={row[0]}")
+                        
+                        charts_generated += 1
+                        
+                    except Exception as cache_error:
+                        print(f"   ❌ Error saving chart cache for user {user.id}, period {period}: {str(cache_error)}")
+                        import traceback
+                        print(f"   {traceback.format_exc()}")
+                        
+            except Exception as e:
+                print(f"Error generating chart for user {user.id}, period {period}: {str(e)}")
+                import traceback
+                print(f"Full traceback: {traceback.format_exc()}")
+                continue
+    
+    print(f"✅ Generated {charts_generated} chart caches for all users")
+    
+    # NOW calculate leaderboard data (reads from chart caches we just created)
     for period in periods:
         for category in categories:
             try:
@@ -892,92 +968,6 @@ def update_leaderboard_cache(periods=None):
                 # Just skip this period/category and continue with others
                 print(f"Skipping period {period}, category {category} due to error")
                 continue
-    
-    # Generate portfolio charts for ALL users (not just leaderboard users)
-    # Use generate_chart_from_snapshots() which includes intraday data for 1D/5D and S&P 500 benchmark
-    from models import User
-    all_users = User.query.all()
-    
-    for user in all_users:
-        for period in periods:
-            try:
-                # Generate chart data for this user and period using updated function
-                chart_data = generate_chart_from_snapshots(user.id, period)
-                
-                if chart_data:
-                    try:
-                        # FIX: Force PRIMARY connection to bypass read replica lag (Vercel Postgres)
-                        # ORM queries hit stale replicas, causing "duplicate key" errors
-                        from sqlalchemy import text
-                        
-                        chart_data_json = json.dumps(chart_data)
-                        now = datetime.now()
-                        
-                        print(f"🔄 ATTEMPTING PRIMARY TXN: user={user.id}, period={period}, labels={len(chart_data.get('labels', []))}")
-                        print(f"   First label: {chart_data.get('labels', [])[0] if chart_data.get('labels') else 'N/A'}")
-                        print(f"   Last label: {chart_data.get('labels', [])[-1] if chart_data.get('labels') else 'N/A'}")
-                        
-                        # Use explicit PRIMARY connection with transaction
-                        # This ensures SELECT, DELETE, INSERT all hit PRIMARY (not replicas)
-                        with db.engine.connect() as primary_conn:
-                            with primary_conn.begin():  # Auto-commits on exit
-                                # Step 1: SELECT on PRIMARY
-                                select_sql = text("""
-                                    SELECT id FROM user_portfolio_chart_cache 
-                                    WHERE user_id = :uid AND period = :period
-                                """)
-                                result = primary_conn.execute(select_sql, {
-                                    'uid': user.id,
-                                    'period': period
-                                })
-                                existing_id = result.scalar()
-                                
-                                if existing_id:
-                                    print(f"   🗑️  Deleting existing row id={existing_id} on PRIMARY")
-                                    # Step 2: DELETE on PRIMARY
-                                    delete_sql = text("""
-                                        DELETE FROM user_portfolio_chart_cache WHERE id = :id
-                                    """)
-                                    primary_conn.execute(delete_sql, {'id': existing_id})
-                                else:
-                                    print(f"   ℹ️  No existing row on PRIMARY")
-                                
-                                # Step 3: INSERT on PRIMARY
-                                insert_sql = text("""
-                                    INSERT INTO user_portfolio_chart_cache 
-                                    (user_id, period, chart_data, generated_at)
-                                    VALUES (:uid, :period, :data, :time)
-                                    RETURNING id
-                                """)
-                                result = primary_conn.execute(insert_sql, {
-                                    'uid': user.id,
-                                    'period': period,
-                                    'data': chart_data_json,
-                                    'time': now
-                                })
-                                new_id = result.scalar()
-                                
-                                print(f"✅ PRIMARY INSERT SUCCESS: id={new_id}, generated_at={now}")
-                                print(f"✅ PRIMARY TXN committed for user {user.id}, period {period}")
-                        charts_generated += 1
-                        print(f"✓ Generated chart cache for user {user.id}, period {period}")
-                        
-                    except Exception as upsert_error:
-                        import traceback
-                        print(f"❌ UPSERT FAILED for user {user.id}, period {period}")
-                        print(f"   Error: {str(upsert_error)}")
-                        print(f"   Traceback: {traceback.format_exc()}")
-                        # DO NOT raise - let other charts process and Phase 2.4 commit run
-                        # This allows partial success instead of crashing entire cron job
-                else:
-                    print(f"⚠ No chart data generated for user {user.id}, period {period} - insufficient snapshots")
-                    
-            except Exception as e:
-                import traceback
-                print(f"❌ ERROR generating chart cache for user {user.id}, period {period}: {str(e)}")
-                print(f"   Traceback: {traceback.format_exc()}")
-                # REMOVED continue - allow other users/periods to process
-                # Phase 2.4 commit must run even if some charts fail
     
     print(f"\n=== LEADERBOARD CACHE UPDATE COMPLETE ===")
     print(f"Updated {updated_count} leaderboard cache entries")
