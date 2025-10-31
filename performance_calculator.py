@@ -300,7 +300,7 @@ def _generate_chart_points(
     
     # Get S&P 500 data for the FULL period (not just from user's join date)
     # This ensures charts show S&P performance for entire period
-    # For 1D/5D: Use SPY_INTRADAY for intraday comparison
+    # For 1D/5D: Use SPY_INTRADAY for intraday comparison, fallback to daily if unavailable
     # For longer periods: Use SPY_SP500 daily close
     if period in ['1D', '5D']:
         # Query intraday S&P 500 data
@@ -312,6 +312,17 @@ def _generate_chart_points(
                 MarketData.timestamp.isnot(None)
             )
         ).order_by(MarketData.timestamp.asc()).all()
+        
+        # FALLBACK: If no intraday S&P 500 data, use daily close
+        if not sp500_data:
+            logger.warning(f"No SPY_INTRADAY data found for {period}, falling back to daily SPY_SP500")
+            sp500_data = MarketData.query.filter(
+                and_(
+                    MarketData.ticker == 'SPY_SP500',
+                    MarketData.date >= period_start,
+                    MarketData.date <= period_end
+                )
+            ).order_by(MarketData.date.asc()).all()
     else:
         # Query daily S&P 500 data
         sp500_data = MarketData.query.filter(

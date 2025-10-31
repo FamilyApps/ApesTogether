@@ -5275,6 +5275,241 @@ def backfill_sp500_data():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/check-spy-intraday', methods=['GET'])
+@login_required
+def check_spy_intraday():
+    """Diagnostic endpoint to check SPY_INTRADAY data and identify gaps"""
+    try:
+        if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import date, datetime, timedelta
+        from models import MarketData, PortfolioSnapshotIntraday
+        from sqlalchemy import and_
+        
+        today = get_market_date()
+        results = {
+            'today': today.isoformat(),
+            'spy_intraday_today': [],
+            'spy_intraday_last_7_days': {},
+            'portfolio_intraday_today': {},
+            'gaps_found': []
+        }
+        
+        # Check SPY_INTRADAY for today
+        spy_today = MarketData.query.filter(
+            and_(
+                MarketData.ticker == 'SPY_INTRADAY',
+                MarketData.date == today
+            )
+        ).order_by(MarketData.timestamp.asc()).all()
+        
+        results['spy_intraday_today'] = [
+            {
+                'timestamp': s.timestamp.isoformat() if s.timestamp else None,
+                'close_price': float(s.close_price),
+                'date': s.date.isoformat()
+            }
+            for s in spy_today
+        ]
+        results['spy_intraday_today_count'] = len(spy_today)
+        
+        # Check last 7 days
+        for days_back in range(7):
+            check_date = today - timedelta(days=days_back)
+            # Skip weekends
+            if check_date.weekday() >= 5:
+                continue
+            
+            count = MarketData.query.filter(
+                and_(
+                    MarketData.ticker == 'SPY_INTRADAY',
+                    MarketData.date == check_date
+                )
+            ).count()
+            results['spy_intraday_last_7_days'][check_date.isoformat()] = count
+            
+            # Flag gaps
+            if count == 0:
+                results['gaps_found'].append({
+                    'date': check_date.isoformat(),
+                    'type': 'no_spy_intraday',
+                    'message': f'No SPY_INTRADAY data for {check_date}'
+                })
+        
+        # Check portfolio intraday snapshots for today
+        portfolio_snaps = PortfolioSnapshotIntraday.query.filter(
+            PortfolioSnapshotIntraday.timestamp >= datetime.combine(today, datetime.min.time())
+        ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
+        
+        # Group by user
+        by_user = {}
+        for snap in portfolio_snaps:
+            if snap.user_id not in by_user:
+                by_user[snap.user_id] = []
+            by_user[snap.user_id].append(snap)
+        
+        for user_id, snaps in by_user.items():
+            results['portfolio_intraday_today'][f'user_{user_id}'] = {
+                'count': len(snaps),
+                'first_timestamp': snaps[0].timestamp.isoformat() if snaps else None,
+                'last_timestamp': snaps[-1].timestamp.isoformat() if snaps else None
+            }
+        
+        # Summary
+        results['summary'] = {
+            'spy_intraday_today_exists': len(spy_today) > 0,
+            'portfolio_snapshots_today': len(portfolio_snaps),
+            'users_with_intraday_data': len(by_user),
+            'total_gaps_found': len(results['gaps_found']),
+            'recommendation': 'Use POST /admin/backfill-spy-intraday to fill gaps' if results['gaps_found'] else 'No gaps found'
+        }
+        
+        return jsonify(results)
+        
+    except Exception as e:
+        logger.error(f"Check SPY intraday error: {e}")
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/backfill-spy-intraday', methods=['POST', 'GET'])
+@login_required
+def backfill_spy_intraday():
+    """Backfill missing SPY_INTRADAY data by fetching SPY price and creating MarketData records"""
+    try:
+        if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import date, datetime, timedelta, time
+        from models import MarketData
+        from portfolio_performance import PortfolioPerformanceCalculator
+        from pytz import timezone
+        
+        # GET: Show what would be backfilled
+        if request.method == 'GET':
+            today = get_market_date()
+            missing_info = []
+            
+            for days_back in range(7):
+                check_date = today - timedelta(days=days_back)
+                if check_date.weekday() >= 5:
+                    continue
+                
+                count = MarketData.query.filter(
+                    and_(
+                        MarketData.ticker == 'SPY_INTRADAY',
+                        MarketData.date == check_date
+                    )
+                ).count()
+                
+                if count == 0:
+                    missing_info.append({
+                        'date': check_date.isoformat(),
+                        'current_count': count,
+                        'will_backfill': True
+                    })
+            
+            return jsonify({
+                'missing_dates': missing_info,
+                'count': len(missing_info),
+                'message': f'Found {len(missing_info)} dates missing SPY_INTRADAY data',
+                'action': 'POST to this endpoint to backfill with market-close SPY price'
+            })
+        
+        # POST: Perform backfill
+        calculator = PortfolioPerformanceCalculator()
+        results = {
+            'started_at': datetime.now().isoformat(),
+            'dates_processed': [],
+            'records_created': 0,
+            'errors': []
+        }
+        
+        # Backfill missing dates from last 7 days
+        today = get_market_date()
+        ET = timezone('America/New_York')
+        
+        for days_back in range(7):
+            check_date = today - timedelta(days=days_back)
+            if check_date.weekday() >= 5:
+                continue
+            
+            # Check if SPY_INTRADAY already exists for this date
+            existing = MarketData.query.filter(
+                and_(
+                    MarketData.ticker == 'SPY_INTRADAY',
+                    MarketData.date == check_date
+                )
+            ).count()
+            
+            if existing > 0:
+                results['dates_processed'].append({
+                    'date': check_date.isoformat(),
+                    'status': 'skipped',
+                    'reason': f'Already has {existing} records'
+                })
+                continue
+            
+            # Fetch current SPY price (will use cached historical if available)
+            try:
+                spy_data = calculator.get_stock_data('SPY')
+                if spy_data and spy_data.get('price'):
+                    spy_price = spy_data['price']
+                    sp500_value = spy_price * 10
+                    
+                    # Create SPY_INTRADAY record at 4PM ET for this date
+                    timestamp_4pm = ET.localize(datetime.combine(check_date, time(16, 0)))
+                    
+                    market_data = MarketData(
+                        ticker='SPY_INTRADAY',
+                        date=check_date,
+                        timestamp=timestamp_4pm,
+                        close_price=sp500_value
+                    )
+                    db.session.add(market_data)
+                    results['records_created'] += 1
+                    
+                    results['dates_processed'].append({
+                        'date': check_date.isoformat(),
+                        'status': 'backfilled',
+                        'spy_price': spy_price,
+                        'sp500_value': sp500_value,
+                        'timestamp': timestamp_4pm.isoformat()
+                    })
+                else:
+                    results['errors'].append({
+                        'date': check_date.isoformat(),
+                        'error': 'No SPY price available'
+                    })
+            except Exception as e:
+                results['errors'].append({
+                    'date': check_date.isoformat(),
+                    'error': str(e)
+                })
+        
+        # Commit all backfilled records
+        if results['records_created'] > 0:
+            db.session.commit()
+            results['success'] = True
+            results['message'] = f'Backfilled {results["records_created"]} SPY_INTRADAY records'
+        else:
+            results['success'] = True
+            results['message'] = 'No backfill needed - all dates have SPY_INTRADAY data'
+        
+        return jsonify(results)
+        
+    except Exception as e:
+        logger.error(f"Backfill SPY intraday error: {e}")
+        db.session.rollback()
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/command-center', methods=['GET'])
 @login_required
 def admin_command_center():
