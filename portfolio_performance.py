@@ -138,37 +138,34 @@ class PortfolioPerformanceCalculator:
                 
                 # CRITICAL: Log the full response for debugging
                 logger.info(f"📡 Bulk Quotes API Response Keys: {list(data.keys())}")
-                logger.debug(f"📡 Full Bulk Quotes API Response: {data}")
                 
-                # TODO: Re-enable API logging after fixing column size (symbol VARCHAR(10) -> VARCHAR(50))
-                # Log the bulk quotes API call (TEMPORARILY DISABLED due to column size issue)
-                # try:
-                #     from models import AlphaVantageAPILog, db
-                #     success = 'data' in data or 'Global Quote' in data
-                #     api_log = AlphaVantageAPILog(
-                #         endpoint='REALTIME_BULK_QUOTES',
-                #         symbol=f"BULK_{len(chunk)}_TICKERS",
-                #         response_status='success' if success else 'error',
-                #         timestamp=current_time
-                #     )
-                #     db.session.add(api_log)
-                # except Exception as log_error:
-                #     logger.warning(f"⚠️ API logging failed (non-critical): {log_error}")
+                # Log first quote sample for debugging
+                if 'data' in data and data['data']:
+                    logger.info(f"📡 Sample Quote (first ticker): {data['data'][0]}")
                 
                 # Parse bulk quotes response
                 if 'data' in data:
+                    prices_extracted = 0
                     for quote in data['data']:
                         ticker = quote.get('symbol', '').upper()
                         price_str = quote.get('price', '0')
+                        
+                        # Log first few quotes for debugging
+                        if len(result) < 3:
+                            logger.info(f"📡 Processing {ticker}: raw price='{price_str}', quote keys={list(quote.keys())}")
+                        
                         try:
                             price = float(price_str)
                             if price > 0:
                                 stock_price_cache[ticker] = {'price': price, 'timestamp': current_time}
                                 result[ticker] = price
+                                prices_extracted += 1
+                            else:
+                                logger.warning(f"⚠️ {ticker}: price is 0 or negative ({price})")
                         except (ValueError, TypeError):
                             logger.warning(f"Invalid price for {ticker}: {price_str}")
                     
-                    logger.info(f"✅ Bulk Quotes API: Fetched {len(chunk)} tickers in 1 call")
+                    logger.info(f"✅ Bulk Quotes API: Fetched {len(chunk)} tickers, extracted {prices_extracted} valid prices")
                 else:
                     logger.warning(f"❌ Bulk Quotes API failed - Response: {data}")
             
