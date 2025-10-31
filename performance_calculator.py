@@ -40,7 +40,8 @@ def calculate_portfolio_performance(
     user_id: int,
     start_date: date,
     end_date: date,
-    include_chart_data: bool = False
+    include_chart_data: bool = False,
+    period: str = None
 ) -> Dict:
     """
     Calculate portfolio performance using Modified Dietz with max_cash_deployed.
@@ -84,8 +85,8 @@ def calculate_portfolio_performance(
     logger.info(f"Calculating performance for user {user_id} from {start_date} to {end_date}")
     
     # Determine if we should include intraday snapshots (for 1D and 5D periods only)
-    days_in_period = (end_date - start_date).days
-    include_intraday = days_in_period <= 5
+    # Check period name directly rather than day count since 5D can span 7 calendar days
+    include_intraday = period in ['1D', '5D'] if period else False
     
     # Get daily snapshots for period
     snapshots = PortfolioSnapshot.query.filter(
@@ -136,7 +137,7 @@ def calculate_portfolio_performance(
             # Merge and sort all snapshots by timestamp
             snapshots = sorted(snapshots + wrapped_intraday, key=lambda s: s.timestamp)
             
-            logger.info(f"Including {len(intraday_snapshots)} intraday snapshots for {days_in_period}-day period")
+            logger.info(f"Including {len(intraday_snapshots)} intraday snapshots for {period} period")
     
     # Edge case: No snapshots
     if not snapshots:
@@ -299,13 +300,27 @@ def _generate_chart_points(
     
     # Get S&P 500 data for the FULL period (not just from user's join date)
     # This ensures charts show S&P performance for entire period
-    sp500_data = MarketData.query.filter(
-        and_(
-            MarketData.ticker == 'SPY_SP500',
-            MarketData.date >= period_start,  # Use period_start, not baseline_date
-            MarketData.date <= period_end
-        )
-    ).order_by(MarketData.date.asc()).all()
+    # For 1D/5D: Use SPY_INTRADAY for intraday comparison
+    # For longer periods: Use SPY_SP500 daily close
+    if period in ['1D', '5D']:
+        # Query intraday S&P 500 data
+        sp500_data = MarketData.query.filter(
+            and_(
+                MarketData.ticker == 'SPY_INTRADAY',
+                MarketData.date >= period_start,
+                MarketData.date <= period_end,
+                MarketData.timestamp.isnot(None)
+            )
+        ).order_by(MarketData.timestamp.asc()).all()
+    else:
+        # Query daily S&P 500 data
+        sp500_data = MarketData.query.filter(
+            and_(
+                MarketData.ticker == 'SPY_SP500',
+                MarketData.date >= period_start,  # Use period_start, not baseline_date
+                MarketData.date <= period_end
+            )
+        ).order_by(MarketData.date.asc()).all()
     
     # DEBUG: Log what dates we actually got
     if sp500_data:
@@ -314,8 +329,19 @@ def _generate_chart_points(
     else:
         logger.warning(f"⚠️ S&P 500 query returned NO DATA for period {period_start} to {period_end}")
     
-    # Build date-to-SP500-price map
-    sp500_map = {s.date: float(s.close_price) for s in sp500_data}
+    # Build S&P 500 lookup map (by date for daily, by timestamp for intraday)
+    if period in ['1D', '5D']:
+        # For intraday: build map by timestamp for precise matching
+        sp500_map_timestamp = {}
+        for s in sp500_data:
+            if hasattr(s, 'timestamp') and s.timestamp:
+                sp500_map_timestamp[s.timestamp] = float(s.close_price)
+        # Also keep a date map for fallback
+        sp500_map = {s.date: float(s.close_price) for s in sp500_data}
+    else:
+        # For daily: build map by date only
+        sp500_map = {s.date: float(s.close_price) for s in sp500_data}
+        sp500_map_timestamp = {}
     
     # Get baseline S&P 500 value from period start (not user join date)
     baseline_sp500 = None
@@ -334,18 +360,40 @@ def _generate_chart_points(
     
     if has_intraday:
         # For intraday periods (1D/5D): Generate point for each snapshot
+        from pytz import timezone
+        ET = timezone('America/New_York')
+        
         for snapshot in snapshots:
             if snapshot.total_value <= 0:
                 continue
             
-            # Format label with time for intraday, date only for daily close
+            # Format label with time for intraday (ensure Eastern Time), date only for daily close
             if hasattr(snapshot, 'is_intraday') and snapshot.is_intraday:
-                date_str = snapshot.timestamp.strftime('%b %d %I:%M %p')  # "Oct 31 03:30 PM"
+                # Convert to Eastern Time if needed
+                ts = snapshot.timestamp
+                if ts.tzinfo is None:
+                    # Assume UTC if naive
+                    from pytz import utc
+                    ts = utc.localize(ts)
+                ts_et = ts.astimezone(ET)
+                date_str = ts_et.strftime('%b %d %I:%M %p')  # "Oct 31 03:30 PM"
             else:
                 date_str = snapshot.date.strftime('%b %d')
             
-            # Get S&P 500 value for this date (use daily close)
-            sp500_value = sp500_map.get(snapshot.date, baseline_sp500)
+            # Get S&P 500 value for this timestamp/date
+            # For intraday: find closest S&P 500 point at or before this timestamp
+            if hasattr(snapshot, 'is_intraday') and snapshot.is_intraday and sp500_map_timestamp:
+                # Find closest S&P 500 value at or before this timestamp
+                sp500_value = baseline_sp500
+                for spy_ts, spy_price in sorted(sp500_map_timestamp.items()):
+                    if spy_ts <= snapshot.timestamp:
+                        sp500_value = spy_price
+                    else:
+                        break
+            else:
+                # For daily: use date-based lookup
+                sp500_value = sp500_map.get(snapshot.date, baseline_sp500)
+            
             sp500_pct = ((sp500_value - baseline_sp500) / baseline_sp500) * 100
             
             # Calculate Modified Dietz for this snapshot

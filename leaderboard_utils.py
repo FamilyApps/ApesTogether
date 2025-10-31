@@ -1022,7 +1022,8 @@ def generate_chart_from_snapshots(user_id, period):
             user_id, 
             start_date, 
             end_date, 
-            include_chart_data=True
+            include_chart_data=True,
+            period=period
         )
         
         if not result:
