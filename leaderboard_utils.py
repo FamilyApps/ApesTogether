@@ -906,54 +906,41 @@ def update_leaderboard_cache(periods=None):
                 
                 if chart_data:
                     try:
-                        # CRITICAL: Use PostgreSQL UPSERT to atomically handle update/insert
-                        # DELETE+INSERT with UNIQUE constraints can cause race conditions
-                        from sqlalchemy import text
+                        # Use ORM operations to ensure proper transaction binding
+                        from models import UserPortfolioChartCache
                         
                         chart_data_json = json.dumps(chart_data)
                         now = datetime.now()
                         
-                        print(f"🔄 ATTEMPTING DELETE + INSERT: user={user.id}, period={period}, labels={len(chart_data.get('labels', []))}")
+                        print(f"🔄 ATTEMPTING ORM DELETE + ADD: user={user.id}, period={period}, labels={len(chart_data.get('labels', []))}")
                         print(f"   First label: {chart_data.get('labels', [])[0] if chart_data.get('labels') else 'N/A'}")
                         print(f"   Last label: {chart_data.get('labels', [])[-1] if chart_data.get('labels') else 'N/A'}")
                         
-                        # BYPASS UPSERT: Use explicit DELETE + INSERT
-                        # Step 1: Delete existing entry if it exists
-                        delete_sql = text("""
-                            DELETE FROM user_portfolio_chart_cache
-                            WHERE user_id = :user_id AND period = :period
-                        """)
+                        # Step 1: Delete existing entry using ORM (bound to session transaction)
+                        existing = UserPortfolioChartCache.query.filter_by(
+                            user_id=user.id,
+                            period=period
+                        ).first()
                         
-                        delete_result = db.session.connection().execute(delete_sql, {
-                            'user_id': user.id,
-                            'period': period
-                        })
-                        
-                        rows_deleted = delete_result.rowcount
-                        print(f"   🗑️  Deleted {rows_deleted} existing row(s)")
-                        
-                        # Step 2: Insert new entry
-                        insert_sql = text("""
-                            INSERT INTO user_portfolio_chart_cache (user_id, period, chart_data, generated_at)
-                            VALUES (:user_id, :period, :chart_data, :generated_at)
-                            RETURNING id, generated_at
-                        """)
-                        
-                        insert_result = db.session.connection().execute(insert_sql, {
-                            'user_id': user.id,
-                            'period': period,
-                            'chart_data': chart_data_json,
-                            'generated_at': now
-                        })
-                        
-                        returned_row = insert_result.fetchone()
-                        if returned_row:
-                            print(f"✅ INSERT SUCCESS: id={returned_row[0]}, generated_at={returned_row[1]}")
+                        if existing:
+                            print(f"   🗑️  Deleting existing row id={existing.id}")
+                            db.session.delete(existing)
                         else:
-                            print(f"⚠️ INSERT returned no row - this shouldn't happen!")
+                            print(f"   ℹ️  No existing row to delete")
                         
+                        # Step 2: Create new entry using ORM (bound to session transaction)
+                        new_entry = UserPortfolioChartCache(
+                            user_id=user.id,
+                            period=period,
+                            chart_data=chart_data_json,
+                            generated_at=now
+                        )
+                        db.session.add(new_entry)
+                        
+                        # Flush to get the ID assigned
                         db.session.flush()
                         
+                        print(f"✅ ORM ADD SUCCESS: id={new_entry.id}, generated_at={new_entry.generated_at}")
                         print(f"✅ FLUSHED to session for user {user.id}, period {period}")
                         charts_generated += 1
                         print(f"✓ Generated chart cache for user {user.id}, period {period}")
