@@ -23164,11 +23164,59 @@ def collect_intraday_data():
             else:
                 results['errors'].append("Batch API returned no prices")
                 logger.error("❌ Batch API failed - no prices returned")
+                
+                # FALLBACK: Fetch SPY individually to ensure S&P 500 data is always collected
+                logger.info("🔄 Attempting SPY fallback fetch...")
+                try:
+                    spy_data = calculator.get_stock_data('SPY')
+                    if spy_data and spy_data.get('price'):
+                        spy_price = spy_data['price']
+                        sp500_value = spy_price * 10
+                        
+                        from models import MarketData
+                        market_data = MarketData(
+                            ticker='SPY_INTRADAY',
+                            date=today_et,
+                            timestamp=current_time,
+                            close_price=sp500_value
+                        )
+                        db.session.add(market_data)
+                        results['spy_data_collected'] = True
+                        results['spy_fallback_used'] = True
+                        logger.info(f"✅ SPY Fallback Success: ${spy_price} (S&P 500: ${sp500_value})")
+                    else:
+                        logger.error("❌ SPY fallback also failed")
+                except Exception as spy_error:
+                    logger.error(f"❌ SPY fallback error: {str(spy_error)}")
         
         except Exception as e:
             error_msg = f"Batch API error: {str(e)}"
             results['errors'].append(error_msg)
             logger.error(error_msg)
+            
+            # FALLBACK: Fetch SPY individually even on batch exception
+            logger.info("🔄 Attempting SPY fallback fetch after batch exception...")
+            try:
+                spy_data = calculator.get_stock_data('SPY')
+                if spy_data and spy_data.get('price'):
+                    spy_price = spy_data['price']
+                    sp500_value = spy_price * 10
+                    
+                    from models import MarketData
+                    market_data = MarketData(
+                        ticker='SPY_INTRADAY',
+                        date=today_et,
+                        timestamp=current_time,
+                        close_price=sp500_value
+                    )
+                    db.session.add(market_data)
+                    results['spy_data_collected'] = True
+                    results['spy_fallback_used'] = True
+                    logger.info(f"✅ SPY Fallback Success: ${spy_price} (S&P 500: ${sp500_value})")
+                else:
+                    logger.error("❌ SPY fallback also failed")
+            except Exception as spy_error:
+                logger.error(f"❌ SPY fallback error: {str(spy_error)}")
         
         # Step 3: Calculate portfolio values (now using CACHED data from batch call)
         # All stock prices are already in cache - no additional API calls needed!
