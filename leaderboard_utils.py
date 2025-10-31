@@ -906,42 +906,59 @@ def update_leaderboard_cache(periods=None):
                 
                 if chart_data:
                     try:
-                        # Use ORM operations to ensure proper transaction binding
-                        from models import UserPortfolioChartCache
+                        # FIX: Force PRIMARY connection to bypass read replica lag (Vercel Postgres)
+                        # ORM queries hit stale replicas, causing "duplicate key" errors
+                        from sqlalchemy import text
                         
                         chart_data_json = json.dumps(chart_data)
                         now = datetime.now()
                         
-                        print(f"🔄 ATTEMPTING ORM DELETE + ADD: user={user.id}, period={period}, labels={len(chart_data.get('labels', []))}")
+                        print(f"🔄 ATTEMPTING PRIMARY TXN: user={user.id}, period={period}, labels={len(chart_data.get('labels', []))}")
                         print(f"   First label: {chart_data.get('labels', [])[0] if chart_data.get('labels') else 'N/A'}")
                         print(f"   Last label: {chart_data.get('labels', [])[-1] if chart_data.get('labels') else 'N/A'}")
                         
-                        # Step 1: Delete existing entry using ORM (bound to session transaction)
-                        existing = UserPortfolioChartCache.query.filter_by(
-                            user_id=user.id,
-                            period=period
-                        ).first()
-                        
-                        if existing:
-                            print(f"   🗑️  Deleting existing row id={existing.id}")
-                            db.session.delete(existing)
-                        else:
-                            print(f"   ℹ️  No existing row to delete")
-                        
-                        # Step 2: Create new entry using ORM (bound to session transaction)
-                        new_entry = UserPortfolioChartCache(
-                            user_id=user.id,
-                            period=period,
-                            chart_data=chart_data_json,
-                            generated_at=now
-                        )
-                        db.session.add(new_entry)
-                        
-                        # Flush to get the ID assigned
-                        db.session.flush()
-                        
-                        print(f"✅ ORM ADD SUCCESS: id={new_entry.id}, generated_at={new_entry.generated_at}")
-                        print(f"✅ FLUSHED to session for user {user.id}, period {period}")
+                        # Use explicit PRIMARY connection with transaction
+                        # This ensures SELECT, DELETE, INSERT all hit PRIMARY (not replicas)
+                        with db.engine.connect() as primary_conn:
+                            with primary_conn.begin():  # Auto-commits on exit
+                                # Step 1: SELECT on PRIMARY
+                                select_sql = text("""
+                                    SELECT id FROM user_portfolio_chart_cache 
+                                    WHERE user_id = :uid AND period = :period
+                                """)
+                                result = primary_conn.execute(select_sql, {
+                                    'uid': user.id,
+                                    'period': period
+                                })
+                                existing_id = result.scalar()
+                                
+                                if existing_id:
+                                    print(f"   🗑️  Deleting existing row id={existing_id} on PRIMARY")
+                                    # Step 2: DELETE on PRIMARY
+                                    delete_sql = text("""
+                                        DELETE FROM user_portfolio_chart_cache WHERE id = :id
+                                    """)
+                                    primary_conn.execute(delete_sql, {'id': existing_id})
+                                else:
+                                    print(f"   ℹ️  No existing row on PRIMARY")
+                                
+                                # Step 3: INSERT on PRIMARY
+                                insert_sql = text("""
+                                    INSERT INTO user_portfolio_chart_cache 
+                                    (user_id, period, chart_data, generated_at)
+                                    VALUES (:uid, :period, :data, :time)
+                                    RETURNING id
+                                """)
+                                result = primary_conn.execute(insert_sql, {
+                                    'uid': user.id,
+                                    'period': period,
+                                    'data': chart_data_json,
+                                    'time': now
+                                })
+                                new_id = result.scalar()
+                                
+                                print(f"✅ PRIMARY INSERT SUCCESS: id={new_id}, generated_at={now}")
+                                print(f"✅ PRIMARY TXN committed for user {user.id}, period {period}")
                         charts_generated += 1
                         print(f"✓ Generated chart cache for user {user.id}, period {period}")
                         
