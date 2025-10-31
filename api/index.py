@@ -4876,6 +4876,141 @@ def check_chart_cache_schema():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/migrate-historical-charts')
+@login_required
+def migrate_historical_charts():
+    """Regenerate all chart cache data using Modified Dietz calculation"""
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import User
+        from leaderboard_utils import generate_chart_from_snapshots
+        from sqlalchemy import text
+        import json
+        from datetime import datetime
+        
+        # Get execute parameter (dry run by default)
+        execute = request.args.get('execute', 'false').lower() == 'true'
+        username_filter = request.args.get('username')  # Optional: migrate single user
+        period_filter = request.args.get('period')  # Optional: migrate single period
+        
+        results = {
+            'dry_run': not execute,
+            'timestamp': datetime.now().isoformat(),
+            'users_processed': 0,
+            'charts_regenerated': 0,
+            'charts_unchanged': 0,
+            'errors': [],
+            'before_after_samples': []
+        }
+        
+        # Get users to process
+        if username_filter:
+            users = User.query.filter_by(username=username_filter).all()
+        else:
+            users = User.query.all()
+        
+        periods = [period_filter] if period_filter else ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']
+        
+        for user in users:
+            results['users_processed'] += 1
+            
+            for period in periods:
+                try:
+                    # Generate new chart data using Modified Dietz
+                    new_chart_data = generate_chart_from_snapshots(user.id, period)
+                    
+                    if not new_chart_data:
+                        continue
+                    
+                    # Get existing chart data from cache
+                    with db.engine.connect() as conn:
+                        select_sql = text("""
+                            SELECT id, chart_data, generated_at
+                            FROM user_portfolio_chart_cache
+                            WHERE user_id = :uid AND period = :period
+                        """)
+                        result = conn.execute(select_sql, {'uid': user.id, 'period': period})
+                        existing = result.fetchone()
+                    
+                    # Compare old vs new
+                    changed = True
+                    if existing:
+                        old_data = json.loads(existing[1]) if existing[1] else {}
+                        old_return = old_data.get('portfolio_return', 0)
+                        new_return = new_chart_data.get('portfolio_return', 0)
+                        
+                        # Consider changed if return differs by more than 0.01%
+                        changed = abs(old_return - new_return) > 0.01
+                        
+                        # Sample first user for before/after comparison
+                        if len(results['before_after_samples']) < 3 and changed:
+                            results['before_after_samples'].append({
+                                'user': user.username,
+                                'period': period,
+                                'old_return': round(old_return, 2),
+                                'new_return': round(new_return, 2),
+                                'difference': round(new_return - old_return, 2)
+                            })
+                    
+                    if changed:
+                        results['charts_regenerated'] += 1
+                        
+                        if execute:
+                            # Use PRIMARY connection with explicit transaction
+                            chart_data_json = json.dumps(new_chart_data)
+                            now = datetime.now()
+                            
+                            with db.engine.connect() as primary_conn:
+                                with primary_conn.begin():
+                                    # Delete old entry
+                                    if existing:
+                                        delete_sql = text("""
+                                            DELETE FROM user_portfolio_chart_cache WHERE id = :id
+                                        """)
+                                        primary_conn.execute(delete_sql, {'id': existing[0]})
+                                    
+                                    # Insert new entry with Modified Dietz data
+                                    insert_sql = text("""
+                                        INSERT INTO user_portfolio_chart_cache 
+                                        (user_id, period, chart_data, generated_at)
+                                        VALUES (:uid, :period, :data, :time)
+                                    """)
+                                    primary_conn.execute(insert_sql, {
+                                        'uid': user.id,
+                                        'period': period,
+                                        'data': chart_data_json,
+                                        'time': now
+                                    })
+                    else:
+                        results['charts_unchanged'] += 1
+                
+                except Exception as chart_error:
+                    error_msg = f"User {user.username}, period {period}: {str(chart_error)}"
+                    results['errors'].append(error_msg)
+                    logger.error(error_msg)
+        
+        results['success'] = len(results['errors']) == 0
+        results['message'] = (
+            f"{'DRY RUN - ' if not execute else ''}Processed {results['users_processed']} users, "
+            f"{results['charts_regenerated']} charts regenerated, "
+            f"{results['charts_unchanged']} unchanged"
+        )
+        
+        if not execute:
+            results['next_step'] = f"Run with ?execute=true to apply changes"
+        
+        return jsonify(results)
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/show-deployed-code')
 @login_required
 def show_deployed_code():
