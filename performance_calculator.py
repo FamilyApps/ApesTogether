@@ -295,12 +295,52 @@ def _generate_chart_points(
         sp500_value = float(sp500_record.close_price)
         sp500_pct = ((sp500_value - baseline_sp500) / baseline_sp500) * 100
         
-        # Portfolio percentage (only if user has snapshot for this date)
+        # Portfolio percentage using Modified Dietz (accounts for cash flows)
         portfolio_pct = None
         if sp500_record.date in snapshot_map:
             user_started = True
             snapshot = snapshot_map[sp500_record.date]
-            portfolio_pct = ((snapshot.total_value - baseline_value) / baseline_value) * 100
+            
+            # Calculate Modified Dietz return from baseline to this point
+            V_start = baseline_value
+            V_end = snapshot.total_value
+            CF_net = snapshot.max_cash_deployed - baseline.max_cash_deployed
+            
+            # Calculate time-weighted cash flows up to this date
+            if CF_net <= 0:
+                # No net capital added - use simple percentage
+                if V_start > 0:
+                    portfolio_pct = ((V_end - V_start) / V_start) * 100
+                else:
+                    portfolio_pct = 0.0
+            else:
+                # Calculate W (time-weighted factor) for cash flows up to this date
+                weighted_cf = 0.0
+                prev_deployed = baseline.max_cash_deployed
+                period_days = (sp500_record.date - baseline.date).days
+                
+                for s in snapshots:
+                    if s.date > sp500_record.date:
+                        break
+                    if s.date <= baseline.date:
+                        continue
+                    
+                    capital_added = s.max_cash_deployed - prev_deployed
+                    if capital_added > 0 and period_days > 0:
+                        days_remaining = (sp500_record.date - s.date).days
+                        weight = days_remaining / period_days
+                        weighted_cf += capital_added * weight
+                    prev_deployed = s.max_cash_deployed
+                
+                W = weighted_cf / CF_net if CF_net > 0 else 0.5
+                denominator = V_start + (W * CF_net)
+                
+                if denominator > 0:
+                    numerator = V_end - V_start - CF_net
+                    portfolio_pct = (numerator / denominator) * 100
+                else:
+                    portfolio_pct = 0.0
+                    
         elif user_started:
             # User has started but no snapshot for this date - use last known value
             # Find previous snapshot
@@ -310,7 +350,41 @@ def _generate_chart_points(
                     prev_snapshot = s
                     break
             if prev_snapshot:
-                portfolio_pct = ((prev_snapshot.total_value - baseline_value) / baseline_value) * 100
+                # Calculate Modified Dietz for previous snapshot
+                V_start = baseline_value
+                V_end = prev_snapshot.total_value
+                CF_net = prev_snapshot.max_cash_deployed - baseline.max_cash_deployed
+                
+                if CF_net <= 0 and V_start > 0:
+                    portfolio_pct = ((V_end - V_start) / V_start) * 100
+                elif CF_net > 0:
+                    weighted_cf = 0.0
+                    prev_deployed = baseline.max_cash_deployed
+                    period_days = (prev_snapshot.date - baseline.date).days
+                    
+                    for s in snapshots:
+                        if s.date > prev_snapshot.date:
+                            break
+                        if s.date <= baseline.date:
+                            continue
+                        
+                        capital_added = s.max_cash_deployed - prev_deployed
+                        if capital_added > 0 and period_days > 0:
+                            days_remaining = (prev_snapshot.date - s.date).days
+                            weight = days_remaining / period_days
+                            weighted_cf += capital_added * weight
+                        prev_deployed = s.max_cash_deployed
+                    
+                    W = weighted_cf / CF_net if CF_net > 0 else 0.5
+                    denominator = V_start + (W * CF_net)
+                    
+                    if denominator > 0:
+                        numerator = V_end - V_start - CF_net
+                        portfolio_pct = (numerator / denominator) * 100
+                    else:
+                        portfolio_pct = 0.0
+                else:
+                    portfolio_pct = 0.0
         else:
             # User hasn't started yet - show 0%
             portfolio_pct = 0.0
