@@ -650,7 +650,19 @@ def get_period_dates(period: str, user_id: Optional[int] = None) -> Tuple[date, 
     if period_upper == '1D':
         start_date = end_date
     elif period_upper == '5D':
-        start_date = end_date - timedelta(days=7)  # Account for weekends
+        # Get last 5 trading days (Mon-Fri), skipping weekends
+        # Start from yesterday and count back 4 more trading days
+        trading_days_needed = 4  # We already have today
+        current_date = end_date - timedelta(days=1)
+        
+        while trading_days_needed > 0:
+            # Skip weekends (Saturday=5, Sunday=6)
+            if current_date.weekday() < 5:
+                trading_days_needed -= 1
+            current_date = current_date - timedelta(days=1)
+        
+        # current_date is now 1 day before the start date, so add 1 day
+        start_date = current_date + timedelta(days=1)
     elif period_upper == '1M':
         start_date = end_date - timedelta(days=30)
     elif period_upper == '3M':
