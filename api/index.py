@@ -25586,8 +25586,11 @@ def admin_diagnose_leaderboard_staleness():
             
             diagnostics['users'].append(user_diag)
         
-        # Check LeaderboardCache
-        leaderboard_cache = LeaderboardCache.query.filter_by(period=f'{period}_all').first()
+        # Check LeaderboardCache (now uses _auth and _anon suffixes)
+        leaderboard_cache_auth = LeaderboardCache.query.filter_by(period=f'{period}_all_auth').first()
+        leaderboard_cache_anon = LeaderboardCache.query.filter_by(period=f'{period}_all_anon').first()
+        
+        leaderboard_cache = leaderboard_cache_auth or leaderboard_cache_anon
         
         if leaderboard_cache:
             cache_age = datetime.now() - leaderboard_cache.generated_at
