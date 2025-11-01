@@ -16166,24 +16166,30 @@ def populate_stock_info():
 
 # Portfolio performance API endpoints
 @app.route('/api/portfolio/performance/<period>')
-@login_required
 def get_portfolio_performance(period):
-    """Get portfolio performance data for a specific time period - uses cached data for leaderboard users"""
+    """Get portfolio performance data for a specific time period - uses cached data for leaderboard users
+    
+    NOTE: Does NOT use @login_required to avoid HTML redirects on AJAX requests.
+    Returns JSON 401 error instead of redirecting to login page.
+    """
     try:
         logger.info(f"ROUTE HIT: /api/portfolio/performance/{period}")
         logger.info(f"Request method: {request.method}")
         logger.info(f"Request headers: {dict(request.headers)}")
-        logger.info(f"Session user_id: {session.get('user_id')}")
+        logger.info(f"current_user.is_authenticated: {current_user.is_authenticated}")
+        
+        # Check authentication without redirect (API endpoints should return JSON, not HTML redirects)
+        if not current_user.is_authenticated:
+            logger.warning(f"Unauthenticated request to performance API")
+            return jsonify({'error': 'User not authenticated'}), 401
+        
         # Note: Removed signal-based timeout as it doesn't work in serverless environments
         # Vercel handles timeouts automatically
         from datetime import datetime, timedelta
         import json
         
-        user_id = session.get('user_id')
-        logger.info(f"Performance API called for period {period}, user_id in session: {user_id}")
-        if not user_id:
-            logger.warning(f"No user_id in session for performance API. Session keys: {list(session.keys())}")
-            return jsonify({'error': 'User not authenticated'}), 401
+        user_id = current_user.id
+        logger.info(f"Performance API called for period {period}, user_id: {user_id}")
         
         period_upper = period.upper()
         
@@ -25496,6 +25502,128 @@ def public_portfolio_performance(slug, period):
     except Exception as e:
         logger.error(f"Public portfolio performance error: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/diagnose-chart-issues', methods=['GET'])
+@login_required
+def admin_diagnose_chart_issues():
+    """Diagnose 1D/5D chart datapoint issues and 1Y Network Error"""
+    try:
+        if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import PortfolioSnapshot, PortfolioSnapshotIntraday, MarketData
+        from performance_calculator import get_period_dates
+        from datetime import date, timedelta
+        import json
+        
+        diagnostics = {
+            'timestamp': datetime.now().isoformat(),
+            'issues': {}
+        }
+        
+        # Issue 1: 1D Chart - Check Oct 31 intraday data
+        today = date(2025, 10, 31)
+        
+        # Check SPY_INTRADAY records for Oct 31
+        spy_intraday_oct31 = MarketData.query.filter(
+            and_(
+                MarketData.ticker == 'SPY_INTRADAY',
+                MarketData.date == today
+            )
+        ).order_by(MarketData.timestamp.asc()).all()
+        
+        diagnostics['issues']['1D_chart'] = {
+            'expected_points': 27,
+            'expected_times': '09:30 AM - 4:00 PM EST at 15-min intervals',
+            'spy_intraday_count': len(spy_intraday_oct31),
+            'spy_intraday_times': [s.timestamp.strftime('%H:%M') for s in spy_intraday_oct31[:5]] if spy_intraday_oct31 else [],
+            'spy_intraday_time_range': f"{spy_intraday_oct31[0].timestamp.strftime('%H:%M')} to {spy_intraday_oct31[-1].timestamp.strftime('%H:%M')}" if spy_intraday_oct31 else 'No data'
+        }
+        
+        # Check user intraday snapshots for Oct 31
+        user_intraday_oct31 = PortfolioSnapshotIntraday.query.filter(
+            and_(
+                PortfolioSnapshotIntraday.user_id == current_user.id,
+                cast(PortfolioSnapshotIntraday.timestamp, Date) == today
+            )
+        ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
+        
+        diagnostics['issues']['1D_chart']['user_intraday_count'] = len(user_intraday_oct31)
+        diagnostics['issues']['1D_chart']['user_intraday_times'] = [
+            s.timestamp.strftime('%H:%M') for s in user_intraday_oct31
+        ] if user_intraday_oct31 else []
+        
+        # Issue 2: 5D Chart - Check date range
+        start_date_5d, end_date_5d = get_period_dates('5D', user_id=current_user.id)
+        
+        diagnostics['issues']['5D_chart'] = {
+            'expected_dates': ['2025-10-27', '2025-10-28', '2025-10-29', '2025-10-30', '2025-10-31'],
+            'calculated_start_date': start_date_5d.isoformat(),
+            'calculated_end_date': end_date_5d.isoformat(),
+            'problem': 'Showing 10/24 data and only 1 point for 10/27'
+        }
+        
+        # Check what dates actually have data
+        user_snapshots_5d = PortfolioSnapshot.query.filter(
+            and_(
+                PortfolioSnapshot.user_id == current_user.id,
+                PortfolioSnapshot.date >= start_date_5d,
+                PortfolioSnapshot.date <= end_date_5d
+            )
+        ).order_by(PortfolioSnapshot.date.asc()).all()
+        
+        user_intraday_5d = PortfolioSnapshotIntraday.query.filter(
+            and_(
+                PortfolioSnapshotIntraday.user_id == current_user.id,
+                cast(PortfolioSnapshotIntraday.timestamp, Date) >= start_date_5d,
+                cast(PortfolioSnapshotIntraday.timestamp, Date) <= end_date_5d
+            )
+        ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
+        
+        # Group by date
+        dates_with_data = {}
+        for snap in user_snapshots_5d:
+            date_str = snap.date.isoformat()
+            if date_str not in dates_with_data:
+                dates_with_data[date_str] = {'daily': 0, 'intraday': 0}
+            dates_with_data[date_str]['daily'] += 1
+        
+        for snap in user_intraday_5d:
+            date_str = snap.timestamp.date().isoformat()
+            if date_str not in dates_with_data:
+                dates_with_data[date_str] = {'daily': 0, 'intraday': 0}
+            dates_with_data[date_str]['intraday'] += 1
+        
+        diagnostics['issues']['5D_chart']['actual_dates_with_data'] = dates_with_data
+        
+        # Issue 3: 1Y Network Error - Check session and cache
+        diagnostics['issues']['1Y_network_error'] = {
+            'session_user_id': session.get('user_id'),
+            'current_user_id': current_user.id,
+            'session_keys': list(session.keys()),
+            'problem': '302 redirect on first load, then works after toggle'
+        }
+        
+        # Check if 1Y cache exists
+        from models import UserPortfolioChartCache
+        cache_1y = UserPortfolioChartCache.query.filter_by(
+            user_id=current_user.id,
+            period='1Y'
+        ).first()
+        
+        diagnostics['issues']['1Y_network_error']['cache_exists'] = cache_1y is not None
+        if cache_1y:
+            diagnostics['issues']['1Y_network_error']['cache_age_hours'] = (datetime.now() - cache_1y.generated_at).total_seconds() / 3600
+        
+        return jsonify(diagnostics)
+        
+    except Exception as e:
+        logger.error(f"Chart issues diagnostic error: {e}")
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
 
 @app.route('/admin/diagnose-leaderboard-staleness', methods=['GET'])
 @login_required
