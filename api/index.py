@@ -24024,72 +24024,114 @@ def collect_intraday_data():
 @app.route('/admin/check-intraday-data')
 @login_required
 def check_intraday_data():
-    """Check if intraday data was collected today"""
+    """Check intraday data for last 7 trading days - shows ALL snapshots and missing intervals"""
     try:
         # Check if user is admin
         email = session.get('email', '')
         if email != ADMIN_EMAIL:
             return jsonify({'error': 'Admin access required'}), 403
         
-        from datetime import datetime, date
-        from models import PortfolioSnapshotIntraday
-        from sqlalchemy import func, cast, Date
+        from datetime import datetime, date, timedelta
+        from models import PortfolioSnapshotIntraday, User
+        from sqlalchemy import cast, Date
+        from zoneinfo import ZoneInfo
         
-        # CRITICAL: Use Eastern Time to match how snapshots are created
-        today_et = get_market_date()
+        MARKET_TZ = ZoneInfo('America/New_York')
         current_time_et = get_market_time()
+        today_et = get_market_date()
         
-        logger.info(f"Checking intraday data for {today_et} (ET) - Current time: {current_time_et}")
+        # Get last 7 calendar days (covers 5 trading days)
+        start_date = today_et - timedelta(days=7)
         
-        # Check intraday snapshots for today (using ET date)
-        today_snapshots = PortfolioSnapshotIntraday.query.filter(
-            cast(PortfolioSnapshotIntraday.timestamp, Date) == today_et
-        ).all()
+        # Get ALL intraday snapshots for last 7 days
+        all_snapshots = PortfolioSnapshotIntraday.query.filter(
+            cast(PortfolioSnapshotIntraday.timestamp, Date) >= start_date
+        ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
         
-        logger.info(f"Found {len(today_snapshots)} intraday snapshots for {today_et} (ET)")
+        logger.info(f"Found {len(all_snapshots)} total intraday snapshots from {start_date} to {today_et}")
         
-        # Group by user
-        user_snapshots = {}
-        for snapshot in today_snapshots:
-            if snapshot.user_id not in user_snapshots:
-                user_snapshots[snapshot.user_id] = []
-            user_snapshots[snapshot.user_id].append({
-                'timestamp': snapshot.timestamp.isoformat(),
+        # Expected 15-minute intervals during market hours (9:30 AM - 4:00 PM ET)
+        expected_times = []
+        for hour in range(9, 17):
+            for minute in [0, 15, 30, 45]:
+                if hour == 9 and minute < 30:
+                    continue
+                if hour == 16 and minute > 0:
+                    continue
+                expected_times.append((hour, minute))
+        
+        # Group by date and user
+        data_by_date = {}
+        for snapshot in all_snapshots:
+            # Convert to ET
+            ts = snapshot.timestamp
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=ZoneInfo('UTC'))
+            ts_et = ts.astimezone(MARKET_TZ)
+            snapshot_date = ts_et.date()
+            
+            if snapshot_date not in data_by_date:
+                data_by_date[snapshot_date] = {}
+            
+            if snapshot.user_id not in data_by_date[snapshot_date]:
+                data_by_date[snapshot_date][snapshot.user_id] = []
+            
+            data_by_date[snapshot_date][snapshot.user_id].append({
+                'time': ts_et.strftime('%H:%M'),
+                'timestamp': ts_et.isoformat(),
                 'value': snapshot.total_value
             })
         
-        # Get total counts
-        total_snapshots = len(today_snapshots)
-        users_with_data = len(user_snapshots)
+        # Get all users
+        all_users = User.query.all()
+        user_map = {u.id: u.username for u in all_users}
         
-        # Sample recent snapshots
-        recent_snapshots = PortfolioSnapshotIntraday.query.order_by(
-            PortfolioSnapshotIntraday.timestamp.desc()
-        ).limit(10).all()
-        
-        recent_sample = []
-        for snapshot in recent_snapshots:
-            recent_sample.append({
-                'user_id': snapshot.user_id,
-                'timestamp': snapshot.timestamp.isoformat(),
-                'value': snapshot.total_value
-            })
+        # Build report for each date
+        daily_reports = {}
+        for check_date in [today_et - timedelta(days=i) for i in range(7, -1, -1)]:
+            # Skip weekends
+            if check_date.weekday() >= 5:
+                continue
+            
+            date_str = check_date.isoformat()
+            daily_reports[date_str] = {
+                'total_snapshots': 0,
+                'users': {}
+            }
+            
+            if check_date in data_by_date:
+                for user_id, snapshots in data_by_date[check_date].items():
+                    username = user_map.get(user_id, f'User_{user_id}')
+                    actual_times = {s['time'] for s in snapshots}
+                    expected_time_strs = {f'{h:02d}:{m:02d}' for h, m in expected_times}
+                    missing_times = sorted(expected_time_strs - actual_times)
+                    
+                    daily_reports[date_str]['users'][username] = {
+                        'count': len(snapshots),
+                        'expected': len(expected_times),
+                        'missing_count': len(missing_times),
+                        'missing_times': missing_times,
+                        'snapshots': snapshots
+                    }
+                    daily_reports[date_str]['total_snapshots'] += len(snapshots)
         
         return jsonify({
             'success': True,
-            'today_date_et': today_et.isoformat(),
             'current_time_et': current_time_et.isoformat(),
-            'timezone': 'America/New_York',
-            'total_snapshots_today': total_snapshots,
-            'users_with_data_today': users_with_data,
-            'user_snapshots_today': user_snapshots,
-            'recent_snapshots_sample': recent_sample,
-            'message': f'Found {total_snapshots} intraday snapshots for {users_with_data} users on {today_et} (ET)'
+            'date_range': f'{start_date.isoformat()} to {today_et.isoformat()}',
+            'total_snapshots_all_days': len(all_snapshots),
+            'expected_intervals_per_day': len(expected_times),
+            'daily_reports': daily_reports,
+            'summary': f'Found {len(all_snapshots)} intraday snapshots across last 7 days'
         }), 200
     
     except Exception as e:
         logger.error(f"Error checking intraday data: {str(e)}")
-        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+        import traceback
+        return jsonify({
+            'error': f'Unexpected error: {str(e)}',
+            'traceback': traceback.format_exc()
+        }), 500
 
 @app.route('/admin/debug-intraday-calculation')
 @login_required
