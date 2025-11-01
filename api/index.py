@@ -5375,6 +5375,50 @@ def check_spy_intraday():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/clear-spy-intraday-date', methods=['POST'])
+@login_required
+def clear_spy_intraday_date():
+    """Delete SPY_INTRADAY records for a specific date (to redo backfill)"""
+    try:
+        if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import date as date_type
+        from models import MarketData
+        from sqlalchemy import and_
+        
+        # Get date from request
+        date_str = request.json.get('date') if request.json else None
+        if not date_str:
+            return jsonify({'error': 'Missing date parameter'}), 400
+        
+        target_date = date_type.fromisoformat(date_str)
+        
+        # Delete all SPY_INTRADAY records for this date
+        deleted = MarketData.query.filter(
+            and_(
+                MarketData.ticker == 'SPY_INTRADAY',
+                MarketData.date == target_date
+            )
+        ).delete()
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'date': date_str,
+            'records_deleted': deleted
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Clear SPY intraday error: {e}")
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/backfill-spy-intraday', methods=['POST', 'GET'])
 @login_required
 def backfill_spy_intraday():
@@ -5386,6 +5430,7 @@ def backfill_spy_intraday():
         from datetime import date, datetime, timedelta, time, timezone as dt_timezone
         from models import MarketData
         from portfolio_performance import PortfolioPerformanceCalculator
+        from sqlalchemy import and_
         
         # GET: Show what would be backfilled
         if request.method == 'GET':
@@ -5411,33 +5456,58 @@ def backfill_spy_intraday():
                         'will_backfill': True
                     })
             
-            return jsonify({
-                'missing_dates': missing_info,
-                'count': len(missing_info),
-                'message': f'Found {len(missing_info)} dates missing SPY_INTRADAY data',
-                'action': 'POST to this endpoint to backfill with market-close SPY price'
-            })
+            # Return HTML with button if browser request, JSON otherwise
+            if 'application/json' not in request.headers.get('Accept', ''):
+                # Return HTML page with button
+                missing_list = ''.join([f'<li>{d["date"]}</li>' for d in missing_info])
+                return f'''
+                <!DOCTYPE html>
+                <html>
+                <head><title>SPY Intraday Backfill</title></head>
+                <body style="font-family: Arial; padding: 20px;">
+                    <h1>SPY_INTRADAY Backfill</h1>
+                    <p>Found <strong>{len(missing_info)}</strong> dates missing SPY_INTRADAY data:</p>
+                    <ul>{missing_list}</ul>
+                    <form method="POST">
+                        <button type="submit" style="padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px;">
+                            Backfill Missing Dates
+                        </button>
+                    </form>
+                </body>
+                </html>
+                '''
+            else:
+                return jsonify({
+                    'missing_dates': missing_info,
+                    'count': len(missing_info),
+                    'message': f'Found {len(missing_info)} dates missing SPY_INTRADAY data',
+                    'action': 'POST to this endpoint to backfill with market-close SPY price'
+                })
         
-        # POST: Perform backfill
-        calculator = PortfolioPerformanceCalculator()
+        # POST: Perform backfill using Alpha Vantage intraday historical data
+        import requests
+        import os
+        
         results = {
             'started_at': datetime.now().isoformat(),
             'dates_processed': [],
             'records_created': 0,
-            'errors': []
+            'errors': [],
+            'api_calls_made': 0
         }
         
         # Backfill missing dates from last 7 days
         today = get_market_date()
-        # Create ET timezone offset: UTC-5 (EST) or UTC-4 (EDT)
-        ET = dt_timezone(timedelta(hours=-5))
+        # Create ET timezone offset: UTC-4 (EDT)
+        ET = dt_timezone(timedelta(hours=-4))
         
+        # Get dates that need backfilling
+        dates_to_backfill = []
         for days_back in range(7):
             check_date = today - timedelta(days=days_back)
             if check_date.weekday() >= 5:
                 continue
             
-            # Check if SPY_INTRADAY already exists for this date
             existing = MarketData.query.filter(
                 and_(
                     MarketData.ticker == 'SPY_INTRADAY',
@@ -5451,50 +5521,88 @@ def backfill_spy_intraday():
                     'status': 'skipped',
                     'reason': f'Already has {existing} records'
                 })
-                continue
+            else:
+                dates_to_backfill.append(check_date)
+        
+        if not dates_to_backfill:
+            results['success'] = True
+            results['message'] = 'No backfill needed - all dates have SPY_INTRADAY data'
+            return jsonify(results)
+        
+        # Fetch intraday data from Alpha Vantage (15-minute intervals, last 2 months)
+        ALPHA_VANTAGE_API_KEY = os.environ.get('ALPHA_VANTAGE_API_KEY')
+        url = f'https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=SPY&interval=15min&apikey={ALPHA_VANTAGE_API_KEY}&outputsize=full&extended_hours=false'
+        
+        try:
+            response = requests.get(url, timeout=15)
+            data = response.json()
+            results['api_calls_made'] = 1
             
-            # Fetch current SPY price (will use cached historical if available)
-            try:
-                spy_data = calculator.get_stock_data('SPY')
-                if spy_data and spy_data.get('price'):
-                    spy_price = spy_data['price']
-                    sp500_value = spy_price * 10
+            time_series = data.get('Time Series (15min)', {})
+            if not time_series:
+                results['errors'].append({
+                    'error': 'No intraday data returned from Alpha Vantage',
+                    'response_keys': list(data.keys())
+                })
+                results['success'] = False
+                return jsonify(results), 500
+            
+            # Process each date that needs backfilling
+            for check_date in dates_to_backfill:
+                date_str = check_date.isoformat()
+                records_for_date = 0
+                
+                # Find all 15-minute intervals for this date
+                for timestamp_str, price_data in time_series.items():
+                    # Parse timestamp (format: "2025-10-29 09:30:00")
+                    ts = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S')
                     
-                    # Create SPY_INTRADAY record at 4PM ET for this date
-                    # 4 PM ET = 8 PM UTC (during EDT, UTC-4)
-                    # Database stores naive UTC timestamps
-                    timestamp_4pm_et = datetime.combine(check_date, time(16, 0))
-                    timestamp_4pm_et = timestamp_4pm_et.replace(tzinfo=ET)
-                    timestamp_utc = timestamp_4pm_et.astimezone(dt_timezone.utc)
-                    timestamp_naive_utc = timestamp_utc.replace(tzinfo=None)
+                    # Check if this timestamp is for our target date
+                    if ts.date() != check_date:
+                        continue
                     
+                    # Get SPY close price for this interval
+                    spy_close = float(price_data.get('4. close', 0))
+                    if spy_close <= 0:
+                        continue
+                    
+                    sp500_value = spy_close * 10
+                    
+                    # Timestamp from Alpha Vantage is in ET, convert to UTC for storage
+                    ts_et = ts.replace(tzinfo=ET)
+                    ts_utc = ts_et.astimezone(dt_timezone.utc)
+                    ts_naive_utc = ts_utc.replace(tzinfo=None)
+                    
+                    # Create MarketData record
                     market_data = MarketData(
                         ticker='SPY_INTRADAY',
                         date=check_date,
-                        timestamp=timestamp_naive_utc,
+                        timestamp=ts_naive_utc,
                         close_price=sp500_value
                     )
                     db.session.add(market_data)
-                    results['records_created'] += 1
-                    
+                    records_for_date += 1
+                
+                if records_for_date > 0:
+                    results['records_created'] += records_for_date
                     results['dates_processed'].append({
-                        'date': check_date.isoformat(),
+                        'date': date_str,
                         'status': 'backfilled',
-                        'spy_price': spy_price,
-                        'sp500_value': sp500_value,
-                        'timestamp_et': timestamp_4pm_et.isoformat(),
-                        'timestamp_utc': timestamp_naive_utc.isoformat()
+                        'records_created': records_for_date
                     })
                 else:
-                    results['errors'].append({
-                        'date': check_date.isoformat(),
-                        'error': 'No SPY price available'
+                    results['dates_processed'].append({
+                        'date': date_str,
+                        'status': 'no_data',
+                        'reason': 'No intraday data found in Alpha Vantage response'
                     })
-            except Exception as e:
-                results['errors'].append({
-                    'date': check_date.isoformat(),
-                    'error': str(e)
-                })
+        
+        except Exception as e:
+            results['errors'].append({
+                'error': f'Alpha Vantage API error: {str(e)}'
+            })
+            results['success'] = False
+            return jsonify(results), 500
         
         # Commit all backfilled records
         if results['records_created'] > 0:
