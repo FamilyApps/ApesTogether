@@ -5287,6 +5287,9 @@ def check_spy_intraday():
         from models import MarketData, PortfolioSnapshotIntraday
         from sqlalchemy import and_
         
+        # Force fresh queries from database
+        db.session.expire_all()
+        
         today = get_market_date()
         results = {
             'today': today.isoformat(),
@@ -5584,6 +5587,9 @@ def backfill_spy_intraday():
         from models import MarketData
         from portfolio_performance import PortfolioPerformanceCalculator
         from sqlalchemy import and_
+        
+        # Force fresh queries from database (clear any cached results)
+        db.session.expire_all()
         
         # GET: Show what would be backfilled
         if request.method == 'GET':
