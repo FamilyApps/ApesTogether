@@ -5598,6 +5598,66 @@ def clear_spy_intraday_date():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/force-delete-spy-intraday', methods=['POST'])
+@login_required
+def force_delete_spy_intraday():
+    """Force delete using raw SQL to bypass any ORM caching"""
+    try:
+        if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import date as date_type
+        from sqlalchemy import text
+        
+        # Get date from request
+        date_str = request.json.get('date') if request.json else None
+        if not date_str:
+            return jsonify({'error': 'Missing date parameter'}), 400
+        
+        target_date = date_type.fromisoformat(date_str)
+        
+        # Count before (raw SQL)
+        before_result = db.session.execute(
+            text("SELECT COUNT(*) FROM market_data WHERE ticker = 'SPY_INTRADAY' AND date = :date"),
+            {'date': target_date}
+        )
+        before_count = before_result.scalar()
+        
+        # Delete using raw SQL
+        delete_result = db.session.execute(
+            text("DELETE FROM market_data WHERE ticker = 'SPY_INTRADAY' AND date = :date"),
+            {'date': target_date}
+        )
+        db.session.commit()
+        
+        # Close and get new session to force fresh connection
+        db.session.close()
+        
+        # Count after (raw SQL with new session)
+        after_result = db.session.execute(
+            text("SELECT COUNT(*) FROM market_data WHERE ticker = 'SPY_INTRADAY' AND date = :date"),
+            {'date': target_date}
+        )
+        after_count = after_result.scalar()
+        
+        return jsonify({
+            'success': True,
+            'date': date_str,
+            'before_count': before_count,
+            'records_deleted': delete_result.rowcount,
+            'after_count': after_count,
+            'verified': after_count == 0
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Force delete SPY intraday error: {e}")
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/backfill-spy-intraday', methods=['POST', 'GET'])
 @login_required
 def backfill_spy_intraday():
@@ -5609,10 +5669,11 @@ def backfill_spy_intraday():
         from datetime import date, datetime, timedelta, time, timezone as dt_timezone
         from models import MarketData
         from portfolio_performance import PortfolioPerformanceCalculator
-        from sqlalchemy import and_
+        from sqlalchemy import and_, text
         
         # Force fresh queries from database (clear any cached results)
         db.session.expire_all()
+        db.session.close()  # Close stale connections
         
         # GET: Show what would be backfilled
         if request.method == 'GET':
@@ -5690,12 +5751,12 @@ def backfill_spy_intraday():
             if check_date.weekday() >= 5:
                 continue
             
-            existing = MarketData.query.filter(
-                and_(
-                    MarketData.ticker == 'SPY_INTRADAY',
-                    MarketData.date == check_date
-                )
-            ).count()
+            # Use raw SQL to bypass ORM cache
+            existing_result = db.session.execute(
+                text("SELECT COUNT(*) FROM market_data WHERE ticker = 'SPY_INTRADAY' AND date = :date"),
+                {'date': check_date}
+            )
+            existing = existing_result.scalar()
             
             if existing > 0:
                 results['dates_processed'].append({
