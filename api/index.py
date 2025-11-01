@@ -24441,22 +24441,22 @@ def admin_delete_user_intraday_snapshots():
         if not user:
             return jsonify({'error': f'User {username} not found'}), 404
         
-        # Count snapshots before deletion
+        # Find all snapshots to delete by fetching IDs first
         from sqlalchemy import cast, Date
-        before_count = PortfolioSnapshotIntraday.query.filter(
+        snapshots_to_delete = PortfolioSnapshotIntraday.query.filter(
             PortfolioSnapshotIntraday.user_id == user.id,
             cast(PortfolioSnapshotIntraday.timestamp, Date) >= start_date,
             cast(PortfolioSnapshotIntraday.timestamp, Date) <= end_date
-        ).count()
+        ).all()
         
-        # Delete snapshots
-        deleted = PortfolioSnapshotIntraday.query.filter(
-            PortfolioSnapshotIntraday.user_id == user.id,
-            cast(PortfolioSnapshotIntraday.timestamp, Date) >= start_date,
-            cast(PortfolioSnapshotIntraday.timestamp, Date) <= end_date
-        ).delete(synchronize_session=False)
+        before_count = len(snapshots_to_delete)
+        
+        # Delete each snapshot individually
+        for snapshot in snapshots_to_delete:
+            db.session.delete(snapshot)
         
         db.session.commit()
+        deleted = before_count
         
         logger.info(f"Deleted {deleted} intraday snapshots for user {username} from {start_date} to {end_date}")
         
@@ -24472,6 +24472,69 @@ def admin_delete_user_intraday_snapshots():
         
     except Exception as e:
         logger.error(f"Error deleting intraday snapshots: {e}")
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/verify-snapshot-counts', methods=['POST'])
+@login_required
+def admin_verify_snapshot_counts():
+    """Verify actual snapshot counts in database for debugging deletion issues"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime
+        from models import User, PortfolioSnapshotIntraday
+        from sqlalchemy import cast, Date, func
+        
+        username = request.json.get('username')
+        start_date_str = request.json.get('start_date')
+        end_date_str = request.json.get('end_date')
+        
+        if not username or not start_date_str or not end_date_str:
+            return jsonify({'error': 'username, start_date, and end_date required'}), 400
+        
+        # Parse dates
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+        end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+        
+        # Find user
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': f'User {username} not found'}), 404
+        
+        # Count by date
+        results = db.session.query(
+            cast(PortfolioSnapshotIntraday.timestamp, Date).label('date'),
+            func.count('*').label('count')
+        ).filter(
+            PortfolioSnapshotIntraday.user_id == user.id,
+            cast(PortfolioSnapshotIntraday.timestamp, Date) >= start_date,
+            cast(PortfolioSnapshotIntraday.timestamp, Date) <= end_date
+        ).group_by(
+            cast(PortfolioSnapshotIntraday.timestamp, Date)
+        ).order_by('date').all()
+        
+        counts_by_date = {str(r.date): r.count for r in results}
+        total = sum(counts_by_date.values())
+        
+        return jsonify({
+            'success': True,
+            'username': username,
+            'user_id': user.id,
+            'start_date': start_date_str,
+            'end_date': end_date_str,
+            'total_count': total,
+            'counts_by_date': counts_by_date
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error verifying snapshot counts: {e}")
         import traceback
         return jsonify({
             'error': str(e),
