@@ -238,7 +238,7 @@ def calculate_portfolio_performance(
     # Generate chart data if requested (uses simple per-point formula for speed)
     chart_data = None
     if include_chart_data:
-        chart_data = _generate_chart_points(snapshots, start_date, end_date)
+        chart_data = _generate_chart_points(snapshots, start_date, end_date, period)
     
     # Calculate S&P 500 benchmark (simple percentage, not time-weighted)
     sp500_return = _calculate_sp500_benchmark(start_date, end_date)
@@ -262,7 +262,8 @@ def calculate_portfolio_performance(
 def _generate_chart_points(
     snapshots: List[PortfolioSnapshot],
     period_start: date,
-    period_end: date
+    period_end: date,
+    period: Optional[str] = None
 ) -> List[Dict]:
     """
     Generate point-by-point chart data using simple per-point formula.

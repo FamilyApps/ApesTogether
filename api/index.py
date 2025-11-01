@@ -5314,8 +5314,9 @@ def check_spy_intraday():
         ]
         results['spy_intraday_today_count'] = len(spy_today)
         
-        # Check last 7 days
-        for days_back in range(7):
+        # Check last 30 days for comprehensive gap analysis
+        daily_breakdown = []
+        for days_back in range(30):
             check_date = today - timedelta(days=days_back)
             # Skip weekends
             if check_date.weekday() >= 5:
@@ -5327,7 +5328,37 @@ def check_spy_intraday():
                     MarketData.date == check_date
                 )
             ).count()
-            results['spy_intraday_last_7_days'][check_date.isoformat()] = count
+            
+            # Get time range if data exists
+            time_range = None
+            if count > 0:
+                first = MarketData.query.filter(
+                    and_(
+                        MarketData.ticker == 'SPY_INTRADAY',
+                        MarketData.date == check_date
+                    )
+                ).order_by(MarketData.timestamp.asc()).first()
+                
+                last = MarketData.query.filter(
+                    and_(
+                        MarketData.ticker == 'SPY_INTRADAY',
+                        MarketData.date == check_date
+                    )
+                ).order_by(MarketData.timestamp.desc()).first()
+                
+                if first and last and first.timestamp and last.timestamp:
+                    time_range = f"{first.timestamp.strftime('%H:%M')} to {last.timestamp.strftime('%H:%M')}"
+            
+            daily_breakdown.append({
+                'date': check_date.isoformat(),
+                'count': count,
+                'time_range': time_range,
+                'has_data': count > 0
+            })
+            
+            # Keep backward compatible last 7 days
+            if days_back < 7:
+                results['spy_intraday_last_7_days'][check_date.isoformat()] = count
             
             # Flag gaps
             if count == 0:
@@ -5336,6 +5367,30 @@ def check_spy_intraday():
                     'type': 'no_spy_intraday',
                     'message': f'No SPY_INTRADAY data for {check_date}'
                 })
+        
+        # Find continuous gap range
+        gap_start = None
+        gap_end = None
+        for item in daily_breakdown:
+            if not item['has_data']:
+                if gap_end is None:
+                    gap_end = item['date']
+                gap_start = item['date']
+            elif gap_start and gap_end:
+                break
+        
+        gap_info = None
+        if gap_start and gap_end:
+            missing_dates = [item['date'] for item in daily_breakdown if not item['has_data'] and item['date'] >= gap_start and item['date'] <= gap_end]
+            gap_info = {
+                'gap_start': gap_start,
+                'gap_end': gap_end,
+                'trading_days_missing': len(missing_dates),
+                'missing_dates': missing_dates
+            }
+        
+        results['daily_breakdown_30d'] = daily_breakdown
+        results['gap_analysis'] = gap_info
         
         # Check portfolio intraday snapshots for today
         portfolio_snaps = PortfolioSnapshotIntraday.query.filter(
@@ -5369,6 +5424,104 @@ def check_spy_intraday():
         
     except Exception as e:
         logger.error(f"Check SPY intraday error: {e}")
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/diagnose-spy-intraday-gap', methods=['GET'])
+@login_required
+def diagnose_spy_intraday_gap():
+    """Find the gap in SPY_INTRADAY data"""
+    try:
+        if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import date, timedelta
+        from models import MarketData
+        from sqlalchemy import and_
+        
+        today = get_market_date()
+        results = []
+        
+        # Check last 30 trading days
+        for days_back in range(30):
+            check_date = today - timedelta(days=days_back)
+            
+            # Skip weekends
+            if check_date.weekday() >= 5:
+                continue
+            
+            # Count SPY_INTRADAY records for this date
+            count = MarketData.query.filter(
+                and_(
+                    MarketData.ticker == 'SPY_INTRADAY',
+                    MarketData.date == check_date
+                )
+            ).count()
+            
+            # Get sample timestamps if any exist
+            time_range = None
+            if count > 0:
+                first = MarketData.query.filter(
+                    and_(
+                        MarketData.ticker == 'SPY_INTRADAY',
+                        MarketData.date == check_date
+                    )
+                ).order_by(MarketData.timestamp.asc()).first()
+                
+                last = MarketData.query.filter(
+                    and_(
+                        MarketData.ticker == 'SPY_INTRADAY',
+                        MarketData.date == check_date
+                    )
+                ).order_by(MarketData.timestamp.desc()).first()
+                
+                time_range = f"{first.timestamp.strftime('%H:%M')} to {last.timestamp.strftime('%H:%M')}"
+            
+            results.append({
+                'date': check_date.isoformat(),
+                'count': count,
+                'time_range': time_range,
+                'has_data': count > 0
+            })
+        
+        # Find the gap
+        gap_start = None
+        gap_end = None
+        
+        for r in results:
+            if not r['has_data']:
+                if gap_end is None:
+                    gap_end = r['date']
+                gap_start = r['date']
+            elif gap_start and gap_end:
+                break
+        
+        gap_info = None
+        if gap_start and gap_end:
+            missing_dates = [r['date'] for r in results if not r['has_data'] and r['date'] >= gap_start and r['date'] <= gap_end]
+            gap_info = {
+                'gap_start': gap_start,
+                'gap_end': gap_end,
+                'trading_days_missing': len(missing_dates),
+                'missing_dates': missing_dates
+            }
+        
+        # Total SPY_INTRADAY count
+        total = MarketData.query.filter_by(ticker='SPY_INTRADAY').count()
+        
+        return jsonify({
+            'daily_breakdown': results,
+            'gap': gap_info,
+            'total_spy_intraday_records': total,
+            'checked_from': results[-1]['date'] if results else None,
+            'checked_to': results[0]['date'] if results else None
+        })
+        
+    except Exception as e:
+        logger.error(f"Diagnose SPY intraday gap error: {e}")
         import traceback
         return jsonify({
             'error': str(e),
