@@ -24208,18 +24208,16 @@ def admin_backfill_intraday_data():
                 
                 # Check if already exists
                 existing = MarketData.query.filter_by(
-                    symbol='SPY',
-                    data_type='SPY_INTRADAY',
+                    ticker='SPY_INTRADAY',
                     timestamp=dt_utc
                 ).first()
                 
                 if not existing:
                     spy_entry = MarketData(
-                        symbol='SPY',
+                        ticker='SPY_INTRADAY',
                         date=target_date,
                         timestamp=dt_utc,
-                        close_price=close_price,
-                        data_type='SPY_INTRADAY'
+                        close_price=close_price
                     )
                     db.session.add(spy_entry)
                     created_spy_count += 1
