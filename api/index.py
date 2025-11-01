@@ -24267,6 +24267,9 @@ def admin_backfill_intraday_data():
                     user_results[user.username]['errors'].append(f"Error fetching {ticker}: {str(e)}")
             
             # Step 5: Calculate portfolio value at each interval
+            # Track last known price for each ticker (for sparse data like SSPY)
+            last_known_prices = {}
+            
             for hour, minute in intervals:
                 dt_et = datetime.combine(target_date, time(hour, minute), tzinfo=MARKET_TZ)
                 dt_utc = dt_et.astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
@@ -24285,18 +24288,34 @@ def admin_backfill_intraday_data():
                 # Calculate portfolio value at this timestamp
                 portfolio_value = 0.0
                 stock_value = 0.0
-                all_prices_available = True
+                missing_initial_price = False
                 
                 for stock in user_stocks:
+                    price = None
+                    
+                    # Try to get price from intraday data
                     if stock.ticker in ticker_prices and av_timestamp in ticker_prices[stock.ticker]:
                         price = float(ticker_prices[stock.ticker][av_timestamp]['4. close'])
-                        stock_value += stock.quantity * price
+                        last_known_prices[stock.ticker] = price  # Update last known price
+                    elif stock.ticker in last_known_prices:
+                        # Use last known price for sparse data
+                        price = last_known_prices[stock.ticker]
                     else:
-                        all_prices_available = False
+                        # No data yet for this ticker - try to find first available price
+                        for ts in sorted(ticker_prices.get(stock.ticker, {}).keys()):
+                            if ts.startswith(target_date.strftime('%Y-%m-%d')):
+                                price = float(ticker_prices[stock.ticker][ts]['4. close'])
+                                last_known_prices[stock.ticker] = price
+                                break
+                    
+                    if price is None:
+                        missing_initial_price = True
+                        user_results[user.username]['errors'].append(f"No price data for {stock.ticker} on {target_date}")
                         break
+                    
+                    stock_value += stock.quantity * price
                 
-                if not all_prices_available:
-                    user_results[user.username]['errors'].append(f"Missing prices at {av_timestamp}")
+                if missing_initial_price:
                     continue
                 
                 portfolio_value = stock_value
@@ -24335,6 +24354,58 @@ def admin_backfill_intraday_data():
         
     except Exception as e:
         logger.error(f"Error in backfill: {e}")
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/fix-ticker', methods=['POST'])
+@login_required
+def admin_fix_ticker():
+    """Fix incorrect ticker symbol for a user's stock"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import User, Stock
+        
+        username = request.json.get('username')
+        old_ticker = request.json.get('old_ticker')
+        new_ticker = request.json.get('new_ticker')
+        
+        if not username or not old_ticker or not new_ticker:
+            return jsonify({'error': 'username, old_ticker, and new_ticker required'}), 400
+        
+        # Find user
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': f'User {username} not found'}), 404
+        
+        # Find stock with old ticker
+        stock = Stock.query.filter_by(user_id=user.id, ticker=old_ticker).first()
+        if not stock:
+            return jsonify({'error': f'Stock {old_ticker} not found for user {username}'}), 404
+        
+        # Update ticker
+        stock.ticker = new_ticker
+        db.session.commit()
+        
+        logger.info(f"Updated ticker for user {username}: {old_ticker} -> {new_ticker}")
+        
+        return jsonify({
+            'success': True,
+            'username': username,
+            'old_ticker': old_ticker,
+            'new_ticker': new_ticker,
+            'stock_id': stock.id,
+            'quantity': stock.quantity
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error fixing ticker: {e}")
         import traceback
         return jsonify({
             'error': str(e),
