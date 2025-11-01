@@ -25497,6 +25497,127 @@ def public_portfolio_performance(slug, period):
         logger.error(f"Public portfolio performance error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/diagnose-leaderboard-staleness', methods=['GET'])
+@login_required
+def admin_diagnose_leaderboard_staleness():
+    """Diagnose why leaderboard shows stale data - compare cache vs live calculations"""
+    try:
+        if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import User, UserPortfolioChartCache, LeaderboardCache, PortfolioSnapshot
+        from performance_calculator import calculate_portfolio_performance, get_period_dates
+        import json
+        
+        period = request.args.get('period', '1M')
+        
+        diagnostics = {
+            'period': period,
+            'timestamp': datetime.now().isoformat(),
+            'users': []
+        }
+        
+        users = User.query.all()
+        
+        for user in users:
+            user_diag = {
+                'user_id': user.id,
+                'username': user.username
+            }
+            
+            # Latest snapshot
+            latest_snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id)\
+                .order_by(PortfolioSnapshot.date.desc()).first()
+            
+            if latest_snapshot:
+                user_diag['latest_snapshot'] = {
+                    'date': latest_snapshot.date.isoformat(),
+                    'value': float(latest_snapshot.total_value)
+                }
+            
+            # Chart cache
+            chart_cache = UserPortfolioChartCache.query.filter_by(
+                user_id=user.id,
+                period=period
+            ).first()
+            
+            if chart_cache:
+                cache_age = datetime.now() - chart_cache.generated_at
+                cache_age_hours = cache_age.total_seconds() / 3600
+                
+                try:
+                    cached_data = json.loads(chart_cache.chart_data)
+                    cached_return = cached_data.get('portfolio_return')
+                except:
+                    cached_return = None
+                
+                user_diag['chart_cache'] = {
+                    'generated_at': chart_cache.generated_at.isoformat(),
+                    'age_hours': round(cache_age_hours, 1),
+                    'cached_return': cached_return
+                }
+            else:
+                user_diag['chart_cache'] = None
+            
+            # Live calculation
+            try:
+                start_date, end_date = get_period_dates(period, user_id=user.id)
+                live_result = calculate_portfolio_performance(
+                    user.id,
+                    start_date,
+                    end_date,
+                    include_chart_data=False,
+                    period=period
+                )
+                
+                if live_result:
+                    user_diag['live_calculation'] = {
+                        'return': live_result.get('portfolio_return'),
+                        'sp500_return': live_result.get('sp500_return')
+                    }
+                    
+                    # Compare
+                    if chart_cache and cached_return is not None:
+                        diff = abs(live_result.get('portfolio_return', 0) - cached_return)
+                        user_diag['mismatch'] = diff > 0.01
+                        user_diag['diff'] = round(diff, 2)
+            except Exception as e:
+                user_diag['live_calculation_error'] = str(e)
+            
+            diagnostics['users'].append(user_diag)
+        
+        # Check LeaderboardCache
+        leaderboard_cache = LeaderboardCache.query.filter_by(period=f'{period}_all').first()
+        
+        if leaderboard_cache:
+            cache_age = datetime.now() - leaderboard_cache.generated_at
+            cache_age_hours = cache_age.total_seconds() / 3600
+            
+            try:
+                cached_data = json.loads(leaderboard_cache.leaderboard_data)
+                top_3 = cached_data[:3] if len(cached_data) >= 3 else cached_data
+            except:
+                top_3 = []
+            
+            diagnostics['leaderboard_cache'] = {
+                'generated_at': leaderboard_cache.generated_at.isoformat(),
+                'age_hours': round(cache_age_hours, 1),
+                'entry_count': len(cached_data) if cached_data else 0,
+                'top_3': top_3
+            }
+        else:
+            diagnostics['leaderboard_cache'] = None
+        
+        return jsonify(diagnostics)
+        
+    except Exception as e:
+        logger.error(f"Leaderboard staleness diagnostic error: {e}")
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 if __name__ == '__main__':
     # Log app startup with structured information
     logger.info("App starting", extra={
