@@ -163,15 +163,20 @@ def calculate_portfolio_performance(
             # Wrap intraday snapshots
             wrapped_intraday = [IntradayWrapper(s) for s in intraday_snapshots]
             
-            # Add timestamp to daily snapshots for sorting
-            for snap in snapshots:
-                snap.timestamp = datetime.combine(snap.date, time(16, 0))
-                snap.is_intraday = False
-            
-            # Merge and sort all snapshots by timestamp
-            snapshots = sorted(snapshots + wrapped_intraday, key=lambda s: s.timestamp)
-            
-            logger.info(f"Including {len(intraday_snapshots)} intraday snapshots for {period} period")
+            # For 1D period, ONLY use intraday snapshots (exclude daily snapshot to avoid duplicates)
+            # For 5D period, merge daily snapshots (for days before today) with intraday snapshots (for recent days)
+            if period == '1D':
+                snapshots = wrapped_intraday
+                logger.info(f"Using ONLY {len(intraday_snapshots)} intraday snapshots for 1D period (excluding daily)")
+            else:
+                # Add timestamp to daily snapshots for sorting
+                for snap in snapshots:
+                    snap.timestamp = datetime.combine(snap.date, time(16, 0))
+                    snap.is_intraday = False
+                
+                # Merge and sort all snapshots by timestamp
+                snapshots = sorted(snapshots + wrapped_intraday, key=lambda s: s.timestamp)
+                logger.info(f"Including {len(intraday_snapshots)} intraday + {len(snapshots) - len(intraday_snapshots)} daily snapshots for {period} period")
     
     # Edge case: No snapshots
     if not snapshots:

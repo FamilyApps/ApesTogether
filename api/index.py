@@ -1457,30 +1457,16 @@ def dashboard():
     # Build share URL
     share_url = f"https://apestogether.ai/p/{current_user.portfolio_slug}" if current_user.is_authenticated and current_user.portfolio_slug else ""
     
-    # Get user's leaderboard positions (if in top 20) - cache for 5 minutes
+    # Get user's leaderboard positions (if in top 20)
+    # This reads from pre-calculated LeaderboardCache (fast), doesn't recalculate entire leaderboard
     leaderboard_positions = {}
-    cache_key = f"leaderboard_pos_{current_user.id}"
-    cached_positions = session.get(cache_key)
-    cache_time = session.get(f"{cache_key}_time")
-    
-    if cached_positions and cache_time:
-        cache_age = datetime.now() - datetime.fromisoformat(cache_time)
-        if cache_age < timedelta(minutes=5):
-            leaderboard_positions = cached_positions
-            logger.info(f"Using cached leaderboard positions for user {current_user.id}")
-    
-    if not leaderboard_positions:
-        try:
-            from leaderboard_utils import get_user_leaderboard_positions
-            leaderboard_positions = get_user_leaderboard_positions(current_user.id, top_n=20)
-            logger.info(f"Calculated leaderboard positions for user {current_user.id}: {leaderboard_positions}")
-            
-            # Cache in session
-            session[cache_key] = leaderboard_positions
-            session[f"{cache_key}_time"] = datetime.now().isoformat()
-        except Exception as e:
-            logger.error(f"Error fetching leaderboard positions: {str(e)}")
-            logger.error(traceback.format_exc())
+    try:
+        from leaderboard_utils import get_user_leaderboard_positions
+        leaderboard_positions = get_user_leaderboard_positions(current_user.id, top_n=20)
+        logger.info(f"Retrieved leaderboard positions for user {current_user.id}: {leaderboard_positions}")
+    except Exception as e:
+        logger.error(f"Error fetching leaderboard positions: {str(e)}")
+        logger.error(traceback.format_exc())
     
     # Get user's portfolio stats (Phase 3)
     portfolio_stats = None
@@ -16197,11 +16183,19 @@ def get_portfolio_performance(period):
     try:
         logger.info(f"ROUTE HIT: /api/portfolio/performance/{period}")
         logger.info(f"Request method: {request.method}")
-        logger.info(f"Request headers: {dict(request.headers)}")
         logger.info(f"current_user.is_authenticated: {current_user.is_authenticated}")
+        logger.info(f"session.get('user_id'): {session.get('user_id')}")
         
-        # Check authentication without redirect (API endpoints should return JSON, not HTML redirects)
-        if not current_user.is_authenticated:
+        # Check authentication - try current_user first, then fall back to session
+        # (AJAX requests sometimes don't load current_user properly)
+        user_id = None
+        if current_user.is_authenticated:
+            user_id = current_user.id
+        elif session.get('user_id'):
+            user_id = session.get('user_id')
+            logger.info(f"Using user_id from session: {user_id}")
+        
+        if not user_id:
             logger.warning(f"Unauthenticated request to performance API")
             return jsonify({'error': 'User not authenticated'}), 401
         
@@ -16210,7 +16204,6 @@ def get_portfolio_performance(period):
         from datetime import datetime, timedelta
         import json
         
-        user_id = current_user.id
         logger.info(f"Performance API called for period {period}, user_id: {user_id}")
         
         period_upper = period.upper()
@@ -25641,6 +25634,41 @@ def admin_diagnose_chart_issues():
         
     except Exception as e:
         logger.error(f"Chart issues diagnostic error: {e}")
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/clear-chart-cache', methods=['POST'])
+@login_required
+def admin_clear_chart_cache():
+    """Clear chart cache for current user to force fresh data generation"""
+    try:
+        from models import UserPortfolioChartCache
+        from sqlalchemy import text
+        
+        user_id = current_user.id
+        
+        # Delete using raw SQL to bypass any caching
+        with db.engine.connect() as conn:
+            result = conn.execute(text("""
+                DELETE FROM user_portfolio_chart_cache
+                WHERE user_id = :user_id
+            """), {'user_id': user_id})
+            conn.commit()
+            deleted_count = result.rowcount
+        
+        logger.info(f"✅ Cleared {deleted_count} chart cache entries for user {user_id}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Cleared {deleted_count} chart cache entries',
+            'user_id': user_id
+        })
+        
+    except Exception as e:
+        logger.error(f"Error clearing chart cache: {e}")
         import traceback
         return jsonify({
             'error': str(e),
