@@ -5543,6 +5543,9 @@ def clear_spy_intraday_date():
         from models import MarketData
         from sqlalchemy import and_
         
+        # Force fresh queries
+        db.session.expire_all()
+        
         # Get date from request
         date_str = request.json.get('date') if request.json else None
         if not date_str:
@@ -5550,20 +5553,40 @@ def clear_spy_intraday_date():
         
         target_date = date_type.fromisoformat(date_str)
         
+        # Check count before delete
+        before_count = MarketData.query.filter(
+            and_(
+                MarketData.ticker == 'SPY_INTRADAY',
+                MarketData.date == target_date
+            )
+        ).count()
+        
         # Delete all SPY_INTRADAY records for this date
         deleted = MarketData.query.filter(
             and_(
                 MarketData.ticker == 'SPY_INTRADAY',
                 MarketData.date == target_date
             )
-        ).delete()
+        ).delete(synchronize_session=False)
         
         db.session.commit()
+        db.session.expire_all()
+        
+        # Verify deletion
+        after_count = MarketData.query.filter(
+            and_(
+                MarketData.ticker == 'SPY_INTRADAY',
+                MarketData.date == target_date
+            )
+        ).count()
         
         return jsonify({
             'success': True,
             'date': date_str,
-            'records_deleted': deleted
+            'before_count': before_count,
+            'records_deleted': deleted,
+            'after_count': after_count,
+            'verified': after_count == 0
         })
         
     except Exception as e:
