@@ -371,8 +371,11 @@ def _generate_chart_points(
     
     if has_intraday:
         # For intraday periods (1D/5D): Generate point for each snapshot
-        from pytz import timezone
-        ET = timezone('America/New_York')
+        from datetime import timezone as dt_timezone
+        
+        # Eastern Time is UTC-5 (EST) or UTC-4 (EDT)
+        # For now use UTC-4 for EDT (we're in daylight saving time through Nov 3)
+        ET = dt_timezone(timedelta(hours=-4))
         
         for snapshot in snapshots:
             if snapshot.total_value <= 0:
@@ -380,14 +383,14 @@ def _generate_chart_points(
             
             # Format label with time for intraday (ensure Eastern Time), date only for daily close
             if hasattr(snapshot, 'is_intraday') and snapshot.is_intraday:
-                # Convert to Eastern Time if needed
+                # Convert to Eastern Time
+                # Database stores UTC timestamps (naive), so treat as UTC and convert to ET
                 ts = snapshot.timestamp
                 if ts.tzinfo is None:
-                    # Assume UTC if naive
-                    from pytz import utc
-                    ts = utc.localize(ts)
+                    # Add UTC timezone info
+                    ts = ts.replace(tzinfo=dt_timezone.utc)
                 ts_et = ts.astimezone(ET)
-                date_str = ts_et.strftime('%b %d %I:%M %p')  # "Oct 31 03:30 PM"
+                date_str = ts_et.strftime('%b %d %I:%M %p')  # "Oct 31 09:30 AM"
             else:
                 date_str = snapshot.date.strftime('%b %d')
             

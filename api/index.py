@@ -5383,10 +5383,9 @@ def backfill_spy_intraday():
         if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
             return jsonify({'error': 'Admin access required'}), 403
         
-        from datetime import date, datetime, timedelta, time
+        from datetime import date, datetime, timedelta, time, timezone as dt_timezone
         from models import MarketData
         from portfolio_performance import PortfolioPerformanceCalculator
-        from pytz import timezone
         
         # GET: Show what would be backfilled
         if request.method == 'GET':
@@ -5430,7 +5429,8 @@ def backfill_spy_intraday():
         
         # Backfill missing dates from last 7 days
         today = get_market_date()
-        ET = timezone('America/New_York')
+        # Create ET timezone offset: UTC-5 (EST) or UTC-4 (EDT)
+        ET = dt_timezone(timedelta(hours=-5))
         
         for days_back in range(7):
             check_date = today - timedelta(days=days_back)
@@ -5461,12 +5461,17 @@ def backfill_spy_intraday():
                     sp500_value = spy_price * 10
                     
                     # Create SPY_INTRADAY record at 4PM ET for this date
-                    timestamp_4pm = ET.localize(datetime.combine(check_date, time(16, 0)))
+                    # 4 PM ET = 8 PM UTC (during EDT, UTC-4)
+                    # Database stores naive UTC timestamps
+                    timestamp_4pm_et = datetime.combine(check_date, time(16, 0))
+                    timestamp_4pm_et = timestamp_4pm_et.replace(tzinfo=ET)
+                    timestamp_utc = timestamp_4pm_et.astimezone(dt_timezone.utc)
+                    timestamp_naive_utc = timestamp_utc.replace(tzinfo=None)
                     
                     market_data = MarketData(
                         ticker='SPY_INTRADAY',
                         date=check_date,
-                        timestamp=timestamp_4pm,
+                        timestamp=timestamp_naive_utc,
                         close_price=sp500_value
                     )
                     db.session.add(market_data)
@@ -5477,7 +5482,8 @@ def backfill_spy_intraday():
                         'status': 'backfilled',
                         'spy_price': spy_price,
                         'sp500_value': sp500_value,
-                        'timestamp': timestamp_4pm.isoformat()
+                        'timestamp_et': timestamp_4pm_et.isoformat(),
+                        'timestamp_utc': timestamp_naive_utc.isoformat()
                     })
                 else:
                     results['errors'].append({
