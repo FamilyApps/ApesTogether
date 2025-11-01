@@ -24432,21 +24432,26 @@ def admin_delete_user_intraday_snapshots():
         if not username or not start_date_str or not end_date_str:
             return jsonify({'error': 'username, start_date, and end_date required (format: YYYY-MM-DD)'}), 400
         
-        # Parse dates
+        # Parse dates and create timestamp range
+        from zoneinfo import ZoneInfo
         start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
         end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+        
+        # Create timestamp range (start of start_date to end of end_date in ET)
+        tz = ZoneInfo('America/New_York')
+        start_ts = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=tz)
+        end_ts = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=tz)
         
         # Find user
         user = User.query.filter_by(username=username).first()
         if not user:
             return jsonify({'error': f'User {username} not found'}), 404
         
-        # Find all snapshot IDs to delete
-        from sqlalchemy import cast, Date
+        # Find all snapshot IDs to delete using timestamp comparison
         snapshot_ids = [s.id for s in PortfolioSnapshotIntraday.query.filter(
             PortfolioSnapshotIntraday.user_id == user.id,
-            cast(PortfolioSnapshotIntraday.timestamp, Date) >= start_date,
-            cast(PortfolioSnapshotIntraday.timestamp, Date) <= end_date
+            PortfolioSnapshotIntraday.timestamp >= start_ts,
+            PortfolioSnapshotIntraday.timestamp <= end_ts
         ).with_entities(PortfolioSnapshotIntraday.id).all()]
         
         before_count = len(snapshot_ids)
