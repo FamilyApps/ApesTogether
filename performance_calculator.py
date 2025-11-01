@@ -101,6 +101,7 @@ def calculate_portfolio_performance(
     if include_intraday:
         from models import PortfolioSnapshotIntraday
         from datetime import datetime, time
+        from zoneinfo import ZoneInfo
         
         start_datetime = datetime.combine(start_date, time.min)
         end_datetime = datetime.combine(end_date, time.max)
@@ -112,6 +113,39 @@ def calculate_portfolio_performance(
                 PortfolioSnapshotIntraday.timestamp <= end_datetime
             )
         ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
+        
+        # Filter to only valid 15-minute market intervals (9:30 AM - 4:00 PM EST)
+        # Valid times: 09:30, 09:45, 10:00, ..., 15:45, 16:00 (27 intervals)
+        valid_minutes = set()
+        for hour in range(9, 17):  # 9 AM to 4 PM
+            for minute in [0, 15, 30, 45]:
+                # Skip 9:00 AM and 9:15 AM (market opens at 9:30)
+                if hour == 9 and minute < 30:
+                    continue
+                # Skip times after 4:00 PM
+                if hour == 16 and minute > 0:
+                    continue
+                valid_minutes.add((hour, minute))
+        
+        # Filter snapshots to only valid intervals in EST
+        MARKET_TZ = ZoneInfo('America/New_York')
+        filtered_intraday = []
+        
+        for snap in intraday_snapshots:
+            # Convert timestamp to EST
+            if snap.timestamp.tzinfo is None:
+                # Assume UTC if no timezone
+                snap_time_est = snap.timestamp.replace(tzinfo=ZoneInfo('UTC')).astimezone(MARKET_TZ)
+            else:
+                snap_time_est = snap.timestamp.astimezone(MARKET_TZ)
+            
+            # Check if this is a valid 15-minute interval
+            if (snap_time_est.hour, snap_time_est.minute) in valid_minutes:
+                filtered_intraday.append(snap)
+        
+        logger.info(f"Filtered {len(intraday_snapshots)} intraday snapshots to {len(filtered_intraday)} valid 15-min intervals")
+        
+        intraday_snapshots = filtered_intraday
         
         if intraday_snapshots:
             # Wrapper class to make intraday snapshots compatible with daily snapshot interface

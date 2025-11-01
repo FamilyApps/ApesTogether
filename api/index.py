@@ -1276,6 +1276,10 @@ def onboarding():
 @login_required
 def dashboard():
     """Display the user's dashboard."""
+    import time
+    start_time = time.time()
+    logger.info(f"⏱️ Dashboard load started for user {current_user.id}")
+    
     # Log dashboard view activity
     try:
         from models import UserActivity
@@ -1453,15 +1457,30 @@ def dashboard():
     # Build share URL
     share_url = f"https://apestogether.ai/p/{current_user.portfolio_slug}" if current_user.is_authenticated and current_user.portfolio_slug else ""
     
-    # Get user's leaderboard positions (if in top 20)
+    # Get user's leaderboard positions (if in top 20) - cache for 5 minutes
     leaderboard_positions = {}
-    try:
-        from leaderboard_utils import get_user_leaderboard_positions
-        leaderboard_positions = get_user_leaderboard_positions(current_user.id, top_n=20)
-        logger.info(f"DEBUG: Leaderboard positions for user {current_user.id}: {leaderboard_positions}")
-    except Exception as e:
-        logger.error(f"Error fetching leaderboard positions: {str(e)}")
-        logger.error(traceback.format_exc())
+    cache_key = f"leaderboard_pos_{current_user.id}"
+    cached_positions = session.get(cache_key)
+    cache_time = session.get(f"{cache_key}_time")
+    
+    if cached_positions and cache_time:
+        cache_age = datetime.now() - datetime.fromisoformat(cache_time)
+        if cache_age < timedelta(minutes=5):
+            leaderboard_positions = cached_positions
+            logger.info(f"Using cached leaderboard positions for user {current_user.id}")
+    
+    if not leaderboard_positions:
+        try:
+            from leaderboard_utils import get_user_leaderboard_positions
+            leaderboard_positions = get_user_leaderboard_positions(current_user.id, top_n=20)
+            logger.info(f"Calculated leaderboard positions for user {current_user.id}: {leaderboard_positions}")
+            
+            # Cache in session
+            session[cache_key] = leaderboard_positions
+            session[f"{cache_key}_time"] = datetime.now().isoformat()
+        except Exception as e:
+            logger.error(f"Error fetching leaderboard positions: {str(e)}")
+            logger.error(traceback.format_exc())
     
     # Get user's portfolio stats (Phase 3)
     portfolio_stats = None
@@ -1471,6 +1490,9 @@ def dashboard():
         logger.info(f"DEBUG: Portfolio stats for user {current_user.id}: {portfolio_stats}")
     except Exception as e:
         logger.error(f"Error fetching portfolio stats: {str(e)}")
+    
+    elapsed_time = time.time() - start_time
+    logger.info(f"⏱️ Dashboard load completed for user {current_user.id} in {elapsed_time:.2f}s")
     
     return render_template_with_defaults('dashboard.html', 
                                        portfolio_data=portfolio_data,
