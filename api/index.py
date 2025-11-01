@@ -24412,6 +24412,72 @@ def admin_fix_ticker():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/delete-user-intraday-snapshots', methods=['POST'])
+@login_required
+def admin_delete_user_intraday_snapshots():
+    """Delete intraday snapshots for a specific user and date range"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime
+        from models import User, PortfolioSnapshotIntraday
+        
+        username = request.json.get('username')
+        start_date_str = request.json.get('start_date')
+        end_date_str = request.json.get('end_date')
+        
+        if not username or not start_date_str or not end_date_str:
+            return jsonify({'error': 'username, start_date, and end_date required (format: YYYY-MM-DD)'}), 400
+        
+        # Parse dates
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+        end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+        
+        # Find user
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': f'User {username} not found'}), 404
+        
+        # Count snapshots before deletion
+        from sqlalchemy import cast, Date
+        before_count = PortfolioSnapshotIntraday.query.filter(
+            PortfolioSnapshotIntraday.user_id == user.id,
+            cast(PortfolioSnapshotIntraday.timestamp, Date) >= start_date,
+            cast(PortfolioSnapshotIntraday.timestamp, Date) <= end_date
+        ).count()
+        
+        # Delete snapshots
+        deleted = PortfolioSnapshotIntraday.query.filter(
+            PortfolioSnapshotIntraday.user_id == user.id,
+            cast(PortfolioSnapshotIntraday.timestamp, Date) >= start_date,
+            cast(PortfolioSnapshotIntraday.timestamp, Date) <= end_date
+        ).delete(synchronize_session=False)
+        
+        db.session.commit()
+        
+        logger.info(f"Deleted {deleted} intraday snapshots for user {username} from {start_date} to {end_date}")
+        
+        return jsonify({
+            'success': True,
+            'username': username,
+            'user_id': user.id,
+            'start_date': start_date_str,
+            'end_date': end_date_str,
+            'before_count': before_count,
+            'deleted_count': deleted
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error deleting intraday snapshots: {e}")
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/debug-intraday-calculation')
 @login_required
 def debug_intraday_calculation():
