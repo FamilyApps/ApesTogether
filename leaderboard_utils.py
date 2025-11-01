@@ -922,40 +922,86 @@ def update_leaderboard_cache(periods=None):
                     import traceback
                     print(f"  Traceback: {traceback.format_exc()}")
                 
-                # Store BOTH versions with different cache keys
+                # Store BOTH versions with different cache keys using raw SQL (like chart cache)
+                # This ensures LeaderboardCache commits are not lost when chart cache uses raw SQL
+                from sqlalchemy import text
+                
+                leaderboard_data_json = json.dumps(leaderboard_data)
+                now = datetime.now()
+                
                 # Authenticated version: {period}_{category}_auth
                 auth_cache_key = f"{cache_key}_auth"
-                auth_cache = LeaderboardCache.query.filter_by(period=auth_cache_key).first()
-                if auth_cache:
-                    auth_cache.leaderboard_data = json.dumps(leaderboard_data)
-                    auth_cache.rendered_html = auth_html
-                    auth_cache.generated_at = datetime.now()
-                else:
-                    auth_cache = LeaderboardCache(
-                        period=auth_cache_key,
-                        leaderboard_data=json.dumps(leaderboard_data),
-                        rendered_html=auth_html,
-                        generated_at=datetime.now()
-                    )
-                    db.session.add(auth_cache)
+                
+                with db.engine.connect() as primary_conn:
+                    with primary_conn.begin():
+                        # Check if exists
+                        select_sql = text("SELECT id FROM leaderboard_cache WHERE period = :period")
+                        result = primary_conn.execute(select_sql, {'period': auth_cache_key})
+                        existing_id = result.scalar()
+                        
+                        if existing_id:
+                            # Update existing
+                            update_sql = text("""
+                                UPDATE leaderboard_cache 
+                                SET leaderboard_data = :data, rendered_html = :html, generated_at = :time
+                                WHERE id = :id
+                            """)
+                            primary_conn.execute(update_sql, {
+                                'id': existing_id,
+                                'data': leaderboard_data_json,
+                                'html': auth_html,
+                                'time': now
+                            })
+                        else:
+                            # Insert new
+                            insert_sql = text("""
+                                INSERT INTO leaderboard_cache (period, leaderboard_data, rendered_html, generated_at)
+                                VALUES (:period, :data, :html, :time)
+                            """)
+                            primary_conn.execute(insert_sql, {
+                                'period': auth_cache_key,
+                                'data': leaderboard_data_json,
+                                'html': auth_html,
+                                'time': now
+                            })
                 
                 # Anonymous version: {period}_{category}_anon
                 anon_cache_key = f"{cache_key}_anon"
-                anon_cache = LeaderboardCache.query.filter_by(period=anon_cache_key).first()
-                if anon_cache:
-                    anon_cache.leaderboard_data = json.dumps(leaderboard_data)
-                    anon_cache.rendered_html = anon_html
-                    anon_cache.generated_at = datetime.now()
-                else:
-                    anon_cache = LeaderboardCache(
-                        period=anon_cache_key,
-                        leaderboard_data=json.dumps(leaderboard_data),
-                        rendered_html=anon_html,
-                        generated_at=datetime.now()
-                    )
-                    db.session.add(anon_cache)
                 
-                print(f"  ✓ Cache entries prepared for {auth_cache_key} and {anon_cache_key}")
+                with db.engine.connect() as primary_conn:
+                    with primary_conn.begin():
+                        # Check if exists
+                        select_sql = text("SELECT id FROM leaderboard_cache WHERE period = :period")
+                        result = primary_conn.execute(select_sql, {'period': anon_cache_key})
+                        existing_id = result.scalar()
+                        
+                        if existing_id:
+                            # Update existing
+                            update_sql = text("""
+                                UPDATE leaderboard_cache 
+                                SET leaderboard_data = :data, rendered_html = :html, generated_at = :time
+                                WHERE id = :id
+                            """)
+                            primary_conn.execute(update_sql, {
+                                'id': existing_id,
+                                'data': leaderboard_data_json,
+                                'html': anon_html,
+                                'time': now
+                            })
+                        else:
+                            # Insert new
+                            insert_sql = text("""
+                                INSERT INTO leaderboard_cache (period, leaderboard_data, rendered_html, generated_at)
+                                VALUES (:period, :data, :html, :time)
+                            """)
+                            primary_conn.execute(insert_sql, {
+                                'period': anon_cache_key,
+                                'data': leaderboard_data_json,
+                                'html': anon_html,
+                                'time': now
+                            })
+                
+                print(f"  ✓ Cache entries saved for {auth_cache_key} and {anon_cache_key}")
                 
                 updated_count += 1
                 print(f"  ✓ Cache entry prepared for {cache_key} (count: {updated_count})")
