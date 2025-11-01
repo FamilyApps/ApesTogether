@@ -16184,18 +16184,9 @@ def get_portfolio_performance(period):
         logger.info(f"ROUTE HIT: /api/portfolio/performance/{period}")
         logger.info(f"Request method: {request.method}")
         logger.info(f"current_user.is_authenticated: {current_user.is_authenticated}")
-        logger.info(f"session.get('user_id'): {session.get('user_id')}")
         
-        # Check authentication - try current_user first, then fall back to session
-        # (AJAX requests sometimes don't load current_user properly)
-        user_id = None
-        if current_user.is_authenticated:
-            user_id = current_user.id
-        elif session.get('user_id'):
-            user_id = session.get('user_id')
-            logger.info(f"Using user_id from session: {user_id}")
-        
-        if not user_id:
+        # Check authentication without redirect (API endpoints should return JSON, not HTML redirects)
+        if not current_user.is_authenticated:
             logger.warning(f"Unauthenticated request to performance API")
             return jsonify({'error': 'User not authenticated'}), 401
         
@@ -16204,6 +16195,7 @@ def get_portfolio_performance(period):
         from datetime import datetime, timedelta
         import json
         
+        user_id = current_user.id
         logger.info(f"Performance API called for period {period}, user_id: {user_id}")
         
         period_upper = period.upper()
@@ -25634,41 +25626,6 @@ def admin_diagnose_chart_issues():
         
     except Exception as e:
         logger.error(f"Chart issues diagnostic error: {e}")
-        import traceback
-        return jsonify({
-            'error': str(e),
-            'traceback': traceback.format_exc()
-        }), 500
-
-@app.route('/admin/clear-chart-cache', methods=['POST'])
-@login_required
-def admin_clear_chart_cache():
-    """Clear chart cache for current user to force fresh data generation"""
-    try:
-        from models import UserPortfolioChartCache
-        from sqlalchemy import text
-        
-        user_id = current_user.id
-        
-        # Delete using raw SQL to bypass any caching
-        with db.engine.connect() as conn:
-            result = conn.execute(text("""
-                DELETE FROM user_portfolio_chart_cache
-                WHERE user_id = :user_id
-            """), {'user_id': user_id})
-            conn.commit()
-            deleted_count = result.rowcount
-        
-        logger.info(f"✅ Cleared {deleted_count} chart cache entries for user {user_id}")
-        
-        return jsonify({
-            'success': True,
-            'message': f'Cleared {deleted_count} chart cache entries',
-            'user_id': user_id
-        })
-        
-    except Exception as e:
-        logger.error(f"Error clearing chart cache: {e}")
         import traceback
         return jsonify({
             'error': str(e),
