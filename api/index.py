@@ -24133,6 +24133,216 @@ def check_intraday_data():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/backfill-intraday-data', methods=['POST'])
+@login_required
+def admin_backfill_intraday_data():
+    """Backfill missing intraday portfolio snapshots and S&P 500 data for a specific date"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime, time, timedelta
+        from models import User, Stock, PortfolioSnapshotIntraday, MarketData
+        import requests
+        from zoneinfo import ZoneInfo
+        
+        # Get date from request (format: YYYY-MM-DD)
+        target_date_str = request.json.get('date')
+        if not target_date_str:
+            return jsonify({'error': 'Date parameter required (format: YYYY-MM-DD)'}), 400
+        
+        target_date = datetime.strptime(target_date_str, '%Y-%m-%d').date()
+        
+        # Skip weekends
+        if target_date.weekday() >= 5:
+            return jsonify({'error': 'Cannot backfill weekend dates'}), 400
+        
+        logger.info(f"Starting backfill for {target_date}")
+        
+        MARKET_TZ = ZoneInfo('America/New_York')
+        
+        # Step 1: Fetch SPY intraday data from AlphaVantage
+        alpha_vantage_key = os.getenv('ALPHA_VANTAGE_API_KEY')
+        if not alpha_vantage_key:
+            return jsonify({'error': 'AlphaVantage API key not configured'}), 500
+        
+        # Use TIME_SERIES_INTRADAY with extended history (outputsize=full gets last 30 days)
+        spy_url = f'https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=SPY&interval=15min&outputsize=full&apikey={alpha_vantage_key}'
+        
+        logger.info(f"Fetching SPY intraday data from AlphaVantage...")
+        spy_response = requests.get(spy_url, timeout=30)
+        spy_data = spy_response.json()
+        
+        if 'Time Series (15min)' not in spy_data:
+            logger.error(f"AlphaVantage response: {spy_data}")
+            return jsonify({'error': 'Failed to fetch SPY data from AlphaVantage', 'response': spy_data}), 500
+        
+        spy_series = spy_data['Time Series (15min)']
+        
+        # Step 2: Generate 15-minute intervals for the target date (9:30 AM - 4:00 PM ET)
+        intervals = []
+        for hour in range(9, 17):
+            for minute in [0, 15, 30, 45]:
+                if hour == 9 and minute < 30:
+                    continue
+                if hour == 16 and minute > 0:
+                    continue
+                intervals.append((hour, minute))
+        
+        # Step 3: Create MarketData entries for SPY at each interval
+        spy_prices = {}
+        created_spy_count = 0
+        
+        for hour, minute in intervals:
+            dt_et = datetime.combine(target_date, time(hour, minute), tzinfo=MARKET_TZ)
+            dt_utc = dt_et.astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
+            
+            # AlphaVantage timestamp format: "YYYY-MM-DD HH:MM:SS"
+            av_timestamp = dt_et.strftime('%Y-%m-%d %H:%M:%S')
+            
+            if av_timestamp in spy_series:
+                close_price = float(spy_series[av_timestamp]['4. close'])
+                spy_prices[dt_utc] = close_price
+                
+                # Check if already exists
+                existing = MarketData.query.filter_by(
+                    symbol='SPY',
+                    data_type='SPY_INTRADAY',
+                    timestamp=dt_utc
+                ).first()
+                
+                if not existing:
+                    spy_entry = MarketData(
+                        symbol='SPY',
+                        date=target_date,
+                        timestamp=dt_utc,
+                        close_price=close_price,
+                        data_type='SPY_INTRADAY'
+                    )
+                    db.session.add(spy_entry)
+                    created_spy_count += 1
+                    logger.info(f"Created SPY data for {av_timestamp}: ${close_price}")
+            else:
+                logger.warning(f"No SPY data found for {av_timestamp}")
+        
+        if created_spy_count > 0:
+            db.session.commit()
+            logger.info(f"Created {created_spy_count} SPY intraday records")
+        
+        # Step 4: Fetch stock prices for all user tickers at each interval
+        all_users = User.query.all()
+        user_results = {}
+        
+        for user in all_users:
+            user_stocks = Stock.query.filter_by(user_id=user.id).all()
+            if not user_stocks:
+                continue
+            
+            user_results[user.username] = {
+                'snapshots_created': 0,
+                'snapshots_skipped': 0,
+                'errors': []
+            }
+            
+            # Get unique tickers for this user
+            tickers = list(set([stock.ticker for stock in user_stocks]))
+            
+            # Fetch intraday data for each ticker
+            ticker_prices = {}
+            for ticker in tickers:
+                ticker_url = f'https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={ticker}&interval=15min&outputsize=full&apikey={alpha_vantage_key}'
+                
+                try:
+                    ticker_response = requests.get(ticker_url, timeout=30)
+                    ticker_data = ticker_response.json()
+                    
+                    if 'Time Series (15min)' in ticker_data:
+                        ticker_prices[ticker] = ticker_data['Time Series (15min)']
+                        logger.info(f"Fetched intraday data for {ticker}")
+                    else:
+                        logger.warning(f"No intraday data for {ticker}: {ticker_data}")
+                        user_results[user.username]['errors'].append(f"No data for {ticker}")
+                except Exception as e:
+                    logger.error(f"Error fetching {ticker}: {e}")
+                    user_results[user.username]['errors'].append(f"Error fetching {ticker}: {str(e)}")
+            
+            # Step 5: Calculate portfolio value at each interval
+            for hour, minute in intervals:
+                dt_et = datetime.combine(target_date, time(hour, minute), tzinfo=MARKET_TZ)
+                dt_utc = dt_et.astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
+                av_timestamp = dt_et.strftime('%Y-%m-%d %H:%M:%S')
+                
+                # Check if snapshot already exists
+                existing_snapshot = PortfolioSnapshotIntraday.query.filter_by(
+                    user_id=user.id,
+                    timestamp=dt_utc
+                ).first()
+                
+                if existing_snapshot:
+                    user_results[user.username]['snapshots_skipped'] += 1
+                    continue
+                
+                # Calculate portfolio value at this timestamp
+                portfolio_value = 0.0
+                stock_value = 0.0
+                all_prices_available = True
+                
+                for stock in user_stocks:
+                    if stock.ticker in ticker_prices and av_timestamp in ticker_prices[stock.ticker]:
+                        price = float(ticker_prices[stock.ticker][av_timestamp]['4. close'])
+                        stock_value += stock.quantity * price
+                    else:
+                        all_prices_available = False
+                        break
+                
+                if not all_prices_available:
+                    user_results[user.username]['errors'].append(f"Missing prices at {av_timestamp}")
+                    continue
+                
+                portfolio_value = stock_value
+                
+                # Get max_cash_deployed from most recent daily snapshot
+                from models import PortfolioSnapshot
+                latest_snapshot = PortfolioSnapshot.query.filter(
+                    PortfolioSnapshot.user_id == user.id,
+                    PortfolioSnapshot.date <= target_date
+                ).order_by(PortfolioSnapshot.date.desc()).first()
+                
+                max_cash_deployed = latest_snapshot.max_cash_deployed if latest_snapshot else portfolio_value
+                
+                # Create intraday snapshot
+                snapshot = PortfolioSnapshotIntraday(
+                    user_id=user.id,
+                    timestamp=dt_utc,
+                    total_value=portfolio_value,
+                    stock_value=stock_value,
+                    cash_proceeds=0.0,
+                    max_cash_deployed=max_cash_deployed
+                )
+                db.session.add(snapshot)
+                user_results[user.username]['snapshots_created'] += 1
+        
+        # Commit all user snapshots
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'date': target_date_str,
+            'spy_records_created': created_spy_count,
+            'intervals_processed': len(intervals),
+            'user_results': user_results
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error in backfill: {e}")
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/debug-intraday-calculation')
 @login_required
 def debug_intraday_calculation():
