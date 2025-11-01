@@ -24447,21 +24447,29 @@ def admin_delete_user_intraday_snapshots():
         if not user:
             return jsonify({'error': f'User {username} not found'}), 404
         
-        # Find all snapshot IDs to delete using timestamp comparison
-        snapshot_ids = [s.id for s in PortfolioSnapshotIntraday.query.filter(
+        # Count records before deletion
+        before_count = PortfolioSnapshotIntraday.query.filter(
             PortfolioSnapshotIntraday.user_id == user.id,
             PortfolioSnapshotIntraday.timestamp >= start_ts,
             PortfolioSnapshotIntraday.timestamp <= end_ts
-        ).with_entities(PortfolioSnapshotIntraday.id).all()]
-        
-        before_count = len(snapshot_ids)
+        ).count()
         
         if before_count > 0:
-            # Delete using IN clause to avoid session conflicts
-            deleted = PortfolioSnapshotIntraday.query.filter(
-                PortfolioSnapshotIntraday.id.in_(snapshot_ids)
-            ).delete(synchronize_session=False)
+            # Use raw SQL DELETE since SQLAlchemy bulk delete isn't working
+            from sqlalchemy import text
+            sql = text("""
+                DELETE FROM portfolio_snapshot_intraday 
+                WHERE user_id = :user_id 
+                AND timestamp >= :start_ts 
+                AND timestamp <= :end_ts
+            """)
+            result = db.session.execute(sql, {
+                'user_id': user.id,
+                'start_ts': start_ts,
+                'end_ts': end_ts
+            })
             db.session.commit()
+            deleted = result.rowcount
         else:
             deleted = 0
         
