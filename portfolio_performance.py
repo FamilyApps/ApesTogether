@@ -1090,9 +1090,10 @@ class PortfolioPerformanceCalculator:
         
         logger.info(f"Found {len(sp500_intraday_data)} SPY intraday data points for {today}")
         
+        # Multiply SPY by 10 to approximate S&P 500 index
         sp500_start_value = None
         if sp500_intraday_data:
-            sp500_start_value = sp500_intraday_data[0].close_price
+            sp500_start_value = sp500_intraday_data[0].close_price * 10
         
         # Get user's first snapshot to calculate percentage returns
         if intraday_snapshots:
@@ -1108,11 +1109,11 @@ class PortfolioPerformanceCalculator:
             sp500_pct = 0.0
             if sp500_start_value and sp500_start_value > 0:
                 if i < len(sp500_intraday_data):
-                    current_sp500 = sp500_intraday_data[i].close_price
+                    current_sp500 = sp500_intraday_data[i].close_price * 10  # Convert SPY to S&P 500
                     sp500_pct = ((current_sp500 - sp500_start_value) / sp500_start_value) * 100
                 elif sp500_intraday_data:
                     # Fallback to latest SPY data if we don't have matching timestamp
-                    current_sp500 = sp500_intraday_data[-1].close_price
+                    current_sp500 = sp500_intraday_data[-1].close_price * 10  # Convert SPY to S&P 500
                     sp500_pct = ((current_sp500 - sp500_start_value) / sp500_start_value) * 100
             
             logger.debug(f"Snapshot {i}: Portfolio {portfolio_pct:.2f}%, S&P500 {sp500_pct:.2f}% (start: {sp500_start_value}, current: {sp500_intraday_data[i].close_price if i < len(sp500_intraday_data) else 'N/A'})")
@@ -1138,6 +1139,128 @@ class PortfolioPerformanceCalculator:
             'period': '1D',
             'start_date': today.isoformat(),
             'end_date': today.isoformat()
+        }
+    
+    def get_multi_day_intraday_performance_data(self, user_id: int, start_date: date, end_date: date, period: str) -> Dict:
+        """Get performance data for 1D/5D charts - shows intraday snapshots across multiple days"""
+        from models import PortfolioSnapshotIntraday
+        
+        # Get all intraday snapshots for the date range
+        intraday_snapshots = PortfolioSnapshotIntraday.query.filter(
+            and_(
+                PortfolioSnapshotIntraday.user_id == user_id,
+                func.date(PortfolioSnapshotIntraday.timestamp) >= start_date,
+                func.date(PortfolioSnapshotIntraday.timestamp) <= end_date
+            )
+        ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
+        
+        logger.info(f"Found {len(intraday_snapshots)} intraday snapshots for user {user_id} from {start_date} to {end_date}")
+        
+        # If no intraday snapshots, fall back to EOD data
+        if not intraday_snapshots:
+            logger.warning(f"No intraday snapshots found for period {period}, falling back to EOD data")
+            # Use EOD snapshots instead
+            eod_snapshots = PortfolioSnapshot.query.filter(
+                and_(
+                    PortfolioSnapshot.user_id == user_id,
+                    PortfolioSnapshot.date >= start_date,
+                    PortfolioSnapshot.date <= end_date
+                )
+            ).order_by(PortfolioSnapshot.date.asc()).all()
+            
+            if not eod_snapshots:
+                return {
+                    'portfolio_return': 0.0,
+                    'sp500_return': 0.0,
+                    'chart_data': [],
+                    'period': period,
+                    'start_date': start_date.isoformat(),
+                    'end_date': end_date.isoformat()
+                }
+            
+            # Use first EOD snapshot as baseline
+            portfolio_start_value = eod_snapshots[0].total_value
+            
+            # Get S&P 500 EOD data
+            sp500_eod_data = self.get_cached_sp500_data(start_date, end_date)
+            sp500_start_value = None
+            if sp500_eod_data:
+                sp500_dates = sorted(sp500_eod_data.keys())
+                if sp500_dates and sp500_dates[0] in sp500_eod_data:
+                    sp500_start_value = sp500_eod_data[sp500_dates[0]]
+            
+            chart_data = []
+            for snapshot in eod_snapshots:
+                portfolio_pct = ((snapshot.total_value - portfolio_start_value) / portfolio_start_value) * 100 if portfolio_start_value > 0 else 0
+                sp500_pct = 0
+                if sp500_start_value and snapshot.date in sp500_eod_data:
+                    sp500_pct = ((sp500_eod_data[snapshot.date] - sp500_start_value) / sp500_start_value) * 100
+                
+                chart_data.append({
+                    'date': snapshot.date.isoformat(),
+                    'portfolio': round(portfolio_pct, 2),
+                    'sp500': round(sp500_pct, 2)
+                })
+            
+            return {
+                'portfolio_return': chart_data[-1]['portfolio'] if chart_data else 0.0,
+                'sp500_return': chart_data[-1]['sp500'] if chart_data else 0.0,
+                'chart_data': chart_data,
+                'period': period,
+                'start_date': start_date.isoformat(),
+                'end_date': end_date.isoformat()
+            }
+        
+        # Process intraday snapshots for chart
+        chart_data = []
+        portfolio_start_value = intraday_snapshots[0].total_value
+        
+        # Get S&P 500 intraday data for the date range
+        sp500_intraday_data = MarketData.query.filter(
+            and_(
+                MarketData.ticker == 'SPY_INTRADAY',
+                MarketData.date >= start_date,
+                MarketData.date <= end_date
+            )
+        ).order_by(MarketData.timestamp.asc()).all()
+        
+        logger.info(f"Found {len(sp500_intraday_data)} SPY intraday data points from {start_date} to {end_date}")
+        
+        # Multiply SPY by 10 to approximate S&P 500 index
+        sp500_start_value = (sp500_intraday_data[0].close_price * 10) if sp500_intraday_data else None
+        
+        for i, snapshot in enumerate(intraday_snapshots):
+            # Calculate portfolio percentage return from start
+            portfolio_pct = ((snapshot.total_value - portfolio_start_value) / portfolio_start_value) * 100 if portfolio_start_value > 0 else 0
+            
+            # Calculate S&P 500 percentage return using matching intraday data
+            sp500_pct = 0.0
+            if sp500_start_value and sp500_start_value > 0:
+                if i < len(sp500_intraday_data):
+                    current_sp500 = sp500_intraday_data[i].close_price * 10  # Convert SPY to S&P 500
+                    sp500_pct = ((current_sp500 - sp500_start_value) / sp500_start_value) * 100
+                elif sp500_intraday_data:
+                    # Fallback to latest SPY data
+                    current_sp500 = sp500_intraday_data[-1].close_price * 10  # Convert SPY to S&P 500
+                    sp500_pct = ((current_sp500 - sp500_start_value) / sp500_start_value) * 100
+            
+            chart_data.append({
+                'date': snapshot.timestamp.isoformat(),
+                'portfolio': round(portfolio_pct, 2),
+                'sp500': round(sp500_pct, 2)
+            })
+        
+        # Calculate overall returns for display
+        portfolio_return = chart_data[-1]['portfolio'] if chart_data else 0.0
+        sp500_return = chart_data[-1]['sp500'] if chart_data else 0.0
+        
+        return {
+            'portfolio_return': portfolio_return,
+            'sp500_return': sp500_return,
+            'chart_data': chart_data,
+            'period': period,
+            'start_date': start_date.isoformat(),
+            'end_date': end_date.isoformat()
         }
     
     def check_portfolio_snapshots_coverage(self, user_id: int) -> Dict:
@@ -1230,9 +1353,9 @@ class PortfolioPerformanceCalculator:
         else:
             start_date = end_date - timedelta(days=period_days[period])
         
-        # For 1D charts, use intraday data if available
-        if period == '1D':
-            return self.get_intraday_performance_data(user_id, start_date, end_date)
+        # For 1D and 5D charts, use intraday data if available
+        if period in ['1D', '5D']:
+            return self.get_multi_day_intraday_performance_data(user_id, start_date, end_date, period)
         
         # Get user's first snapshot to handle partial period data
         user_first_snapshot = PortfolioSnapshot.query.filter_by(user_id=user_id)\

@@ -1519,14 +1519,17 @@ def update_username():
     return redirect(url_for('dashboard'))
 
 @app.route('/api/portfolio_value')
-@login_required
 def portfolio_value():
-    """API endpoint to get portfolio value data"""
+    """API endpoint to get portfolio value data - returns JSON, not HTML redirects"""
     from datetime import date, datetime
     from models import PortfolioSnapshot
     
+    # Check authentication without redirect (API endpoints should return JSON, not HTML redirects)
+    if not current_user.is_authenticated:
+        return jsonify({'error': 'User not authenticated'}), 401
+    
     # Get current user from session
-    current_user_id = session.get('user_id')
+    current_user_id = current_user.id
     
     # Check if it's weekend or after market hours - use cached snapshots
     today = get_market_date()  # FIX: Use ET not UTC
