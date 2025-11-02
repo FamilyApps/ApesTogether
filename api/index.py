@@ -24496,6 +24496,80 @@ def admin_delete_user_intraday_snapshots():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/delete-spy-intraday-data', methods=['POST'])
+@login_required
+def admin_delete_spy_intraday_data():
+    """Delete SPY_INTRADAY records to force backfill recreation"""
+    try:
+        # Check if user is admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from datetime import datetime
+        from models import MarketData
+        from zoneinfo import ZoneInfo
+        
+        start_date_str = request.json.get('start_date')
+        end_date_str = request.json.get('end_date')
+        
+        if not start_date_str or not end_date_str:
+            return jsonify({'error': 'start_date and end_date required (format: YYYY-MM-DD)'}), 400
+        
+        # Parse dates and create timestamp range
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+        end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+        
+        # Create timestamp range (start of start_date to end of end_date in ET)
+        tz = ZoneInfo('America/New_York')
+        start_ts = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=tz)
+        end_ts = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=tz)
+        
+        # Count records before deletion
+        before_count = MarketData.query.filter(
+            MarketData.ticker == 'SPY_INTRADAY',
+            MarketData.timestamp >= start_ts,
+            MarketData.timestamp <= end_ts
+        ).count()
+        
+        if before_count > 0:
+            # Use raw SQL DELETE
+            from sqlalchemy import text
+            sql = text("""
+                DELETE FROM market_data 
+                WHERE ticker = :ticker
+                AND timestamp >= :start_ts 
+                AND timestamp <= :end_ts
+            """)
+            result = db.session.execute(sql, {
+                'ticker': 'SPY_INTRADAY',
+                'start_ts': start_ts,
+                'end_ts': end_ts
+            })
+            db.session.commit()
+            deleted = result.rowcount
+        else:
+            deleted = 0
+        
+        logger.info(f"Deleted {deleted} SPY_INTRADAY records from {start_date} to {end_date}")
+        
+        return jsonify({
+            'success': True,
+            'ticker': 'SPY_INTRADAY',
+            'start_date': start_date_str,
+            'end_date': end_date_str,
+            'before_count': before_count,
+            'deleted_count': deleted
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error deleting SPY_INTRADAY data: {e}")
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/verify-snapshot-counts', methods=['POST'])
 @login_required
 def admin_verify_snapshot_counts():
