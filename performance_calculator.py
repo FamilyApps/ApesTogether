@@ -163,11 +163,11 @@ def calculate_portfolio_performance(
             # Wrap intraday snapshots
             wrapped_intraday = [IntradayWrapper(s) for s in intraday_snapshots]
             
-            # For 1D period, ONLY use intraday snapshots (exclude daily snapshot to avoid duplicates)
-            # For 5D period, merge daily snapshots (for days before today) with intraday snapshots (for recent days)
-            if period == '1D':
+            # For 1D and 5D periods, ONLY use intraday snapshots (exclude daily snapshots to avoid duplicates)
+            # For longer periods (1M+), merge daily snapshots with intraday snapshots
+            if period in ['1D', '5D']:
                 snapshots = wrapped_intraday
-                logger.info(f"Using ONLY {len(intraday_snapshots)} intraday snapshots for 1D period (excluding daily)")
+                logger.info(f"Using ONLY {len(intraday_snapshots)} intraday snapshots for {period} period (excluding daily)")
             else:
                 # Add timestamp to daily snapshots for sorting
                 for snap in snapshots:
@@ -383,12 +383,13 @@ def _generate_chart_points(
     # Build S&P 500 lookup map (by date for daily, by timestamp for intraday)
     if period in ['1D', '5D']:
         # For intraday: build map by timestamp for precise matching
+        # Multiply SPY prices by 10 to approximate S&P 500 index
         sp500_map_timestamp = {}
         for s in sp500_data:
             if hasattr(s, 'timestamp') and s.timestamp:
-                sp500_map_timestamp[s.timestamp] = float(s.close_price)
+                sp500_map_timestamp[s.timestamp] = float(s.close_price) * 10
         # Also keep a date map for fallback
-        sp500_map = {s.date: float(s.close_price) for s in sp500_data}
+        sp500_map = {s.date: float(s.close_price) * 10 for s in sp500_data}
     else:
         # For daily: build map by date only
         sp500_map = {s.date: float(s.close_price) for s in sp500_data}
@@ -397,7 +398,11 @@ def _generate_chart_points(
     # Get baseline S&P 500 value from period start (not user join date)
     baseline_sp500 = None
     if sp500_data:
-        baseline_sp500 = float(sp500_data[0].close_price)
+        # Multiply by 10 for intraday SPY data to approximate S&P 500 index
+        if period in ['1D', '5D']:
+            baseline_sp500 = float(sp500_data[0].close_price) * 10
+        else:
+            baseline_sp500 = float(sp500_data[0].close_price)
     
     if not baseline_sp500:
         logger.warning(f"No S&P 500 baseline data found for period starting {period_start}")
