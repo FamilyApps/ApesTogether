@@ -29159,41 +29159,57 @@ def admin_delete_spy_intraday_today():
             'traceback': traceback.format_exc()
         }), 500
 
-@app.route('/admin/fix-spy-intraday-5d', methods=['POST'])
+@app.route('/admin/fix-spy-unmultiplied-data', methods=['POST'])
 @login_required
-def admin_fix_spy_intraday_5d():
-    """Delete last 5 trading days of SPY_INTRADAY to fix format inconsistency causing 900% gain"""
+def admin_fix_spy_unmultiplied_data():
+    """Multiply unmultiplied SPY_INTRADAY data by 10 for Oct 27-31 to fix 900% gain bug"""
     try:
         email = session.get('email', '')
         if email != ADMIN_EMAIL:
             return jsonify({'error': 'Admin access required'}), 403
         
         from models import MarketData
-        from datetime import timedelta
+        from datetime import date
         
-        today = get_market_date()
+        # Target dates: Oct 27-31, 2025 (the unmultiplied data)
+        start_date = date(2025, 10, 27)
+        end_date = date(2025, 10, 31)
         
-        # Get last 10 days to ensure we cover 5 trading days
-        start_date = today - timedelta(days=10)
-        
-        # Delete all SPY_INTRADAY entries from last 10 days
-        deleted_count = MarketData.query.filter(
+        # Get all SPY_INTRADAY entries in this range that look unmultiplied (< 1000)
+        unmultiplied_entries = MarketData.query.filter(
             MarketData.ticker == 'SPY_INTRADAY',
             MarketData.date >= start_date,
-            MarketData.date <= today
-        ).delete()
+            MarketData.date <= end_date,
+            MarketData.close_price < 1000  # Only fix entries that look unmultiplied
+        ).all()
+        
+        fixed_count = 0
+        date_summary = {}
+        
+        for entry in unmultiplied_entries:
+            old_price = float(entry.close_price)
+            new_price = old_price * 10
+            entry.close_price = new_price
+            fixed_count += 1
+            
+            # Track changes by date
+            date_key = entry.date.isoformat()
+            if date_key not in date_summary:
+                date_summary[date_key] = {'count': 0, 'sample_old': old_price, 'sample_new': new_price}
+            date_summary[date_key]['count'] += 1
         
         db.session.commit()
         
         return jsonify({
             'success': True,
-            'date_range': f'{start_date.isoformat()} to {today.isoformat()}',
-            'deleted_count': deleted_count,
-            'message': f'Deleted {deleted_count} SPY_INTRADAY entries. Market is closed, so you\'ll need to manually trigger backfill or wait until tomorrow\'s market open.',
+            'date_range': f'{start_date.isoformat()} to {end_date.isoformat()}',
+            'fixed_count': fixed_count,
+            'by_date': date_summary,
+            'message': f'Multiplied {fixed_count} SPY_INTRADAY entries by 10. Now regenerate chart cache!',
             'next_steps': [
-                '1. Charts will show no S&P data for 1D/5D until data is backfilled',
-                '2. Tomorrow at market open (9:30 AM), intraday cron will start collecting fresh data',
-                '3. Or manually backfill historical data if you have that endpoint'
+                '1. Run: fetch(\'/admin/regenerate-chart-cache\').then(r => r.json()).then(console.log)',
+                '2. Run: fetch(\'/admin/regenerate-leaderboard-html\', {method: \'POST\'}).then(r => r.json()).then(console.log)',
+                '3. Refresh leaderboard page - 900% jump should be gone!'
             ]
         })
         
