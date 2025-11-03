@@ -1,6 +1,28 @@
 {% extends "base.html" %}
 
-{% block title %}Leaderboard{% endblock %}
+{% block title %}Stock Portfolio Leaderboard - {{ current_period }} Performance{% endblock %}
+
+{% block head %}
+<!-- SEO Structured Data for Leaderboard -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "ItemList",
+  "name": "Stock Portfolio Leaderboard - {{ current_period }}",
+  "description": "Top performing stock portfolios for {{ current_period }} period",
+  "itemListElement": [
+    {% for entry in leaderboard_data %}
+    {
+      "@type": "ListItem",
+      "position": {{ loop.index }},
+      "name": "{{ entry.username }}",
+      "description": "{% if (entry.performance_percent or 0) >= 0 %}+{% endif %}{{ '%.2f'|format(entry.performance_percent or 0) }}% {{ current_period }} return"
+    }{% if not loop.last %},{% endif %}
+    {% endfor %}
+  ]
+}
+</script>
+{% endblock %}
 
 {% block content %}
 <div class="container mt-4">
@@ -74,7 +96,8 @@
                                 <tr>
                                     <th>Rank</th>
                                     <th>Trader</th>
-                                    <th>Performance</th>
+                                    <th style="width: 300px;">Performance Chart</th>
+                                    <th>Return</th>
                                     <th>Portfolio Value</th>
                                     <th>Small Cap %</th>
                                     <th>Large Cap %</th>
@@ -94,9 +117,15 @@
                                     </td>
                                     <td>
                                         <strong>{{ entry.username }}</strong>
-                                        {% if entry.is_current_user %}
-                                        <span class="badge bg-info ms-1">You</span>
-                                        {% endif %}
+                                        <span class="user-badge" data-user-id="{{ entry.user_id }}"></span>
+                                    </td>
+                                    <td>
+                                        <canvas class="leaderboard-chart" 
+                                                data-user-id="{{ entry.user_id }}" 
+                                                data-chart-json="{{ entry.chart_json | tojson | forceescape }}"
+                                                width="250" 
+                                                height="80"
+                                                style="max-width: 250px; height: 80px;"></canvas>
                                     </td>
                                     <td>
                                         <span class="{% if (entry.performance_percent or 0) >= 0 %}text-success{% else %}text-danger{% endif %}">
@@ -158,18 +187,119 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
-// Auto-refresh leaderboard data every 5 minutes
-setInterval(function() {
-    location.reload();
-}, 300000);
-
-// Add tooltips for performance metrics
 document.addEventListener('DOMContentLoaded', function() {
-    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+    // ============================================
+    // 1. AUTH OVERLAY (Client-side personalization)
+    // ============================================
+    const currentUserId = {{ current_user.id if current_user.is_authenticated else 'null' }};
+    
+    if (currentUserId) {
+        // Add "You" badges to current user's entries
+        document.querySelectorAll('.user-badge').forEach(badge => {
+            const userId = parseInt(badge.dataset.userId);
+            if (userId === currentUserId) {
+                badge.innerHTML = '<span class="badge bg-info ms-1">You</span>';
+                badge.closest('tr').classList.add('table-info');
+            }
+        });
+    }
+    
+    // ============================================
+    // 2. LAZY-LOADED CHART RENDERING (Performance optimization)
+    // ============================================
+    
+    // Optimized Chart.js config for static mini-charts
+    const staticChartOptions = {
+        responsive: false,
+        maintainAspectRatio: false,
+        animation: false,  // Disable ALL animations
+        events: [],  // Disable hover/click interactions
+        elements: {
+            point: { radius: 0 },  // No data points
+            line: { tension: 0.4 }
+        },
+        plugins: {
+            legend: { display: false },
+            tooltip: { enabled: false },
+            decimation: {  // Downsample for mini charts
+                enabled: true,
+                algorithm: 'lttb',
+                samples: 50  // Max 50 points per chart
+            }
+        },
+        scales: {
+            x: { display: false },  // Hide x-axis
+            y: { 
+                display: true,
+                ticks: { 
+                    maxTicksLimit: 3,  // Only 3 Y-axis labels
+                    callback: function(value) {
+                        return value.toFixed(1) + '%';
+                    },
+                    font: { size: 9 }
+                },
+                grid: {
+                    drawBorder: false,
+                    color: 'rgba(0, 0, 0, 0.05)'
+                }
+            }
+        }
+    };
+    
+    // Render a single chart from embedded JSON data
+    function renderChart(canvas) {
+        try {
+            const chartDataJson = canvas.dataset.chartJson;
+            if (!chartDataJson || chartDataJson === 'null') return;
+            
+            const chartData = JSON.parse(chartDataJson);
+            if (!chartData || !chartData.datasets || chartData.datasets.length === 0) return;
+            
+            const ctx = canvas.getContext('2d');
+            new Chart(ctx, {
+                type: 'line',
+                data: chartData,
+                options: staticChartOptions
+            });
+            
+        } catch (err) {
+            console.error('Failed to render chart:', err);
+        }
+    }
+    
+    // Intersection Observer for lazy loading (render charts as user scrolls)
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting && !entry.target.dataset.rendered) {
+                renderChart(entry.target);
+                entry.target.dataset.rendered = 'true';
+                observer.unobserve(entry.target);  // Stop observing after render
+            }
+        });
+    }, { 
+        rootMargin: '100px 0px',  // Pre-load charts 100px before they enter viewport
+        threshold: 0.1 
+    });
+    
+    // Observe all chart canvases
+    document.querySelectorAll('canvas.leaderboard-chart').forEach(canvas => {
+        observer.observe(canvas);
+    });
+    
+    // ============================================
+    // 3. TOOLTIPS & UI ENHANCEMENTS
+    // ============================================
+    const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    tooltipTriggerList.map(function (tooltipTriggerEl) {
         return new bootstrap.Tooltip(tooltipTriggerEl);
     });
 });
+
+// Auto-refresh every 15 minutes (reduced from 5 to minimize server load)
+setInterval(function() {
+    location.reload();
+}, 900000);
 </script>
 {% endblock %}
