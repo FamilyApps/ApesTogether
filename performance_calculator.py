@@ -687,16 +687,22 @@ def get_period_dates(period: str, user_id: Optional[int] = None) -> Tuple[date, 
         def get_market_date():
             return datetime.now(MARKET_TZ).date()
     
-    end_date = get_market_date()  # Today in ET timezone
+    today = get_market_date()  # Today in ET timezone
+    
+    # Find most recent market day (Mon-Fri) - important for weekends
+    end_date = today
+    while end_date.weekday() >= 5:  # Saturday=5, Sunday=6
+        end_date = end_date - timedelta(days=1)
     
     period_upper = period.upper()
     
     if period_upper == '1D':
+        # Show most recent market day's intraday data
         start_date = end_date
     elif period_upper == '5D':
         # Get last 5 trading days (Mon-Fri), skipping weekends
-        # Start from yesterday and count back 4 more trading days
-        trading_days_needed = 4  # We already have today
+        # Start from the day before end_date and count back 4 more trading days
+        trading_days_needed = 4  # We already have end_date
         current_date = end_date - timedelta(days=1)
         
         while trading_days_needed > 0:
