@@ -631,17 +631,55 @@ def _calculate_sp500_benchmark(start_date: date, end_date: date) -> float:
     Returns:
         S&P 500 percentage return
     """
-    # Get S&P 500 prices (closest to start/end dates)
+    # For 1D periods (start_date == end_date), use intraday data
+    if start_date == end_date:
+        # Query intraday SPY data for this date
+        intraday_data = MarketData.query.filter(
+            and_(
+                MarketData.ticker == 'SPY_INTRADAY',
+                MarketData.date == start_date,
+                MarketData.timestamp.isnot(None)
+            )
+        ).order_by(MarketData.timestamp.asc()).all()
+        
+        if not intraday_data or len(intraday_data) < 2:
+            logger.warning(f"Missing SPY_INTRADAY data for {start_date}")
+            return 0.0
+        
+        # First and last intraday prices (multiply by 10 to convert SPY to S&P 500)
+        start_price = intraday_data[0].close_price * 10
+        end_price = intraday_data[-1].close_price * 10
+        
+        if start_price == 0:
+            logger.warning(f"Zero SPY_INTRADAY start price on {start_date}")
+            return 0.0
+        
+        sp500_return = ((end_price - start_price) / start_price) * 100
+        
+        logger.debug(
+            f"S&P 500 intraday return: {sp500_return:.2f}% "
+            f"({start_date} 9:30 AM: ${start_price:.2f} -> 4:00 PM: ${end_price:.2f})"
+        )
+        
+        return sp500_return
+    
+    # For multi-day periods, use daily SPY_SP500 data
     start_price_data = MarketData.query.filter(
-        MarketData.date >= start_date
+        and_(
+            MarketData.ticker == 'SPY_SP500',
+            MarketData.date >= start_date
+        )
     ).order_by(MarketData.date.asc()).first()
     
     end_price_data = MarketData.query.filter(
-        MarketData.date <= end_date
+        and_(
+            MarketData.ticker == 'SPY_SP500',
+            MarketData.date <= end_date
+        )
     ).order_by(MarketData.date.desc()).first()
     
     if not start_price_data or not end_price_data:
-        logger.warning(f"Missing S&P 500 data for period {start_date} to {end_date}")
+        logger.warning(f"Missing SPY_SP500 data for period {start_date} to {end_date}")
         return 0.0
     
     start_price = start_price_data.close_price
