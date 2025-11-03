@@ -9900,7 +9900,13 @@ def admin_intraday_collection_logs():
             ).all()
             
             # Convert UTC to Eastern Time
-            collection_time_et = utc.localize(collection_time).astimezone(eastern)
+            try:
+                collection_time_et = utc.localize(collection_time).astimezone(eastern)
+            except AttributeError:
+                if collection_time.tzinfo is None:
+                    collection_time_et = collection_time.replace(tzinfo=utc).astimezone(eastern)
+                else:
+                    collection_time_et = collection_time.astimezone(eastern)
             
             collection_logs.append({
                 'collection_time': collection_time_et.strftime('%H:%M:%S'),
@@ -9916,7 +9922,11 @@ def admin_intraday_collection_logs():
                     {
                         'symbol': call.symbol,
                         'status': call.response_status,
-                        'timestamp': utc.localize(call.timestamp).astimezone(eastern).strftime('%H:%M:%S.%f')[:-3],
+                        'timestamp': (
+                            utc.localize(call.timestamp).astimezone(eastern).strftime('%H:%M:%S.%f')[:-3]
+                            if hasattr(utc, 'localize')
+                            else call.timestamp.replace(tzinfo=utc).astimezone(eastern).strftime('%H:%M:%S.%f')[:-3]
+                        ),
                         'endpoint': call.endpoint
                     } for call in api_calls
                 ],
@@ -28887,6 +28897,87 @@ def admin_verify_batch_api_optimization():
                 'speedup_factor': round(estimated_individual_time / batch_duration, 1)
             },
             'verdict': 'BATCH OPTIMIZATION WORKING' if batch_success_count >= len(ticker_list) * 0.9 else 'ISSUES DETECTED'
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/check-api-efficiency', methods=['GET'])
+@login_required
+def admin_check_api_efficiency():
+    """Check today's API efficiency and batch optimization status"""
+    try:
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import AlphaVantageAPILog
+        from sqlalchemy import func
+        
+        today = get_market_date()
+        
+        # Get today's API call statistics
+        total_calls = AlphaVantageAPILog.query.filter(
+            func.date(AlphaVantageAPILog.timestamp) == today
+        ).count()
+        
+        successful_calls = AlphaVantageAPILog.query.filter(
+            func.date(AlphaVantageAPILog.timestamp) == today,
+            AlphaVantageAPILog.response_status == 'success'
+        ).count()
+        
+        # Get batch vs individual call breakdown
+        batch_calls = AlphaVantageAPILog.query.filter(
+            func.date(AlphaVantageAPILog.timestamp) == today,
+            AlphaVantageAPILog.endpoint.like('%BATCH_QUOTE%')
+        ).count()
+        
+        individual_calls = total_calls - batch_calls
+        
+        # Get unique symbols called
+        unique_symbols_query = db.session.query(
+            func.count(func.distinct(AlphaVantageAPILog.symbol))
+        ).filter(
+            func.date(AlphaVantageAPILog.timestamp) == today
+        ).scalar()
+        
+        # Calculate efficiency metrics
+        if batch_calls > 0:
+            avg_symbols_per_batch = unique_symbols_query / batch_calls if batch_calls > 0 else 0
+            efficiency_status = 'EXCELLENT' if avg_symbols_per_batch > 10 else 'GOOD' if avg_symbols_per_batch > 5 else 'POOR'
+        else:
+            avg_symbols_per_batch = 0
+            efficiency_status = 'NO_BATCH_CALLS'
+        
+        return jsonify({
+            'success': True,
+            'date': today.isoformat(),
+            'api_usage': {
+                'total_calls': total_calls,
+                'successful_calls': successful_calls,
+                'failed_calls': total_calls - successful_calls,
+                'success_rate_percent': round((successful_calls / total_calls * 100), 1) if total_calls > 0 else 0
+            },
+            'batch_optimization': {
+                'batch_calls': batch_calls,
+                'individual_calls': individual_calls,
+                'unique_symbols_fetched': unique_symbols_query,
+                'avg_symbols_per_batch': round(avg_symbols_per_batch, 1),
+                'efficiency_status': efficiency_status,
+                'calls_saved_estimate': unique_symbols_query - total_calls
+            },
+            'diagnosis': {
+                'batch_working': batch_calls > 0,
+                'recommendation': (
+                    'Batch optimization is working well!' if efficiency_status in ['EXCELLENT', 'GOOD']
+                    else 'Check if batch API is failing - too many individual calls'
+                )
+            }
         })
         
     except Exception as e:
