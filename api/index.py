@@ -28988,6 +28988,147 @@ def admin_check_api_efficiency():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/debug-collection-times', methods=['GET'])
+@login_required
+def admin_debug_collection_times():
+    """Debug what times data should be collected vs what times actually have data"""
+    try:
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import MarketData, PortfolioSnapshotIntraday
+        from datetime import datetime, time as dt_time
+        import pytz
+        
+        today = get_market_date()
+        
+        # Define expected collection times in EST
+        expected_times_est = [
+            dt_time(9, 30),   # Market open
+            dt_time(9, 45),
+            dt_time(10, 0),
+            dt_time(10, 15),
+            dt_time(10, 30),
+            dt_time(10, 45),
+            dt_time(11, 0),
+            dt_time(11, 15),
+            dt_time(11, 30),
+            dt_time(11, 45),
+            dt_time(12, 0),
+            dt_time(12, 15),
+            dt_time(12, 30),
+            dt_time(12, 45),
+            dt_time(13, 0),
+            dt_time(13, 15),
+            dt_time(13, 30),
+            dt_time(13, 45),
+            dt_time(14, 0),
+            dt_time(14, 15),
+            dt_time(14, 30),
+            dt_time(14, 45),
+            dt_time(15, 0),
+            dt_time(15, 15),
+            dt_time(15, 30),
+            dt_time(15, 45),
+            dt_time(16, 0),   # Market close
+        ]
+        
+        # Get actual SPY_INTRADAY collection times for today
+        spy_data = MarketData.query.filter(
+            MarketData.ticker == 'SPY_INTRADAY',
+            MarketData.date == today
+        ).order_by(MarketData.timestamp.asc()).all()
+        
+        # Also check portfolio snapshots for the admin user
+        from models import User
+        admin_user = User.query.filter_by(email=ADMIN_EMAIL).first()
+        portfolio_snapshots = []
+        if admin_user:
+            portfolio_snapshots = PortfolioSnapshotIntraday.query.filter(
+                PortfolioSnapshotIntraday.user_id == admin_user.id,
+                PortfolioSnapshotIntraday.date == today
+            ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
+        
+        # Convert actual timestamps to EST times
+        et_tz = pytz.timezone('America/New_York')
+        actual_spy_times = []
+        for data in spy_data:
+            if data.timestamp:
+                # Treat naive timestamp as UTC, convert to EST
+                utc_ts = pytz.utc.localize(data.timestamp)
+                est_ts = utc_ts.astimezone(et_tz)
+                actual_spy_times.append({
+                    'time_est': est_ts.strftime('%I:%M %p'),
+                    'timestamp_utc': data.timestamp.isoformat(),
+                    'close_price': float(data.close_price)
+                })
+        
+        actual_portfolio_times = []
+        for snapshot in portfolio_snapshots:
+            if snapshot.timestamp:
+                utc_ts = pytz.utc.localize(snapshot.timestamp)
+                est_ts = utc_ts.astimezone(et_tz)
+                actual_portfolio_times.append({
+                    'time_est': est_ts.strftime('%I:%M %p'),
+                    'timestamp_utc': snapshot.timestamp.isoformat(),
+                    'total_value': float(snapshot.total_value)
+                })
+        
+        # Find missing times for SPY
+        actual_spy_time_strs = [t['time_est'] for t in actual_spy_times]
+        missing_spy_times = []
+        for expected in expected_times_est:
+            expected_str = expected.strftime('%I:%M %p')
+            if expected_str not in actual_spy_time_strs:
+                missing_spy_times.append(expected_str)
+        
+        # Find missing times for portfolio snapshots
+        actual_portfolio_time_strs = [t['time_est'] for t in actual_portfolio_times]
+        missing_portfolio_times = []
+        for expected in expected_times_est:
+            expected_str = expected.strftime('%I:%M %p')
+            if expected_str not in actual_portfolio_time_strs:
+                missing_portfolio_times.append(expected_str)
+        
+        return jsonify({
+            'success': True,
+            'date': today.isoformat(),
+            'expected_count': len(expected_times_est),
+            'spy_data': {
+                'actual_count': len(actual_spy_times),
+                'missing_count': len(missing_spy_times),
+                'actual_times': actual_spy_times,
+                'missing_times': missing_spy_times
+            },
+            'portfolio_snapshots': {
+                'actual_count': len(actual_portfolio_times),
+                'missing_count': len(missing_portfolio_times),
+                'actual_times': actual_portfolio_times,
+                'missing_times': missing_portfolio_times,
+                'admin_user': admin_user.username if admin_user else None
+            },
+            'expected_times': [t.strftime('%I:%M %p') for t in expected_times_est],
+            'diagnosis': {
+                'spy_first': actual_spy_times[0]['time_est'] if actual_spy_times else None,
+                'spy_last': actual_spy_times[-1]['time_est'] if actual_spy_times else None,
+                'portfolio_first': actual_portfolio_times[0]['time_est'] if actual_portfolio_times else None,
+                'portfolio_last': actual_portfolio_times[-1]['time_est'] if actual_portfolio_times else None,
+                'should_start_at': '09:30 AM EST (market open)',
+                'should_end_at': '04:00 PM EST (market close)',
+                'spy_issue': 'Missing times in SPY data' if missing_spy_times else 'All SPY times collected',
+                'portfolio_issue': 'Missing times in portfolio snapshots' if missing_portfolio_times else 'All portfolio snapshots collected'
+            }
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/debug-spy-intraday', methods=['GET'])
 @login_required
 def admin_debug_spy_intraday():
