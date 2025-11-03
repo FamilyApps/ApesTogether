@@ -12,62 +12,73 @@ leaderboard_bp = Blueprint('leaderboard', __name__, url_prefix='/leaderboard')
 
 @leaderboard_bp.route('/')
 def leaderboard_home():
-    """Main leaderboard page - public access, no login required"""
-    period = request.args.get('period', '5D')  # Default to 5D for homepage (trading standard)
+    """
+    Main leaderboard page - optimized for 10,000+ concurrent users
+    
+    Strategy:
+    1. Serve pre-rendered HTML from cache (CDN edge cached, <100ms response)
+    2. Single HTML variant for all users (auth overlay done client-side)
+    3. Chart data embedded in HTML (no API calls, lazy-loaded client-side)
+    """
+    period = request.args.get('period', 'YTD')  # Default to YTD
     category = request.args.get('category', 'all')  # all, small_cap, large_cap
     
-    # Try to serve pre-rendered HTML for maximum performance (1-5ms response time)
-    # AUTH-AWARE CACHING: Serve different versions based on authentication status
-    from models import LeaderboardCache
+    # ============================================
+    # STEP 1: Try to serve pre-rendered HTML from cache
+    # ============================================
+    from models import LeaderboardCache, UserPortfolioChartCache
+    from flask import Response, make_response
     
-    # Determine which cached version to serve based on authentication status
-    auth_suffix = '_auth' if current_user.is_authenticated else '_anon'
-    cache_key = f"{period}_{category}{auth_suffix}"
-    
-    # Try to get auth-aware cached version
+    # Single cache key (no auth suffix - client-side overlay handles auth)
+    cache_key = f"{period}_{category}"
     cache_entry = LeaderboardCache.query.filter_by(period=cache_key).first()
     
     if cache_entry and cache_entry.rendered_html:
-        # Serve pre-rendered HTML directly - maximum performance!
-        from flask import Response
-        return Response(cache_entry.rendered_html, mimetype='text/html')
+        # Serve pre-rendered HTML with aggressive CDN caching
+        response = make_response(cache_entry.rendered_html)
+        
+        # CDN caching headers for 10k+ concurrent users
+        response.headers['Cache-Control'] = 'public, max-age=3600, s-maxage=3600'  # 1 hour
+        response.headers['CDN-Cache-Control'] = 'max-age=86400'  # 24h at CDN edge
+        response.headers['Vary'] = 'Accept-Encoding'  # Only vary on compression
+        response.headers['X-Cache-Source'] = 'pre-rendered'
+        
+        return response
     
-    # Fallback to dynamic rendering if no pre-rendered HTML available
-    leaderboard_data = get_leaderboard_data(period, limit=50, category=category, use_auth_suffix=True)
+    # ============================================
+    # STEP 2: Fallback - Dynamic rendering (should rarely happen)
+    # ============================================
+    from leaderboard_utils import calculate_leaderboard_data
     
-    # Filter by category if specified
-    if category == 'small_cap':
-        leaderboard_data = [entry for entry in leaderboard_data if entry['small_cap_percent'] > 50]
-    elif category == 'large_cap':
-        leaderboard_data = [entry for entry in leaderboard_data if entry['large_cap_percent'] > 50]
+    leaderboard_data = calculate_leaderboard_data(period, limit=20, category=category)
     
-    # Check which users current user is already subscribed to (if logged in)
-    subscribed_to_ids = set()
-    current_user_id = None
-    if current_user.is_authenticated:
-        current_user_id = current_user.id
-        subscriptions = Subscription.query.filter_by(
-            subscriber_id=current_user.id, 
-            status='active'
-        ).all()
-        subscribed_to_ids = {sub.subscribed_to_id for sub in subscriptions}
-    
-    # Add subscription status to leaderboard data
+    # Embed chart JSON data for each user (no API calls needed)
     for entry in leaderboard_data:
-        entry['is_subscribed'] = entry['user_id'] in subscribed_to_ids
-        entry['is_current_user'] = entry['user_id'] == current_user_id
+        chart_cache = UserPortfolioChartCache.query.filter_by(
+            user_id=entry['user_id'],
+            period=period
+        ).first()
+        
+        entry['chart_json'] = chart_cache.chart_data if chart_cache else None
     
-    return render_template('leaderboard.html', 
-                         leaderboard_data=leaderboard_data,
-                         current_period=period,
-                         current_category=category,
-                         periods=['1D', '5D', '1M', '3M', 'YTD', '1Y'],
-                         categories=[
-                             ('all', 'All Portfolios'),
-                             ('small_cap', 'Small Cap Focus'),
-                             ('large_cap', 'Large Cap Focus')
-                         ],
-                         now=datetime.now())
+    # Render template (auth state available for SSR, but client will handle overlay)
+    response = make_response(render_template('leaderboard.html',
+                                            leaderboard_data=leaderboard_data,
+                                            current_period=period,
+                                            current_category=category,
+                                            periods=['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX'],
+                                            categories=[
+                                                ('all', 'All Portfolios'),
+                                                ('small_cap', 'Small Cap Focus'),
+                                                ('large_cap', 'Large Cap Focus')
+                                            ],
+                                            now=datetime.now()))
+    
+    # Shorter cache for fallback (trigger regeneration)
+    response.headers['Cache-Control'] = 'public, max-age=300'  # 5 min for fallback
+    response.headers['X-Cache-Source'] = 'fallback-dynamic'
+    
+    return response
 
 @leaderboard_bp.route('/api/data')
 def api_leaderboard_data():
