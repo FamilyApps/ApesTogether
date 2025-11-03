@@ -19102,6 +19102,25 @@ def market_close_cron():
                 results['pipeline_phases'].append('leaderboard_completed')
                 logger.info(f"PHASE 2 Complete: {updated_count} leaderboard entries updated")
                 
+                # PHASE 2.2: Pre-render leaderboard HTML with optimized y-axes (for 10k+ concurrent users)
+                logger.info("PHASE 2.2: Pre-rendering leaderboard HTML with optimized y-axis ranges...")
+                results['pipeline_phases'].append('html_prerender_started')
+                
+                try:
+                    from leaderboard_utils import update_leaderboard_cache_html
+                    html_stats = update_leaderboard_cache_html()
+                    results['html_prerendered'] = html_stats['updated']
+                    results['html_prerender_failed'] = html_stats['failed']
+                    results['pipeline_phases'].append('html_prerender_completed')
+                    logger.info(f"PHASE 2.2 Complete: Pre-rendered {html_stats['updated']}/{html_stats['total']} leaderboard HTML pages with optimized y-axes")
+                except Exception as e:
+                    error_msg = f"HTML pre-rendering failed: {str(e)}"
+                    results['errors'].append(error_msg)
+                    logger.error(f"PHASE 2.2 ERROR: {error_msg}")
+                    results['html_prerendered'] = 0
+                    results['html_prerender_failed'] = 24  # Expected total
+                    # Continue - not critical, fallback rendering will work
+                
                 # === CRITICAL DEBUG: Entry point for Phase 2.25 ===
                 print("="*80)
                 print("🔍 REACHED LINE 18029 - ABOUT TO START PHASE 2.25")
