@@ -29316,7 +29316,7 @@ def admin_fix_spy_unmultiplied_data():
         start_date = date(2025, 10, 27)
         end_date = date(2025, 10, 31)
         
-        # Get all SPY_INTRADAY entries in this range that look unmultiplied (< 1000)
+        # First get a count and sample of what will be updated
         unmultiplied_entries = MarketData.query.filter(
             MarketData.ticker == 'SPY_INTRADAY',
             MarketData.date >= start_date,
@@ -29324,21 +29324,30 @@ def admin_fix_spy_unmultiplied_data():
             MarketData.close_price < 1000  # Only fix entries that look unmultiplied
         ).all()
         
-        fixed_count = 0
+        # Build summary before updating
         date_summary = {}
-        
         for entry in unmultiplied_entries:
-            old_price = float(entry.close_price)
-            new_price = old_price * 10
-            entry.close_price = new_price
-            fixed_count += 1
-            
-            # Track changes by date
             date_key = entry.date.isoformat()
             if date_key not in date_summary:
-                date_summary[date_key] = {'count': 0, 'sample_old': old_price, 'sample_new': new_price}
+                date_summary[date_key] = {
+                    'count': 0,
+                    'sample_old': float(entry.close_price),
+                    'sample_new': float(entry.close_price) * 10
+                }
             date_summary[date_key]['count'] += 1
         
+        # Use bulk UPDATE statement to ensure changes persist
+        from sqlalchemy import update
+        result = db.session.execute(
+            update(MarketData)
+            .where(MarketData.ticker == 'SPY_INTRADAY')
+            .where(MarketData.date >= start_date)
+            .where(MarketData.date <= end_date)
+            .where(MarketData.close_price < 1000)
+            .values(close_price=MarketData.close_price * 10)
+        )
+        
+        fixed_count = result.rowcount
         db.session.commit()
         
         return jsonify({
