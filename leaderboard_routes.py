@@ -53,13 +53,21 @@ def leaderboard_home():
     leaderboard_data = calculate_leaderboard_data(period, limit=20, category=category)
     
     # Embed chart JSON data for each user (no API calls needed)
+    import json
     for entry in leaderboard_data:
         chart_cache = UserPortfolioChartCache.query.filter_by(
             user_id=entry['user_id'],
             period=period
         ).first()
         
-        entry['chart_json'] = chart_cache.chart_data if chart_cache else None
+        # Parse JSON string from database to dict for template
+        if chart_cache and chart_cache.chart_data:
+            try:
+                entry['chart_json'] = json.loads(chart_cache.chart_data)
+            except (json.JSONDecodeError, TypeError):
+                entry['chart_json'] = None
+        else:
+            entry['chart_json'] = None
     
     # Render template (auth state available for SSR, but client will handle overlay)
     response = make_response(render_template('leaderboard.html',

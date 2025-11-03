@@ -1537,13 +1537,21 @@ def prerender_leaderboard_html(period, category='all'):
     leaderboard_data = calculate_leaderboard_data(period, limit=20, category=category)
     
     # Embed chart JSON for each user (no API calls needed on page load)
+    import json
     for entry in leaderboard_data:
         chart_cache = UserPortfolioChartCache.query.filter_by(
             user_id=entry['user_id'],
             period=period
         ).first()
         
-        entry['chart_json'] = chart_cache.chart_data if chart_cache else None
+        # Parse JSON string from database to dict for template
+        if chart_cache and chart_cache.chart_data:
+            try:
+                entry['chart_json'] = json.loads(chart_cache.chart_data)
+            except (json.JSONDecodeError, TypeError):
+                entry['chart_json'] = None
+        else:
+            entry['chart_json'] = None
     
     # Render complete HTML (single variant for all users - auth handled client-side)
     try:
