@@ -28999,10 +28999,74 @@ def admin_debug_spy_intraday():
         
         from models import MarketData
         from sqlalchemy import func
+        from datetime import timedelta
         
         today = get_market_date()
         
-        # Get today's SPY_INTRADAY data
+        # Get last 10 days to cover 5 trading days
+        start_date = today - timedelta(days=10)
+        
+        # Check BOTH possible ticker names
+        spy_intraday_all = MarketData.query.filter(
+            MarketData.ticker == 'SPY_INTRADAY',
+            MarketData.date >= start_date,
+            MarketData.date <= today
+        ).order_by(MarketData.date.asc(), MarketData.timestamp.asc()).all()
+        
+        spy_sp500_intraday_all = MarketData.query.filter(
+            MarketData.ticker == 'SPY_SP500_INTRADAY',
+            MarketData.date >= start_date,
+            MarketData.date <= today
+        ).order_by(MarketData.date.asc(), MarketData.timestamp.asc()).all()
+        
+        # Group by date
+        by_date = {}
+        for data in spy_intraday_all:
+            date_key = data.date.isoformat()
+            if date_key not in by_date:
+                by_date[date_key] = []
+            by_date[date_key].append({
+                'timestamp': data.timestamp.isoformat() if data.timestamp else None,
+                'close_price': float(data.close_price),
+                'expected_spy_price': float(data.close_price) / 10
+            })
+        
+        # Calculate daily first/last for each day
+        daily_summary = {}
+        for date_key, entries in by_date.items():
+            if entries:
+                first_price = entries[0]['close_price']
+                last_price = entries[-1]['close_price']
+                daily_summary[date_key] = {
+                    'count': len(entries),
+                    'first_price': first_price,
+                    'last_price': last_price,
+                    'first_timestamp': entries[0]['timestamp'],
+                    'last_timestamp': entries[-1]['timestamp'],
+                    'intraday_change_pct': ((last_price - first_price) / first_price * 100) if first_price > 0 else 0,
+                    'looks_unmultiplied': first_price < 1000  # If < 1000, likely raw SPY price
+                }
+        
+        # Calculate day-over-day changes
+        sorted_dates = sorted(daily_summary.keys())
+        day_over_day_changes = []
+        for i in range(1, len(sorted_dates)):
+            prev_date = sorted_dates[i-1]
+            curr_date = sorted_dates[i]
+            prev_close = daily_summary[prev_date]['last_price']
+            curr_open = daily_summary[curr_date]['first_price']
+            
+            change_pct = ((curr_open - prev_close) / prev_close * 100) if prev_close > 0 else 0
+            day_over_day_changes.append({
+                'from_date': prev_date,
+                'to_date': curr_date,
+                'prev_close': prev_close,
+                'curr_open': curr_open,
+                'change_pct': round(change_pct, 2),
+                'is_anomaly': abs(change_pct) > 50  # Flag jumps > 50%
+            })
+        
+        # Get today's SPY_INTRADAY data for detail
         spy_intraday = MarketData.query.filter(
             MarketData.ticker == 'SPY_INTRADAY',
             MarketData.date == today
@@ -29022,15 +29086,30 @@ def admin_debug_spy_intraday():
         
         return jsonify({
             'success': True,
-            'date': today.isoformat(),
-            'spy_intraday_count': len(spy_intraday),
-            'data': intraday_data,
+            'date_range': f'{start_date.isoformat()} to {today.isoformat()}',
+            'ticker_counts': {
+                'SPY_INTRADAY': len(spy_intraday_all),
+                'SPY_SP500_INTRADAY': len(spy_sp500_intraday_all)
+            },
+            'today_detail_count': len(spy_intraday),
+            'today_detail_data': intraday_data,
+            'daily_summary': daily_summary,
+            'day_over_day_changes': day_over_day_changes,
             'diagnosis': {
-                'all_doubled': all(d['is_doubled'] for d in intraday_data) if intraday_data else False,
+                'anomaly_detected': any(c['is_anomaly'] for c in day_over_day_changes),
+                'anomalies': [c for c in day_over_day_changes if c['is_anomaly']],
+                'has_old_ticker': len(spy_sp500_intraday_all) > 0,
+                'likely_cause': (
+                    'Format inconsistency: Some days have raw SPY price (~680), others have S&P 500 index (~6800)'
+                    if any(c['is_anomaly'] for c in day_over_day_changes)
+                    else 'Mixed ticker names detected - SPY_INTRADAY and SPY_SP500_INTRADAY both exist'
+                    if len(spy_sp500_intraday_all) > 0
+                    else 'All data looks consistent'
+                ),
                 'recommendation': (
-                    'Data has double multiplication - need to fix stored values in database'
-                    if intraday_data and all(d['is_doubled'] for d in intraday_data)
-                    else 'Data looks correct'
+                    'Delete old SPY_SP500_INTRADAY entries - they may be from old backfill code'
+                    if len(spy_sp500_intraday_all) > 0
+                    else 'Check the anomalies list to see which date ranges need correction'
                 )
             }
         })
