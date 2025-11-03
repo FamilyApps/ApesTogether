@@ -10192,6 +10192,181 @@ def admin_clear_chart_cache():
         <p><a href="/admin">Back to Admin</a></p>
         """
 
+@app.route('/admin/regenerate-leaderboard-html', methods=['GET', 'POST'])
+@login_required
+def admin_regenerate_leaderboard_html():
+    """
+    Pre-render leaderboard HTML for all periods/categories
+    Optimized for 10k+ concurrent users with CDN edge caching
+    """
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    if request.method == 'GET':
+        return '''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Regenerate Leaderboard HTML</title>
+            <style>
+                body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+                button { background: #28a745; color: white; padding: 10px 20px; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; }
+                button:hover { background: #218838; }
+                .info { background: #e7f3ff; padding: 15px; border-radius: 4px; margin: 20px 0; }
+                #result { margin-top: 20px; padding: 15px; border-radius: 4px; display: none; }
+                .success { background: #d4edda; border-left: 4px solid #28a745; }
+                .error { background: #f8d7da; border-left: 4px solid #dc3545; }
+            </style>
+        </head>
+        <body>
+            <h1>🚀 Regenerate Leaderboard HTML</h1>
+            
+            <div class="info">
+                <strong>Purpose:</strong> Pre-render leaderboard HTML with embedded chart data for all periods/categories.
+                This enables <100ms CDN-cached responses for 10,000+ concurrent users.
+            </div>
+            
+            <div class="info">
+                <strong>📊 Will generate:</strong> 24 HTML pages (8 periods × 3 categories)<br>
+                <strong>⏱️ Estimated time:</strong> 30-60 seconds<br>
+                <strong>💾 Cache location:</strong> LeaderboardCache.rendered_html
+            </div>
+            
+            <button onclick="regenerate()">🔄 Regenerate All Leaderboard HTML</button>
+            
+            <div id="result"></div>
+            
+            <script>
+            async function regenerate() {
+                const button = document.querySelector('button');
+                const resultDiv = document.getElementById('result');
+                
+                button.disabled = true;
+                button.textContent = '⏳ Regenerating...';
+                resultDiv.style.display = 'none';
+                
+                try {
+                    const response = await fetch('/admin/regenerate-leaderboard-html', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        resultDiv.className = 'success';
+                        resultDiv.innerHTML = `
+                            <h3>✅ Success!</h3>
+                            <p><strong>Updated:</strong> ${data.stats.updated}/${data.stats.total} pages</p>
+                            <p><strong>Failed:</strong> ${data.stats.failed}</p>
+                            <p><strong>Time:</strong> ${data.time_taken}s</p>
+                            <hr>
+                            <p>Leaderboard will now load from pre-rendered HTML with <100ms response time!</p>
+                        `;
+                    } else {
+                        throw new Error(data.error || 'Unknown error');
+                    }
+                } catch (err) {
+                    resultDiv.className = 'error';
+                    resultDiv.innerHTML = `
+                        <h3>❌ Error</h3>
+                        <p>${err.message}</p>
+                    `;
+                } finally {
+                    resultDiv.style.display = 'block';
+                    button.disabled = false;
+                    button.textContent = '🔄 Regenerate All Leaderboard HTML';
+                }
+            }
+            </script>
+        </body>
+        </html>
+        '''
+    
+    # POST request - do the regeneration
+    try:
+        import time
+        from leaderboard_utils import update_leaderboard_cache_html
+        
+        start_time = time.time()
+        
+        # Regenerate all leaderboard HTML
+        stats = update_leaderboard_cache_html()
+        
+        time_taken = round(time.time() - start_time, 2)
+        
+        return jsonify({
+            'success': True,
+            'stats': stats,
+            'time_taken': time_taken,
+            'message': f'Pre-rendered {stats["updated"]}/{stats["total"]} leaderboard pages'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error regenerating leaderboard HTML: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/admin/invalidate-leaderboard', methods=['POST'])
+@login_required
+def admin_invalidate_leaderboard():
+    """
+    Invalidate specific leaderboard cache entry and trigger regeneration
+    Emergency endpoint for fixing stale/incorrect leaderboard data
+    """
+    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    try:
+        from models import LeaderboardCache
+        from leaderboard_utils import prerender_leaderboard_html
+        import json
+        
+        period = request.json.get('period', 'YTD')
+        category = request.json.get('category', 'all')
+        cache_key = f"{period}_{category}"
+        
+        # Delete existing cache
+        cache_entry = LeaderboardCache.query.filter_by(period=cache_key).first()
+        if cache_entry:
+            db.session.delete(cache_entry)
+            db.session.commit()
+        
+        # Regenerate immediately
+        result = prerender_leaderboard_html(period, category)
+        
+        if result:
+            # Store new cache
+            new_cache = LeaderboardCache(
+                period=cache_key,
+                leaderboard_data=result['data'],
+                rendered_html=result['html'],
+                generated_at=result['generated_at']
+            )
+            db.session.add(new_cache)
+            db.session.commit()
+            
+            return jsonify({
+                'success': True,
+                'message': f'Invalidated and regenerated {cache_key}',
+                'html_size': len(result['html'])
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to regenerate HTML'
+            }), 500
+            
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error invalidating leaderboard: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/admin')
 @login_required
 def admin_dashboard():

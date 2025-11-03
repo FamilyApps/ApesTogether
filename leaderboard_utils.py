@@ -1514,3 +1514,128 @@ def calculate_user_portfolio_stats(user_id):
     stats['last_updated'] = datetime.utcnow()
     
     return stats
+
+def prerender_leaderboard_html(period, category='all'):
+    """
+    Pre-render complete leaderboard HTML with embedded chart data
+    Called during market-close cron for maximum performance
+    
+    Args:
+        period: Time period ('1D', '5D', '1M', etc.)
+        category: Portfolio category ('all', 'small_cap', 'large_cap')
+        
+    Returns:
+        dict with 'html' (rendered HTML string) and 'data' (JSON leaderboard data)
+    """
+    from flask import render_template
+    from models import UserPortfolioChartCache, LeaderboardCache
+    import json
+    
+    logger.info(f"Pre-rendering leaderboard HTML for {period}_{category}")
+    
+    # Calculate leaderboard data (uses cached UserPortfolioChartCache)
+    leaderboard_data = calculate_leaderboard_data(period, limit=20, category=category)
+    
+    # Embed chart JSON for each user (no API calls needed on page load)
+    for entry in leaderboard_data:
+        chart_cache = UserPortfolioChartCache.query.filter_by(
+            user_id=entry['user_id'],
+            period=period
+        ).first()
+        
+        entry['chart_json'] = chart_cache.chart_data if chart_cache else None
+    
+    # Render complete HTML (single variant for all users - auth handled client-side)
+    try:
+        html = render_template('leaderboard.html',
+                             leaderboard_data=leaderboard_data,
+                             current_period=period,
+                             current_category=category,
+                             periods=['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX'],
+                             categories=[
+                                 ('all', 'All Portfolios'),
+                                 ('small_cap', 'Small Cap Focus'),
+                                 ('large_cap', 'Large Cap Focus')
+                             ],
+                             current_user=None,  # Public version - no auth state
+                             now=datetime.now())
+        
+        logger.info(f"Successfully pre-rendered {period}_{category} HTML ({len(html)} bytes)")
+        
+        return {
+            'html': html,
+            'data': json.dumps(leaderboard_data),
+            'generated_at': datetime.now()
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to pre-render {period}_{category}: {e}")
+        return None
+
+def update_leaderboard_cache_html(periods=None, categories=None):
+    """
+    Update pre-rendered HTML for specified periods and categories
+    Called during market-close cron
+    
+    Args:
+        periods: List of periods to update (default: all)
+        categories: List of categories to update (default: all)
+        
+    Returns:
+        dict with update statistics
+    """
+    from models import LeaderboardCache
+    
+    if periods is None:
+        periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']
+    
+    if categories is None:
+        categories = ['all', 'small_cap', 'large_cap']
+    
+    stats = {
+        'updated': 0,
+        'failed': 0,
+        'total': len(periods) * len(categories)
+    }
+    
+    for period in periods:
+        for category in categories:
+            try:
+                # Pre-render HTML
+                result = prerender_leaderboard_html(period, category)
+                
+                if result:
+                    # Store in cache
+                    cache_key = f"{period}_{category}"
+                    cache_entry = LeaderboardCache.query.filter_by(period=cache_key).first()
+                    
+                    if not cache_entry:
+                        cache_entry = LeaderboardCache(period=cache_key)
+                    
+                    cache_entry.leaderboard_data = result['data']
+                    cache_entry.rendered_html = result['html']
+                    cache_entry.generated_at = result['generated_at']
+                    
+                    db.session.add(cache_entry)
+                    stats['updated'] += 1
+                    
+                    logger.info(f"✅ Cached pre-rendered HTML for {cache_key}")
+                else:
+                    stats['failed'] += 1
+                    logger.warning(f"❌ Failed to pre-render {period}_{category}")
+                    
+            except Exception as e:
+                stats['failed'] += 1
+                logger.error(f"Error updating {period}_{category}: {e}")
+    
+    # Commit all updates
+    try:
+        db.session.commit()
+        logger.info(f"Leaderboard HTML cache updated: {stats['updated']}/{stats['total']} successful")
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Failed to commit leaderboard cache: {e}")
+        stats['failed'] = stats['total']
+        stats['updated'] = 0
+    
+    return stats
