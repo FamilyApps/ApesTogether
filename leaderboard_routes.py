@@ -54,6 +54,9 @@ def leaderboard_home():
     
     # Embed chart JSON data for each user (no API calls needed)
     import json
+    from leaderboard_utils import calculate_chart_y_axis_range
+    
+    chart_data_list = []
     for entry in leaderboard_data:
         chart_cache = UserPortfolioChartCache.query.filter_by(
             user_id=entry['user_id'],
@@ -63,17 +66,23 @@ def leaderboard_home():
         # Parse JSON string from database to dict for template
         if chart_cache and chart_cache.chart_data:
             try:
-                entry['chart_json'] = json.loads(chart_cache.chart_data)
+                chart_data = json.loads(chart_cache.chart_data)
+                entry['chart_json'] = chart_data
+                chart_data_list.append(chart_data)
             except (json.JSONDecodeError, TypeError):
                 entry['chart_json'] = None
         else:
             entry['chart_json'] = None
+    
+    # Calculate consistent y-axis range for visual comparison
+    y_axis_range = calculate_chart_y_axis_range(chart_data_list)
     
     # Render template (auth state available for SSR, but client will handle overlay)
     response = make_response(render_template('leaderboard.html',
                                             leaderboard_data=leaderboard_data,
                                             current_period=period,
                                             current_category=category,
+                                            y_axis_range=y_axis_range,  # Consistent scale for visual comparison
                                             periods=['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX'],
                                             categories=[
                                                 ('all', 'All Portfolios'),

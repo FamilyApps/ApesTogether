@@ -1515,6 +1515,58 @@ def calculate_user_portfolio_stats(user_id):
     
     return stats
 
+def calculate_chart_y_axis_range(chart_data_list):
+    """
+    Calculate consistent y-axis min/max range across all charts for visual comparison
+    Uses actual data range with minimal padding to avoid wasted chart space
+    
+    Args:
+        chart_data_list: List of chart data dicts with 'datasets' containing portfolio and S&P 500 values
+        
+    Returns:
+        dict with 'min' and 'max' values, with 10-15% padding for visual clarity
+    """
+    if not chart_data_list:
+        return {'min': -10, 'max': 10}
+    
+    all_values = []
+    
+    # Extract ALL values from both portfolio AND S&P 500 datasets
+    for chart_data in chart_data_list:
+        if not chart_data or 'datasets' not in chart_data:
+            continue
+        
+        for dataset in chart_data['datasets']:
+            # Include both Portfolio and S&P 500 data
+            if 'data' in dataset:
+                all_values.extend([v for v in dataset['data'] if v is not None])
+    
+    if not all_values:
+        return {'min': -10, 'max': 10}
+    
+    min_val = min(all_values)
+    max_val = max(all_values)
+    
+    # Add 10-15% padding to the actual range for visual clarity
+    range_size = max_val - min_val
+    padding = max(range_size * 0.15, 2)  # At least 2% padding
+    
+    y_min = min_val - padding
+    y_max = max_val + padding
+    
+    # Round to clean intervals (1% increments for readability)
+    import math
+    y_min = math.floor(y_min)
+    y_max = math.ceil(y_max)
+    
+    # Ensure minimum range of 5% for very tight clusters
+    if y_max - y_min < 5:
+        center = (y_min + y_max) / 2
+        y_min = center - 2.5
+        y_max = center + 2.5
+    
+    return {'min': y_min, 'max': y_max}
+
 def prerender_leaderboard_html(period, category='all'):
     """
     Pre-render complete leaderboard HTML with embedded chart data
@@ -1538,6 +1590,8 @@ def prerender_leaderboard_html(period, category='all'):
     
     # Embed chart JSON for each user (no API calls needed on page load)
     import json
+    chart_data_list = []
+    
     for entry in leaderboard_data:
         chart_cache = UserPortfolioChartCache.query.filter_by(
             user_id=entry['user_id'],
@@ -1547,11 +1601,16 @@ def prerender_leaderboard_html(period, category='all'):
         # Parse JSON string from database to dict for template
         if chart_cache and chart_cache.chart_data:
             try:
-                entry['chart_json'] = json.loads(chart_cache.chart_data)
+                chart_data = json.loads(chart_cache.chart_data)
+                entry['chart_json'] = chart_data
+                chart_data_list.append(chart_data)
             except (json.JSONDecodeError, TypeError):
                 entry['chart_json'] = None
         else:
             entry['chart_json'] = None
+    
+    # Calculate consistent y-axis range for visual comparison
+    y_axis_range = calculate_chart_y_axis_range(chart_data_list)
     
     # Render complete HTML (single variant for all users - auth handled client-side)
     try:
@@ -1559,6 +1618,7 @@ def prerender_leaderboard_html(period, category='all'):
                              leaderboard_data=leaderboard_data,
                              current_period=period,
                              current_category=category,
+                             y_axis_range=y_axis_range,  # Consistent scale for visual comparison
                              periods=['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX'],
                              categories=[
                                  ('all', 'All Portfolios'),

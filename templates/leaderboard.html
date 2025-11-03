@@ -210,6 +210,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // 2. LAZY-LOADED CHART RENDERING (Performance optimization)
     // ============================================
     
+    // Consistent y-axis range for all charts (enables visual comparison)
+    const yAxisRange = {{ y_axis_range | tojson | safe }};
+    
     // Optimized Chart.js config for static mini-charts
     const staticChartOptions = {
         responsive: false,
@@ -233,6 +236,8 @@ document.addEventListener('DOMContentLoaded', function() {
             x: { display: false },  // Hide x-axis
             y: { 
                 display: true,
+                min: yAxisRange.min,  // Fixed min for all charts
+                max: yAxisRange.max,  // Fixed max for all charts
                 ticks: { 
                     maxTicksLimit: 3,  // Only 3 Y-axis labels
                     callback: function(value) {
