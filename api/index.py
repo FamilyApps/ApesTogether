@@ -28988,6 +28988,61 @@ def admin_check_api_efficiency():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/debug-spy-intraday', methods=['GET'])
+@login_required
+def admin_debug_spy_intraday():
+    """Debug SPY_INTRADAY data to diagnose 900% gain issue"""
+    try:
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import MarketData
+        from sqlalchemy import func
+        
+        today = get_market_date()
+        
+        # Get today's SPY_INTRADAY data
+        spy_intraday = MarketData.query.filter(
+            MarketData.ticker == 'SPY_INTRADAY',
+            MarketData.date == today
+        ).order_by(MarketData.timestamp.asc()).all()
+        
+        # Expected: SPY price is ~$585, so close_price should be ~$5850 (SPY * 10 = S&P 500 index)
+        # If close_price is ~$58500, it was multiplied by 10 twice
+        
+        intraday_data = []
+        for data in spy_intraday:
+            intraday_data.append({
+                'timestamp': data.timestamp.isoformat() if data.timestamp else None,
+                'close_price': float(data.close_price),
+                'expected_spy_price': float(data.close_price) / 10,
+                'is_doubled': float(data.close_price) > 10000  # If > 10k, definitely doubled
+            })
+        
+        return jsonify({
+            'success': True,
+            'date': today.isoformat(),
+            'spy_intraday_count': len(spy_intraday),
+            'data': intraday_data,
+            'diagnosis': {
+                'all_doubled': all(d['is_doubled'] for d in intraday_data) if intraday_data else False,
+                'recommendation': (
+                    'Data has double multiplication - need to fix stored values in database'
+                    if intraday_data and all(d['is_doubled'] for d in intraday_data)
+                    else 'Data looks correct'
+                )
+            }
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/find-user-id', methods=['GET'])
 @login_required
 def admin_find_user_id():
