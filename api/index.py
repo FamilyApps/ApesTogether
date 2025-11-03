@@ -29043,6 +29043,43 @@ def admin_debug_spy_intraday():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/delete-spy-intraday-today', methods=['POST'])
+@login_required
+def admin_delete_spy_intraday_today():
+    """Delete today's SPY_INTRADAY data (if doubled) so it can be recollected correctly"""
+    try:
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import MarketData
+        
+        today = get_market_date()
+        
+        # Delete all SPY_INTRADAY entries for today
+        deleted_count = MarketData.query.filter(
+            MarketData.ticker == 'SPY_INTRADAY',
+            MarketData.date == today
+        ).delete()
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'date': today.isoformat(),
+            'deleted_count': deleted_count,
+            'message': f'Deleted {deleted_count} SPY_INTRADAY entries for {today}. They will be recollected correctly at next intraday cron.'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/find-user-id', methods=['GET'])
 @login_required
 def admin_find_user_id():
