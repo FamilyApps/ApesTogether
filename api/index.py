@@ -29080,6 +29080,53 @@ def admin_delete_spy_intraday_today():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/fix-spy-intraday-5d', methods=['POST'])
+@login_required
+def admin_fix_spy_intraday_5d():
+    """Delete last 5 trading days of SPY_INTRADAY to fix format inconsistency causing 900% gain"""
+    try:
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import MarketData
+        from datetime import timedelta
+        
+        today = get_market_date()
+        
+        # Get last 10 days to ensure we cover 5 trading days
+        start_date = today - timedelta(days=10)
+        
+        # Delete all SPY_INTRADAY entries from last 10 days
+        deleted_count = MarketData.query.filter(
+            MarketData.ticker == 'SPY_INTRADAY',
+            MarketData.date >= start_date,
+            MarketData.date <= today
+        ).delete()
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'date_range': f'{start_date.isoformat()} to {today.isoformat()}',
+            'deleted_count': deleted_count,
+            'message': f'Deleted {deleted_count} SPY_INTRADAY entries. Market is closed, so you\'ll need to manually trigger backfill or wait until tomorrow\'s market open.',
+            'next_steps': [
+                '1. Charts will show no S&P data for 1D/5D until data is backfilled',
+                '2. Tomorrow at market open (9:30 AM), intraday cron will start collecting fresh data',
+                '3. Or manually backfill historical data if you have that endpoint'
+            ]
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/admin/find-user-id', methods=['GET'])
 @login_required
 def admin_find_user_id():
