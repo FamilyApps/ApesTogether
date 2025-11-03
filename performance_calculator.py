@@ -646,9 +646,10 @@ def _calculate_sp500_benchmark(start_date: date, end_date: date) -> float:
             logger.warning(f"Missing SPY_INTRADAY data for {start_date}")
             return 0.0
         
-        # First and last intraday prices (multiply by 10 to convert SPY to S&P 500)
-        start_price = intraday_data[0].close_price * 10
-        end_price = intraday_data[-1].close_price * 10
+        # SPY_INTRADAY already contains S&P 500 value (spy_price * 10 from intraday cron)
+        # Do NOT multiply by 10 again or you'll get ~900% gains!
+        start_price = intraday_data[0].close_price
+        end_price = intraday_data[-1].close_price
         
         if start_price == 0:
             logger.warning(f"Zero SPY_INTRADAY start price on {start_date}")
