@@ -29009,9 +29009,13 @@ def admin_debug_collection_times_simple():
         admin_user = User.query.filter_by(email=email).first()
         portfolio_count = 0
         if admin_user:
+            # Filter by timestamp since PortfolioSnapshotIntraday doesn't have a date field
+            start_of_day = datetime.combine(today, datetime.min.time())
+            end_of_day = datetime.combine(today, datetime.max.time())
             portfolio_count = PortfolioSnapshotIntraday.query.filter(
                 PortfolioSnapshotIntraday.user_id == admin_user.id,
-                PortfolioSnapshotIntraday.date == today
+                PortfolioSnapshotIntraday.timestamp >= start_of_day,
+                PortfolioSnapshotIntraday.timestamp <= end_of_day
             ).count()
         
         return jsonify({
@@ -29085,9 +29089,14 @@ def admin_debug_collection_times():
         admin_user = User.query.filter_by(email=email).first()
         portfolio_snapshots = []
         if admin_user:
+            # Filter by timestamp since PortfolioSnapshotIntraday doesn't have a date field
+            from datetime import datetime
+            start_of_day = datetime.combine(today, datetime.min.time())
+            end_of_day = datetime.combine(today, datetime.max.time())
             portfolio_snapshots = PortfolioSnapshotIntraday.query.filter(
                 PortfolioSnapshotIntraday.user_id == admin_user.id,
-                PortfolioSnapshotIntraday.date == today
+                PortfolioSnapshotIntraday.timestamp >= start_of_day,
+                PortfolioSnapshotIntraday.timestamp <= end_of_day
             ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
         
         # Convert actual timestamps to EST times (UTC-5 or UTC-4 depending on DST)
