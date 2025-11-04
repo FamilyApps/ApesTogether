@@ -28988,6 +28988,48 @@ def admin_check_api_efficiency():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/admin/debug-collection-times-simple', methods=['GET'])
+@login_required
+def admin_debug_collection_times_simple():
+    """Simplified version to debug the 500 error"""
+    try:
+        from models import MarketData, PortfolioSnapshotIntraday, User
+        from datetime import datetime, time as dt_time, timezone, timedelta
+        
+        email = session.get('email', '')
+        today = get_market_date()
+        
+        # Get SPY data
+        spy_count = MarketData.query.filter(
+            MarketData.ticker == 'SPY_INTRADAY',
+            MarketData.date == today
+        ).count()
+        
+        # Get portfolio snapshots
+        admin_user = User.query.filter_by(email=email).first()
+        portfolio_count = 0
+        if admin_user:
+            portfolio_count = PortfolioSnapshotIntraday.query.filter(
+                PortfolioSnapshotIntraday.user_id == admin_user.id,
+                PortfolioSnapshotIntraday.date == today
+            ).count()
+        
+        return jsonify({
+            'success': True,
+            'date': today.isoformat(),
+            'spy_count': spy_count,
+            'portfolio_count': portfolio_count,
+            'admin_email': email,
+            'admin_user_found': admin_user is not None
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 200  # Return 200 so we can see the error
+
 @app.route('/admin/debug-collection-times', methods=['GET'])
 @login_required
 def admin_debug_collection_times():
@@ -29122,11 +29164,13 @@ def admin_debug_collection_times():
         
     except Exception as e:
         import traceback
+        logger.error(f"Error in debug-collection-times: {str(e)}")
+        logger.error(traceback.format_exc())
         return jsonify({
             'success': False,
             'error': str(e),
             'traceback': traceback.format_exc()
-        }), 500
+        }), 200  # Return 200 so browser can see the error
 
 @app.route('/admin/debug-spy-intraday', methods=['GET'])
 @login_required
