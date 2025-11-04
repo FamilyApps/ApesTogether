@@ -29239,7 +29239,7 @@ def admin_debug_portfolio_jump():
                 stock_info.append({
                     'ticker': stock.ticker,
                     'quantity': float(stock.quantity),
-                    'avg_cost': float(stock.average_cost) if stock.average_cost else 0
+                    'purchase_price': float(stock.purchase_price) if stock.purchase_price else 0
                 })
         
         result = {
