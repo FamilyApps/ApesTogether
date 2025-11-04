@@ -28997,9 +28997,8 @@ def admin_debug_collection_times():
         if email != ADMIN_EMAIL:
             return jsonify({'error': 'Admin access required'}), 403
         
-        from models import MarketData, PortfolioSnapshotIntraday
-        from datetime import datetime, time as dt_time
-        import pytz
+        from models import MarketData, PortfolioSnapshotIntraday, User
+        from datetime import datetime, time as dt_time, timezone, timedelta
         
         today = get_market_date()
         
@@ -29040,9 +29039,8 @@ def admin_debug_collection_times():
             MarketData.date == today
         ).order_by(MarketData.timestamp.asc()).all()
         
-        # Also check portfolio snapshots for the admin user
-        from models import User
-        admin_user = User.query.filter_by(email=ADMIN_EMAIL).first()
+        # Also check portfolio snapshots for the logged-in admin user
+        admin_user = User.query.filter_by(email=email).first()
         portfolio_snapshots = []
         if admin_user:
             portfolio_snapshots = PortfolioSnapshotIntraday.query.filter(
@@ -29050,14 +29048,15 @@ def admin_debug_collection_times():
                 PortfolioSnapshotIntraday.date == today
             ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
         
-        # Convert actual timestamps to EST times
-        et_tz = pytz.timezone('America/New_York')
+        # Convert actual timestamps to EST times (UTC-5 or UTC-4 depending on DST)
+        # For Nov 3, 2025, we're in EST (UTC-5)
+        ET = timezone(timedelta(hours=-5))
         actual_spy_times = []
         for data in spy_data:
             if data.timestamp:
                 # Treat naive timestamp as UTC, convert to EST
-                utc_ts = pytz.utc.localize(data.timestamp)
-                est_ts = utc_ts.astimezone(et_tz)
+                utc_ts = data.timestamp.replace(tzinfo=timezone.utc)
+                est_ts = utc_ts.astimezone(ET)
                 actual_spy_times.append({
                     'time_est': est_ts.strftime('%I:%M %p'),
                     'timestamp_utc': data.timestamp.isoformat(),
@@ -29067,8 +29066,8 @@ def admin_debug_collection_times():
         actual_portfolio_times = []
         for snapshot in portfolio_snapshots:
             if snapshot.timestamp:
-                utc_ts = pytz.utc.localize(snapshot.timestamp)
-                est_ts = utc_ts.astimezone(et_tz)
+                utc_ts = snapshot.timestamp.replace(tzinfo=timezone.utc)
+                est_ts = utc_ts.astimezone(ET)
                 actual_portfolio_times.append({
                     'time_est': est_ts.strftime('%I:%M %p'),
                     'timestamp_utc': snapshot.timestamp.isoformat(),
