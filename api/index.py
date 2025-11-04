@@ -29181,6 +29181,129 @@ def admin_debug_collection_times():
             'traceback': traceback.format_exc()
         }), 200  # Return 200 so browser can see the error
 
+@app.route('/admin/debug-portfolio-jump', methods=['GET'])
+@login_required
+def admin_debug_portfolio_jump():
+    """Debug portfolio value jump between Oct 31 and Nov 3"""
+    try:
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        from models import User, PortfolioSnapshotIntraday, PortfolioSnapshot, Stock
+        from datetime import datetime, timedelta
+        
+        # Get admin user
+        admin_user = User.query.filter_by(email=email).first()
+        if not admin_user:
+            return jsonify({'error': 'Admin user not found'}), 404
+        
+        # Get portfolio snapshots for Oct 31 and Nov 3
+        oct31 = datetime(2025, 10, 31).date()
+        nov3 = datetime(2025, 11, 3).date()
+        
+        # Get EOD snapshots
+        oct31_eod = PortfolioSnapshot.query.filter(
+            PortfolioSnapshot.user_id == admin_user.id,
+            PortfolioSnapshot.date == oct31
+        ).first()
+        
+        nov3_eod = PortfolioSnapshot.query.filter(
+            PortfolioSnapshot.user_id == admin_user.id,
+            PortfolioSnapshot.date == nov3
+        ).first()
+        
+        # Get intraday snapshots for both days
+        oct31_start = datetime.combine(oct31, datetime.min.time())
+        oct31_end = datetime.combine(oct31, datetime.max.time())
+        nov3_start = datetime.combine(nov3, datetime.min.time())
+        nov3_end = datetime.combine(nov3, datetime.max.time())
+        
+        oct31_intraday = PortfolioSnapshotIntraday.query.filter(
+            PortfolioSnapshotIntraday.user_id == admin_user.id,
+            PortfolioSnapshotIntraday.timestamp >= oct31_start,
+            PortfolioSnapshotIntraday.timestamp <= oct31_end
+        ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
+        
+        nov3_intraday = PortfolioSnapshotIntraday.query.filter(
+            PortfolioSnapshotIntraday.user_id == admin_user.id,
+            PortfolioSnapshotIntraday.timestamp >= nov3_start,
+            PortfolioSnapshotIntraday.timestamp <= nov3_end
+        ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
+        
+        # Get current stock holdings
+        stocks = Stock.query.filter_by(user_id=admin_user.id).all()
+        stock_info = []
+        for stock in stocks:
+            if stock.quantity > 0:
+                stock_info.append({
+                    'ticker': stock.ticker,
+                    'quantity': float(stock.quantity),
+                    'avg_cost': float(stock.average_cost) if stock.average_cost else 0
+                })
+        
+        result = {
+            'success': True,
+            'user': admin_user.username,
+            'stock_holdings': stock_info,
+            'oct31': {
+                'eod_snapshot': {
+                    'total_value': float(oct31_eod.total_value) if oct31_eod else None,
+                    'stock_value': float(oct31_eod.stock_value) if oct31_eod else None,
+                    'cash_proceeds': float(oct31_eod.cash_proceeds) if oct31_eod else None
+                } if oct31_eod else None,
+                'intraday_count': len(oct31_intraday),
+                'first_intraday': {
+                    'timestamp': oct31_intraday[0].timestamp.isoformat(),
+                    'total_value': float(oct31_intraday[0].total_value)
+                } if oct31_intraday else None,
+                'last_intraday': {
+                    'timestamp': oct31_intraday[-1].timestamp.isoformat(),
+                    'total_value': float(oct31_intraday[-1].total_value)
+                } if oct31_intraday else None
+            },
+            'nov3': {
+                'eod_snapshot': {
+                    'total_value': float(nov3_eod.total_value) if nov3_eod else None,
+                    'stock_value': float(nov3_eod.stock_value) if nov3_eod else None,
+                    'cash_proceeds': float(nov3_eod.cash_proceeds) if nov3_eod else None
+                } if nov3_eod else None,
+                'intraday_count': len(nov3_intraday),
+                'first_intraday': {
+                    'timestamp': nov3_intraday[0].timestamp.isoformat(),
+                    'total_value': float(nov3_intraday[0].total_value)
+                } if nov3_intraday else None,
+                'last_intraday': {
+                    'timestamp': nov3_intraday[-1].timestamp.isoformat(),
+                    'total_value': float(nov3_intraday[-1].total_value)
+                } if nov3_intraday else None
+            }
+        }
+        
+        # Calculate the jump
+        if oct31_intraday and nov3_intraday:
+            oct31_last = float(oct31_intraday[-1].total_value)
+            nov3_first = float(nov3_intraday[0].total_value)
+            jump_pct = ((nov3_first - oct31_last) / oct31_last * 100) if oct31_last > 0 else 0
+            result['jump_analysis'] = {
+                'oct31_last_value': oct31_last,
+                'nov3_first_value': nov3_first,
+                'jump_amount': nov3_first - oct31_last,
+                'jump_pct': round(jump_pct, 2)
+            }
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        import traceback
+        logger.error(f"Error in debug-portfolio-jump: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 200
+
 @app.route('/admin/debug-spy-intraday', methods=['GET'])
 @login_required
 def admin_debug_spy_intraday():
