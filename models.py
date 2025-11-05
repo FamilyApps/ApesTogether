@@ -31,6 +31,14 @@ class User(UserMixin, db.Model):
     # Portfolio sharing & GDPR
     portfolio_slug = db.Column(db.String(20), unique=True, nullable=True)  # Unique URL slug for public sharing
     deleted_at = db.Column(db.DateTime, nullable=True)  # GDPR soft-delete timestamp
+    
+    # User type and creation tracking (NEW - for agent system)
+    role = db.Column(db.String(20), default='user')  # 'user', 'agent', 'admin'
+    created_by = db.Column(db.String(20), default='human')  # 'human', 'system'
+    
+    # SMS/Email trading and notifications (NEW - for Week 2)
+    phone_number = db.Column(db.String(20), nullable=True)  # E.164 format: +12125551234
+    default_notification_method = db.Column(db.String(10), default='email')  # 'email' or 'sms'
 
 class Stock(db.Model):
     __tablename__ = 'stock'
@@ -379,3 +387,122 @@ class UserPortfolioStats(db.Model):
     
     def __repr__(self):
         return f"<UserPortfolioStats user_id={self.user_id} stocks={self.unique_stocks_count}>"
+
+class NotificationPreferences(db.Model):
+    """User preferences for trade notifications per subscription"""
+    __tablename__ = 'notification_preferences'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    portfolio_owner_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    email_enabled = db.Column(db.Boolean, default=True)
+    sms_enabled = db.Column(db.Boolean, default=False)
+    phone_number = db.Column(db.String(20), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    subscriber = db.relationship('User', foreign_keys=[user_id], backref='notification_preferences')
+    portfolio_owner = db.relationship('User', foreign_keys=[portfolio_owner_id])
+    
+    # Ensure one preference per subscriber per portfolio
+    __table_args__ = (db.UniqueConstraint('user_id', 'portfolio_owner_id', name='unique_user_portfolio_notification'),)
+    
+    def __repr__(self):
+        return f"<NotificationPreferences user_id={self.user_id} owner_id={self.portfolio_owner_id}>"
+
+class NotificationLog(db.Model):
+    """Log of all notification delivery attempts"""
+    __tablename__ = 'notification_log'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    portfolio_owner_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    notification_type = db.Column(db.String(20), nullable=True)  # 'sms', 'email'
+    transaction_id = db.Column(db.Integer, db.ForeignKey('stock_transaction.id'), nullable=True)
+    sent_at = db.Column(db.DateTime, default=datetime.utcnow)
+    status = db.Column(db.String(20), nullable=True)  # 'sent', 'failed', 'pending'
+    twilio_sid = db.Column(db.String(100), nullable=True)
+    error_message = db.Column(db.Text, nullable=True)
+    
+    # Relationships
+    user = db.relationship('User', foreign_keys=[user_id])
+    portfolio_owner = db.relationship('User', foreign_keys=[portfolio_owner_id])
+    transaction = db.relationship('Transaction')
+    
+    def __repr__(self):
+        return f"<NotificationLog {self.notification_type} to user_id={self.user_id} status={self.status}>"
+
+class XeroSyncLog(db.Model):
+    """Log of Xero accounting sync operations"""
+    __tablename__ = 'xero_sync_log'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    sync_type = db.Column(db.String(50), nullable=True)  # 'subscription_revenue', 'user_payout', 'stripe_fee'
+    entity_id = db.Column(db.Integer, nullable=True)  # ID of the related entity (subscription_id, user_id, etc.)
+    entity_type = db.Column(db.String(50), nullable=True)  # 'subscription', 'payout', 'fee'
+    xero_invoice_id = db.Column(db.String(100), nullable=True)
+    xero_contact_id = db.Column(db.String(100), nullable=True)
+    amount = db.Column(db.Float, nullable=True)
+    synced_at = db.Column(db.DateTime, default=datetime.utcnow)
+    status = db.Column(db.String(20), nullable=True)  # 'success', 'failed', 'pending'
+    error_message = db.Column(db.Text, nullable=True)
+    
+    def __repr__(self):
+        return f"<XeroSyncLog {self.sync_type} ${self.amount} status={self.status}>"
+
+class AgentConfig(db.Model):
+    """Configuration and state for automated trading agents"""
+    __tablename__ = 'agent_config'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, unique=True)
+    personality = db.Column(db.JSON, nullable=False)  # Risk tolerance, trading style, preferences
+    strategy_params = db.Column(db.JSON, nullable=False)  # Strategy-specific parameters
+    status = db.Column(db.String(20), default='active')  # 'active', 'paused', 'disabled'
+    last_trade_at = db.Column(db.DateTime, nullable=True)
+    total_trades = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationship
+    user = db.relationship('User', backref=db.backref('agent_config', uselist=False))
+    
+    def __repr__(self):
+        return f"<AgentConfig user_id={self.user_id} status={self.status} trades={self.total_trades}>"
+
+class AdminSubscription(db.Model):
+    """Ghost subscribers (counter only) - admin pays 70% payout, no actual subscriptions/notifications"""
+    __tablename__ = 'admin_subscription'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    portfolio_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)  # Who gets the ghost subs
+    ghost_subscriber_count = db.Column(db.Integer, default=0, nullable=False)  # Just a counter (e.g., 8)
+    tier = db.Column(db.String(20), nullable=False)  # 'light', 'standard', 'active', 'pro', 'elite'
+    monthly_payout = db.Column(db.Float, nullable=False)  # count × tier_price × 0.70
+    reason = db.Column(db.String(500), nullable=True)  # Admin notes (e.g., "Marketing boost")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationship
+    portfolio_user = db.relationship('User', foreign_keys=[portfolio_user_id], backref='ghost_subscriptions')
+    
+    # Tier pricing (matches Stripe pricing from plan)
+    TIER_PRICES = {
+        'light': 10.00,
+        'standard': 15.00,
+        'active': 25.00,
+        'pro': 35.00,
+        'elite': 55.00
+    }
+    
+    @property
+    def monthly_revenue(self):
+        """Total monthly revenue from ghost subscribers"""
+        return self.ghost_subscriber_count * self.TIER_PRICES.get(self.tier, 0)
+    
+    def calculate_payout(self):
+        """Calculate 70% payout"""
+        return self.monthly_revenue * 0.70
+    
+    def __repr__(self):
+        return f"<AdminSubscription user={self.portfolio_user_id} ghosts={self.ghost_subscriber_count} tier={self.tier} payout=${self.monthly_payout}>"

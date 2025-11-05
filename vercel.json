@@ -18,6 +18,10 @@
   ],
   "crons": [
     {
+      "path": "/api/health",
+      "schedule": "*/4 * * * *"
+    },
+    {
       "path": "/api/cron/collect-intraday-data",
       "schedule": "*/15 * * * 1-5"
     },

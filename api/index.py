@@ -2610,6 +2610,32 @@ def health_check():
         logger.error(f"Health check failed: {str(e)}")
         return jsonify({'status': 'error', 'message': 'Health check failed'}), 500
 
+# SMS/Email Trading Endpoints
+@app.route('/api/twilio/inbound', methods=['POST'])
+def twilio_inbound():
+    """Handle inbound SMS from Twilio for trade execution"""
+    try:
+        from services.trading_sms import handle_inbound_sms
+        
+        # Get data from Twilio webhook
+        from_number = request.form.get('From')
+        message_body = request.form.get('Body')
+        
+        if not from_number or not message_body:
+            return jsonify({'error': 'Missing required fields'}), 400
+        
+        # Handle the SMS (parse, execute trade, send confirmations)
+        result = handle_inbound_sms(from_number, message_body)
+        
+        # Return empty response (Twilio doesn't need content)
+        return '', 200
+        
+    except Exception as e:
+        logger.error(f"Twilio inbound SMS error: {str(e)}")
+        logger.error(traceback.format_exc())
+        # Still return 200 to Twilio to avoid retries
+        return '', 200
+
 # Root health check endpoint
 @app.route('/health')
 def root_health_check():
