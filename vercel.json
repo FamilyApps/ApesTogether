@@ -19,23 +19,23 @@
   "crons": [
     {
       "path": "/api/cron/market-open",
-      "schedule": "30 13 * * 1-5"
+      "schedule": "30 14 * * 1-5"
     },
     {
       "path": "/api/cron/collect-intraday-data",
-      "schedule": "30,45 13 * * 1-5"
+      "schedule": "30,45 14 * * 1-5"
     },
     {
       "path": "/api/cron/collect-intraday-data",
-      "schedule": "0,15,30,45 14-19 * * 1-5"
+      "schedule": "0,15,30,45 15-20 * * 1-5"
     },
     {
       "path": "/api/cron/collect-intraday-data",
-      "schedule": "0 20 * * 1-5"
+      "schedule": "0 21 * * 1-5"
     },
     {
       "path": "/api/cron/market-close", 
-      "schedule": "2 20 * * 1-5"
+      "schedule": "2 21 * * 1-5"
     },
     {
       "path": "/api/cron/cleanup-intraday-data",
