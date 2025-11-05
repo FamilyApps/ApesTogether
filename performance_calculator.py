@@ -130,6 +130,7 @@ def calculate_portfolio_performance(
         # Filter snapshots to only valid intervals in EST
         MARKET_TZ = ZoneInfo('America/New_York')
         filtered_intraday = []
+        filtered_out = []
         
         for snap in intraday_snapshots:
             # Convert timestamp to EST
@@ -142,8 +143,12 @@ def calculate_portfolio_performance(
             # Check if this is a valid 15-minute interval
             if (snap_time_est.hour, snap_time_est.minute) in valid_minutes:
                 filtered_intraday.append(snap)
+            else:
+                filtered_out.append(f"{snap_time_est.strftime('%H:%M')} ({snap_time_est.hour}, {snap_time_est.minute})")
         
         logger.info(f"Filtered {len(intraday_snapshots)} intraday snapshots to {len(filtered_intraday)} valid 15-min intervals")
+        if filtered_out:
+            logger.info(f"Filtered OUT these times: {', '.join(filtered_out[:10])}")
         
         intraday_snapshots = filtered_intraday
         
