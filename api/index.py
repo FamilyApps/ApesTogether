@@ -24047,6 +24047,38 @@ def collect_intraday_data():
                 'weekend': True
             })
         
+        # DST-aware check: Only collect at valid 15-minute intervals during market hours (9:30 AM - 4:00 PM ET)
+        # This allows the cron to trigger at both EDT and EST times, but we only proceed at the correct one
+        hour = current_time.hour
+        minute = current_time.minute
+        
+        # Check if we're in a valid 15-minute interval
+        valid_intervals = set()
+        for h in range(9, 17):  # 9 AM to 4 PM
+            for m in [0, 15, 30, 45]:
+                if h == 9 and m < 30:  # Skip 9:00 and 9:15 (market opens at 9:30)
+                    continue
+                if h == 16 and m > 0:  # Skip after 4:00 PM
+                    continue
+                valid_intervals.add((h, m))
+        
+        # Allow +/- 2 minutes tolerance for cron timing variance
+        is_valid_time = False
+        for valid_hour, valid_minute in valid_intervals:
+            if hour == valid_hour and abs(minute - valid_minute) <= 2:
+                is_valid_time = True
+                break
+        
+        if not is_valid_time:
+            logger.info(f"Cron triggered at {current_time.strftime('%I:%M %p ET')} - outside market hours, skipping")
+            return jsonify({
+                'success': True,
+                'message': f'Skipped collection - outside market hours ({current_time.strftime("%I:%M %p ET")})',
+                'timestamp': current_time.isoformat(),
+                'timezone': 'America/New_York',
+                'skipped': True
+            })
+        
         start_time = time.time()
         calculator = PortfolioPerformanceCalculator()
         results = {
