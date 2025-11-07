@@ -2682,6 +2682,29 @@ def root_health_check():
         logger.error(f"Root health check failed: {str(e)}")
         return jsonify({'status': 'error', 'message': 'Health check failed'}), 500
 
+@app.route('/admin/test-sendgrid')
+@login_required
+def test_sendgrid():
+    """Test SendGrid email sending"""
+    try:
+        from services.notification_utils import send_email
+        
+        # Send test email to current user
+        result = send_email(
+            to_email=current_user.email,
+            subject="ApesTogether - Email Test",
+            body="✅ Success! Your SendGrid integration is working.\n\nThis is a test email from ApesTogether."
+        )
+        
+        return jsonify({
+            'success': result['status'] == 'sent',
+            'result': result,
+            'sent_to': current_user.email
+        })
+    except Exception as e:
+        logger.error(f"SendGrid test error: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/')
 def index():
     """Main landing page - redirect to 5D leaderboard for public access"""
