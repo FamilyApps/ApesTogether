@@ -2847,6 +2847,21 @@ def complete_profile():
         enable_email = request.form.get('enable_email') == '1'
         enable_sms = request.form.get('enable_sms') == '1'
         
+        # Normalize phone number (auto-add +1 for US numbers)
+        if phone_number:
+            # Remove all non-digit characters
+            digits_only = ''.join(filter(str.isdigit, phone_number))
+            
+            if len(digits_only) == 10:
+                # US number without country code: 3235551234 -> +13235551234
+                phone_number = f'+1{digits_only}'
+            elif len(digits_only) == 11 and digits_only.startswith('1'):
+                # US number with 1 prefix: 13235551234 -> +13235551234
+                phone_number = f'+{digits_only}'
+            elif not phone_number.startswith('+'):
+                # Has digits but no +, add it
+                phone_number = f'+{digits_only}'
+        
         # Update user
         current_user.phone_number = phone_number if phone_number else None
         
@@ -2898,6 +2913,17 @@ def update_contact():
         
         phone_number = data.get('phone_number', '').strip()
         default_method = data.get('default_notification_method', 'email')
+        
+        # Normalize phone number (auto-add +1 for US numbers)
+        if phone_number:
+            digits_only = ''.join(filter(str.isdigit, phone_number))
+            
+            if len(digits_only) == 10:
+                phone_number = f'+1{digits_only}'
+            elif len(digits_only) == 11 and digits_only.startswith('1'):
+                phone_number = f'+{digits_only}'
+            elif not phone_number.startswith('+'):
+                phone_number = f'+{digits_only}'
         
         current_user.phone_number = phone_number if phone_number else None
         current_user.default_notification_method = default_method

@@ -23,10 +23,9 @@
                            id="phone_number" 
                            name="phone_number" 
                            value="{{ current_user.phone_number or '' }}"
-                           placeholder="+1 (555) 123-4567"
-                           pattern="^\+?[1-9]\d{1,14}$">
+                           placeholder="3235551234 or +13235551234">
                     <small class="form-text text-muted">
-                        E.164 format: +12125551234. Add this to enable SMS trading and notifications.
+                        US numbers: Enter 10 digits (e.g., 3235551234). International: Include country code (e.g., +442071234567).
                     </small>
                 </div>
                 
