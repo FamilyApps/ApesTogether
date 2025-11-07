@@ -2735,9 +2735,9 @@ def migrate_user_notification_fields():
         logger.error(f"User migration error: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/admin/debug-user-data')
+@app.route('/admin/debug-notification-fields')
 @login_required
-def debug_user_data():
+def debug_notification_fields():
     """Debug endpoint to check current user's notification fields"""
     try:
         return jsonify({
