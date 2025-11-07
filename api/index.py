@@ -2844,11 +2844,17 @@ def complete_profile():
     """Complete user profile with phone number and notification preferences"""
     if request.method == 'POST':
         phone_number = request.form.get('phone_number', '').strip()
-        default_method = request.form.get('default_notification_method', 'email')
+        enable_email = request.form.get('enable_email') == '1'
+        enable_sms = request.form.get('enable_sms') == '1'
         
         # Update user
         current_user.phone_number = phone_number if phone_number else None
-        current_user.default_notification_method = default_method
+        
+        # Determine default method based on checkboxes
+        if enable_sms and phone_number:
+            current_user.default_notification_method = 'both' if enable_email else 'sms'
+        else:
+            current_user.default_notification_method = 'email'
         
         try:
             db.session.commit()

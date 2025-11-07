@@ -29,6 +29,7 @@
                         <select class="form-control" id="default_method" name="default_notification_method">
                             <option value="email" {% if current_user.default_notification_method == 'email' %}selected{% endif %}>📧 Email</option>
                             <option value="sms" {% if current_user.default_notification_method == 'sms' %}selected{% endif %}>📱 SMS</option>
+                            <option value="both" {% if current_user.default_notification_method == 'both' %}selected{% endif %}>📧📱 Both (Email + SMS)</option>
                         </select>
                         <small class="form-text text-muted">Used for new subscriptions</small>
                     </div>

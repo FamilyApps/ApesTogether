@@ -22,6 +22,7 @@
                            class="form-control" 
                            id="phone_number" 
                            name="phone_number" 
+                           value="{{ current_user.phone_number or '' }}"
                            placeholder="+1 (555) 123-4567"
                            pattern="^\+?[1-9]\d{1,14}$">
                     <small class="form-text text-muted">
@@ -38,7 +39,7 @@
                                name="enable_email" 
                                id="enable_email" 
                                value="1"
-                               checked>
+                               {% if not current_user.default_notification_method or current_user.default_notification_method in ['email', 'both'] %}checked{% endif %}>
                         <label class="form-check-label" for="enable_email">
                             ✉️ Email (Free)
                         </label>
@@ -51,7 +52,8 @@
                                type="checkbox" 
                                name="enable_sms" 
                                id="enable_sms" 
-                               value="1">
+                               value="1"
+                               {% if current_user.default_notification_method in ['sms', 'both'] %}checked{% endif %}>
                         <label class="form-check-label" for="enable_sms">
                             📱 SMS (Included)
                         </label>
