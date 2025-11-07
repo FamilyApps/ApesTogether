@@ -2767,16 +2767,19 @@ def migrate_user_notification_fields():
 def debug_notification_fields():
     """Debug endpoint to check current user's notification fields"""
     try:
+        # Force refresh from database
+        db.session.refresh(current_user)
+        
         return jsonify({
             'user_id': current_user.id,
             'email': current_user.email,
-            'phone_number': current_user.phone_number,
-            'default_notification_method': current_user.default_notification_method,
+            'phone_number': getattr(current_user, 'phone_number', None),
+            'default_notification_method': getattr(current_user, 'default_notification_method', None),
             'has_phone_attr': hasattr(current_user, 'phone_number'),
             'has_method_attr': hasattr(current_user, 'default_notification_method')
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 @app.route('/')
 def index():
