@@ -512,6 +512,10 @@ class User(db.Model, UserMixin):
     portfolio_slug = db.Column(db.String(20), unique=True, nullable=True)
     deleted_at = db.Column(db.DateTime, nullable=True)
     
+    # SMS/Email trading and notifications
+    phone_number = db.Column(db.String(20), nullable=True)  # E.164 format: +12125551234
+    default_notification_method = db.Column(db.String(10), default='email')  # 'email', 'sms', or 'both'
+    
     stocks = db.relationship('Stock', backref='user', lazy=True)
     transactions = db.relationship('Transaction', backref='user', lazy=True)
     # We'll use subscriptions_made and subscribers relationships defined in the Subscription model
