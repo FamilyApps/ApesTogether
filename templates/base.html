@@ -40,7 +40,7 @@
                     {% else %}
                     <!-- Not logged in: Show Leaderboard, Login, Sign Up -->
                     <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'leaderboard.leaderboard_home' %}active{% endif %}" href="{{ url_for('leaderboard.leaderboard_home') }}">Leaderboard</a>
+                        <a class="nav-link {% if request.path.startswith('/leaderboard') %}active{% endif %}" href="/leaderboard/">Leaderboard</a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('login') }}">Login</a>

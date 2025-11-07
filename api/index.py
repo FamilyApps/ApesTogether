@@ -2708,14 +2708,8 @@ def test_sendgrid():
 @app.route('/')
 def index():
     """Main landing page - redirect to 5D leaderboard for public access"""
-    try:
-        # Redirect to 5D leaderboard as the default homepage
-        return redirect(url_for('leaderboard.leaderboard_home', period='5D', category='all'))
-    except Exception as e:
-        logger.error(f"Error in index route redirect: {str(e)}")
-        logger.error(traceback.format_exc())
-        # Fallback to direct leaderboard URL if blueprint routing fails
-        return redirect('/leaderboard/?period=5D&category=all')
+    # Direct URL redirect (leaderboard blueprint may not be loaded yet)
+    return redirect('/leaderboard/?period=5D&category=all')
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
