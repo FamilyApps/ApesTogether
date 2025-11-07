@@ -2735,6 +2735,22 @@ def migrate_user_notification_fields():
         logger.error(f"User migration error: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/admin/debug-user-data')
+@login_required
+def debug_user_data():
+    """Debug endpoint to check current user's notification fields"""
+    try:
+        return jsonify({
+            'user_id': current_user.id,
+            'email': current_user.email,
+            'phone_number': current_user.phone_number,
+            'default_notification_method': current_user.default_notification_method,
+            'has_phone_attr': hasattr(current_user, 'phone_number'),
+            'has_method_attr': hasattr(current_user, 'default_notification_method')
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/')
 def index():
     """Main landing page - redirect to 5D leaderboard for public access"""
@@ -2877,6 +2893,8 @@ def complete_profile():
         enable_email = request.form.get('enable_email') == '1'
         enable_sms = request.form.get('enable_sms') == '1'
         
+        logger.info(f"Profile form submitted - phone: {phone_number}, email: {enable_email}, sms: {enable_sms}")
+        
         # Normalize phone number (auto-add +1 for US numbers)
         if phone_number:
             # Remove all non-digit characters
@@ -2893,6 +2911,9 @@ def complete_profile():
                 phone_number = f'+{digits_only}'
         
         # Update user
+        old_phone = current_user.phone_number
+        old_method = current_user.default_notification_method
+        
         current_user.phone_number = phone_number if phone_number else None
         
         # Determine default method based on checkboxes
@@ -2901,13 +2922,17 @@ def complete_profile():
         else:
             current_user.default_notification_method = 'email'
         
+        logger.info(f"Updating user {current_user.id}: phone {old_phone} -> {current_user.phone_number}, method {old_method} -> {current_user.default_notification_method}")
+        
         try:
             db.session.commit()
+            logger.info(f"Profile update committed successfully for user {current_user.id}")
             flash('Profile updated successfully!', 'success')
             return redirect(url_for('dashboard'))
         except Exception as e:
             db.session.rollback()
             logger.error(f"Error updating profile: {str(e)}")
+            logger.error(traceback.format_exc())
             flash('Error updating profile', 'danger')
     
     return render_template_with_defaults('complete_profile.html')
