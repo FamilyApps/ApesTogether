@@ -2,7 +2,6 @@
 Notification Utilities
 Handles SMS and email notifications with position percentage support
 """
-from twilio.rest import Client
 from models import db, Subscription, NotificationPreferences, NotificationLog
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
@@ -13,12 +12,24 @@ TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID')
 TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN')
 TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER')
 
-# Initialize Twilio client
-if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
-    twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-else:
-    twilio_client = None
-    print("WARNING: Twilio credentials not configured")
+# Twilio client - lazy initialized
+_twilio_client = None
+
+def get_twilio_client():
+    """Get or initialize Twilio client"""
+    global _twilio_client
+    if _twilio_client is None:
+        if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
+            try:
+                from twilio.rest import Client
+                _twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+            except ImportError:
+                print("WARNING: Twilio package not installed")
+                return None
+        else:
+            print("WARNING: Twilio credentials not configured")
+            return None
+    return _twilio_client
 
 
 def send_sms(to_number, message):
@@ -32,14 +43,15 @@ def send_sms(to_number, message):
     Returns:
         dict with status, sid, and optional error
     """
-    if not twilio_client:
+    client = get_twilio_client()
+    if not client:
         return {
-            'status': 'error',
+            'status': 'failed',
             'error': 'Twilio not configured'
         }
     
     try:
-        sms = twilio_client.messages.create(
+        sms = client.messages.create(
             body=message,
             from_=TWILIO_PHONE_NUMBER,
             to=to_number
