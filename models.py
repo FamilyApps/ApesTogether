@@ -388,32 +388,9 @@ class UserPortfolioStats(db.Model):
     def __repr__(self):
         return f"<UserPortfolioStats user_id={self.user_id} stocks={self.unique_stocks_count}>"
 
-class NotificationPreferences(db.Model):
-    """User preferences for trade notifications per subscription"""
-    __tablename__ = 'notification_preferences'
-    
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    portfolio_owner_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    email_enabled = db.Column(db.Boolean, default=True)
-    sms_enabled = db.Column(db.Boolean, default=False)
-    phone_number = db.Column(db.String(20), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Relationships
-    subscriber = db.relationship('User', foreign_keys=[user_id], backref='notification_preferences')
-    portfolio_owner = db.relationship('User', foreign_keys=[portfolio_owner_id])
-    
-    # Ensure one preference per subscriber per portfolio
-    __table_args__ = (db.UniqueConstraint('user_id', 'portfolio_owner_id', name='unique_user_portfolio_notification'),)
-    
-    def __repr__(self):
-        return f"<NotificationPreferences user_id={self.user_id} owner_id={self.portfolio_owner_id}>"
-
-class NotificationLog(db.Model):
-    """Log of all notification delivery attempts"""
-    __tablename__ = 'notification_log'
+class OldNotificationLog(db.Model):
+    """DEPRECATED - Old notification log (keeping for migration compatibility)"""
+    __tablename__ = 'notification_log_old'
     
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
