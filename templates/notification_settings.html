@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+
+{% block title %}Notification Settings - ApesTogether{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 900px; margin: 50px auto;">
+    <h1 class="mb-4">Notification Settings</h1>
+    
+    <!-- User Default Settings -->
+    <div class="card mb-4">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0">Your Contact Information</h5>
+        </div>
+        <div class="card-body">
+            <form id="contact-form">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="phone_number" class="font-weight-bold">Phone Number</label>
+                        <input type="tel" 
+                               class="form-control" 
+                               id="phone_number" 
+                               name="phone_number" 
+                               value="{{ current_user.phone_number or '' }}"
+                               placeholder="+1 (555) 123-4567">
+                        <small class="form-text text-muted">For SMS notifications and trading</small>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="font-weight-bold">Default Method</label>
+                        <select class="form-control" id="default_method" name="default_notification_method">
+                            <option value="email" {% if current_user.default_notification_method == 'email' %}selected{% endif %}>📧 Email</option>
+                            <option value="sms" {% if current_user.default_notification_method == 'sms' %}selected{% endif %}>📱 SMS</option>
+                        </select>
+                        <small class="form-text text-muted">Used for new subscriptions</small>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary">Update Contact Info</button>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Per-Subscription Settings -->
+    <div class="card">
+        <div class="card-header bg-secondary text-white">
+            <h5 class="mb-0">Notification Preferences by Portfolio</h5>
+        </div>
+        <div class="card-body">
+            {% if subscriptions %}
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Portfolio Owner</th>
+                            <th>Notification Method</th>
+                            <th>Enabled</th>
+                            <th>Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for sub in subscriptions %}
+                        <tr data-subscription-id="{{ sub.id }}">
+                            <td>
+                                <strong>{{ sub.subscribed_to.username }}</strong><br>
+                                <small class="text-muted">Subscribed {{ sub.created_at.strftime('%b %d, %Y') }}</small>
+                            </td>
+                            <td>
+                                <select class="form-control form-control-sm notification-method" 
+                                        data-subscription-id="{{ sub.id }}">
+                                    <option value="email" {% if sub.preference and sub.preference.notification_type == 'email' %}selected{% endif %}>📧 Email</option>
+                                    <option value="sms" {% if sub.preference and sub.preference.notification_type == 'sms' %}selected{% endif %} {% if not current_user.phone_number %}disabled{% endif %}>📱 SMS</option>
+                                </select>
+                            </td>
+                            <td>
+                                <div class="custom-control custom-switch">
+                                    <input type="checkbox" 
+                                           class="custom-control-input notification-enabled" 
+                                           id="enabled_{{ sub.id }}" 
+                                           data-subscription-id="{{ sub.id }}"
+                                           {% if not sub.preference or sub.preference.enabled %}checked{% endif %}>
+                                    <label class="custom-control-label" for="enabled_{{ sub.id }}"></label>
+                                </div>
+                            </td>
+                            <td>
+                                <span class="cost-badge" id="cost_{{ sub.id }}">
+                                    {% if sub.preference and sub.preference.notification_type == 'sms' %}
+                                        <span class="badge badge-warning">~$0.01/trade</span>
+                                    {% else %}
+                                        <span class="badge badge-success">Free</span>
+                                    {% endif %}
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="alert alert-info mt-4">
+                <strong>💡 Tip:</strong> Changes are saved automatically. Email notifications are free, SMS notifications cost approximately $0.01 per trade alert.
+            </div>
+            {% else %}
+            <div class="text-center py-5">
+                <p class="text-muted">You're not subscribed to any portfolios yet.</p>
+                <a href="/explore" class="btn btn-primary">Browse Portfolios</a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<style>
+.card-header {
+    font-weight: bold;
+}
+
+.table th {
+    border-top: none;
+}
+
+.notification-method {
+    width: 150px;
+}
+
+.cost-badge {
+    font-size: 0.9em;
+}
+
+.custom-switch {
+    padding-left: 2.25rem;
+}
+
+.alert-info {
+    background-color: #e7f3ff;
+    border-color: #b3d9ff;
+    color: #004085;
+}
+</style>
+
+<script>
+// Update contact info
+document.getElementById('contact-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(e.target);
+    const data = Object.fromEntries(formData);
+    
+    try {
+        const response = await fetch('/api/user/update-contact', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        
+        if (response.ok) {
+            alert('✅ Contact information updated!');
+            location.reload();
+        } else {
+            alert('❌ Failed to update contact information');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('❌ An error occurred');
+    }
+});
+
+// Update notification method
+document.querySelectorAll('.notification-method').forEach(select => {
+    select.addEventListener('change', async function(e) {
+        const subscriptionId = e.target.dataset.subscriptionId;
+        const method = e.target.value;
+        
+        await updatePreference(subscriptionId, {notification_type: method});
+        
+        // Update cost badge
+        const costBadge = document.getElementById(`cost_${subscriptionId}`);
+        if (method === 'sms') {
+            costBadge.innerHTML = '<span class="badge badge-warning">~$0.01/trade</span>';
+        } else {
+            costBadge.innerHTML = '<span class="badge badge-success">Free</span>';
+        }
+    });
+});
+
+// Update enabled status
+document.querySelectorAll('.notification-enabled').forEach(checkbox => {
+    checkbox.addEventListener('change', async function(e) {
+        const subscriptionId = e.target.dataset.subscriptionId;
+        const enabled = e.target.checked;
+        
+        await updatePreference(subscriptionId, {enabled: enabled});
+    });
+});
+
+// API call to update preference
+async function updatePreference(subscriptionId, data) {
+    try {
+        const response = await fetch(`/api/notifications/preferences/${subscriptionId}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        
+        if (response.ok) {
+            console.log('✅ Preference updated');
+        } else {
+            alert('❌ Failed to update preference');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('❌ An error occurred');
+    }
+}
+</script>
+{% endblock %}

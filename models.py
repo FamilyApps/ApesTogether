@@ -506,3 +506,44 @@ class AdminSubscription(db.Model):
     
     def __repr__(self):
         return f"<AdminSubscription user={self.portfolio_user_id} ghosts={self.ghost_subscriber_count} tier={self.tier} payout=${self.monthly_payout}>"
+
+class NotificationPreferences(db.Model):
+    """User preferences for notifications per subscription"""
+    __tablename__ = 'notification_preferences'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    subscription_id = db.Column(db.Integer, db.ForeignKey('subscription.id'), nullable=False)
+    notification_type = db.Column(db.String(10), default='email')  # 'email' or 'sms'
+    enabled = db.Column(db.Boolean, default=True)  # Can disable notifications per subscription
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    user = db.relationship('User', backref='notification_preferences')
+    subscription = db.relationship('Subscription', backref='notification_preferences')
+    
+    def __repr__(self):
+        return f"<NotificationPreferences user={self.user_id} sub={self.subscription_id} type={self.notification_type} enabled={self.enabled}>"
+
+class NotificationLog(db.Model):
+    """Log of all notifications sent"""
+    __tablename__ = 'notification_log'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    portfolio_owner_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    subscription_id = db.Column(db.Integer, db.ForeignKey('subscription.id'), nullable=True)
+    notification_type = db.Column(db.String(10), nullable=False)  # 'sms' or 'email'
+    status = db.Column(db.String(20), nullable=False)  # 'sent', 'failed'
+    twilio_sid = db.Column(db.String(100), nullable=True)  # Twilio message SID (for SMS)
+    sendgrid_message_id = db.Column(db.String(100), nullable=True)  # SendGrid message ID (for email)
+    error_message = db.Column(db.String(500), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    user = db.relationship('User', foreign_keys=[user_id], backref='notifications_received')
+    portfolio_owner = db.relationship('User', foreign_keys=[portfolio_owner_id], backref='notifications_sent')
+    
+    def __repr__(self):
+        return f"<NotificationLog user={self.user_id} type={self.notification_type} status={self.status}>"

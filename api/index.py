@@ -2636,6 +2636,38 @@ def twilio_inbound():
         # Still return 200 to Twilio to avoid retries
         return '', 200
 
+@app.route('/api/email/inbound', methods=['POST'])
+def email_inbound():
+    """Handle inbound emails from SendGrid for trade execution"""
+    try:
+        from services.trading_email import handle_inbound_email
+        
+        # SendGrid sends email data as form-encoded
+        from_email = request.form.get('from') or request.json.get('from')
+        subject = request.form.get('subject') or request.json.get('subject')
+        body = request.form.get('text') or request.json.get('text')
+        
+        if not from_email:
+            return jsonify({'error': 'Missing from email'}), 400
+        
+        # Extract email address from "Name <email@example.com>" format
+        import re
+        email_match = re.search(r'<(.+?)>', from_email)
+        if email_match:
+            from_email = email_match.group(1)
+        
+        # Handle the email (parse, execute trade, send confirmations)
+        result = handle_inbound_email(from_email, subject or '', body or '')
+        
+        # Return empty response (SendGrid doesn't need content)
+        return '', 200
+        
+    except Exception as e:
+        logger.error(f"Email inbound error: {str(e)}")
+        logger.error(traceback.format_exc())
+        # Still return 200 to SendGrid to avoid retries
+        return '', 200
+
 # Root health check endpoint
 @app.route('/health')
 def root_health_check():
@@ -2788,6 +2820,117 @@ def logout():
     
     flash('You have been logged out', 'success')
     return redirect(url_for('index'))
+
+@app.route('/auth/complete-profile', methods=['GET', 'POST'])
+@login_required
+def complete_profile():
+    """Complete user profile with phone number and notification preferences"""
+    if request.method == 'POST':
+        phone_number = request.form.get('phone_number', '').strip()
+        default_method = request.form.get('default_notification_method', 'email')
+        
+        # Update user
+        current_user.phone_number = phone_number if phone_number else None
+        current_user.default_notification_method = default_method
+        
+        try:
+            db.session.commit()
+            flash('Profile updated successfully!', 'success')
+            return redirect(url_for('dashboard'))
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error updating profile: {str(e)}")
+            flash('Error updating profile', 'danger')
+    
+    return render_template_with_defaults('complete_profile.html')
+
+@app.route('/settings/notifications')
+@login_required
+def notification_settings():
+    """Notification settings page - manage preferences per subscription"""
+    from models import NotificationPreferences
+    
+    # Get all user's subscriptions with preferences
+    subscriptions = Subscription.query.filter_by(
+        subscriber_id=current_user.id,
+        status='active'
+    ).all()
+    
+    # Add preference to each subscription
+    for sub in subscriptions:
+        sub.preference = NotificationPreferences.query.filter_by(
+            user_id=current_user.id,
+            subscription_id=sub.id
+        ).first()
+    
+    return render_template_with_defaults('notification_settings.html', 
+                                        subscriptions=subscriptions)
+
+@app.route('/api/user/update-contact', methods=['POST'])
+@login_required
+def update_contact():
+    """API endpoint to update user contact information"""
+    try:
+        data = request.get_json()
+        
+        phone_number = data.get('phone_number', '').strip()
+        default_method = data.get('default_notification_method', 'email')
+        
+        current_user.phone_number = phone_number if phone_number else None
+        current_user.default_notification_method = default_method
+        
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': 'Contact information updated'})
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error updating contact: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/notifications/preferences/<int:subscription_id>', methods=['PUT'])
+@login_required
+def update_notification_preference(subscription_id):
+    """API endpoint to update notification preferences for a subscription"""
+    try:
+        from models import NotificationPreferences
+        
+        data = request.get_json()
+        
+        # Verify subscription belongs to user
+        subscription = Subscription.query.filter_by(
+            id=subscription_id,
+            subscriber_id=current_user.id
+        ).first()
+        
+        if not subscription:
+            return jsonify({'error': 'Subscription not found'}), 404
+        
+        # Get or create preference
+        preference = NotificationPreferences.query.filter_by(
+            user_id=current_user.id,
+            subscription_id=subscription_id
+        ).first()
+        
+        if not preference:
+            preference = NotificationPreferences(
+                user_id=current_user.id,
+                subscription_id=subscription_id
+            )
+            db.session.add(preference)
+        
+        # Update fields
+        if 'notification_type' in data:
+            preference.notification_type = data['notification_type']
+        if 'enabled' in data:
+            preference.enabled = data['enabled']
+        
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': 'Preference updated'})
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error updating preference: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/login/google')
 def login_google():

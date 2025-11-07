@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+
+{% block title %}Complete Your Profile - ApesTogether{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 600px; margin: 50px auto;">
+    <h1 class="text-center mb-4">Complete Your Profile</h1>
+    
+    <div class="card">
+        <div class="card-body">
+            <p class="text-muted mb-4">
+                Set up your notification preferences to receive trade alerts from portfolios you follow.
+            </p>
+            
+            <form method="POST" action="/auth/complete-profile">
+                <!-- Phone Number (Optional) -->
+                <div class="form-group mb-4">
+                    <label for="phone_number" class="font-weight-bold">
+                        Phone Number <span class="text-muted">(Optional)</span>
+                    </label>
+                    <input type="tel" 
+                           class="form-control" 
+                           id="phone_number" 
+                           name="phone_number" 
+                           placeholder="+1 (555) 123-4567"
+                           pattern="^\+?[1-9]\d{1,14}$">
+                    <small class="form-text text-muted">
+                        E.164 format: +12125551234. Add this to enable SMS trading and notifications.
+                    </small>
+                </div>
+                
+                <!-- Default Notification Method -->
+                <div class="form-group mb-4">
+                    <label class="font-weight-bold">Default Notification Method</label>
+                    <div class="form-check">
+                        <input class="form-check-input" 
+                               type="radio" 
+                               name="default_notification_method" 
+                               id="method_email" 
+                               value="email" 
+                               checked>
+                        <label class="form-check-label" for="method_email">
+                            📧 Email (Free)
+                        </label>
+                        <small class="form-text text-muted">
+                            Receive trade alerts via email
+                        </small>
+                    </div>
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" 
+                               type="radio" 
+                               name="default_notification_method" 
+                               id="method_sms" 
+                               value="sms">
+                        <label class="form-check-label" for="method_sms">
+                            📱 SMS ($0.01/alert)
+                        </label>
+                        <small class="form-text text-muted">
+                            Receive trade alerts via text message (requires phone number)
+                        </small>
+                    </div>
+                </div>
+                
+                <!-- SMS Trading Info -->
+                <div class="alert alert-info mb-4">
+                    <strong>📈 SMS Trading</strong><br>
+                    With a phone number, you can trade by texting commands like:
+                    <ul class="mb-0 mt-2">
+                        <li><code>BUY 10 TSLA</code></li>
+                        <li><code>SELL 5 AAPL</code></li>
+                    </ul>
+                </div>
+                
+                <!-- Submit Buttons -->
+                <div class="text-center">
+                    <button type="submit" class="btn btn-primary btn-lg px-5">
+                        Save Preferences
+                    </button>
+                    <a href="/dashboard" class="btn btn-link">Skip for now</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<style>
+.card {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.form-check {
+    padding: 10px;
+    border: 1px solid #e0e0e0;
+    border-radius: 5px;
+    background: #f9f9f9;
+}
+
+.form-check:hover {
+    background: #f0f0f0;
+}
+
+.alert-info {
+    background-color: #e7f3ff;
+    border-color: #b3d9ff;
+    color: #004085;
+}
+
+code {
+    background: #f4f4f4;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+}
+</style>
+
+<script>
+// Disable SMS option if no phone number entered
+document.getElementById('phone_number').addEventListener('input', function(e) {
+    const smsRadio = document.getElementById('method_sms');
+    if (!e.target.value) {
+        smsRadio.disabled = true;
+        document.getElementById('method_email').checked = true;
+    } else {
+        smsRadio.disabled = false;
+    }
+});
+
+// On page load, check if phone number exists
+window.addEventListener('load', function() {
+    const phoneInput = document.getElementById('phone_number');
+    const smsRadio = document.getElementById('method_sms');
+    if (!phoneInput.value) {
+        smsRadio.disabled = true;
+    }
+});
+</script>
+{% endblock %}

@@ -59,22 +59,68 @@ def send_sms(to_number, message):
 
 def send_email(to_email, subject, body):
     """
-    Send email notification
+    Send email notification via SendGrid
     
     Args:
         to_email: Recipient email
         subject: Email subject
-        body: Email body
+        body: Email body (plain text)
     
     Returns:
-        dict with status and optional error
+        dict with status, message_id, and optional error
     """
-    # TODO: Implement with SendGrid or Flask-Mail
-    # For now, return success to not block SMS implementation
-    return {
-        'status': 'sent',
-        'message': 'Email sending not yet implemented'
-    }
+    sendgrid_api_key = os.environ.get('SENDGRID_API_KEY')
+    from_email = os.environ.get('SENDGRID_FROM_EMAIL', 'notifications@apestogether.ai')
+    
+    if not sendgrid_api_key:
+        print("WARNING: SendGrid API key not configured")
+        return {
+            'status': 'failed',
+            'error': 'SendGrid not configured'
+        }
+    
+    try:
+        import requests
+        
+        # SendGrid API v3
+        url = 'https://api.sendgrid.com/v3/mail/send'
+        headers = {
+            'Authorization': f'Bearer {sendgrid_api_key}',
+            'Content-Type': 'application/json'
+        }
+        
+        data = {
+            'personalizations': [{
+                'to': [{'email': to_email}],
+                'subject': subject
+            }],
+            'from': {'email': from_email},
+            'content': [{
+                'type': 'text/plain',
+                'value': body
+            }]
+        }
+        
+        response = requests.post(url, headers=headers, json=data)
+        
+        if response.status_code == 202:
+            # SendGrid returns message ID in X-Message-Id header
+            message_id = response.headers.get('X-Message-Id', 'unknown')
+            return {
+                'status': 'sent',
+                'message_id': message_id
+            }
+        else:
+            return {
+                'status': 'failed',
+                'error': f'SendGrid error: {response.status_code} - {response.text}'
+            }
+    
+    except Exception as e:
+        return {
+            'status': 'failed',
+            'error': str(e)
+        }
 
 
 def format_trade_notification(trade_data):
@@ -125,22 +171,32 @@ def send_notification_to_subscriber(subscriber_data, message):
     Returns:
         dict with delivery result
     """
+    from models import NotificationLog
+    
     sub = subscriber_data['subscription']
     pref = subscriber_data['preference']
+    user = sub.subscriber
     
     # Determine notification method
-    method = pref.notification_type if pref else 'email'
+    # Priority: 1) Preference on this subscription, 2) User's phone if exists, 3) Email
+    if pref and pref.notification_type:
+        method = pref.notification_type
+    elif user.phone_number and user.default_notification_method == 'sms':
+        method = 'sms'
+    else:
+        method = 'email'
     
     # Send notification
-    if method == 'sms' and pref and pref.phone_number:
-        result = send_sms(pref.phone_number, message)
+    if method == 'sms' and user.phone_number:
+        result = send_sms(user.phone_number, message)
     else:
         # Send email (default)
         result = send_email(
-            sub.subscriber.email,
+            user.email,
             f"Trade Alert: {subscriber_data['username']}",
             message
         )
+        method = 'email'  # Force method to email if SMS unavailable
     
     # Log delivery
     log = NotificationLog(
@@ -150,6 +206,7 @@ def send_notification_to_subscriber(subscriber_data, message):
         notification_type=method,
         status=result['status'],
         twilio_sid=result.get('sid'),
+        sendgrid_message_id=result.get('message_id'),
         error_message=result.get('error')
     )
     db.session.add(log)
