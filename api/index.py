@@ -2710,30 +2710,57 @@ def test_sendgrid():
 def migrate_user_notification_fields():
     """Add phone_number and default_notification_method to User table"""
     try:
-        from sqlalchemy import text
+        from sqlalchemy import text, inspect
+        
+        # Check if columns already exist
+        inspector = inspect(db.engine)
+        columns = [col['name'] for col in inspector.get_columns('user')]
+        
+        results = []
         
         # Add phone_number column if it doesn't exist
-        db.session.execute(text("""
-            ALTER TABLE "user" 
-            ADD COLUMN IF NOT EXISTS phone_number VARCHAR(20)
-        """))
+        if 'phone_number' not in columns:
+            try:
+                db.session.execute(text("""
+                    ALTER TABLE "user" ADD COLUMN phone_number VARCHAR(20)
+                """))
+                results.append('phone_number column added')
+            except Exception as e:
+                results.append(f'phone_number error: {str(e)}')
+        else:
+            results.append('phone_number column already exists')
         
         # Add default_notification_method column if it doesn't exist
-        db.session.execute(text("""
-            ALTER TABLE "user" 
-            ADD COLUMN IF NOT EXISTS default_notification_method VARCHAR(10) DEFAULT 'email'
-        """))
+        if 'default_notification_method' not in columns:
+            try:
+                db.session.execute(text("""
+                    ALTER TABLE "user" ADD COLUMN default_notification_method VARCHAR(10) DEFAULT 'email'
+                """))
+                results.append('default_notification_method column added')
+            except Exception as e:
+                results.append(f'default_notification_method error: {str(e)}')
+        else:
+            results.append('default_notification_method column already exists')
         
         db.session.commit()
         
+        # Verify columns now exist
+        inspector = inspect(db.engine)
+        columns_after = [col['name'] for col in inspector.get_columns('user')]
+        
         return jsonify({
             'success': True,
-            'message': 'User notification fields migration completed successfully'
+            'results': results,
+            'columns_before': columns,
+            'columns_after': columns_after,
+            'phone_number_exists': 'phone_number' in columns_after,
+            'method_exists': 'default_notification_method' in columns_after
         })
     except Exception as e:
         db.session.rollback()
         logger.error(f"User migration error: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 @app.route('/admin/debug-notification-fields')
 @login_required
