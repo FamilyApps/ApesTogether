@@ -2705,6 +2705,36 @@ def test_sendgrid():
         logger.error(f"SendGrid test error: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/admin/migrate-user-notification-fields')
+@login_required
+def migrate_user_notification_fields():
+    """Add phone_number and default_notification_method to User table"""
+    try:
+        from sqlalchemy import text
+        
+        # Add phone_number column if it doesn't exist
+        db.session.execute(text("""
+            ALTER TABLE "user" 
+            ADD COLUMN IF NOT EXISTS phone_number VARCHAR(20)
+        """))
+        
+        # Add default_notification_method column if it doesn't exist
+        db.session.execute(text("""
+            ALTER TABLE "user" 
+            ADD COLUMN IF NOT EXISTS default_notification_method VARCHAR(10) DEFAULT 'email'
+        """))
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': 'User notification fields migration completed successfully'
+        })
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"User migration error: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/')
 def index():
     """Main landing page - redirect to 5D leaderboard for public access"""
