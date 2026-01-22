@@ -2619,11 +2619,13 @@ def init_database():
     """Initialize database tables for fresh Supabase instance - NO AUTH REQUIRED
     Protected by SECRET_KEY query parameter instead of login (chicken-and-egg problem)
     Usage: /api/init-db?key=YOUR_SECRET_KEY
+    Add &force=true to drop and recreate all tables (WARNING: destroys data)
     """
     try:
         # Verify secret key (use existing SECRET_KEY env var)
         provided_key = request.args.get('key', '')
         expected_key = os.environ.get('SECRET_KEY', '')
+        force_recreate = request.args.get('force', '').lower() == 'true'
         
         if not provided_key or provided_key != expected_key:
             return jsonify({'error': 'Invalid or missing key parameter'}), 403
@@ -2636,6 +2638,16 @@ def init_database():
                            AdminSubscription, PortfolioSnapshotIntraday)
         
         results = []
+        
+        # Force drop all tables if requested
+        if force_recreate:
+            try:
+                db.drop_all()
+                db.session.commit()
+                results.append('All tables dropped successfully')
+            except Exception as e:
+                db.session.rollback()
+                results.append(f'Table drop error: {str(e)}')
         
         # Create all tables
         try:
