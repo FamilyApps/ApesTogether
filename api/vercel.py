@@ -4,8 +4,11 @@
 import os
 import sys
 
-# Add the current directory to the path so we can import index
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add both api directory AND root directory to path for imports
+api_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(api_dir)
+sys.path.insert(0, api_dir)
+sys.path.insert(0, root_dir)  # For blueprints in root: mobile_api, leaderboard_routes, etc.
 
 # FORCE REBUILD: Print version info to trigger function bundle refresh
 print(f"🔄 VERCEL BUILD INFO - Commit: {os.environ.get('VERCEL_GIT_COMMIT_SHA', 'UNKNOWN')}")
