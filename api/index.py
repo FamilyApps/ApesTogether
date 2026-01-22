@@ -26860,13 +26860,15 @@ try:
 except Exception as e:
     print(f"Error registering admin blueprint: {e}")
 
-# Register the SMS blueprint for Vercel deployment
-try:
-    from sms_routes import sms_bp
-    app.register_blueprint(sms_bp)
-    logger.info("SMS blueprint registered successfully")
-except Exception as e:
-    logger.error(f"Error registering SMS blueprint: {e}")
+# DEPRECATED (Jan 2026): SMS blueprint moved to _legacy/sms_twilio/
+# Push notifications via Firebase FCM now handle all trade alerts
+# See: push_notification_service.py and api/mobile_api.py
+# try:
+#     from sms_routes import sms_bp
+#     app.register_blueprint(sms_bp)
+#     logger.info("SMS blueprint registered successfully")
+# except Exception as e:
+#     logger.error(f"Error registering SMS blueprint: {e}")
 
 # Register cash tracking admin routes for Phase 0 implementation
 try:
@@ -26931,6 +26933,14 @@ try:
     logger.info("Leaderboard blueprint registered successfully")
 except Exception as e:
     print(f"Error registering leaderboard blueprint: {e}")
+
+# Register the mobile API blueprint for iOS/Android apps (Phase 1 - January 2026)
+try:
+    from api.mobile_api import mobile_api
+    app.register_blueprint(mobile_api)
+    logger.info("Mobile API blueprint registered successfully")
+except Exception as e:
+    logger.error(f"Error registering mobile API blueprint: {e}")
 
 @app.route('/admin/nuclear-data-fix', methods=['GET', 'POST'])
 @login_required
@@ -30559,6 +30569,83 @@ def admin_view_all_portfolio_stats():
         logger.error(f"Error viewing all portfolio stats: {str(e)}")
         import traceback
         return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/admin/create-mobile-tables', methods=['GET', 'POST'])
+@login_required
+def admin_create_mobile_tables():
+    """
+    Create mobile app tables for Phase 1 (January 2026)
+    Tables: device_token, in_app_purchase, push_notification_log, xero_payout_record, mobile_subscription
+    """
+    try:
+        from models import db, DeviceToken, InAppPurchase, PushNotificationLog, XeroPayoutRecord, MobileSubscription
+        from sqlalchemy import inspect, text
+        
+        # Check admin
+        email = session.get('email', '')
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        
+        inspector = inspect(db.engine)
+        existing_tables = inspector.get_table_names()
+        
+        tables_to_create = {
+            'device_token': DeviceToken,
+            'in_app_purchase': InAppPurchase,
+            'push_notification_log': PushNotificationLog,
+            'xero_payout_record': XeroPayoutRecord,
+            'mobile_subscription': MobileSubscription
+        }
+        
+        created = []
+        already_exists = []
+        
+        for table_name, model in tables_to_create.items():
+            if table_name in existing_tables:
+                already_exists.append(table_name)
+            else:
+                model.__table__.create(db.engine)
+                created.append(table_name)
+                logger.info(f"Created table: {table_name}")
+        
+        # Update admin_subscription with new columns if needed
+        try:
+            with db.engine.connect() as conn:
+                result = conn.execute(text("""
+                    SELECT column_name FROM information_schema.columns 
+                    WHERE table_name = 'admin_subscription' AND column_name = 'bonus_subscriber_count'
+                """))
+                if not result.fetchone():
+                    conn.execute(text("""
+                        ALTER TABLE admin_subscription 
+                        ADD COLUMN IF NOT EXISTS bonus_subscriber_count INTEGER DEFAULT 0,
+                        ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    """))
+                    conn.execute(text("""
+                        UPDATE admin_subscription 
+                        SET bonus_subscriber_count = COALESCE(ghost_subscriber_count, 0)
+                        WHERE bonus_subscriber_count = 0 OR bonus_subscriber_count IS NULL
+                    """))
+                    conn.commit()
+                    created.append('admin_subscription (updated columns)')
+        except Exception as e:
+            logger.warning(f"Could not update admin_subscription: {e}")
+        
+        return jsonify({
+            'success': True,
+            'created': created,
+            'already_exists': already_exists,
+            'message': f"Created {len(created)} tables, {len(already_exists)} already existed"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error creating mobile tables: {str(e)}")
+        import traceback
+        return jsonify({
+            'success': False,
             'error': str(e),
             'traceback': traceback.format_exc()
         }), 500

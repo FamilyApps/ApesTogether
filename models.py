@@ -449,40 +449,46 @@ class AgentConfig(db.Model):
         return f"<AgentConfig user_id={self.user_id} status={self.status} trades={self.total_trades}>"
 
 class AdminSubscription(db.Model):
-    """Ghost subscribers (counter only) - admin pays 70% payout, no actual subscriptions/notifications"""
+    """Bonus subscribers - admin pays 60% payout from platform pocket, no actual app store transactions"""
     __tablename__ = 'admin_subscription'
     
     id = db.Column(db.Integer, primary_key=True)
-    portfolio_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)  # Who gets the ghost subs
-    ghost_subscriber_count = db.Column(db.Integer, default=0, nullable=False)  # Just a counter (e.g., 8)
-    tier = db.Column(db.String(20), nullable=False)  # 'light', 'standard', 'active', 'pro', 'elite'
-    monthly_payout = db.Column(db.Float, nullable=False)  # count × tier_price × 0.70
-    reason = db.Column(db.String(500), nullable=True)  # Admin notes (e.g., "Marketing boost")
+    portfolio_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)  # Who gets the bonus subs
+    bonus_subscriber_count = db.Column(db.Integer, default=0, nullable=False)  # Bonus count (e.g., 8)
+    reason = db.Column(db.String(500), nullable=True)  # Admin notes (e.g., "Marketing boost", "Early adopter reward")
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Legacy fields (kept for backward compatibility with existing data)
+    ghost_subscriber_count = db.Column(db.Integer, default=0, nullable=True)  # Deprecated: use bonus_subscriber_count
+    tier = db.Column(db.String(20), nullable=True)  # Deprecated: no longer used (flat pricing)
+    monthly_payout = db.Column(db.Float, nullable=True)  # Deprecated: calculated dynamically
     
     # Relationship
-    portfolio_user = db.relationship('User', foreign_keys=[portfolio_user_id], backref='ghost_subscriptions')
+    portfolio_user = db.relationship('User', foreign_keys=[portfolio_user_id], backref='bonus_subscriptions')
     
-    # Tier pricing (matches Stripe pricing from plan)
-    TIER_PRICES = {
-        'light': 10.00,
-        'standard': 15.00,
-        'active': 25.00,
-        'pro': 35.00,
-        'elite': 55.00
-    }
+    # Flat pricing (mobile app model - January 2026)
+    SUBSCRIPTION_PRICE = 9.00
+    INFLUENCER_PAYOUT_PERCENT = 0.60  # 60% to influencer
+    PLATFORM_PERCENT = 0.10  # 10% to platform
+    STORE_FEE_PERCENT = 0.30  # 30% to Apple/Google
     
     @property
     def monthly_revenue(self):
-        """Total monthly revenue from ghost subscribers"""
-        return self.ghost_subscriber_count * self.TIER_PRICES.get(self.tier, 0)
+        """Notional monthly revenue from bonus subscribers (for display purposes)"""
+        return self.bonus_subscriber_count * self.SUBSCRIPTION_PRICE
+    
+    @property
+    def payout_amount(self):
+        """Calculate 60% payout for bonus subscribers (paid from platform pocket)"""
+        return self.bonus_subscriber_count * self.SUBSCRIPTION_PRICE * self.INFLUENCER_PAYOUT_PERCENT
     
     def calculate_payout(self):
-        """Calculate 70% payout"""
-        return self.monthly_revenue * 0.70
+        """Calculate 60% payout - matches new mobile pricing model"""
+        return self.payout_amount
     
     def __repr__(self):
-        return f"<AdminSubscription user={self.portfolio_user_id} ghosts={self.ghost_subscriber_count} tier={self.tier} payout=${self.monthly_payout}>"
+        return f"<AdminSubscription user={self.portfolio_user_id} bonus={self.bonus_subscriber_count} payout=${self.payout_amount:.2f}>"
 
 class NotificationPreferences(db.Model):
     """User preferences for notifications per subscription"""
@@ -524,3 +530,198 @@ class NotificationLog(db.Model):
     
     def __repr__(self):
         return f"<NotificationLog user={self.user_id} type={self.notification_type} status={self.status}>"
+
+
+# =============================================================================
+# MOBILE APP MODELS (Phase 1 - January 2026)
+# =============================================================================
+
+class DeviceToken(db.Model):
+    """Push notification tokens for iOS/Android devices"""
+    __tablename__ = 'device_token'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    token = db.Column(db.String(500), nullable=False)  # FCM/APNs token
+    platform = db.Column(db.String(10), nullable=False)  # 'ios' or 'android'
+    device_id = db.Column(db.String(100), nullable=True)  # Unique device identifier
+    app_version = db.Column(db.String(20), nullable=True)  # e.g., "1.0.0"
+    os_version = db.Column(db.String(20), nullable=True)  # e.g., "iOS 17.2" or "Android 14"
+    is_active = db.Column(db.Boolean, default=True)  # False if token is invalid/expired
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_used_at = db.Column(db.DateTime, nullable=True)  # Last successful push
+    
+    # Relationship
+    user = db.relationship('User', backref='device_tokens')
+    
+    # Unique constraint: one token per device per user
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'device_id', name='unique_user_device'),
+    )
+    
+    def __repr__(self):
+        return f"<DeviceToken user={self.user_id} platform={self.platform} active={self.is_active}>"
+
+
+class InAppPurchase(db.Model):
+    """Apple/Google In-App Purchase records"""
+    __tablename__ = 'in_app_purchase'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    subscriber_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    subscribed_to_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    
+    # Platform details
+    platform = db.Column(db.String(10), nullable=False)  # 'apple' or 'google'
+    product_id = db.Column(db.String(100), nullable=False)  # e.g., 'com.apestogether.subscription.monthly'
+    
+    # Transaction identifiers
+    transaction_id = db.Column(db.String(200), unique=True, nullable=False)  # Apple/Google transaction ID
+    original_transaction_id = db.Column(db.String(200), nullable=True)  # For renewals
+    
+    # Receipt data
+    receipt_data = db.Column(db.Text, nullable=True)  # Encrypted receipt (for re-validation)
+    
+    # Subscription details
+    status = db.Column(db.String(20), nullable=False, default='active')  # 'active', 'expired', 'canceled', 'refunded'
+    purchase_date = db.Column(db.DateTime, nullable=False)
+    expires_date = db.Column(db.DateTime, nullable=True)  # For subscriptions
+    
+    # Pricing (for accounting)
+    price = db.Column(db.Float, default=9.00)  # Flat $9
+    currency = db.Column(db.String(3), default='USD')
+    
+    # Payout tracking
+    influencer_payout = db.Column(db.Float, default=5.40)  # 60% of $9
+    platform_revenue = db.Column(db.Float, default=0.90)  # 10% of $9
+    store_fee = db.Column(db.Float, default=2.70)  # 30% Apple/Google
+    
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    subscriber = db.relationship('User', foreign_keys=[subscriber_id], backref='iap_subscriptions_made')
+    subscribed_to = db.relationship('User', foreign_keys=[subscribed_to_id], backref='iap_subscribers')
+    
+    def __repr__(self):
+        return f"<InAppPurchase {self.platform} sub={self.subscriber_id}->owner={self.subscribed_to_id} status={self.status}>"
+
+
+class PushNotificationLog(db.Model):
+    """Log of push notifications sent via Firebase/APNs"""
+    __tablename__ = 'push_notification_log'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)  # Recipient
+    portfolio_owner_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)  # Trader
+    device_token_id = db.Column(db.Integer, db.ForeignKey('device_token.id'), nullable=True)
+    
+    # Notification content
+    title = db.Column(db.String(200), nullable=False)
+    body = db.Column(db.String(500), nullable=False)
+    data_payload = db.Column(db.JSON, nullable=True)  # Custom data (ticker, action, price, etc.)
+    
+    # Delivery status
+    status = db.Column(db.String(20), nullable=False)  # 'sent', 'delivered', 'failed', 'invalid_token'
+    fcm_message_id = db.Column(db.String(200), nullable=True)  # Firebase message ID
+    error_message = db.Column(db.String(500), nullable=True)
+    
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    delivered_at = db.Column(db.DateTime, nullable=True)
+    
+    # Relationships
+    user = db.relationship('User', foreign_keys=[user_id], backref='push_notifications_received')
+    portfolio_owner = db.relationship('User', foreign_keys=[portfolio_owner_id], backref='push_notifications_triggered')
+    device_token = db.relationship('DeviceToken', backref='notifications')
+    
+    def __repr__(self):
+        return f"<PushNotificationLog user={self.user_id} status={self.status}>"
+
+
+class XeroPayoutRecord(db.Model):
+    """Track influencer payouts synced to Xero"""
+    __tablename__ = 'xero_payout_record'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    portfolio_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    
+    # Payout period
+    period_start = db.Column(db.Date, nullable=False)
+    period_end = db.Column(db.Date, nullable=False)
+    
+    # Subscriber counts
+    real_subscriber_count = db.Column(db.Integer, default=0)  # From InAppPurchase
+    bonus_subscriber_count = db.Column(db.Integer, default=0)  # From AdminSubscription
+    total_subscriber_count = db.Column(db.Integer, default=0)  # real + bonus
+    
+    # Revenue breakdown (all at $9/subscriber)
+    gross_revenue = db.Column(db.Float, default=0.0)  # total_subs × $9
+    store_fees = db.Column(db.Float, default=0.0)  # 30% to Apple/Google
+    platform_revenue = db.Column(db.Float, default=0.0)  # 10% ($0.90/sub)
+    influencer_payout = db.Column(db.Float, default=0.0)  # 60% ($5.40/sub)
+    
+    # Bonus payout (paid from platform pocket)
+    bonus_payout = db.Column(db.Float, default=0.0)  # bonus_subs × $5.40
+    
+    # Xero sync status
+    xero_invoice_id = db.Column(db.String(100), nullable=True)
+    xero_contact_id = db.Column(db.String(100), nullable=True)
+    xero_synced_at = db.Column(db.DateTime, nullable=True)
+    xero_sync_status = db.Column(db.String(20), default='pending')  # 'pending', 'synced', 'failed'
+    xero_error = db.Column(db.String(500), nullable=True)
+    
+    # Payment status
+    payment_status = db.Column(db.String(20), default='pending')  # 'pending', 'paid', 'held'
+    paid_at = db.Column(db.DateTime, nullable=True)
+    
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationship
+    portfolio_user = db.relationship('User', backref='payout_records')
+    
+    def calculate_totals(self):
+        """Recalculate all amounts based on subscriber counts"""
+        self.total_subscriber_count = self.real_subscriber_count + self.bonus_subscriber_count
+        self.gross_revenue = self.real_subscriber_count * 9.00
+        self.store_fees = self.real_subscriber_count * 2.70
+        self.platform_revenue = self.real_subscriber_count * 0.90
+        self.influencer_payout = self.real_subscriber_count * 5.40
+        self.bonus_payout = self.bonus_subscriber_count * 5.40
+    
+    @property
+    def total_payout(self):
+        """Total owed to influencer (real + bonus)"""
+        return self.influencer_payout + self.bonus_payout
+    
+    def __repr__(self):
+        return f"<XeroPayoutRecord user={self.portfolio_user_id} period={self.period_start}-{self.period_end} payout=${self.total_payout}>"
+
+
+class MobileSubscription(db.Model):
+    """Mobile app subscription linking - replaces Stripe-based Subscription for mobile"""
+    __tablename__ = 'mobile_subscription'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    subscriber_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    subscribed_to_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    in_app_purchase_id = db.Column(db.Integer, db.ForeignKey('in_app_purchase.id'), nullable=False)
+    
+    status = db.Column(db.String(20), nullable=False, default='active')  # 'active', 'expired', 'canceled'
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    expires_at = db.Column(db.DateTime, nullable=True)
+    
+    # Notification preferences
+    push_notifications_enabled = db.Column(db.Boolean, default=True)
+    
+    # Relationships
+    subscriber = db.relationship('User', foreign_keys=[subscriber_id], backref='mobile_subscriptions_made')
+    subscribed_to = db.relationship('User', foreign_keys=[subscribed_to_id], backref='mobile_subscribers')
+    in_app_purchase = db.relationship('InAppPurchase', backref='subscription')
+    
+    def __repr__(self):
+        return f"<MobileSubscription sub={self.subscriber_id}->owner={self.subscribed_to_id} status={self.status}>"
