@@ -2,7 +2,7 @@
   "version": 2,
   "name": "stock-portfolio-app",
   "functions": {
-    "api/vercel.py": {
+    "api/*.py": {
       "maxDuration": 60
     }
   },
@@ -13,7 +13,7 @@
     },
     {
       "source": "/(.*)",
-      "destination": "/api/vercel.py"
+      "destination": "/api/index.py"
     }
   ],
   "crons": [
