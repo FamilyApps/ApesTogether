@@ -2614,6 +2614,62 @@ def health_check():
         logger.error(f"Health check failed: {str(e)}")
         return jsonify({'status': 'error', 'message': 'Health check failed'}), 500
 
+@app.route('/api/init-db')
+def init_database():
+    """Initialize database tables for fresh Supabase instance - NO AUTH REQUIRED
+    Protected by SECRET_KEY query parameter instead of login (chicken-and-egg problem)
+    Usage: /api/init-db?key=YOUR_SECRET_KEY
+    """
+    try:
+        # Verify secret key (use existing SECRET_KEY env var)
+        provided_key = request.args.get('key', '')
+        expected_key = os.environ.get('SECRET_KEY', '')
+        
+        if not provided_key or provided_key != expected_key:
+            return jsonify({'error': 'Invalid or missing key parameter'}), 403
+        
+        # Import all models
+        from models import (db, User, Stock, Transaction, PortfolioSnapshot, StockInfo, 
+                           SubscriptionTier, Subscription, SMSNotification, LeaderboardCache, 
+                           UserPortfolioChartCache, AlphaVantageAPILog, PlatformMetrics, 
+                           UserActivity, NotificationPreferences, NotificationLog,
+                           AdminSubscription, PortfolioSnapshotIntraday)
+        
+        results = []
+        
+        # Create all tables
+        try:
+            db.create_all()
+            results.append('All database tables created successfully')
+        except Exception as e:
+            results.append(f'Table creation error: {str(e)}')
+        
+        # Commit
+        try:
+            db.session.commit()
+            results.append('Database commit successful')
+        except Exception as e:
+            db.session.rollback()
+            results.append(f'Commit error: {str(e)}')
+        
+        # Verify tables exist
+        try:
+            user_count = User.query.count()
+            results.append(f'User table exists, count: {user_count}')
+        except Exception as e:
+            results.append(f'User table check error: {str(e)}')
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Database initialized',
+            'results': results,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Database init failed: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 # SMS/Email Trading Endpoints
 @app.route('/api/twilio/inbound', methods=['POST'])
 def twilio_inbound():
