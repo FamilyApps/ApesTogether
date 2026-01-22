@@ -26936,7 +26936,7 @@ except Exception as e:
 
 # Register the mobile API blueprint for iOS/Android apps (Phase 1 - January 2026)
 try:
-    from api.mobile_api import mobile_api
+    from mobile_api import mobile_api
     app.register_blueprint(mobile_api)
     logger.info("Mobile API blueprint registered successfully")
 except Exception as e:
