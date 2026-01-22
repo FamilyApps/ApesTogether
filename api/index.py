@@ -26935,12 +26935,13 @@ except Exception as e:
     print(f"Error registering leaderboard blueprint: {e}")
 
 # Register the mobile API blueprint for iOS/Android apps (Phase 1 - January 2026)
-try:
-    from mobile_api import mobile_api
-    app.register_blueprint(mobile_api)
-    logger.info("Mobile API blueprint registered successfully")
-except Exception as e:
-    logger.error(f"Error registering mobile API blueprint: {e}")
+# NOTE: Temporarily disabled until import path issues resolved for Vercel
+# try:
+#     from mobile_api import mobile_api
+#     app.register_blueprint(mobile_api)
+#     logger.info("Mobile API blueprint registered successfully")
+# except Exception as e:
+#     logger.error(f"Error registering mobile API blueprint: {e}")
 
 @app.route('/admin/nuclear-data-fix', methods=['GET', 'POST'])
 @login_required
