@@ -2639,15 +2639,18 @@ def init_database():
         
         results = []
         
-        # Force drop all tables if requested
+        # Force drop all tables if requested - use raw SQL for speed
         if force_recreate:
             try:
-                db.drop_all()
+                db.session.execute(text('DROP SCHEMA public CASCADE'))
+                db.session.execute(text('CREATE SCHEMA public'))
+                db.session.execute(text('GRANT ALL ON SCHEMA public TO postgres'))
+                db.session.execute(text('GRANT ALL ON SCHEMA public TO public'))
                 db.session.commit()
-                results.append('All tables dropped successfully')
+                results.append('Schema dropped and recreated successfully')
             except Exception as e:
                 db.session.rollback()
-                results.append(f'Table drop error: {str(e)}')
+                results.append(f'Schema drop error: {str(e)}')
         
         # Create all tables
         try:
