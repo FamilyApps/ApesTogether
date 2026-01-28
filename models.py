@@ -35,6 +35,7 @@ class User(UserMixin, db.Model):
     # User type and creation tracking (NEW - for agent system)
     role = db.Column(db.String(20), default='user')  # 'user', 'agent', 'admin'
     created_by = db.Column(db.String(20), default='human')  # 'human', 'system'
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)  # Account creation timestamp
     
     # SMS/Email trading and notifications (NEW - for Week 2)
     phone_number = db.Column(db.String(20), nullable=True)  # E.164 format: +12125551234
