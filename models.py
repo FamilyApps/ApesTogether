@@ -60,6 +60,8 @@ class Subscription(db.Model):
     stripe_subscription_id = db.Column(db.String(255), unique=True, nullable=False)
     status = db.Column(db.String(50), nullable=False, default='active')  # e.g., 'active', 'canceled'
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    start_date = db.Column(db.DateTime, default=datetime.utcnow)
+    end_date = db.Column(db.DateTime, nullable=True)
 
     # Define relationships to get User objects
     # backref creates a 'subscriptions_made' collection on the User model (for the subscriber)
