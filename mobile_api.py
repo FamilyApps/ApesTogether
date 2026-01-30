@@ -690,3 +690,58 @@ def refresh_token():
     except Exception as e:
         logger.error(f"Token refresh error: {e}")
         return jsonify({'error': 'refresh_failed'}), 500
+
+
+# =============================================================================
+# Health Check Endpoint
+# =============================================================================
+
+@mobile_api.route('/health', methods=['GET'])
+def health_check():
+    """
+    Health check endpoint for mobile API
+    Returns status of all required services
+    """
+    import os
+    
+    health = {
+        'status': 'ok',
+        'api_version': '1.0.0',
+        'services': {}
+    }
+    
+    # Check Firebase
+    try:
+        from push_notification_service import get_push_service
+        push_service = get_push_service()
+        health['services']['firebase'] = {
+            'available': push_service.is_available,
+            'status': 'configured' if push_service.is_available else 'not_configured'
+        }
+    except Exception as e:
+        health['services']['firebase'] = {
+            'available': False,
+            'status': 'error',
+            'error': str(e)
+        }
+    
+    # Check IAP service config
+    apple_configured = bool(os.environ.get('APPLE_SHARED_SECRET'))
+    google_configured = bool(os.environ.get('GOOGLE_PLAY_CREDENTIALS_JSON'))
+    health['services']['iap'] = {
+        'apple': 'configured' if apple_configured else 'not_configured',
+        'google': 'configured' if google_configured else 'not_configured'
+    }
+    
+    # Check JWT config
+    jwt_configured = bool(os.environ.get('JWT_SECRET') or os.environ.get('SECRET_KEY'))
+    health['services']['jwt'] = {
+        'status': 'configured' if jwt_configured else 'using_default'
+    }
+    
+    # Overall status
+    if not push_service.is_available:
+        health['status'] = 'degraded'
+        health['message'] = 'Push notifications not available - Firebase not configured'
+    
+    return jsonify(health)
