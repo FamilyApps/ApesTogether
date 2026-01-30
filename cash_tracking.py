@@ -33,6 +33,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Push notification integration flag - set to True when Firebase is configured
+PUSH_NOTIFICATIONS_ENABLED = True
+
 def process_transaction(db, user_id, ticker, quantity, price, transaction_type, timestamp=None):
     """
     Process a transaction and update user's cash tracking fields.
@@ -104,6 +107,23 @@ def process_transaction(db, user_id, ticker, quantity, price, transaction_type, 
     # CRITICAL: Merge user to handle cross-session scenarios (Vercel serverless)
     # merge() updates the session's copy of the user with our changes
     db.session.merge(user)
+    
+    # Send push notifications to subscribers (Phase 1 - Mobile App)
+    if PUSH_NOTIFICATIONS_ENABLED and transaction_type in ('buy', 'sell'):
+        try:
+            from push_notification_service import notify_subscribers_of_trade
+            notification_result = notify_subscribers_of_trade(
+                db=db,
+                trader_user_id=user_id,
+                action=transaction_type,
+                ticker=ticker,
+                quantity=quantity,
+                price=price
+            )
+            logger.info(f"Push notifications sent: {notification_result.get('success_count', 0)} success, {notification_result.get('failure_count', 0)} failures")
+        except Exception as e:
+            # Don't fail the trade if notifications fail
+            logger.warning(f"Failed to send trade notifications: {e}")
     
     return {
         'max_cash_deployed': user.max_cash_deployed,
