@@ -40,6 +40,10 @@ class User(UserMixin, db.Model):
     # SMS/Email trading and notifications (NEW - for Week 2)
     phone_number = db.Column(db.String(20), nullable=True)  # E.164 format: +12125551234
     default_notification_method = db.Column(db.String(10), default='email')  # 'email' or 'sms'
+    
+    # Future-proofing for leaderboard filtering and admin controls
+    leaderboard_eligible = db.Column(db.Boolean, default=True)  # Admin can exclude from leaderboards
+    metadata = db.Column(db.JSON, default=dict)  # Flexible storage for future fields
 
 class Stock(db.Model):
     __tablename__ = 'stock'
