@@ -25,6 +25,60 @@ SECRET_KEY=...
 
 ---
 
+## 🔲 Mobile App Backend (Phase 1)
+
+### Firebase Cloud Messaging (Push Notifications)
+```bash
+# Option 1: JSON string (recommended for Vercel)
+FIREBASE_CREDENTIALS_JSON={"type":"service_account","project_id":"...","private_key":"..."}
+
+# Option 2: File path (for local development)
+FIREBASE_CREDENTIALS_PATH=/path/to/firebase-service-account.json
+```
+
+**Setup Steps**:
+1. Go to https://console.firebase.google.com/
+2. Create or select project "apestogether"
+3. Project Settings → Service Accounts → Generate new private key
+4. Download JSON file
+5. For Vercel: Stringify JSON and add as FIREBASE_CREDENTIALS_JSON
+6. For local: Set FIREBASE_CREDENTIALS_PATH to file location
+
+### Apple In-App Purchases
+```bash
+# App Store Connect shared secret
+APPLE_SHARED_SECRET=...  # From App Store Connect
+APPLE_BUNDLE_ID=com.apestogether.app
+```
+
+**Setup Steps**:
+1. Go to https://appstoreconnect.apple.com/
+2. My Apps → Your App → App Information
+3. App-Specific Shared Secret → Generate
+4. Copy and add to environment
+
+### Google Play Billing
+```bash
+# Service account JSON for Google Play Developer API
+GOOGLE_PLAY_CREDENTIALS_JSON={"type":"service_account","project_id":"..."}
+GOOGLE_PLAY_PACKAGE_NAME=com.apestogether.app
+```
+
+**Setup Steps**:
+1. Go to https://play.google.com/console/
+2. Setup → API access → Create service account
+3. Grant "Financial data" permission
+4. Download JSON key
+5. Stringify and add as GOOGLE_PLAY_CREDENTIALS_JSON
+
+### JWT for Mobile Authentication
+```bash
+# JWT secret for mobile API tokens (can use existing SECRET_KEY)
+JWT_SECRET=...  # Or falls back to SECRET_KEY
+```
+
+---
+
 ## 🔲 Need to Add (Week 2-3)
 
 ### Agent System
@@ -234,4 +288,4 @@ vercel env ls
 
 ---
 
-**Last Updated**: November 3, 2025
+**Last Updated**: January 29, 2026
