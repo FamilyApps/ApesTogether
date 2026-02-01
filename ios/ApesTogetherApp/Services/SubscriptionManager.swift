@@ -70,7 +70,7 @@ class SubscriptionManager: ObservableObject {
         isProcessing = false
     }
     
-    private func validateWithBackend(transaction: Transaction, userId: Int) async {
+    private func validateWithBackend(transaction: StoreKit.Transaction, userId: Int) async {
         // Get the receipt data
         guard let appStoreReceiptURL = Bundle.main.appStoreReceiptURL,
               FileManager.default.fileExists(atPath: appStoreReceiptURL.path),
@@ -98,7 +98,7 @@ class SubscriptionManager: ObservableObject {
     }
     
     private func listenForTransactions() async {
-        for await result in Transaction.updates {
+        for await result in StoreKit.Transaction.updates {
             do {
                 let transaction = try checkVerified(result)
                 await transaction.finish()
