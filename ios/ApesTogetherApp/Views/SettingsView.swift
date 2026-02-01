@@ -5,7 +5,7 @@ struct SettingsView: View {
     @State private var showingSignOutAlert = false
     
     var body: some View {
-        NavigationStack {
+        NavigationView {
             List {
                 // Account section
                 Section("Account") {
@@ -80,7 +80,9 @@ struct SettingsView: View {
     }
 }
 
-#Preview {
-    SettingsView()
-        .environmentObject(AuthenticationManager())
+struct SettingsView_Previews: PreviewProvider {
+    static var previews: some View {
+        SettingsView()
+            .environmentObject(AuthenticationManager())
+    }
 }

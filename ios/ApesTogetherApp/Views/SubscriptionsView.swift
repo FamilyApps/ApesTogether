@@ -4,14 +4,21 @@ struct SubscriptionsView: View {
     @StateObject private var viewModel = SubscriptionsViewModel()
     
     var body: some View {
-        NavigationStack {
+        NavigationView {
             List {
                 if viewModel.subscriptions.isEmpty && !viewModel.isLoading {
-                    ContentUnavailableView(
-                        "No Subscriptions",
-                        systemImage: "bell.slash",
-                        description: Text("Subscribe to traders from the leaderboard to get real-time alerts when they trade.")
-                    )
+                    VStack(spacing: 16) {
+                        Image(systemName: "bell.slash")
+                            .font(.system(size: 50))
+                            .foregroundColor(.secondary)
+                        Text("No Subscriptions")
+                            .font(.title2.bold())
+                        Text("Subscribe to traders from the leaderboard to get real-time alerts when they trade.")
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding()
+                    .listRowBackground(Color.clear)
                 } else {
                     ForEach(viewModel.subscriptions) { subscription in
                         if let owner = subscription.portfolioOwner {
@@ -130,7 +137,9 @@ class SubscriptionsViewModel: ObservableObject {
     }
 }
 
-#Preview {
-    SubscriptionsView()
-        .environmentObject(SubscriptionManager())
+struct SubscriptionsView_Previews: PreviewProvider {
+    static var previews: some View {
+        SubscriptionsView()
+            .environmentObject(SubscriptionManager())
+    }
 }

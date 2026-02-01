@@ -48,12 +48,14 @@ struct MainTabView: View {
                 }
                 .tag(3)
         }
-        .tint(.green)
+        .accentColor(.green)
     }
 }
 
-#Preview {
-    ContentView()
-        .environmentObject(AuthenticationManager())
-        .environmentObject(SubscriptionManager())
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()
+            .environmentObject(AuthenticationManager())
+            .environmentObject(SubscriptionManager())
+    }
 }

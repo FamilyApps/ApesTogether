@@ -192,9 +192,11 @@ class PortfolioDetailViewModel: ObservableObject {
     }
 }
 
-#Preview {
-    NavigationStack {
-        PortfolioDetailView(slug: "test")
-            .environmentObject(SubscriptionManager())
+struct PortfolioDetailView_Previews: PreviewProvider {
+    static var previews: some View {
+        NavigationView {
+            PortfolioDetailView(slug: "test")
+                .environmentObject(SubscriptionManager())
+        }
     }
 }

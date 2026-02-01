@@ -4,25 +4,34 @@ struct MyPortfolioView: View {
     @EnvironmentObject var authManager: AuthenticationManager
     
     var body: some View {
-        NavigationStack {
+        NavigationView {
             VStack(spacing: 20) {
                 if let user = authManager.currentUser, let slug = user.portfolioSlug {
                     PortfolioDetailView(slug: slug)
                 } else {
-                    ContentUnavailableView(
-                        "No Portfolio",
-                        systemImage: "chart.pie",
-                        description: Text("Add stocks on the web to see your portfolio here.")
-                    )
+                    VStack(spacing: 16) {
+                        Image(systemName: "chart.pie")
+                            .font(.system(size: 50))
+                            .foregroundColor(.secondary)
+                        Text("No Portfolio")
+                            .font(.title2.bold())
+                        Text("Add stocks on the web to see your portfolio here.")
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding()
                 }
             }
             .navigationTitle("My Portfolio")
         }
+        .navigationViewStyle(.stack)
     }
 }
 
-#Preview {
-    MyPortfolioView()
-        .environmentObject(AuthenticationManager())
-        .environmentObject(SubscriptionManager())
+struct MyPortfolioView_Previews: PreviewProvider {
+    static var previews: some View {
+        MyPortfolioView()
+            .environmentObject(AuthenticationManager())
+            .environmentObject(SubscriptionManager())
+    }
 }

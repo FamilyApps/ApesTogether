@@ -7,7 +7,7 @@ struct LeaderboardView: View {
     let periods = ["1D", "5D", "7D", "1M", "3M", "YTD", "1Y"]
     
     var body: some View {
-        NavigationStack {
+        NavigationView {
             VStack(spacing: 0) {
                 // Period selector
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -131,6 +131,8 @@ class LeaderboardViewModel: ObservableObject {
     }
 }
 
-#Preview {
-    LeaderboardView()
+struct LeaderboardView_Previews: PreviewProvider {
+    static var previews: some View {
+        LeaderboardView()
+    }
 }
