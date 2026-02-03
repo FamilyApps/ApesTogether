@@ -15,7 +15,7 @@ class AuthenticationManager: ObservableObject {
     }
     
     private func checkExistingAuth() {
-        if let token = keychain.getToken() {
+        if keychain.getToken() != nil {
             self.isAuthenticated = true
             Task {
                 await refreshUserData()

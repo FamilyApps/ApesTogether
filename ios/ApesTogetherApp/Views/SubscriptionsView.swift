@@ -126,7 +126,7 @@ class SubscriptionsViewModel: ObservableObject {
             try await APIService.shared.updateNotificationSettings(subscriptionId: subscriptionId, enabled: enabled)
             
             if let index = subscriptions.firstIndex(where: { $0.id == subscriptionId }) {
-                var updated = subscriptions[index]
+                let updated = subscriptions[index]
                 subscriptions[index] = SubscriptionMade(
                     id: updated.id,
                     portfolioOwner: updated.portfolioOwner,
