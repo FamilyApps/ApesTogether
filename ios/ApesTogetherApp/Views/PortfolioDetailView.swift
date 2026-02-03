@@ -93,8 +93,10 @@ struct PortfolioDetailView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            await viewModel.loadPortfolio(slug: slug)
+        .onAppear {
+            Task {
+                await viewModel.loadPortfolio(slug: slug)
+            }
         }
     }
 }

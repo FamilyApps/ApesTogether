@@ -34,16 +34,20 @@ struct SubscriptionsView: View {
             .refreshable {
                 await viewModel.loadSubscriptions()
             }
-            .task {
+            .onAppear {
                 if viewModel.subscriptions.isEmpty {
-                    await viewModel.loadSubscriptions()
+                    Task {
+                        await viewModel.loadSubscriptions()
+                    }
                 }
             }
-            .overlay {
-                if viewModel.isLoading && viewModel.subscriptions.isEmpty {
-                    ProgressView()
+            .overlay(
+                Group {
+                    if viewModel.isLoading && viewModel.subscriptions.isEmpty {
+                        ProgressView()
+                    }
                 }
-            }
+            )
         }
     }
 }

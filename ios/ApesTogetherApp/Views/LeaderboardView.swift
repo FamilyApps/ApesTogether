@@ -65,9 +65,11 @@ struct LeaderboardView: View {
                 }
             }
             .navigationTitle("Leaderboard")
-            .task {
+            .onAppear {
                 if viewModel.entries.isEmpty {
-                    await viewModel.loadLeaderboard(period: selectedPeriod)
+                    Task {
+                        await viewModel.loadLeaderboard(period: selectedPeriod)
+                    }
                 }
             }
         }
