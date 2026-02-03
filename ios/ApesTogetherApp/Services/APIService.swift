@@ -38,13 +38,18 @@ class APIService {
     
     // MARK: - Device Registration
     
+    @MainActor
     func registerDeviceToken(_ token: String) async {
+        let deviceId = UIDevice.current.identifierForVendor?.uuidString ?? ""
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let osVersion = UIDevice.current.systemVersion
+        
         let body: [String: Any] = [
             "token": token,
             "platform": "ios",
-            "device_id": UIDevice.current.identifierForVendor?.uuidString ?? "",
-            "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0",
-            "os_version": UIDevice.current.systemVersion
+            "device_id": deviceId,
+            "app_version": appVersion,
+            "os_version": osVersion
         ]
         
         do {
