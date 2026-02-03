@@ -29,11 +29,11 @@ class APIService {
     }
     
     func getCurrentUser() async throws -> User {
-        try await get("/auth/user")
+        return try await get("/auth/user")
     }
     
     func refreshToken() async throws -> AuthResponse {
-        try await post("/auth/refresh", body: [:], authenticated: true)
+        return try await post("/auth/refresh", body: [:], authenticated: true)
     }
     
     // MARK: - Device Registration
@@ -57,19 +57,19 @@ class APIService {
     // MARK: - Leaderboard
     
     func getLeaderboard(period: String = "7D", category: String = "all", limit: Int = 50) async throws -> LeaderboardResponse {
-        try await get("/leaderboard?period=\(period)&category=\(category)&limit=\(limit)", authenticated: false)
+        return try await get("/leaderboard?period=\(period)&category=\(category)&limit=\(limit)", authenticated: false)
     }
     
     // MARK: - Portfolio
     
     func getPortfolio(slug: String) async throws -> PortfolioResponse {
-        try await get("/portfolio/\(slug)")
+        return try await get("/portfolio/\(slug)")
     }
     
     // MARK: - Subscriptions
     
     func getSubscriptions() async throws -> SubscriptionsResponse {
-        try await get("/subscriptions")
+        return try await get("/subscriptions")
     }
     
     func validatePurchase(platform: String, receiptData: String?, purchaseToken: String?, subscribedToId: Int) async throws -> PurchaseValidationResponse {
