@@ -6,90 +6,130 @@ struct PortfolioDetailView: View {
     @EnvironmentObject var subscriptionManager: SubscriptionManager
     
     var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                if viewModel.isLoading {
-                    ProgressView()
-                        .padding(.top, 100)
-                } else if let portfolio = viewModel.portfolio {
-                    // Header
-                    VStack(spacing: 8) {
-                        Text(portfolio.owner.username)
-                            .font(.title.bold())
-                        
-                        HStack(spacing: 16) {
-                            Label("\(portfolio.subscriberCount)", systemImage: "person.2.fill")
-                            Text("$\(String(format: "%.2f", portfolio.subscriptionPrice))/mo")
-                        }
-                        .foregroundColor(.secondary)
-                    }
-                    .padding()
-                    
-                    Divider()
-                    
-                    // Holdings section
-                    if let holdings = portfolio.holdings {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Holdings")
-                                .font(.headline)
-                                .padding(.horizontal)
+        ZStack {
+            Color.appBackground.ignoresSafeArea()
+            
+            ScrollView {
+                VStack(spacing: 20) {
+                    if viewModel.isLoading {
+                        ProgressView()
+                            .tint(.primaryAccent)
+                            .padding(.top, 100)
+                    } else if let portfolio = viewModel.portfolio {
+                        // Header card
+                        VStack(spacing: 12) {
+                            Text(portfolio.owner.username)
+                                .font(.title.bold())
+                                .foregroundColor(.textPrimary)
                             
-                            ForEach(holdings) { holding in
-                                HoldingRow(holding: holding)
+                            HStack(spacing: 20) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "person.2.fill")
+                                        .foregroundColor(.primaryAccent)
+                                    Text("\(portfolio.subscriberCount)")
+                                        .foregroundColor(.textSecondary)
+                                }
+                                
+                                HStack(spacing: 4) {
+                                    Text("$\(String(format: "%.2f", portfolio.subscriptionPrice))")
+                                        .foregroundColor(.primaryAccent)
+                                        .fontWeight(.semibold)
+                                    Text("/mo")
+                                        .foregroundColor(.textMuted)
+                                }
                             }
+                            .font(.subheadline)
                         }
+                        .padding(.vertical, 24)
+                        .frame(maxWidth: .infinity)
+                        .background(
+                            LinearGradient(
+                                colors: [Color.primaryAccent.opacity(0.1), Color.appBackground],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
                         
-                        Divider()
-                        
-                        // Recent trades
-                        if let trades = portfolio.recentTrades, !trades.isEmpty {
+                        // Holdings section
+                        if let holdings = portfolio.holdings {
                             VStack(alignment: .leading, spacing: 12) {
-                                Text("Recent Trades")
-                                    .font(.headline)
+                                SectionHeader(title: "Holdings")
                                     .padding(.horizontal)
                                 
-                                ForEach(trades) { trade in
-                                    TradeRow(trade: trade)
+                                VStack(spacing: 0) {
+                                    ForEach(Array(holdings.enumerated()), id: \.element.id) { index, holding in
+                                        HoldingRow(holding: holding)
+                                        if index < holdings.count - 1 {
+                                            AccentDivider()
+                                        }
+                                    }
+                                }
+                                .cardStyle(padding: 0)
+                                .padding(.horizontal)
+                            }
+                            
+                            // Recent trades
+                            if let trades = portfolio.recentTrades, !trades.isEmpty {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    SectionHeader(title: "Recent Trades")
+                                        .padding(.horizontal)
+                                    
+                                    VStack(spacing: 0) {
+                                        ForEach(Array(trades.enumerated()), id: \.element.id) { index, trade in
+                                            TradeRow(trade: trade)
+                                            if index < trades.count - 1 {
+                                                AccentDivider()
+                                            }
+                                        }
+                                    }
+                                    .cardStyle(padding: 0)
+                                    .padding(.horizontal)
                                 }
                             }
-                        }
-                    } else {
-                        // Subscription prompt
-                        VStack(spacing: 16) {
-                            Image(systemName: "lock.fill")
-                                .font(.system(size: 50))
-                                .foregroundColor(.secondary)
-                            
-                            Text(portfolio.previewMessage ?? "Subscribe to view holdings")
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-                            
-                            Button {
-                                Task {
-                                    await subscriptionManager.subscribe(to: portfolio.owner.id)
+                        } else {
+                            // Subscription prompt
+                            VStack(spacing: 20) {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.primaryAccent.opacity(0.1))
+                                        .frame(width: 80, height: 80)
+                                    
+                                    Image(systemName: "lock.fill")
+                                        .font(.system(size: 32))
+                                        .foregroundColor(.primaryAccent)
                                 }
-                            } label: {
-                                HStack {
-                                    Text("Subscribe")
-                                    Text("$\(String(format: "%.2f", portfolio.subscriptionPrice))/mo")
-                                        .fontWeight(.semibold)
+                                
+                                Text(portfolio.previewMessage ?? "Subscribe to view holdings")
+                                    .foregroundColor(.textSecondary)
+                                    .multilineTextAlignment(.center)
+                                
+                                Button {
+                                    Task {
+                                        await subscriptionManager.subscribe(to: portfolio.owner.id)
+                                    }
+                                } label: {
+                                    HStack {
+                                        Text("Subscribe")
+                                        Text("$\(String(format: "%.2f", portfolio.subscriptionPrice))/mo")
+                                            .fontWeight(.semibold)
+                                    }
                                 }
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.green)
-                                .foregroundColor(.white)
-                                .cornerRadius(12)
+                                .buttonStyle(PrimaryButtonStyle(isDisabled: subscriptionManager.isProcessing))
+                                .padding(.horizontal, 40)
+                                .disabled(subscriptionManager.isProcessing)
                             }
-                            .padding(.horizontal, 40)
-                            .disabled(subscriptionManager.isProcessing)
+                            .padding(.vertical, 40)
                         }
-                        .padding(.vertical, 40)
+                    } else if let error = viewModel.error {
+                        EmptyStateView(
+                            icon: "exclamationmark.triangle",
+                            title: "Error",
+                            message: error
+                        )
+                        .padding(.top, 60)
                     }
-                } else if let error = viewModel.error {
-                    Text(error)
-                        .foregroundColor(.secondary)
-                        .padding()
                 }
+                .padding(.bottom, 20)
             }
         }
         .navigationBarTitleDisplayMode(.inline)
@@ -106,55 +146,71 @@ struct HoldingRow: View {
     
     var body: some View {
         HStack {
-            VStack(alignment: .leading) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(holding.ticker)
                     .font(.headline)
+                    .foregroundColor(.textPrimary)
                 Text("\(Int(holding.quantity)) shares")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.textSecondary)
             }
             
             Spacer()
             
-            VStack(alignment: .trailing) {
+            VStack(alignment: .trailing, spacing: 4) {
                 Text("$\(String(format: "%.2f", holding.purchasePrice))")
                     .font(.subheadline)
+                    .foregroundColor(.textPrimary)
                 Text("avg cost")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.textMuted)
             }
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
+        .padding()
     }
 }
 
 struct TradeRow: View {
     let trade: Trade
     
+    private var isBuy: Bool {
+        trade.type.lowercased() == "buy"
+    }
+    
     var body: some View {
-        HStack {
-            Circle()
-                .fill(trade.type.lowercased() == "buy" ? Color.green : Color.red)
-                .frame(width: 8, height: 8)
+        HStack(spacing: 12) {
+            // Trade type indicator
+            ZStack {
+                Circle()
+                    .fill((isBuy ? Color.gains : Color.losses).opacity(0.15))
+                    .frame(width: 32, height: 32)
+                
+                Image(systemName: isBuy ? "arrow.down.left" : "arrow.up.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundColor(isBuy ? .gains : .losses)
+            }
             
-            VStack(alignment: .leading) {
-                Text("\(trade.type.uppercased()) \(trade.ticker)")
-                    .font(.subheadline.bold())
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(trade.type.uppercased())
+                        .font(.caption.weight(.bold))
+                        .foregroundColor(isBuy ? .gains : .losses)
+                    Text(trade.ticker)
+                        .font(.subheadline.bold())
+                        .foregroundColor(.textPrimary)
+                }
                 Text(formatDate(trade.timestamp))
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.textMuted)
             }
             
             Spacer()
             
-            VStack(alignment: .trailing) {
-                Text("\(Int(trade.quantity)) @ $\(String(format: "%.2f", trade.price))")
-                    .font(.subheadline)
-            }
+            Text("\(Int(trade.quantity)) @ $\(String(format: "%.2f", trade.price))")
+                .font(.subheadline)
+                .foregroundColor(.textSecondary)
         }
-        .padding(.horizontal)
-        .padding(.vertical, 4)
+        .padding()
     }
     
     private func formatDate(_ dateString: String) -> String {

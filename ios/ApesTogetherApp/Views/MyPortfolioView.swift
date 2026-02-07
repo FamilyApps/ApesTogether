@@ -5,21 +5,21 @@ struct MyPortfolioView: View {
     
     var body: some View {
         NavigationView {
-            VStack(spacing: 20) {
-                if let user = authManager.currentUser, let slug = user.portfolioSlug {
-                    PortfolioDetailView(slug: slug)
-                } else {
-                    VStack(spacing: 16) {
-                        Image(systemName: "chart.pie")
-                            .font(.system(size: 50))
-                            .foregroundColor(.secondary)
-                        Text("No Portfolio")
-                            .font(.title2.bold())
-                        Text("Add stocks on the web to see your portfolio here.")
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
+            ZStack {
+                Color.appBackground.ignoresSafeArea()
+                
+                VStack(spacing: 20) {
+                    if let user = authManager.currentUser, let slug = user.portfolioSlug {
+                        PortfolioDetailView(slug: slug)
+                    } else {
+                        Spacer()
+                        EmptyStateView(
+                            icon: "chart.pie",
+                            title: "No Portfolio",
+                            message: "Add stocks on the web to see your portfolio here."
+                        )
+                        Spacer()
                     }
-                    .padding()
                 }
             }
             .navigationTitle("My Portfolio")

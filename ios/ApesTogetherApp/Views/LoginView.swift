@@ -6,28 +6,46 @@ struct LoginView: View {
     
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color.black, Color(red: 0.1, green: 0.2, blue: 0.1)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+            // Background gradient
+            LinearGradient.heroGradient
+                .ignoresSafeArea()
+            
+            // Decorative gradient accent
+            VStack {
+                Spacer()
+                LinearGradient(
+                    colors: [Color.primaryAccent.opacity(0.0), Color.primaryAccent.opacity(0.08)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 300)
+            }
             .ignoresSafeArea()
             
             VStack(spacing: 40) {
                 Spacer()
                 
                 // Logo and title
-                VStack(spacing: 16) {
-                    Text("🦍")
-                        .font(.system(size: 80))
+                VStack(spacing: 20) {
+                    // App icon
+                    Image("AppIcon-1024")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 100, height: 100)
+                        .cornerRadius(22)
+                        .shadow(color: Color.primaryAccent.opacity(0.3), radius: 20, x: 0, y: 10)
                     
-                    Text("Apes Together")
-                        .font(.system(size: 36, weight: .bold))
-                        .foregroundColor(.white)
+                    VStack(spacing: 8) {
+                        Text("Apes")
+                            .foregroundColor(.textPrimary) +
+                        Text(" Together")
+                            .foregroundColor(.primaryAccent)
+                    }
+                    .font(.system(size: 36, weight: .bold))
                     
                     Text("Follow top traders.\nGet real-time alerts.")
                         .font(.title3)
-                        .foregroundColor(.gray)
+                        .foregroundColor(.textSecondary)
                         .multilineTextAlignment(.center)
                 }
                 
@@ -47,19 +65,20 @@ struct LoginView: View {
                     }
                 }
                 .signInWithAppleButtonStyle(.white)
-                .frame(height: 50)
-                .cornerRadius(8)
+                .frame(height: 54)
+                .cornerRadius(12)
                 .padding(.horizontal, 40)
                 
                 if authManager.isLoading {
                     ProgressView()
-                        .tint(.white)
+                        .tint(.primaryAccent)
                 }
                 
                 if let error = authManager.error {
                     Text(error)
-                        .foregroundColor(.red)
+                        .foregroundColor(.losses)
                         .font(.caption)
+                        .padding(.horizontal)
                 }
                 
                 Spacer()
@@ -68,7 +87,7 @@ struct LoginView: View {
                 // Terms
                 Text("By signing in, you agree to our Terms of Service and Privacy Policy")
                     .font(.caption)
-                    .foregroundColor(.gray)
+                    .foregroundColor(.textMuted)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
                     .padding(.bottom, 20)

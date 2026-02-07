@@ -6,61 +6,84 @@ struct LeaderboardView: View {
     
     let periods = ["1D", "5D", "7D", "1M", "3M", "YTD", "1Y"]
     
+    init() {
+        // Configure navigation bar appearance
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithOpaqueBackground()
+        appearance.backgroundColor = UIColor(Color.appBackground)
+        appearance.titleTextAttributes = [.foregroundColor: UIColor(Color.textPrimary)]
+        appearance.largeTitleTextAttributes = [.foregroundColor: UIColor(Color.textPrimary)]
+        UINavigationBar.appearance().standardAppearance = appearance
+        UINavigationBar.appearance().scrollEdgeAppearance = appearance
+    }
+    
     var body: some View {
         NavigationView {
-            VStack(spacing: 0) {
-                // Period selector
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(periods, id: \.self) { period in
-                            Button {
-                                selectedPeriod = period
-                                Task {
-                                    await viewModel.loadLeaderboard(period: period)
+            ZStack {
+                Color.appBackground.ignoresSafeArea()
+                
+                VStack(spacing: 0) {
+                    // Period selector
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(periods, id: \.self) { period in
+                                Button {
+                                    selectedPeriod = period
+                                    Task {
+                                        await viewModel.loadLeaderboard(period: period)
+                                    }
+                                } label: {
+                                    Text(period)
                                 }
-                            } label: {
-                                Text(period)
-                                    .font(.subheadline.weight(.semibold))
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 8)
-                                    .background(selectedPeriod == period ? Color.green : Color.gray.opacity(0.2))
-                                    .foregroundColor(selectedPeriod == period ? .white : .primary)
-                                    .cornerRadius(20)
+                                .buttonStyle(PillButtonStyle(isSelected: selectedPeriod == period))
                             }
                         }
+                        .padding(.horizontal)
+                        .padding(.vertical, 12)
                     }
-                    .padding(.horizontal)
-                    .padding(.vertical, 12)
-                }
-                .background(Color(.systemBackground))
-                
-                Divider()
-                
-                // Leaderboard list
-                if viewModel.isLoading && viewModel.entries.isEmpty {
-                    Spacer()
-                    ProgressView()
-                    Spacer()
-                } else if let error = viewModel.error {
-                    Spacer()
-                    Text(error)
-                        .foregroundColor(.secondary)
-                    Button("Retry") {
-                        Task {
+                    
+                    AccentDivider()
+                    
+                    // Leaderboard list
+                    if viewModel.isLoading && viewModel.entries.isEmpty {
+                        Spacer()
+                        ProgressView()
+                            .tint(.primaryAccent)
+                        Spacer()
+                    } else if let error = viewModel.error {
+                        Spacer()
+                        EmptyStateView(
+                            icon: "exclamationmark.triangle",
+                            title: "Error",
+                            message: error,
+                            action: {
+                                Task {
+                                    await viewModel.loadLeaderboard(period: selectedPeriod)
+                                }
+                            },
+                            actionLabel: "Retry"
+                        )
+                        Spacer()
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(viewModel.entries) { entry in
+                                    NavigationLink(destination: PortfolioDetailView(slug: entry.user.portfolioSlug ?? "")) {
+                                        LeaderboardRow(entry: entry)
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                    
+                                    if entry.id != viewModel.entries.last?.id {
+                                        AccentDivider()
+                                            .padding(.leading, 50)
+                                    }
+                                }
+                            }
+                            .padding(.top, 8)
+                        }
+                        .refreshable {
                             await viewModel.loadLeaderboard(period: selectedPeriod)
                         }
-                    }
-                    .padding()
-                    Spacer()
-                } else {
-                    List(viewModel.entries) { entry in
-                        NavigationLink(destination: PortfolioDetailView(slug: entry.user.portfolioSlug ?? "")) {
-                            LeaderboardRow(entry: entry)
-                        }
-                    }
-                    .listStyle(.plain)
-                    .refreshable {
-                        await viewModel.loadLeaderboard(period: selectedPeriod)
                     }
                 }
             }
@@ -81,16 +104,22 @@ struct LeaderboardRow: View {
     
     var body: some View {
         HStack(spacing: 12) {
-            // Rank
-            Text("\(entry.rank)")
-                .font(.headline)
-                .foregroundColor(.secondary)
-                .frame(width: 30)
+            // Rank badge
+            ZStack {
+                Circle()
+                    .fill(entry.rank <= 3 ? Color.primaryAccent.opacity(0.15) : Color.cardBackground)
+                    .frame(width: 36, height: 36)
+                
+                Text("\(entry.rank)")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundColor(entry.rank <= 3 ? .primaryAccent : .textSecondary)
+            }
             
             // User info
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(entry.user.username)
                     .font(.headline)
+                    .foregroundColor(.textPrimary)
                 
                 HStack(spacing: 4) {
                     Image(systemName: "person.2.fill")
@@ -98,7 +127,7 @@ struct LeaderboardRow: View {
                     Text("\(entry.subscriberCount)")
                         .font(.caption)
                 }
-                .foregroundColor(.secondary)
+                .foregroundColor(.textSecondary)
             }
             
             Spacer()
@@ -106,9 +135,16 @@ struct LeaderboardRow: View {
             // Return percentage
             Text(String(format: "%+.2f%%", entry.returnPercent))
                 .font(.headline.monospacedDigit())
-                .foregroundColor(entry.returnPercent >= 0 ? .green : .red)
+                .foregroundColor(entry.returnPercent >= 0 ? .gains : .losses)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule()
+                        .fill((entry.returnPercent >= 0 ? Color.gains : Color.losses).opacity(0.15))
+                )
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal)
+        .padding(.vertical, 12)
     }
 }
 

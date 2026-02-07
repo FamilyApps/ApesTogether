@@ -22,6 +22,19 @@ struct ContentView: View {
 struct MainTabView: View {
     @State private var selectedTab = 0
     
+    init() {
+        // Configure tab bar appearance
+        let appearance = UITabBarAppearance()
+        appearance.configureWithOpaqueBackground()
+        appearance.backgroundColor = UIColor(Color.appBackground)
+        appearance.stackedLayoutAppearance.selected.iconColor = UIColor(Color.primaryAccent)
+        appearance.stackedLayoutAppearance.selected.titleTextAttributes = [.foregroundColor: UIColor(Color.primaryAccent)]
+        appearance.stackedLayoutAppearance.normal.iconColor = UIColor(Color.textSecondary)
+        appearance.stackedLayoutAppearance.normal.titleTextAttributes = [.foregroundColor: UIColor(Color.textSecondary)]
+        UITabBar.appearance().standardAppearance = appearance
+        UITabBar.appearance().scrollEdgeAppearance = appearance
+    }
+    
     var body: some View {
         TabView(selection: $selectedTab) {
             LeaderboardView()
@@ -48,7 +61,7 @@ struct MainTabView: View {
                 }
                 .tag(3)
         }
-        .accentColor(.green)
+        .accentColor(.primaryAccent)
     }
 }
 

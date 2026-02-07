@@ -5,35 +5,35 @@ struct SubscriptionsView: View {
     
     var body: some View {
         NavigationView {
-            List {
+            ZStack {
+                Color.appBackground.ignoresSafeArea()
+                
                 if viewModel.subscriptions.isEmpty && !viewModel.isLoading {
-                    VStack(spacing: 16) {
-                        Image(systemName: "bell.slash")
-                            .font(.system(size: 50))
-                            .foregroundColor(.secondary)
-                        Text("No Subscriptions")
-                            .font(.title2.bold())
-                        Text("Subscribe to traders from the leaderboard to get real-time alerts when they trade.")
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding()
-                    .listRowBackground(Color.clear)
+                    EmptyStateView(
+                        icon: "bell.slash",
+                        title: "No Subscriptions",
+                        message: "Subscribe to traders from the leaderboard to get real-time alerts when they trade."
+                    )
                 } else {
-                    ForEach(viewModel.subscriptions) { subscription in
-                        if let owner = subscription.portfolioOwner {
-                            NavigationLink(destination: PortfolioDetailView(slug: owner.portfolioSlug ?? "")) {
-                                SubscriptionRow(subscription: subscription, viewModel: viewModel)
+                    ScrollView {
+                        LazyVStack(spacing: 12) {
+                            ForEach(viewModel.subscriptions) { subscription in
+                                if let owner = subscription.portfolioOwner {
+                                    NavigationLink(destination: PortfolioDetailView(slug: owner.portfolioSlug ?? "")) {
+                                        SubscriptionRow(subscription: subscription, viewModel: viewModel)
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                }
                             }
                         }
+                        .padding()
+                    }
+                    .refreshable {
+                        await viewModel.loadSubscriptions()
                     }
                 }
             }
-            .listStyle(.insetGrouped)
             .navigationTitle("Following")
-            .refreshable {
-                await viewModel.loadSubscriptions()
-            }
             .onAppear {
                 if viewModel.subscriptions.isEmpty {
                     Task {
@@ -45,6 +45,7 @@ struct SubscriptionsView: View {
                 Group {
                     if viewModel.isLoading && viewModel.subscriptions.isEmpty {
                         ProgressView()
+                            .tint(.primaryAccent)
                     }
                 }
             )
@@ -58,19 +59,21 @@ struct SubscriptionRow: View {
     
     var body: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(subscription.portfolioOwner?.username ?? "Unknown")
                     .font(.headline)
+                    .foregroundColor(.textPrimary)
                 
-                HStack {
-                    Text(subscription.status.capitalized)
-                        .font(.caption)
-                        .foregroundColor(subscription.status == "active" ? .green : .secondary)
+                HStack(spacing: 8) {
+                    StatusBadge(
+                        text: subscription.status.capitalized,
+                        color: subscription.status == "active" ? .gains : .textSecondary
+                    )
                     
                     if let expires = subscription.expiresAt {
-                        Text("• Expires \(formatDate(expires))")
+                        Text("Expires \(formatDate(expires))")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.textMuted)
                     }
                 }
             }
@@ -86,9 +89,11 @@ struct SubscriptionRow: View {
                     }
                 }
             ))
+            .toggleStyle(SwitchToggleStyle(tint: Color.primaryAccent))
             .labelsHidden()
         }
-        .padding(.vertical, 4)
+        .padding()
+        .cardStyle(padding: 0)
     }
     
     private func formatDate(_ dateString: String) -> String {
