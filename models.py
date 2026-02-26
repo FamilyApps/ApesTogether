@@ -43,7 +43,7 @@ class User(UserMixin, db.Model):
     
     # Future-proofing for leaderboard filtering and admin controls
     leaderboard_eligible = db.Column(db.Boolean, default=True)  # Admin can exclude from leaderboards
-    metadata = db.Column(db.JSON, default=dict)  # Flexible storage for future fields
+    extra_data = db.Column('metadata', db.JSON, default=dict)  # Flexible storage for future fields
 
 class Stock(db.Model):
     __tablename__ = 'stock'
