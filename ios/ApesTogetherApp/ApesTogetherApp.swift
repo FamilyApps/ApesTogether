@@ -13,6 +13,9 @@ struct ApesTogetherApp: App {
             ContentView()
                 .environmentObject(authManager)
                 .environmentObject(subscriptionManager)
+                .onOpenURL { url in
+                    DeepLinkManager.shared.handleUniversalLink(url)
+                }
         }
     }
 }
@@ -94,4 +97,5 @@ class AppDelegate: NSObject, UIApplicationDelegate, MessagingDelegate, UNUserNot
 
 extension Notification.Name {
     static let openPortfolio = Notification.Name("openPortfolio")
+    static let didSubscribe = Notification.Name("didSubscribe")
 }

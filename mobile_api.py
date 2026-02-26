@@ -448,6 +448,82 @@ def get_portfolio(slug):
         return jsonify({'error': 'failed_to_get_portfolio'}), 500
 
 
+@mobile_api.route('/portfolio/stocks', methods=['POST'])
+@require_auth
+def add_stocks():
+    """
+    Add stocks to the authenticated user's portfolio
+    
+    Request body:
+    {
+        "stocks": [
+            {"ticker": "AAPL", "quantity": 10},
+            {"ticker": "TSLA", "quantity": 5}
+        ]
+    }
+    """
+    from models import db, Stock
+    
+    data = request.get_json()
+    if not data or 'stocks' not in data:
+        return jsonify({'error': 'stocks_required'}), 400
+    
+    stocks_list = data['stocks']
+    if not isinstance(stocks_list, list) or len(stocks_list) == 0:
+        return jsonify({'error': 'stocks_must_be_non_empty_list'}), 400
+    
+    added_count = 0
+    errors = []
+    
+    for item in stocks_list:
+        ticker = item.get('ticker', '').strip().upper()
+        quantity = item.get('quantity')
+        
+        if not ticker or not quantity:
+            errors.append(f"Missing ticker or quantity")
+            continue
+        
+        try:
+            quantity = float(quantity)
+            if quantity <= 0:
+                errors.append(f"Invalid quantity for {ticker}")
+                continue
+        except (ValueError, TypeError):
+            errors.append(f"Invalid quantity for {ticker}")
+            continue
+        
+        try:
+            # Check if user already has this stock
+            existing = Stock.query.filter_by(user_id=g.user_id, ticker=ticker).first()
+            if existing:
+                existing.quantity += quantity
+            else:
+                stock = Stock(
+                    ticker=ticker,
+                    quantity=quantity,
+                    purchase_price=0.0,
+                    user_id=g.user_id
+                )
+                db.session.add(stock)
+            added_count += 1
+        except Exception as e:
+            logger.error(f"Error adding stock {ticker}: {e}")
+            errors.append(f"Failed to add {ticker}")
+    
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error committing stocks: {e}")
+        return jsonify({'error': 'failed_to_save_stocks'}), 500
+    
+    return jsonify({
+        'success': True,
+        'added_count': added_count,
+        'errors': errors if errors else None
+    })
+
+
 @mobile_api.route('/leaderboard', methods=['GET'])
 def get_leaderboard():
     """

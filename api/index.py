@@ -26291,6 +26291,21 @@ def run_portfolio_slug_migration():
             'traceback': traceback.format_exc()
         }), 500
 
+@app.route('/.well-known/apple-app-site-association')
+def apple_app_site_association():
+    """Serve Apple App Site Association file for Universal Links"""
+    return jsonify({
+        "applinks": {
+            "apps": [],
+            "details": [
+                {
+                    "appID": os.environ.get('APPLE_TEAM_ID', 'TEAM_ID') + ".com.apestogether.ApesTogether",
+                    "paths": ["/p/*"]
+                }
+            ]
+        }
+    }), 200, {'Content-Type': 'application/json'}
+
 @app.route('/p/<slug>')
 def public_portfolio_view(slug):
     """Public portfolio view - accessible without login"""

@@ -64,6 +64,14 @@ struct LeaderboardView: View {
                             actionLabel: "Retry"
                         )
                         Spacer()
+                    } else if viewModel.entries.isEmpty {
+                        Spacer()
+                        EmptyStateView(
+                            icon: "trophy",
+                            title: "Leaderboard Coming Soon",
+                            message: "As traders join and add their portfolios, the leaderboard will populate. Add your stocks to be among the first!"
+                        )
+                        Spacer()
                     } else {
                         ScrollView {
                             LazyVStack(spacing: 0) {

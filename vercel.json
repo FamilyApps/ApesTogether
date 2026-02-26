@@ -13,6 +13,13 @@
       "dest": "/static/$1"
     },
     {
+      "src": "/.well-known/apple-app-site-association",
+      "dest": "/public/.well-known/apple-app-site-association",
+      "headers": {
+        "Content-Type": "application/json"
+      }
+    },
+    {
       "src": "/(.*)",
       "dest": "/api/vercel.py"
     }

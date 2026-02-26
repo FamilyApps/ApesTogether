@@ -100,6 +100,15 @@ class APIService {
         let _: EmptyResponse = try await put("/notifications/settings", body: body)
     }
     
+    // MARK: - Portfolio Management
+    
+    func addStocks(stocks: [[String: Any]]) async throws -> AddStocksResponse {
+        let body: [String: Any] = [
+            "stocks": stocks
+        ]
+        return try await post("/portfolio/stocks", body: body, authenticated: true)
+    }
+    
     // MARK: - Private Helpers
     
     private func get<T: Decodable>(_ endpoint: String, authenticated: Bool = true) async throws -> T {

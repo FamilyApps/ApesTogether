@@ -17,6 +17,12 @@ struct AuthResponse: Codable {
     let user: User
 }
 
+struct AddStocksResponse: Codable {
+    let success: Bool
+    let addedCount: Int
+    let errors: [String]?
+}
+
 // MARK: - Leaderboard
 
 struct LeaderboardResponse: Codable {
