@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 struct SubscriptionsView: View {
     @StateObject private var viewModel = SubscriptionsViewModel()

@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 struct LeaderboardView: View {
     @StateObject private var viewModel = LeaderboardViewModel()
