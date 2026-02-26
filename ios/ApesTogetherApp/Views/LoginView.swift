@@ -27,8 +27,8 @@ struct LoginView: View {
                 
                 // Logo and title
                 VStack(spacing: 20) {
-                    // App icon
-                    Image("AppIcon-1024")
+                    // App logo
+                    Image("AppLogo")
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .frame(width: 100, height: 100)
