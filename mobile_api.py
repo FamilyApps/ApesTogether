@@ -665,8 +665,10 @@ def get_auth_token():
         })
         
     except Exception as e:
+        import traceback
         logger.error(f"Auth token error: {e}")
-        return jsonify({'error': 'authentication_failed'}), 500
+        logger.error(f"Auth token traceback: {traceback.format_exc()}")
+        return jsonify({'error': f'authentication_failed: {str(e)}'}), 500
 
 
 @mobile_api.route('/auth/refresh', methods=['POST'])
