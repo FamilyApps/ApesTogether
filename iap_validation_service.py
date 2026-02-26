@@ -56,7 +56,7 @@ class IAPValidationService:
     def __init__(self):
         # Apple credentials
         self.apple_shared_secret = os.environ.get('APPLE_SHARED_SECRET')
-        self.apple_bundle_id = os.environ.get('APPLE_BUNDLE_ID', 'com.apestogether.app')
+        self.apple_bundle_id = os.environ.get('APPLE_BUNDLE_ID', 'com.apestogether.ApesTogether')
         
         # Google credentials
         self.google_credentials = None

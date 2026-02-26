@@ -24,7 +24,7 @@ import re
 # from flask_migrate import Migrate
 # from authlib.integrations.flask_client import OAuth
 # import requests
-import stripe
+# import stripe  # DISABLED (Feb 2026): Web payments disabled, mobile uses Apple IAP
 from datetime import datetime, date, timedelta
 
 # App configuration
@@ -39,13 +39,11 @@ if database_url:
 app.config['SQLALCHEMY_DATABASE_URI'] = database_url or 'sqlite:///portfolio.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Stripe configuration
-app.config['STRIPE_PUBLIC_KEY'] = os.environ.get('STRIPE_PUBLIC_KEY')
-app.config['STRIPE_SECRET_KEY'] = os.environ.get('STRIPE_SECRET_KEY')
-
-app.config['STRIPE_WEBHOOK_SECRET'] = os.environ.get('STRIPE_WEBHOOK_SECRET')
-
-stripe.api_key = app.config['STRIPE_SECRET_KEY']
+# DISABLED (Feb 2026): Web payments disabled, mobile uses Apple IAP
+# app.config['STRIPE_PUBLIC_KEY'] = os.environ.get('STRIPE_PUBLIC_KEY')
+# app.config['STRIPE_SECRET_KEY'] = os.environ.get('STRIPE_SECRET_KEY')
+# app.config['STRIPE_WEBHOOK_SECRET'] = os.environ.get('STRIPE_WEBHOOK_SECRET')
+# stripe.api_key = app.config['STRIPE_SECRET_KEY']
 
 
 # Initialize extensions
@@ -755,98 +753,21 @@ def profile(username):
         subscription=subscription,
         portfolio_data=portfolio_data,
         price=user_to_view.subscription_price,
-        stripe_public_key=app.config['STRIPE_PUBLIC_KEY']
+        stripe_public_key=None  # DISABLED (Feb 2026): Web payments disabled
     )
 
 
 @app.route('/create-payment-intent', methods=['POST'])
 @login_required
 def create_payment_intent():
-    """Creates a subscription and a Payment Intent for Stripe Elements."""
-    data = request.get_json()
-    user_id = data.get('user_id')
-    user_to_subscribe_to = User.query.get_or_404(user_id)
-
-    try:
-        # Get or create a Stripe customer for the current user
-        if not current_user.stripe_customer_id:
-            customer = stripe.Customer.create(
-                email=current_user.email,
-                name=current_user.username
-            )
-            current_user.stripe_customer_id = customer.id
-            db.session.commit()
-        
-        customer_id = current_user.stripe_customer_id
-
-        # Create a subscription with an incomplete payment
-        subscription = stripe.Subscription.create(
-            customer=customer_id,
-            items=[{'price': user_to_subscribe_to.stripe_price_id}],
-            payment_behavior='default_incomplete',
-            payment_settings={'save_default_payment_method': 'on_subscription'},
-            expand=['latest_invoice.payment_intent'],
-            metadata={
-                'subscriber_id': current_user.id,
-                'subscribed_to_id': user_to_subscribe_to.id
-            }
-        )
-
-        return jsonify({
-            'clientSecret': subscription.latest_invoice.payment_intent.client_secret,
-            'subscriptionId': subscription.id
-        })
-    except Exception as e:
-        return jsonify(error={'message': str(e)}), 400
+    """DISABLED: Stripe payment intent - web payments disabled Feb 2026"""
+    return jsonify({'error': 'Web payments disabled. Please use the mobile app.'}), 410
 
 
 @app.route('/stripe-webhook', methods=['POST'])
 def stripe_webhook():
-    """Handle incoming webhooks from Stripe."""
-    payload = request.data
-    sig_header = request.headers.get('Stripe-Signature')
-    webhook_secret = app.config['STRIPE_WEBHOOK_SECRET']
-    event = None
-
-    try:
-        event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
-    except (ValueError, stripe.error.SignatureVerificationError) as e:
-        return 'Invalid request', 400
-
-    # Handle successful payment for the new subscription flow
-    if event['type'] == 'invoice.payment_succeeded':
-        invoice = event['data']['object']
-        stripe_subscription_id = invoice.get('subscription')
-        # We need to retrieve the subscription to get the metadata we set
-        subscription_details = stripe.Subscription.retrieve(stripe_subscription_id)
-        metadata = subscription_details.get('metadata')
-
-        if metadata and stripe_subscription_id:
-            # Check if we've already processed this subscription to handle webhook retries
-            existing_sub = Subscription.query.filter_by(stripe_subscription_id=stripe_subscription_id).first()
-            if not existing_sub:
-                subscriber_id = metadata.get('subscriber_id')
-                subscribed_to_id = metadata.get('subscribed_to_id')
-                
-                new_subscription = Subscription(
-                    subscriber_id=subscriber_id,
-                    subscribed_to_id=subscribed_to_id,
-                    stripe_subscription_id=stripe_subscription_id,
-                    status='active'
-                )
-                db.session.add(new_subscription)
-                db.session.commit()
-
-    # Handle canceled subscription
-    if event['type'] == 'customer.subscription.deleted':
-        subscription_object = event['data']['object']
-        stripe_subscription_id = subscription_object['id']
-        subscription = Subscription.query.filter_by(stripe_subscription_id=stripe_subscription_id).first()
-        if subscription:
-            subscription.status = 'canceled'
-            db.session.commit()
-
-    return 'Success', 200
+    """DISABLED: Stripe webhook - web payments disabled Feb 2026"""
+    return jsonify({'status': 'disabled', 'message': 'Stripe webhooks disabled'}), 410
 
 
 # Register the admin blueprint

@@ -10,7 +10,7 @@ import logging
 import traceback
 import uuid
 import time
-import stripe
+# import stripe  # DISABLED (Feb 2026): Web payments disabled, mobile uses Apple IAP
 import sys
 import traceback
 from datetime import datetime, timedelta, date
@@ -398,13 +398,11 @@ try:
             logger.error(f"Error loading user: {str(e)}")
             return None
 
-    # Stripe configuration
-    app.config['STRIPE_PUBLIC_KEY'] = os.environ.get('STRIPE_PUBLIC_KEY')
-    app.config['STRIPE_SECRET_KEY'] = os.environ.get('STRIPE_SECRET_KEY')
-    app.config['STRIPE_WEBHOOK_SECRET'] = os.environ.get('STRIPE_WEBHOOK_SECRET')
-    
-    # Initialize Stripe
-    stripe.api_key = app.config['STRIPE_SECRET_KEY']
+    # DISABLED (Feb 2026): Web payments disabled, mobile uses Apple IAP
+    # app.config['STRIPE_PUBLIC_KEY'] = os.environ.get('STRIPE_PUBLIC_KEY')
+    # app.config['STRIPE_SECRET_KEY'] = os.environ.get('STRIPE_SECRET_KEY')
+    # app.config['STRIPE_WEBHOOK_SECRET'] = os.environ.get('STRIPE_WEBHOOK_SECRET')
+    # stripe.api_key = app.config['STRIPE_SECRET_KEY']
 
     # Initialize OAuth
     oauth = OAuth(app)
@@ -817,278 +815,45 @@ HOME_HTML = """
 # Add diagnostic route for troubleshooting
 # Subscription and Payment Routes
 
+# ──────────────────────────────────────────────────────────────
+# DISABLED (Feb 2026): Stripe web payment routes disabled.
+# Mobile subscriptions use Apple IAP / Google Play Billing.
+# Web app is now a landing page directing users to the app stores.
+# To re-enable, uncomment the stripe import, config block above,
+# and restore these route bodies.
+# ──────────────────────────────────────────────────────────────
+
 @app.route('/create-checkout-session/<int:user_id>')
 @login_required
 def create_checkout_session(user_id):
-    """Create a checkout session for Apple Pay and other payment methods"""
-    user_to_subscribe_to = User.query.get_or_404(user_id)
-    
-    try:
-        # Get or create a Stripe customer for the current user
-        current_user_id = session.get('user_id')
-        current_user = User.query.get(current_user_id)
-        
-        if not current_user.stripe_customer_id:
-            customer = stripe.Customer.create(
-                email=current_user.email,
-                name=current_user.username
-            )
-            current_user.stripe_customer_id = customer.id
-            db.session.commit()
-        
-        # Create a checkout session
-        checkout_session = stripe.checkout.Session.create(
-            payment_method_types=['card', 'apple_pay'],
-            line_items=[{
-                'price': user_to_subscribe_to.stripe_price_id,
-                'quantity': 1,
-            }],
-            mode='subscription',
-            success_url=request.host_url + 'subscription-success?session_id={CHECKOUT_SESSION_ID}',
-            cancel_url=request.host_url + f'profile/{user_to_subscribe_to.username}',
-            customer=current_user.stripe_customer_id,
-            metadata={
-                'subscriber_id': current_user.id,
-                'subscribed_to_id': user_to_subscribe_to.id
-            }
-        )
-        
-        return redirect(checkout_session.url)
-    except Exception as e:
-        flash(f'Error creating checkout session: {str(e)}', 'danger')
-        return redirect(url_for('profile', username=user_to_subscribe_to.username))
+    """DISABLED: Stripe checkout - web payments disabled Feb 2026"""
+    flash('Subscriptions are now handled through the mobile app.', 'info')
+    return redirect(url_for('index'))
 
 @app.route('/create-payment-intent', methods=['POST'])
 @login_required
 def create_payment_intent():
-    """Creates a subscription and a Payment Intent for Stripe Elements with Apple Pay support"""
-    data = request.get_json()
-    user_id = data.get('user_id')
-    user_to_subscribe_to = User.query.get_or_404(user_id)
-    
-    try:
-        # Get or create a Stripe customer for the current user
-        current_user_id = session.get('user_id')
-        current_user = User.query.get(current_user_id)
-        
-        if not current_user.stripe_customer_id:
-            customer = stripe.Customer.create(
-                email=current_user.email,
-                name=current_user.username
-            )
-            current_user.stripe_customer_id = customer.id
-            db.session.commit()
-        
-        customer_id = current_user.stripe_customer_id
-
-        # Create a subscription with an incomplete payment
-        subscription = stripe.Subscription.create(
-            customer=customer_id,
-            items=[{'price': user_to_subscribe_to.stripe_price_id}],
-            payment_behavior='default_incomplete',
-            payment_settings={'save_default_payment_method': 'on_subscription'},
-            expand=['latest_invoice.payment_intent'],
-            metadata={
-                'subscriber_id': current_user.id,
-                'subscribed_to_id': user_to_subscribe_to.id
-            }
-        )
-        
-        # Add metadata to the payment intent as well for better tracking
-        payment_intent = subscription.latest_invoice.payment_intent
-        stripe.PaymentIntent.modify(
-            payment_intent.id,
-            metadata={
-                'subscription': subscription.id,
-                'subscriber_id': current_user.id,
-                'subscribed_to_id': user_to_subscribe_to.id
-            }
-        )
-
-        return jsonify({
-            'clientSecret': payment_intent.client_secret,
-            'subscriptionId': subscription.id
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
+    """DISABLED: Stripe payment intent - web payments disabled Feb 2026"""
+    return jsonify({'error': 'Web payments disabled. Please use the mobile app.'}), 410
 
 @app.route('/payment-confirmation')
 @login_required
 def payment_confirmation():
-    """Handle payment confirmation for cases requiring additional authentication"""
-    payment_intent_client_secret = request.args.get('payment_intent_client_secret')
-    subscription_id = request.args.get('subscription_id')
-    user_id = request.args.get('user_id')
-    
-    if not payment_intent_client_secret or not subscription_id:
-        flash('Missing payment information', 'danger')
-        return redirect(url_for('dashboard'))
-    
-    # Get the user to subscribe to
-    user_to_subscribe_to = User.query.get_or_404(user_id) if user_id else None
-    
-    return render_template_with_defaults(
-        'payment_confirmation.html',
-        stripe_public_key=app.config['STRIPE_PUBLIC_KEY'],
-        payment_intent_client_secret=payment_intent_client_secret,
-        subscription_id=subscription_id,
-        user_to_view=user_to_subscribe_to
-    )
+    """DISABLED: Stripe payment confirmation - web payments disabled Feb 2026"""
+    flash('Subscriptions are now handled through the mobile app.', 'info')
+    return redirect(url_for('index'))
 
 @app.route('/subscription-success')
 @login_required
 def subscription_success():
-    """Handle successful subscription from both checkout session and payment intent flows"""
-    session_id = request.args.get('session_id')
-    subscription_id = request.args.get('subscription_id')
-    
-    try:
-        if session_id:
-            # Checkout Session flow
-            checkout_session = stripe.checkout.Session.retrieve(session_id)
-            
-            # Create a new subscription record
-            subscription = Subscription(
-                subscriber_id=int(checkout_session.metadata.subscriber_id),
-                subscribed_to_id=int(checkout_session.metadata.subscribed_to_id),
-                stripe_subscription_id=checkout_session.subscription,
-                status='active'
-            )
-            
-            db.session.add(subscription)
-            db.session.commit()
-            
-            subscribed_to = User.query.get(subscription.subscribed_to_id)
-            flash(f'Successfully subscribed to {subscribed_to.username}\'s portfolio!', 'success')
-            return redirect(url_for('profile', username=subscribed_to.username))
-            
-        elif subscription_id:
-            # Payment Intent flow (Apple Pay)
-            stripe_subscription = stripe.Subscription.retrieve(subscription_id)
-            
-            # Check if we already have this subscription recorded
-            existing_sub = Subscription.query.filter_by(stripe_subscription_id=subscription_id).first()
-            if existing_sub:
-                subscribed_to = User.query.get(existing_sub.subscribed_to_id)
-                flash(f'Successfully subscribed to {subscribed_to.username}\'s portfolio!', 'success')
-                return redirect(url_for('profile', username=subscribed_to.username))
-            
-            # Create a new subscription record from the metadata
-            if 'subscriber_id' in stripe_subscription.metadata and 'subscribed_to_id' in stripe_subscription.metadata:
-                subscription = Subscription(
-                    subscriber_id=int(stripe_subscription.metadata.subscriber_id),
-                    subscribed_to_id=int(stripe_subscription.metadata.subscribed_to_id),
-                    stripe_subscription_id=subscription_id,
-                    status=stripe_subscription.status
-                )
-                
-                db.session.add(subscription)
-                db.session.commit()
-                
-                subscribed_to = User.query.get(subscription.subscribed_to_id)
-                flash(f'Successfully subscribed to {subscribed_to.username}\'s portfolio!', 'success')
-                logger.info(f"Login successful for user {subscribed_to.username}, redirecting to dashboard")
-                try:
-                    # Use a simple redirect to avoid potential template rendering issues
-                    return redirect('/')
-                except Exception as redirect_error:
-                    logger.error(f"Error during redirect after successful login: {str(redirect_error)}")
-                    logger.error(traceback.format_exc())
-                    # Even if redirect fails, user is already logged in
-                    return redirect(url_for('index'))
-            else:
-                flash('Subscription metadata is missing', 'danger')
-                return redirect(url_for('dashboard'))
-        else:
-            flash('Invalid subscription information', 'danger')
-            return redirect(url_for('dashboard'))
-            
-    except Exception as e:
-        flash(f'Error processing subscription: {str(e)}', 'danger')
-        return redirect(url_for('dashboard'))
+    """DISABLED: Stripe subscription success - web payments disabled Feb 2026"""
+    flash('Subscriptions are now handled through the mobile app.', 'info')
+    return redirect(url_for('index'))
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    """Handle Stripe webhook events"""
-    payload = request.get_data(as_text=True)
-    sig_header = request.headers.get('Stripe-Signature')
-    
-    try:
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, app.config['STRIPE_WEBHOOK_SECRET']
-        )
-    except ValueError as e:
-        # Invalid payload
-        return jsonify({'error': str(e)}), 400
-    except stripe.error.SignatureVerificationError as e:
-        # Invalid signature
-        return jsonify({'error': str(e)}), 400
-    
-    # Handle the event
-    if event['type'] == 'invoice.payment_succeeded':
-        # Handle successful payment for subscription
-        invoice = event['data']['object']
-        subscription_id = invoice['subscription']
-        
-        # Update the subscription status
-        stripe_subscription = stripe.Subscription.retrieve(subscription_id)
-        
-        # Find the corresponding subscription in our database
-        subscription = Subscription.query.filter_by(stripe_subscription_id=subscription_id).first()
-        if subscription:
-            subscription.status = stripe_subscription['status']
-            db.session.commit()
-        else:
-            # This might be a new subscription from Apple Pay that hasn't been recorded yet
-            # Create a new subscription record if metadata is available
-            try:
-                if 'subscriber_id' in stripe_subscription.metadata and 'subscribed_to_id' in stripe_subscription.metadata:
-                    new_subscription = Subscription(
-                        subscriber_id=int(stripe_subscription.metadata.subscriber_id),
-                        subscribed_to_id=int(stripe_subscription.metadata.subscribed_to_id),
-                        stripe_subscription_id=subscription_id,
-                        status=stripe_subscription.status
-                    )
-                    db.session.add(new_subscription)
-                    db.session.commit()
-            except Exception as e:
-                # Log the error but don't fail the webhook
-                print(f"Error creating subscription from webhook: {str(e)}")
-    
-    elif event['type'] == 'customer.subscription.deleted':
-        # Handle subscription cancellation
-        subscription_obj = event['data']['object']
-        subscription_id = subscription_obj['id']
-        
-        # Find and update the subscription in our database
-        subscription = Subscription.query.filter_by(stripe_subscription_id=subscription_id).first()
-        if subscription:
-            subscription.status = 'canceled'
-            subscription.end_date = datetime.utcnow()
-            db.session.commit()
-    
-    elif event['type'] == 'payment_intent.succeeded':
-        # Handle successful payment intent (could be from Apple Pay)
-        payment_intent = event['data']['object']
-        
-        # If this payment intent is related to a subscription, make sure it's properly recorded
-        if 'subscription' in payment_intent.metadata:
-            subscription_id = payment_intent.metadata.subscription
-            
-            # Check if we already have this subscription
-            subscription = Subscription.query.filter_by(stripe_subscription_id=subscription_id).first()
-            if not subscription and 'subscriber_id' in payment_intent.metadata and 'subscribed_to_id' in payment_intent.metadata:
-                # Create the subscription record
-                new_subscription = Subscription(
-                    subscriber_id=int(payment_intent.metadata.subscriber_id),
-                    subscribed_to_id=int(payment_intent.metadata.subscribed_to_id),
-                    stripe_subscription_id=subscription_id,
-                    status='active'
-                )
-                db.session.add(new_subscription)
-                db.session.commit()
-    
-    return jsonify({'status': 'success'})
+    """DISABLED: Stripe webhook - web payments disabled Feb 2026"""
+    return jsonify({'status': 'disabled', 'message': 'Stripe webhooks disabled'}), 410
 
 @app.route('/subscriptions')
 @login_required
@@ -1179,88 +944,16 @@ def subscriptions():
 @app.route('/cancel-subscription', methods=['POST'])
 @login_required
 def cancel_subscription():
-    """Cancel a user's subscription"""
-    subscription_id = request.form.get('subscription_id')
-    if not subscription_id:
-        flash('Invalid subscription', 'danger')
-        return redirect(url_for('subscriptions'))
-    
-    # Get the subscription
-    subscription = Subscription.query.get_or_404(subscription_id)
-    
-    # Verify ownership
-    current_user_id = session.get('user_id')
-    if subscription.subscriber_id != current_user_id:
-        flash('You do not have permission to cancel this subscription', 'danger')
-        return redirect(url_for('subscriptions'))
-    
-    try:
-        # Cancel the subscription in Stripe
-        stripe.Subscription.delete(subscription.stripe_subscription_id)
-        
-        # Update the subscription in our database
-        subscription.status = 'canceled'
-        subscription.end_date = datetime.utcnow()
-        db.session.commit()
-        
-        flash('Subscription canceled successfully', 'success')
-    except Exception as e:
-        flash(f'Error canceling subscription: {str(e)}', 'danger')
-    
-    return redirect(url_for('subscriptions'))
+    """DISABLED: Stripe cancel subscription - web payments disabled Feb 2026"""
+    flash('Subscription management is now handled through the mobile app.', 'info')
+    return redirect(url_for('index'))
 
 @app.route('/resubscribe', methods=['POST'])
 @login_required
 def resubscribe():
-    """Reactivate a canceled subscription by creating a new one"""
-    old_subscription_id = request.form.get('subscription_id')
-    if not old_subscription_id:
-        flash('Invalid subscription', 'danger')
-        return redirect(url_for('subscriptions'))
-    
-    # Get the old subscription
-    old_subscription = Subscription.query.get_or_404(old_subscription_id)
-    
-    # Verify ownership
-    current_user_id = session.get('user_id')
-    if old_subscription.subscriber_id != current_user_id:
-        flash('You do not have permission to reactivate this subscription', 'danger')
-        return redirect(url_for('subscriptions'))
-    
-    try:
-        # Get the user to subscribe to
-        user_to_subscribe_to = User.query.get_or_404(old_subscription.subscribed_to_id)
-        
-        # Get the current user
-        current_user = User.query.get_or_404(current_user_id)
-        
-        # Create a new subscription in Stripe
-        stripe_subscription = stripe.Subscription.create(
-            customer=current_user.stripe_customer_id,
-            items=[
-                {'price': app.config['STRIPE_PRICE_ID']},
-            ],
-            metadata={
-                'subscriber_id': current_user_id,
-                'subscribed_to_id': user_to_subscribe_to.id
-            }
-        )
-        
-        # Create a new subscription record
-        new_subscription = Subscription(
-            subscriber_id=current_user_id,
-            subscribed_to_id=user_to_subscribe_to.id,
-            stripe_subscription_id=stripe_subscription.id,
-            status='active'
-        )
-        db.session.add(new_subscription)
-        db.session.commit()
-        
-        flash(f'Successfully resubscribed to {user_to_subscribe_to.username}\'s portfolio!', 'success')
-    except Exception as e:
-        flash(f'Error reactivating subscription: {str(e)}', 'danger')
-    
-    return redirect(url_for('subscriptions'))
+    """DISABLED: Stripe resubscribe - web payments disabled Feb 2026"""
+    flash('Subscriptions are now handled through the mobile app.', 'info')
+    return redirect(url_for('index'))
 
 @app.route('/explore')
 @login_required
@@ -2686,30 +2379,11 @@ def init_database():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 # SMS/Email Trading Endpoints
+# DISABLED (Feb 2026): Twilio SMS trading disabled, mobile app uses push notifications
 @app.route('/api/twilio/inbound', methods=['POST'])
 def twilio_inbound():
-    """Handle inbound SMS from Twilio for trade execution"""
-    try:
-        from services.trading_sms import handle_inbound_sms
-        
-        # Get data from Twilio webhook
-        from_number = request.form.get('From')
-        message_body = request.form.get('Body')
-        
-        if not from_number or not message_body:
-            return jsonify({'error': 'Missing required fields'}), 400
-        
-        # Handle the SMS (parse, execute trade, send confirmations)
-        result = handle_inbound_sms(from_number, message_body)
-        
-        # Return empty response (Twilio doesn't need content)
-        return '', 200
-        
-    except Exception as e:
-        logger.error(f"Twilio inbound SMS error: {str(e)}")
-        logger.error(traceback.format_exc())
-        # Still return 200 to Twilio to avoid retries
-        return '', 200
+    """DISABLED: Twilio inbound SMS - replaced by mobile push notifications Feb 2026"""
+    return '', 410
 
 @app.route('/api/email/inbound', methods=['POST'])
 def email_inbound():
@@ -26499,132 +26173,14 @@ def regenerate_portfolio_slug():
 @app.route('/create-subscription', methods=['POST'])
 @login_required
 def create_subscription():
-    """Create subscription using Stripe Elements (slide-up modal)"""
-    try:
-        data = request.get_json()
-        payment_method_id = data.get('payment_method_id')
-        portfolio_owner_id = data.get('portfolio_owner_id')
-        
-        if not payment_method_id or not portfolio_owner_id:
-            return jsonify({'error': 'Payment method and portfolio owner required'}), 400
-        
-        # Get the portfolio owner
-        from models import User, Subscription
-        portfolio_owner = User.query.get(portfolio_owner_id)
-        
-        if not portfolio_owner:
-            return jsonify({'error': 'Portfolio owner not found'}), 404
-        
-        # Check if already subscribed
-        existing_sub = Subscription.query.filter_by(
-            subscriber_id=current_user.id,
-            subscribed_to_id=portfolio_owner_id,
-            status='active'
-        ).first()
-        
-        if existing_sub:
-            return jsonify({'error': 'Already subscribed to this portfolio'}), 400
-        
-        # Get or create Stripe customer
-        if not current_user.stripe_customer_id:
-            customer = stripe.Customer.create(
-                email=current_user.email,
-                name=current_user.username,
-                payment_method=payment_method_id,
-                invoice_settings={'default_payment_method': payment_method_id}
-            )
-            current_user.stripe_customer_id = customer.id
-            db.session.commit()
-        else:
-            # Attach payment method to existing customer
-            stripe.PaymentMethod.attach(
-                payment_method_id,
-                customer=current_user.stripe_customer_id
-            )
-            stripe.Customer.modify(
-                current_user.stripe_customer_id,
-                invoice_settings={'default_payment_method': payment_method_id}
-            )
-        
-        # Create Stripe subscription
-        stripe_subscription = stripe.Subscription.create(
-            customer=current_user.stripe_customer_id,
-            items=[{'price': portfolio_owner.stripe_price_id}],
-            expand=['latest_invoice.payment_intent'],
-            metadata={
-                'subscriber_id': current_user.id,
-                'subscribed_to_id': portfolio_owner_id
-            }
-        )
-        
-        # Create subscription record in database
-        subscription = Subscription(
-            subscriber_id=current_user.id,
-            subscribed_to_id=portfolio_owner_id,
-            stripe_subscription_id=stripe_subscription.id,
-            status='active',
-            start_date=datetime.utcnow()
-        )
-        db.session.add(subscription)
-        db.session.commit()
-        
-        # Check if payment requires action (SCA)
-        payment_intent = stripe_subscription.latest_invoice.payment_intent
-        if payment_intent.status == 'requires_action':
-            return jsonify({
-                'requiresAction': True,
-                'clientSecret': payment_intent.client_secret
-            })
-        
-        return jsonify({'success': True, 'subscription_id': subscription.id})
-    
-    except Exception as e:
-        logger.error(f"Create subscription error: {str(e)}")
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+    """DISABLED: Stripe create subscription - web payments disabled Feb 2026"""
+    return jsonify({'error': 'Web payments disabled. Please use the mobile app.'}), 410
 
 @app.route('/unsubscribe-from-portfolio', methods=['POST'])
 @login_required
 def unsubscribe_from_portfolio():
-    """Cancel subscription to a portfolio (keep access until period end)"""
-    try:
-        data = request.get_json()
-        portfolio_owner_id = data.get('portfolio_owner_id')
-        
-        if not portfolio_owner_id:
-            return jsonify({'error': 'Portfolio owner ID required'}), 400
-        
-        # Find active subscription
-        from models import Subscription
-        subscription = Subscription.query.filter_by(
-            subscriber_id=current_user.id,
-            subscribed_to_id=portfolio_owner_id,
-            status='active'
-        ).first()
-        
-        if not subscription:
-            return jsonify({'error': 'No active subscription found'}), 404
-        
-        # Cancel on Stripe (at period end)
-        stripe.Subscription.modify(
-            subscription.stripe_subscription_id,
-            cancel_at_period_end=True
-        )
-        
-        # Update subscription status to 'cancelled' (but still active until period end)
-        subscription.status = 'cancelled'
-        subscription.end_date = datetime.utcnow() + timedelta(days=30)  # ~1 month from now
-        db.session.commit()
-        
-        return jsonify({
-            'success': True,
-            'end_date': subscription.end_date.strftime('%m/%d/%Y')
-        })
-    
-    except Exception as e:
-        logger.error(f"Unsubscribe error: {str(e)}")
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+    """DISABLED: Stripe unsubscribe - web payments disabled Feb 2026"""
+    return jsonify({'error': 'Web payments disabled. Please use the mobile app.'}), 410
 
 @app.route('/settings/gdpr')
 @login_required

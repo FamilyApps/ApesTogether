@@ -3,7 +3,7 @@ from functools import wraps
 from flask import Blueprint, render_template, render_template_string, request, redirect, url_for, flash, jsonify, current_app
 from flask_login import login_required, current_user
 from sqlalchemy import desc
-import stripe
+# import stripe  # DISABLED (Feb 2026): Web payments disabled, mobile uses Apple IAP
 from datetime import datetime
 from models import db, User, Stock, Transaction, Subscription
 # Removed circular import - get_stock_data will be imported locally when needed
@@ -191,22 +191,8 @@ def user_edit(user_id):
             db.session.rollback()
             flash(f'Error updating user: {str(e)}', 'danger')
     
-    # Get available Stripe prices for the form
-    stripe.api_key = os.environ.get('STRIPE_SECRET_KEY')
+    # DISABLED (Feb 2026): Stripe price listing disabled
     stripe_prices = []
-    try:
-        prices = stripe.Price.list(active=True, limit=10)
-        for price in prices.data:
-            product = stripe.Product.retrieve(price.product)
-            stripe_prices.append({
-                'id': price.id,
-                'product_name': product.name,
-                'amount': price.unit_amount / 100,
-                'currency': price.currency,
-                'interval': price.recurring.interval if price.recurring else None
-            })
-    except Exception as e:
-        flash(f'Error fetching Stripe prices: {str(e)}', 'warning')
     
     return render_template('admin/user_edit.html', user=user, stripe_prices=stripe_prices, now=datetime.now())
 
@@ -647,11 +633,7 @@ def update_user_subscription():
         return jsonify({'error': 'User not found'}), 404
     
     try:
-        # Verify the price ID exists in Stripe
-        stripe.api_key = os.environ.get('STRIPE_SECRET_KEY')
-        price = stripe.Price.retrieve(stripe_price_id)
-        
-        # Update user
+        # DISABLED (Feb 2026): Stripe verification removed, just update DB
         user.subscription_price = float(subscription_price)
         user.stripe_price_id = stripe_price_id
         db.session.commit()
