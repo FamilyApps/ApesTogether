@@ -473,20 +473,20 @@ def get_leaderboard():
         elif category == 'small_cap':
             query = query.filter(LeaderboardEntry.small_cap_percent >= 50)
         
-        entries = query.order_by(LeaderboardEntry.rank.asc()).limit(limit).all()
+        entries = query.order_by(LeaderboardEntry.performance_percent.desc()).limit(limit).all()
         
         leaderboard = []
-        for entry in entries:
+        for rank, entry in enumerate(entries, start=1):
             user = User.query.get(entry.user_id)
             if user:
                 leaderboard.append({
-                    'rank': entry.rank,
+                    'rank': rank,
                     'user': {
                         'id': user.id,
                         'username': user.username,
                         'portfolio_slug': user.portfolio_slug
                     },
-                    'return_percent': entry.return_percent,
+                    'return_percent': entry.performance_percent,
                     'subscriber_count': MobileSubscription.query.filter_by(
                         subscribed_to_id=user.id,
                         status='active'
