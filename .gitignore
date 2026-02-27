@@ -12,3 +12,10 @@ __pycache__/
 .vscode/
 .idea/
 .DS_Store
+
+# Firebase config (contains API keys)
+GoogleService-Info.plist
+
+# Xcode user data
+*.xcuserstate
+xcuserdata/
