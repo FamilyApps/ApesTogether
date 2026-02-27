@@ -54,10 +54,10 @@
 		D0679C702F50F089009960CC /* SubscriptionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionManager.swift; sourceTree = "<group>"; };
 		D0679C772F50F09C009960CC /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		D0679C7A2F50F0AC009960CC /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = ../ApesTogetherApp/Assets.xcassets; sourceTree = SOURCE_ROOT; };
-		D0679C7C2F50F28D009960CC /* ApesTogether.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ApesTogether.entitlements; sourceTree = "<group>"; };
 		D0679C7E2F50F29A009960CC /* StoreKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = StoreKit.framework; path = System/Library/Frameworks/StoreKit.framework; sourceTree = SDKROOT; };
 		D0679C802F50F2EB009960CC /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		D0679C812F51381F009960CC /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = "GoogleService-Info.plist"; path = "../ApesTogetherApp/GoogleService-Info.plist"; sourceTree = SOURCE_ROOT; };
+		D0679C842F514FAD009960CC /* ApesTogether.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ApesTogether.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -93,9 +93,9 @@
 		D0679C3C2F50EFFF009960CC /* ApesTogether */ = {
 			isa = PBXGroup;
 			children = (
+				D0679C842F514FAD009960CC /* ApesTogether.entitlements */,
 				D0679C812F51381F009960CC /* GoogleService-Info.plist */,
 				D0679C802F50F2EB009960CC /* Info.plist */,
-				D0679C7C2F50F28D009960CC /* ApesTogether.entitlements */,
 				D0679C7A2F50F0AC009960CC /* Assets.xcassets */,
 				D0679C782F50F09C009960CC /* Models */,
 				D0679C712F50F089009960CC /* Services */,
@@ -385,7 +385,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = ApesTogether/ApesTogether.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEVELOPMENT_TEAM = M8R8YVW472;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -422,7 +422,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = ApesTogether/ApesTogether.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEVELOPMENT_TEAM = M8R8YVW472;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
