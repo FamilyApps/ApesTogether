@@ -2,13 +2,8 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject var authManager: AuthenticationManager
+    @Environment(\.dismiss) var dismiss
     @State private var showingSignOutAlert = false
-    
-    init() {
-        // Configure list appearance for dark theme
-        UITableView.appearance().backgroundColor = UIColor(Color.appBackground)
-        UITableViewCell.appearance().backgroundColor = UIColor(Color.cardBackground)
-    }
     
     var body: some View {
         NavigationView {
@@ -95,18 +90,16 @@ struct SettingsView: View {
                     .padding()
                 }
             }
+            .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Image("AppLogo")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: 28)
-                }
-                ToolbarItem(placement: .principal) {
-                    Text("Settings")
-                        .font(.headline)
-                        .foregroundColor(.textPrimary)
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.textSecondary)
+                    }
                 }
             }
             .alert("Sign Out", isPresented: $showingSignOutAlert) {

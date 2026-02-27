@@ -4,6 +4,7 @@ import Combine
 struct LeaderboardView: View {
     @StateObject private var viewModel = LeaderboardViewModel()
     @State private var selectedPeriod = "7D"
+    @State private var showSettings = false
     
     let periods = ["1D", "5D", "7D", "1M", "3M", "YTD", "1Y"]
     
@@ -96,26 +97,16 @@ struct LeaderboardView: View {
                     }
                 }
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Image("AppLogo")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: 28)
-                }
-                ToolbarItem(placement: .principal) {
-                    Text("Leaderboard")
-                        .font(.headline)
-                        .foregroundColor(.textPrimary)
-                }
-            }
+            .appNavBar(showSettings: $showSettings)
             .onAppear {
                 if viewModel.entries.isEmpty {
                     Task {
                         await viewModel.loadLeaderboard(period: selectedPeriod)
                     }
                 }
+            }
+            .sheet(isPresented: $showSettings) {
+                SettingsView()
             }
         }
     }

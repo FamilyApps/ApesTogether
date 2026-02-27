@@ -123,12 +123,6 @@ struct MainTabView: View {
                     Label("Following", systemImage: "bell.fill")
                 }
                 .tag(2)
-            
-            SettingsView()
-                .tabItem {
-                    Label("Settings", systemImage: "gear")
-                }
-                .tag(3)
         }
         .accentColor(.primaryAccent)
     }

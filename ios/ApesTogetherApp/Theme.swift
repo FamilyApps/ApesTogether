@@ -222,6 +222,44 @@ struct SectionHeader: View {
     }
 }
 
+// MARK: - Navigation Bar
+struct AppNavBar: ViewModifier {
+    @Binding var showSettings: Bool
+    
+    func body(content: Content) -> some View {
+        content
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    HStack(spacing: 8) {
+                        Image("NavLogo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(height: 24)
+                        Text("Apes Together")
+                            .font(.headline.weight(.bold))
+                            .foregroundColor(.textPrimary)
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gearshape.fill")
+                            .foregroundColor(.textSecondary)
+                            .font(.body)
+                    }
+                }
+            }
+    }
+}
+
+extension View {
+    func appNavBar(showSettings: Binding<Bool>) -> some View {
+        modifier(AppNavBar(showSettings: showSettings))
+    }
+}
+
 // MARK: - Divider Style
 struct AccentDivider: View {
     var body: some View {

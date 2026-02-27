@@ -3,6 +3,7 @@ import Combine
 
 struct SubscriptionsView: View {
     @StateObject private var viewModel = SubscriptionsViewModel()
+    @State private var showSettings = false
     
     var body: some View {
         NavigationView {
@@ -34,19 +35,9 @@ struct SubscriptionsView: View {
                     }
                 }
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Image("AppLogo")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: 28)
-                }
-                ToolbarItem(placement: .principal) {
-                    Text("Following")
-                        .font(.headline)
-                        .foregroundColor(.textPrimary)
-                }
+            .appNavBar(showSettings: $showSettings)
+            .sheet(isPresented: $showSettings) {
+                SettingsView()
             }
             .onAppear {
                 if viewModel.subscriptions.isEmpty {

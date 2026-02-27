@@ -3,6 +3,7 @@ import SwiftUI
 struct MyPortfolioView: View {
     @EnvironmentObject var authManager: AuthenticationManager
     @State private var showAddStocks = false
+    @State private var showSettings = false
     
     var body: some View {
         NavigationView {
@@ -35,19 +36,9 @@ struct MyPortfolioView: View {
                     }
                 }
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Image("AppLogo")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: 28)
-                }
-                ToolbarItem(placement: .principal) {
-                    Text("My Portfolio")
-                        .font(.headline)
-                        .foregroundColor(.textPrimary)
-                }
+            .appNavBar(showSettings: $showSettings)
+            .sheet(isPresented: $showSettings) {
+                SettingsView()
             }
             .sheet(isPresented: $showAddStocks) {
                 AddStocksView(
