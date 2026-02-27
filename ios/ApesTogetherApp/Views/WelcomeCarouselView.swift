@@ -41,7 +41,7 @@ struct WelcomeCarouselView: View {
                     CarouselPage(
                         icon: "dollarsign.circle.fill",
                         headline: "Get paid to share\nyour trades",
-                        subtext: "Build a following and earn\n$5.40/month per subscriber",
+                        subtext: "Build a following and earn\nfrom every subscriber",
                         accentWord: "your trades"
                     )
                     .tag(1)

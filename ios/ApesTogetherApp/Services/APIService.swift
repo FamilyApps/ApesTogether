@@ -206,7 +206,7 @@ class APIService {
     }
 }
 
-enum APIError: LocalizedError {
+enum APIError: LocalizedError, Equatable {
     case invalidURL
     case invalidResponse
     case unauthorized

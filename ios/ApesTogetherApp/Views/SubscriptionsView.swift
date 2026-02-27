@@ -34,7 +34,20 @@ struct SubscriptionsView: View {
                     }
                 }
             }
-            .navigationTitle("Following")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Image("AppLogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 28)
+                }
+                ToolbarItem(placement: .principal) {
+                    Text("Following")
+                        .font(.headline)
+                        .foregroundColor(.textPrimary)
+                }
+            }
             .onAppear {
                 if viewModel.subscriptions.isEmpty {
                     Task {

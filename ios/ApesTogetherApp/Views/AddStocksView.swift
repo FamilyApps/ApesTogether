@@ -23,7 +23,7 @@ struct AddStocksView: View {
     
     init(
         headline: String = "Add Your Stocks",
-        subheadline: String = "Share your trades and earn $5.40/month per subscriber",
+        subheadline: String = "Share your trades and earn from every subscriber",
         showSkip: Bool = true,
         onComplete: @escaping () -> Void
     ) {

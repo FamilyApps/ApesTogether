@@ -64,9 +64,11 @@ class AuthenticationManager: ObservableObject {
         do {
             let user = try await APIService.shared.getCurrentUser()
             currentUser = user
-        } catch {
-            // Token might be expired
+        } catch let error as APIError where error == .unauthorized {
+            // Only sign out on 401 (expired token), not on network/server errors
             signOut()
+        } catch {
+            print("Failed to refresh user data: \(error.localizedDescription)")
         }
     }
     

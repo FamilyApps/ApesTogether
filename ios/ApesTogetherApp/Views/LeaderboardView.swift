@@ -96,7 +96,20 @@ struct LeaderboardView: View {
                     }
                 }
             }
-            .navigationTitle("Leaderboard")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Image("AppLogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 28)
+                }
+                ToolbarItem(placement: .principal) {
+                    Text("Leaderboard")
+                        .font(.headline)
+                        .foregroundColor(.textPrimary)
+                }
+            }
             .onAppear {
                 if viewModel.entries.isEmpty {
                     Task {

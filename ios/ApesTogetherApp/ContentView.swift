@@ -29,7 +29,7 @@ struct ContentView: View {
                     // Add stocks screen
                     AddStocksView(
                         headline: "Add Your Stocks",
-                        subheadline: "Share your trades and earn $5.40/month per subscriber",
+                        subheadline: "Share your trades and earn from every subscriber",
                         showSkip: true,
                         onComplete: {
                             showAddStocks = false
