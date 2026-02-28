@@ -20,6 +20,8 @@ from datetime import datetime
 import logging
 import jwt
 import os
+import secrets
+import string
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +74,12 @@ def generate_jwt_token(user_id: int, email: str, expires_hours: int = 24 * 7) ->
         'exp': datetime.utcnow() + timedelta(hours=expires_hours)
     }
     return jwt.encode(payload, secret, algorithm='HS256')
+
+
+def _generate_portfolio_slug():
+    """Generate a URL-safe unique slug for portfolio sharing (11 chars, like nanoid)"""
+    alphabet = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(alphabet) for _ in range(11))
 
 
 # =============================================================================
@@ -721,9 +729,15 @@ def get_auth_token():
                 email=email,
                 username=username,
                 oauth_provider=provider,
-                oauth_id=oauth_id
+                oauth_id=oauth_id,
+                portfolio_slug=_generate_portfolio_slug()
             )
             db.session.add(user)
+            db.session.commit()
+        
+        # Generate slug for existing users who don't have one
+        if not user.portfolio_slug:
+            user.portfolio_slug = _generate_portfolio_slug()
             db.session.commit()
         
         # Generate JWT token
@@ -745,6 +759,37 @@ def get_auth_token():
         logger.error(f"Auth token error: {e}")
         logger.error(f"Auth token traceback: {traceback.format_exc()}")
         return jsonify({'error': f'authentication_failed: {str(e)}'}), 500
+
+
+@mobile_api.route('/auth/account', methods=['DELETE'])
+@require_auth
+def delete_account():
+    """Delete the authenticated user's account and all associated data"""
+    from models import db, User, Stock, Transaction, DeviceToken, MobileSubscription
+    
+    try:
+        user = User.query.get(g.user_id)
+        if not user:
+            return jsonify({'error': 'user_not_found'}), 404
+        
+        # Delete associated data
+        Stock.query.filter_by(user_id=g.user_id).delete()
+        Transaction.query.filter_by(user_id=g.user_id).delete()
+        DeviceToken.query.filter_by(user_id=g.user_id).delete()
+        MobileSubscription.query.filter(
+            (MobileSubscription.subscriber_id == g.user_id) |
+            (MobileSubscription.subscribed_to_id == g.user_id)
+        ).delete(synchronize_session='fetch')
+        
+        db.session.delete(user)
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': 'account_deleted'})
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Delete account error: {e}")
+        return jsonify({'error': 'delete_failed'}), 500
 
 
 @mobile_api.route('/auth/refresh', methods=['POST'])

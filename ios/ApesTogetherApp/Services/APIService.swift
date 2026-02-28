@@ -100,6 +100,12 @@ class APIService {
         let _: EmptyResponse = try await put("/notifications/settings", body: body)
     }
     
+    // MARK: - Account Management
+    
+    func deleteAccount() async throws {
+        let _: EmptyResponse = try await delete("/auth/account")
+    }
+    
     // MARK: - Portfolio Management
     
     func addStocks(stocks: [[String: Any]]) async throws -> AddStocksResponse {
@@ -194,6 +200,37 @@ class APIService {
         
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
+        }
+        
+        guard (200...299).contains(httpResponse.statusCode) else {
+            throw APIError.serverError(httpResponse.statusCode)
+        }
+        
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return try decoder.decode(T.self, from: data)
+    }
+    private func delete<T: Decodable>(_ endpoint: String) async throws -> T {
+        guard let url = URL(string: baseURL + endpoint) else {
+            throw APIError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        if let token = authToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+        
+        if httpResponse.statusCode == 401 {
+            throw APIError.unauthorized
         }
         
         guard (200...299).contains(httpResponse.statusCode) else {

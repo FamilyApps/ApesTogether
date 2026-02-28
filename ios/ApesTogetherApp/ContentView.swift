@@ -120,7 +120,7 @@ struct MainTabView: View {
             
             SubscriptionsView()
                 .tabItem {
-                    Label("Following", systemImage: "bell.fill")
+                    Label("Subscriptions", systemImage: "person.2.fill")
                 }
                 .tag(2)
         }

@@ -230,14 +230,16 @@ struct AppNavBar: ViewModifier {
         content
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    HStack(spacing: 8) {
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 6) {
                         Image("NavLogo")
+                            .renderingMode(.original)
                             .resizable()
                             .scaledToFit()
-                            .frame(height: 24)
+                            .frame(height: 26)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
                         Text("Apes Together")
-                            .font(.headline.weight(.bold))
+                            .font(.system(size: 17, weight: .bold))
                             .foregroundColor(.textPrimary)
                     }
                 }
@@ -247,7 +249,7 @@ struct AppNavBar: ViewModifier {
                     } label: {
                         Image(systemName: "gearshape.fill")
                             .foregroundColor(.textSecondary)
-                            .font(.body)
+                            .font(.system(size: 18))
                     }
                 }
             }
