@@ -30,6 +30,7 @@
 		D0679C7B2F50F0AC009960CC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D0679C7A2F50F0AC009960CC /* Assets.xcassets */; };
 		D0679C7F2F50F29A009960CC /* StoreKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D0679C7E2F50F29A009960CC /* StoreKit.framework */; };
 		D0679C822F51381F009960CC /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = D0679C812F51381F009960CC /* GoogleService-Info.plist */; };
+		D0679C862F52A01B009960CC /* LegalText.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0679C852F52A01B009960CC /* LegalText.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -58,6 +59,7 @@
 		D0679C802F50F2EB009960CC /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		D0679C812F51381F009960CC /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = "GoogleService-Info.plist"; path = "../ApesTogetherApp/GoogleService-Info.plist"; sourceTree = SOURCE_ROOT; };
 		D0679C842F514FAD009960CC /* ApesTogether.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ApesTogether.entitlements; sourceTree = "<group>"; };
+		D0679C852F52A01B009960CC /* LegalText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LegalText.swift; path = ../ApesTogetherApp/LegalText.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -93,6 +95,7 @@
 		D0679C3C2F50EFFF009960CC /* ApesTogether */ = {
 			isa = PBXGroup;
 			children = (
+				D0679C852F52A01B009960CC /* LegalText.swift */,
 				D0679C842F514FAD009960CC /* ApesTogether.entitlements */,
 				D0679C812F51381F009960CC /* GoogleService-Info.plist */,
 				D0679C802F50F2EB009960CC /* Info.plist */,
@@ -245,6 +248,7 @@
 				D0679C722F50F089009960CC /* KeychainService.swift in Sources */,
 				D0679C732F50F089009960CC /* APIService.swift in Sources */,
 				D0679C742F50F089009960CC /* AuthenticationManager.swift in Sources */,
+				D0679C862F52A01B009960CC /* LegalText.swift in Sources */,
 				D0679C752F50F089009960CC /* DeepLinkManager.swift in Sources */,
 				D0679C762F50F089009960CC /* SubscriptionManager.swift in Sources */,
 				D0679C682F50F075009960CC /* LeaderboardView.swift in Sources */,
@@ -385,7 +389,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = ApesTogether/ApesTogether.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = M8R8YVW472;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -422,7 +426,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = ApesTogether/ApesTogether.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = M8R8YVW472;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
