@@ -4,6 +4,14 @@ struct MyPortfolioView: View {
     @EnvironmentObject var authManager: AuthenticationManager
     @State private var showAddStocks = false
     @State private var showSettings = false
+    @State private var showShareSheet = false
+    
+    private var personalURL: String {
+        if let slug = authManager.currentUser?.portfolioSlug {
+            return "https://apestogether.ai/p/\(slug)"
+        }
+        return "https://apestogether.ai"
+    }
     
     var body: some View {
         NavigationView {
@@ -12,7 +20,29 @@ struct MyPortfolioView: View {
                 
                 VStack(spacing: 20) {
                     if let user = authManager.currentUser, let slug = user.portfolioSlug {
-                        PortfolioDetailView(slug: slug)
+                        VStack(spacing: 0) {
+                            PortfolioDetailView(slug: slug)
+                            
+                            // Share portfolio button
+                            Button {
+                                showShareSheet = true
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "square.and.arrow.up")
+                                    Text("Share Portfolio")
+                                }
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(.primaryAccent)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(Color.primaryAccent.opacity(0.4), lineWidth: 1)
+                                )
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 8)
+                        }
                     } else {
                         Spacer()
                         
@@ -54,9 +84,24 @@ struct MyPortfolioView: View {
                 )
                 .environmentObject(authManager)
             }
+            .sheet(isPresented: $showShareSheet) {
+                ShareSheet(items: [
+                    "Check out my portfolio on Apes Together! 🦍📈\n\(personalURL)"
+                ])
+            }
         }
         .navigationViewStyle(.stack)
     }
+}
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 struct MyPortfolioView_Previews: PreviewProvider {

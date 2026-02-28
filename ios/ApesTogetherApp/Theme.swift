@@ -81,6 +81,7 @@ struct PrimaryButtonStyle: ButtonStyle {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(isDisabled ? Color.textMuted : Color.primaryAccent)
             )
+            .shadow(color: isDisabled ? .clear : Color.primaryAccent.opacity(0.3), radius: 12, y: 4)
             .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
             .opacity(configuration.isPressed ? 0.9 : 1.0)
     }
@@ -132,12 +133,13 @@ struct CardStyle: ViewModifier {
             .padding(padding)
             .background(
                 RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.cardBackground)
+                    .fill(LinearGradient.cardGradient)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 16)
                     .stroke(Color.cardBorder, lineWidth: 1)
             )
+            .shadow(color: Color.primaryAccent.opacity(0.04), radius: 8, y: 4)
     }
 }
 

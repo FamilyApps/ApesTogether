@@ -33,7 +33,8 @@ struct WelcomeCarouselView: View {
                         icon: "bell.badge.fill",
                         headline: "Know when the best\ntraders buy and sell",
                         subtext: "Get real-time alerts the moment\ntop investors make a move",
-                        accentWord: "buy and sell"
+                        accentWord: "buy and sell",
+                        imageName: "Carousel1"
                     )
                     .tag(0)
                     
@@ -42,7 +43,8 @@ struct WelcomeCarouselView: View {
                         icon: "dollarsign.circle.fill",
                         headline: "Get paid to share\nyour trades",
                         subtext: "Build a following and earn\nfrom every subscriber",
-                        accentWord: "your trades"
+                        accentWord: "your trades",
+                        imageName: "Carousel2"
                     )
                     .tag(1)
                 }
@@ -88,18 +90,28 @@ struct CarouselPage: View {
     let headline: String
     let subtext: String
     var accentWord: String? = nil
+    var imageName: String? = nil
     
     var body: some View {
         VStack(spacing: 32) {
-            // Icon
-            ZStack {
-                Circle()
-                    .fill(Color.primaryAccent.opacity(0.12))
-                    .frame(width: 120, height: 120)
-                
-                Image(systemName: icon)
-                    .font(.system(size: 50))
-                    .foregroundColor(.primaryAccent)
+            // Illustration or icon
+            if let imageName = imageName, UIImage(named: imageName) != nil {
+                Image(imageName)
+                    .renderingMode(.original)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 200)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+            } else {
+                ZStack {
+                    Circle()
+                        .fill(Color.primaryAccent.opacity(0.12))
+                        .frame(width: 120, height: 120)
+                    
+                    Image(systemName: icon)
+                        .font(.system(size: 50))
+                        .foregroundColor(.primaryAccent)
+                }
             }
             
             // Headline with optional accent word
