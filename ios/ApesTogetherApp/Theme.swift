@@ -232,7 +232,7 @@ struct AppNavBar: ViewModifier {
         content
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .principal) {
+                ToolbarItem(placement: .navigationBarLeading) {
                     HStack(spacing: 6) {
                         Image("NavLogo")
                             .renderingMode(.original)

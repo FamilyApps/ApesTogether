@@ -20,6 +20,7 @@ struct AddStocksView: View {
     @State private var errorMessage: String?
     @State private var successCount = 0
     @State private var showSuccess = false
+    @FocusState private var focusedEntryID: UUID?
     
     init(
         headline: String = "Add Your Stocks",
@@ -56,7 +57,7 @@ struct AddStocksView: View {
                 ScrollView {
                     VStack(spacing: 12) {
                         ForEach($entries) { $entry in
-                            StockEntryRow(entry: $entry, onDelete: entries.count > 1 ? {
+                            StockEntryRow(entry: $entry, focusedID: $focusedEntryID, onDelete: entries.count > 1 ? {
                                 withAnimation {
                                     entries.removeAll { $0.id == entry.id }
                                 }
@@ -66,7 +67,9 @@ struct AddStocksView: View {
                         // Add more button
                         Button {
                             withAnimation {
-                                entries.append(StockEntry())
+                                let newEntry = StockEntry()
+                                entries.append(newEntry)
+                                focusedEntryID = newEntry.id
                             }
                         } label: {
                             HStack(spacing: 8) {
@@ -186,6 +189,7 @@ struct AddStocksView: View {
 
 struct StockEntryRow: View {
     @Binding var entry: StockEntry
+    var focusedID: FocusState<UUID?>.Binding
     var onDelete: (() -> Void)?
     
     var body: some View {
@@ -204,6 +208,7 @@ struct StockEntryRow: View {
                         .stroke(Color.cardBorder, lineWidth: 1)
                 )
                 .frame(maxWidth: .infinity)
+                .focused(focusedID, equals: entry.id)
             
             // Quantity field
             TextField("Shares", text: $entry.quantity)

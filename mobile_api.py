@@ -761,6 +761,34 @@ def get_auth_token():
         return jsonify({'error': f'authentication_failed: {str(e)}'}), 500
 
 
+@mobile_api.route('/auth/user', methods=['GET'])
+@require_auth
+def get_current_user():
+    """Get the authenticated user's profile data"""
+    from models import db, User
+    
+    try:
+        user = User.query.get(g.user_id)
+        if not user:
+            return jsonify({'error': 'user_not_found'}), 404
+        
+        # Generate slug if missing
+        if not user.portfolio_slug:
+            user.portfolio_slug = _generate_portfolio_slug()
+            db.session.commit()
+        
+        return jsonify({
+            'id': user.id,
+            'email': user.email,
+            'username': user.username,
+            'portfolio_slug': user.portfolio_slug
+        })
+        
+    except Exception as e:
+        logger.error(f"Get current user error: {e}")
+        return jsonify({'error': 'failed_to_get_user'}), 500
+
+
 @mobile_api.route('/auth/account', methods=['DELETE'])
 @require_auth
 def delete_account():

@@ -4,9 +4,16 @@ import Combine
 struct LeaderboardView: View {
     @StateObject private var viewModel = LeaderboardViewModel()
     @State private var selectedPeriod = "7D"
+    @State private var selectedCategory = "all"
+    @State private var showFilters = false
     @State private var showSettings = false
     
     let periods = ["1D", "5D", "7D", "1M", "3M", "YTD", "1Y"]
+    let categories: [(key: String, label: String)] = [
+        ("all", "All"),
+        ("large_cap", "Large Cap"),
+        ("small_cap", "Small Cap")
+    ]
     
     init() {
         // Configure navigation bar appearance
@@ -42,6 +49,66 @@ struct LeaderboardView: View {
                         }
                         .padding(.horizontal)
                         .padding(.vertical, 12)
+                    }
+                    
+                    // Filter toggle + category pills
+                    HStack {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                showFilters.toggle()
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "line.3.horizontal.decrease.circle\(showFilters ? ".fill" : "")")
+                                Text("Filters")
+                                    .font(.subheadline.weight(.medium))
+                                if selectedCategory != "all" {
+                                    Circle()
+                                        .fill(Color.primaryAccent)
+                                        .frame(width: 6, height: 6)
+                                }
+                            }
+                            .foregroundColor(showFilters ? .primaryAccent : .textSecondary)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(
+                                Capsule()
+                                    .fill(showFilters ? Color.primaryAccent.opacity(0.12) : Color.cardBackground)
+                            )
+                            .overlay(
+                                Capsule()
+                                    .stroke(showFilters ? Color.primaryAccent.opacity(0.3) : Color.cardBorder, lineWidth: 1)
+                            )
+                        }
+                        
+                        Spacer()
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
+                    
+                    if showFilters {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Category")
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.textMuted)
+                            
+                            HStack(spacing: 10) {
+                                ForEach(categories, id: \.key) { cat in
+                                    Button {
+                                        selectedCategory = cat.key
+                                        Task {
+                                            await viewModel.loadLeaderboard(period: selectedPeriod, category: selectedCategory)
+                                        }
+                                    } label: {
+                                        Text(cat.label)
+                                    }
+                                    .buttonStyle(PillButtonStyle(isSelected: selectedCategory == cat.key))
+                                }
+                            }
+                        }
+                        .padding(.horizontal)
+                        .padding(.bottom, 12)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                     
                     AccentDivider()
@@ -167,12 +234,12 @@ class LeaderboardViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var error: String?
     
-    func loadLeaderboard(period: String) async {
+    func loadLeaderboard(period: String, category: String = "all") async {
         isLoading = true
         error = nil
         
         do {
-            let response = try await APIService.shared.getLeaderboard(period: period)
+            let response = try await APIService.shared.getLeaderboard(period: period, category: category)
             entries = response.entries
         } catch {
             self.error = error.localizedDescription
