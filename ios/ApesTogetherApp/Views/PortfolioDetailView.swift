@@ -18,28 +18,10 @@ struct PortfolioDetailView: View {
                             .padding(.top, 100)
                     } else if let portfolio = viewModel.portfolio {
                         // Header card
-                        VStack(spacing: 12) {
+                        VStack(spacing: 8) {
                             Text(portfolio.owner.username)
                                 .font(.title.bold())
                                 .foregroundColor(.textPrimary)
-                            
-                            HStack(spacing: 20) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "person.2.fill")
-                                        .foregroundColor(.primaryAccent)
-                                    Text("\(portfolio.subscriberCount)")
-                                        .foregroundColor(.textSecondary)
-                                }
-                                
-                                HStack(spacing: 4) {
-                                    Text("$\(String(format: "%.2f", portfolio.subscriptionPrice))")
-                                        .foregroundColor(.primaryAccent)
-                                        .fontWeight(.semibold)
-                                    Text("/mo")
-                                        .foregroundColor(.textMuted)
-                                }
-                            }
-                            .font(.subheadline)
                         }
                         .padding(.vertical, 24)
                         .frame(maxWidth: .infinity)

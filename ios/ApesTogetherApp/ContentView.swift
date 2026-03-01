@@ -125,6 +125,9 @@ struct MainTabView: View {
                     } icon: {
                         Image("SubscriptionsIcon")
                             .renderingMode(.template)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 24, height: 24)
                     }
                 }
                 .tag(2)

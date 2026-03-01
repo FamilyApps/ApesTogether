@@ -542,7 +542,7 @@ def get_leaderboard():
     - category: all, large_cap, small_cap (default: all)
     - limit: number of entries (default: 50, max: 100)
     """
-    from models import LeaderboardEntry, User
+    from models import LeaderboardEntry, User, MobileSubscription
     
     try:
         period = request.args.get('period', '7D')
@@ -552,12 +552,18 @@ def get_leaderboard():
         # Build query
         query = LeaderboardEntry.query.filter_by(period=period)
         
-        if category == 'large_cap':
-            query = query.filter(LeaderboardEntry.large_cap_percent >= 70)
-        elif category == 'small_cap':
-            query = query.filter(LeaderboardEntry.small_cap_percent >= 50)
-        
-        entries = query.order_by(LeaderboardEntry.performance_percent.desc()).limit(limit).all()
+        try:
+            if category == 'large_cap':
+                query = query.filter(LeaderboardEntry.large_cap_percent >= 70)
+            elif category == 'small_cap':
+                query = query.filter(LeaderboardEntry.small_cap_percent >= 50)
+            
+            entries = query.order_by(LeaderboardEntry.performance_percent.desc()).limit(limit).all()
+        except Exception:
+            # Fallback if cap columns don't exist in production
+            entries = LeaderboardEntry.query.filter_by(period=period).order_by(
+                LeaderboardEntry.performance_percent.desc()
+            ).limit(limit).all()
         
         leaderboard = []
         for rank, entry in enumerate(entries, start=1):

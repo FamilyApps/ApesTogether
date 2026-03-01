@@ -26,89 +26,198 @@ struct LeaderboardView: View {
         UINavigationBar.appearance().scrollEdgeAppearance = appearance
     }
     
+    private var activeFilterCount: Int {
+        selectedCategory != "all" ? 1 : 0
+    }
+    
     var body: some View {
         NavigationView {
             ZStack {
                 Color.appBackground.ignoresSafeArea()
                 
                 VStack(spacing: 0) {
-                    // Period selector
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            ForEach(periods, id: \.self) { period in
-                                Button {
-                                    selectedPeriod = period
-                                    Task {
-                                        await viewModel.loadLeaderboard(period: period)
+                    // Time period segmented control
+                    VStack(spacing: 0) {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(periods, id: \.self) { period in
+                                    Button {
+                                        selectedPeriod = period
+                                        Task {
+                                            await viewModel.loadLeaderboard(period: period, category: selectedCategory)
+                                        }
+                                    } label: {
+                                        Text(period)
+                                            .font(.caption.weight(.bold))
+                                            .padding(.horizontal, 14)
+                                            .padding(.vertical, 7)
+                                            .background(
+                                                selectedPeriod == period
+                                                    ? Color.primaryAccent
+                                                    : Color.clear
+                                            )
+                                            .foregroundColor(
+                                                selectedPeriod == period
+                                                    ? .appBackground
+                                                    : .textSecondary
+                                            )
+                                            .cornerRadius(8)
                                     }
-                                } label: {
-                                    Text(period)
                                 }
-                                .buttonStyle(PillButtonStyle(isSelected: selectedPeriod == period))
                             }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
                         }
-                        .padding(.horizontal)
-                        .padding(.vertical, 12)
+                        .background(Color.cardBackground.opacity(0.5))
+                        
+                        // Thin separator
+                        Rectangle()
+                            .fill(Color.cardBorder.opacity(0.5))
+                            .frame(height: 0.5)
                     }
                     
-                    // Filter toggle + category pills
-                    HStack {
+                    // Filter bar — visually separated
+                    HStack(spacing: 12) {
                         Button {
-                            withAnimation(.easeInOut(duration: 0.25)) {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                                 showFilters.toggle()
                             }
                         } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "line.3.horizontal.decrease.circle\(showFilters ? ".fill" : "")")
+                            HStack(spacing: 5) {
+                                Image(systemName: "slider.horizontal.3")
+                                    .font(.caption)
                                 Text("Filters")
-                                    .font(.subheadline.weight(.medium))
-                                if selectedCategory != "all" {
-                                    Circle()
-                                        .fill(Color.primaryAccent)
-                                        .frame(width: 6, height: 6)
+                                    .font(.caption.weight(.semibold))
+                                if activeFilterCount > 0 {
+                                    Text("\(activeFilterCount)")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundColor(.appBackground)
+                                        .frame(width: 16, height: 16)
+                                        .background(Circle().fill(Color.primaryAccent))
                                 }
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .rotationEffect(.degrees(showFilters ? 180 : 0))
                             }
-                            .foregroundColor(showFilters ? .primaryAccent : .textSecondary)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
+                            .foregroundColor(activeFilterCount > 0 ? .primaryAccent : .textMuted)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
                             .background(
-                                Capsule()
-                                    .fill(showFilters ? Color.primaryAccent.opacity(0.12) : Color.cardBackground)
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(activeFilterCount > 0 ? Color.primaryAccent.opacity(0.1) : Color.cardBackground)
                             )
                             .overlay(
-                                Capsule()
-                                    .stroke(showFilters ? Color.primaryAccent.opacity(0.3) : Color.cardBorder, lineWidth: 1)
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(activeFilterCount > 0 ? Color.primaryAccent.opacity(0.3) : Color.cardBorder, lineWidth: 0.5)
                             )
+                        }
+                        
+                        // Active filter chips (shown inline when filter is applied)
+                        if activeFilterCount > 0 && !showFilters {
+                            HStack(spacing: 6) {
+                                let label = categories.first(where: { $0.key == selectedCategory })?.label ?? ""
+                                HStack(spacing: 4) {
+                                    Text(label)
+                                        .font(.caption.weight(.medium))
+                                    Button {
+                                        selectedCategory = "all"
+                                        Task {
+                                            await viewModel.loadLeaderboard(period: selectedPeriod, category: "all")
+                                        }
+                                    } label: {
+                                        Image(systemName: "xmark")
+                                            .font(.system(size: 8, weight: .bold))
+                                    }
+                                }
+                                .foregroundColor(.primaryAccent)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(
+                                    Capsule().fill(Color.primaryAccent.opacity(0.1))
+                                )
+                            }
                         }
                         
                         Spacer()
                     }
-                    .padding(.horizontal)
-                    .padding(.bottom, 8)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
                     
+                    // Expandable filter panel
                     if showFilters {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Category")
-                                .font(.caption.weight(.semibold))
-                                .foregroundColor(.textMuted)
-                            
-                            HStack(spacing: 10) {
-                                ForEach(categories, id: \.key) { cat in
-                                    Button {
-                                        selectedCategory = cat.key
-                                        Task {
-                                            await viewModel.loadLeaderboard(period: selectedPeriod, category: selectedCategory)
+                        VStack(alignment: .leading, spacing: 14) {
+                            // Category filter
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("PORTFOLIO TYPE")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundColor(.textMuted)
+                                    .tracking(0.5)
+                                
+                                HStack(spacing: 8) {
+                                    ForEach(categories, id: \.key) { cat in
+                                        Button {
+                                            selectedCategory = cat.key
+                                            Task {
+                                                await viewModel.loadLeaderboard(period: selectedPeriod, category: selectedCategory)
+                                            }
+                                        } label: {
+                                            Text(cat.label)
+                                                .font(.caption.weight(.semibold))
+                                                .padding(.horizontal, 14)
+                                                .padding(.vertical, 7)
+                                                .background(
+                                                    selectedCategory == cat.key
+                                                        ? Color.primaryAccent
+                                                        : Color.cardBackground
+                                                )
+                                                .foregroundColor(
+                                                    selectedCategory == cat.key
+                                                        ? .appBackground
+                                                        : .textSecondary
+                                                )
+                                                .cornerRadius(8)
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 8)
+                                                        .stroke(
+                                                            selectedCategory == cat.key ? Color.clear : Color.cardBorder,
+                                                            lineWidth: 0.5
+                                                        )
+                                                )
                                         }
-                                    } label: {
-                                        Text(cat.label)
                                     }
-                                    .buttonStyle(PillButtonStyle(isSelected: selectedCategory == cat.key))
+                                }
+                            }
+                            
+                            // Reset button
+                            if activeFilterCount > 0 {
+                                Button {
+                                    selectedCategory = "all"
+                                    Task {
+                                        await viewModel.loadLeaderboard(period: selectedPeriod, category: "all")
+                                    }
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "arrow.counterclockwise")
+                                            .font(.system(size: 10))
+                                        Text("Reset filters")
+                                            .font(.caption)
+                                    }
+                                    .foregroundColor(.textMuted)
                                 }
                             }
                         }
-                        .padding(.horizontal)
-                        .padding(.bottom, 12)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        .padding(16)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.cardBackground)
+                                .shadow(color: .black.opacity(0.08), radius: 8, y: 4)
+                        )
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
+                        .transition(.asymmetric(
+                            insertion: .opacity.combined(with: .scale(scale: 0.95, anchor: .top)),
+                            removal: .opacity
+                        ))
                     }
                     
                     AccentDivider()
@@ -127,7 +236,7 @@ struct LeaderboardView: View {
                             message: error,
                             action: {
                                 Task {
-                                    await viewModel.loadLeaderboard(period: selectedPeriod)
+                                    await viewModel.loadLeaderboard(period: selectedPeriod, category: selectedCategory)
                                 }
                             },
                             actionLabel: "Retry"
@@ -159,7 +268,7 @@ struct LeaderboardView: View {
                             .padding(.top, 8)
                         }
                         .refreshable {
-                            await viewModel.loadLeaderboard(period: selectedPeriod)
+                            await viewModel.loadLeaderboard(period: selectedPeriod, category: selectedCategory)
                         }
                     }
                 }
@@ -168,7 +277,7 @@ struct LeaderboardView: View {
             .onAppear {
                 if viewModel.entries.isEmpty {
                     Task {
-                        await viewModel.loadLeaderboard(period: selectedPeriod)
+                        await viewModel.loadLeaderboard(period: selectedPeriod, category: selectedCategory)
                     }
                 }
             }
