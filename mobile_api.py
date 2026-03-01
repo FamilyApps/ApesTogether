@@ -542,12 +542,14 @@ def get_leaderboard():
     - category: all, large_cap, small_cap (default: all)
     - limit: number of entries (default: 50, max: 100)
     """
-    from models import LeaderboardEntry, User, MobileSubscription
+    from models import User
+    
+    period = request.args.get('period', '7D')
+    category = request.args.get('category', 'all')
+    limit = min(int(request.args.get('limit', 50)), 100)
     
     try:
-        period = request.args.get('period', '7D')
-        category = request.args.get('category', 'all')
-        limit = min(int(request.args.get('limit', 50)), 100)
+        from models import LeaderboardEntry, MobileSubscription
         
         # Build query
         query = LeaderboardEntry.query.filter_by(period=period)
@@ -561,14 +563,25 @@ def get_leaderboard():
             entries = query.order_by(LeaderboardEntry.performance_percent.desc()).limit(limit).all()
         except Exception:
             # Fallback if cap columns don't exist in production
-            entries = LeaderboardEntry.query.filter_by(period=period).order_by(
-                LeaderboardEntry.performance_percent.desc()
-            ).limit(limit).all()
+            try:
+                entries = LeaderboardEntry.query.filter_by(period=period).order_by(
+                    LeaderboardEntry.performance_percent.desc()
+                ).limit(limit).all()
+            except Exception:
+                entries = []
         
         leaderboard = []
         for rank, entry in enumerate(entries, start=1):
             user = User.query.get(entry.user_id)
             if user:
+                try:
+                    sub_count = MobileSubscription.query.filter_by(
+                        subscribed_to_id=user.id,
+                        status='active'
+                    ).count()
+                except Exception:
+                    sub_count = 0
+                    
                 leaderboard.append({
                     'rank': rank,
                     'user': {
@@ -577,10 +590,7 @@ def get_leaderboard():
                         'portfolio_slug': user.portfolio_slug
                     },
                     'return_percent': entry.performance_percent,
-                    'subscriber_count': MobileSubscription.query.filter_by(
-                        subscribed_to_id=user.id,
-                        status='active'
-                    ).count() if hasattr(MobileSubscription, 'query') else 0,
+                    'subscriber_count': sub_count,
                     'subscription_price': 9.00
                 })
         
@@ -592,7 +602,12 @@ def get_leaderboard():
         
     except Exception as e:
         logger.error(f"Get leaderboard error: {e}")
-        return jsonify({'error': 'failed_to_get_leaderboard'}), 500
+        # Return empty leaderboard instead of 500
+        return jsonify({
+            'period': period,
+            'category': category,
+            'entries': []
+        })
 
 
 # =============================================================================
