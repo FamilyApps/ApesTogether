@@ -1121,7 +1121,7 @@ def execute_trade():
                 ticker=ticker,
                 quantity=quantity,
                 price=price,
-                type=trade_type.upper(),
+                transaction_type=trade_type.upper(),
                 user_id=g.user_id,
                 timestamp=datetime.utcnow()
             )
@@ -1399,7 +1399,7 @@ def bot_execute_trade():
         try:
             transaction = Transaction(
                 ticker=ticker, quantity=quantity, price=price,
-                type=trade_type.upper(), user_id=user_id,
+                transaction_type=trade_type.upper(), user_id=user_id,
                 timestamp=datetime.utcnow()
             )
             db.session.add(transaction)
