@@ -122,3 +122,35 @@ struct PurchaseValidationResponse: Codable {
     let expiresDate: String?
     let error: String?
 }
+
+// MARK: - Portfolio Chart
+
+struct ChartResponse: Codable {
+    let portfolioReturn: Double
+    let sp500Return: Double
+    let chartData: [ChartPoint]
+    let period: String
+}
+
+struct ChartPoint: Codable, Identifiable {
+    let date: String
+    let portfolio: Double?
+    let sp500: Double?
+    
+    var id: String { date }
+}
+
+// MARK: - Trade
+
+struct TradeResponse: Codable {
+    let success: Bool
+    let trade: TradeDetail?
+    let error: String?
+}
+
+struct TradeDetail: Codable {
+    let ticker: String
+    let quantity: Double
+    let price: Double
+    let type: String
+}

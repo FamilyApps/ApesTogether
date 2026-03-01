@@ -106,6 +106,24 @@ class APIService {
         let _: EmptyResponse = try await delete("/auth/account")
     }
     
+    // MARK: - Portfolio Charts
+    
+    func getPortfolioChart(slug: String, period: String = "7D") async throws -> ChartResponse {
+        return try await get("/portfolio/\(slug)/chart?period=\(period)")
+    }
+    
+    // MARK: - Trading
+    
+    func executeTrade(ticker: String, quantity: Double, price: Double, type: String) async throws -> TradeResponse {
+        let body: [String: Any] = [
+            "ticker": ticker,
+            "quantity": quantity,
+            "price": price,
+            "type": type
+        ]
+        return try await post("/portfolio/trade", body: body, authenticated: true)
+    }
+    
     // MARK: - Portfolio Management
     
     func addStocks(stocks: [[String: Any]]) async throws -> AddStocksResponse {

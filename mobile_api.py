@@ -917,3 +917,523 @@ def health_check():
         health['message'] = 'Push notifications not available - Firebase not configured'
     
     return jsonify(health)
+
+
+# =============================================================================
+# Portfolio Performance / Chart Data
+# =============================================================================
+
+@mobile_api.route('/portfolio/<slug>/chart', methods=['GET'])
+@require_auth
+def get_portfolio_chart(slug):
+    """
+    Get portfolio performance chart data with S&P 500 overlay.
+    
+    Query params:
+    - period: 1D, 5D, 7D, 1M, 3M, YTD, 1Y (default: 7D)
+    
+    Returns chart_data array with {date, portfolio, sp500} points.
+    """
+    from models import User, PortfolioSnapshot, MarketData
+    
+    period = request.args.get('period', '7D')
+    valid_periods = ['1D', '5D', '7D', '1M', '3M', 'YTD', '1Y']
+    if period not in valid_periods:
+        return jsonify({'error': f'Invalid period. Must be one of: {", ".join(valid_periods)}'}), 400
+    
+    try:
+        # Find portfolio owner
+        owner = User.query.filter_by(portfolio_slug=slug).first()
+        if not owner:
+            return jsonify({'error': 'portfolio_not_found'}), 404
+        
+        # Check access: must be owner or subscribed
+        is_owner = owner.id == g.user_id
+        is_subscribed = False
+        if not is_owner:
+            try:
+                from models import MobileSubscription
+                is_subscribed = MobileSubscription.query.filter_by(
+                    subscriber_id=g.user_id,
+                    subscribed_to_id=owner.id,
+                    status='active'
+                ).first() is not None
+            except Exception:
+                pass
+        
+        if not is_owner and not is_subscribed:
+            return jsonify({'error': 'subscription_required'}), 403
+        
+        # Try to use the unified performance calculator
+        chart_data = []
+        portfolio_return = 0.0
+        sp500_return = 0.0
+        
+        try:
+            from performance_calculator import calculate_portfolio_performance, get_period_dates
+            start_date, end_date = get_period_dates(period, user_id=owner.id)
+            result = calculate_portfolio_performance(
+                owner.id, start_date, end_date,
+                include_chart_data=True, period=period
+            )
+            if result and result.get('chart_data'):
+                chart_data = result['chart_data']
+                portfolio_return = result.get('portfolio_return', 0.0)
+                sp500_return = result.get('sp500_return', 0.0)
+        except Exception as e:
+            logger.warning(f"Performance calculator failed for user {owner.id}: {e}")
+        
+        # Fallback: generate basic chart from snapshots
+        if not chart_data:
+            try:
+                from leaderboard_utils import generate_chart_from_snapshots
+                chart_result = generate_chart_from_snapshots(owner.id, period)
+                if chart_result:
+                    # Convert Chart.js format to flat array
+                    labels = chart_result.get('labels', [])
+                    datasets = chart_result.get('datasets', [])
+                    portfolio_vals = datasets[0]['data'] if len(datasets) > 0 else []
+                    sp500_vals = datasets[1]['data'] if len(datasets) > 1 else []
+                    
+                    for i, label in enumerate(labels):
+                        chart_data.append({
+                            'date': label,
+                            'portfolio': portfolio_vals[i] if i < len(portfolio_vals) else 0,
+                            'sp500': sp500_vals[i] if i < len(sp500_vals) else 0
+                        })
+                    
+                    portfolio_return = chart_result.get('portfolio_return', 0.0)
+                    sp500_return = chart_result.get('sp500_return', 0.0)
+            except Exception as e:
+                logger.warning(f"Chart generation fallback failed: {e}")
+        
+        # Final fallback: return empty chart with just S&P data
+        if not chart_data:
+            try:
+                from datetime import timedelta, date as dt_date
+                today = dt_date.today()
+                
+                period_days = {'1D': 1, '5D': 5, '7D': 7, '1M': 30, '3M': 90, 'YTD': (today - dt_date(today.year, 1, 1)).days, '1Y': 365}
+                days_back = period_days.get(period, 7)
+                start = today - timedelta(days=days_back)
+                
+                sp500_records = MarketData.query.filter(
+                    MarketData.ticker == 'SPY_SP500',
+                    MarketData.date >= start,
+                    MarketData.date <= today
+                ).order_by(MarketData.date.asc()).all()
+                
+                if sp500_records:
+                    base_sp500 = float(sp500_records[0].close_price)
+                    for rec in sp500_records:
+                        sp500_pct = ((float(rec.close_price) - base_sp500) / base_sp500) * 100 if base_sp500 > 0 else 0
+                        chart_data.append({
+                            'date': rec.date.strftime('%b %d'),
+                            'portfolio': 0,
+                            'sp500': round(sp500_pct, 2)
+                        })
+            except Exception as e:
+                logger.warning(f"S&P fallback failed: {e}")
+        
+        return jsonify({
+            'portfolio_return': round(portfolio_return, 2),
+            'sp500_return': round(sp500_return, 2),
+            'chart_data': chart_data,
+            'period': period
+        })
+        
+    except Exception as e:
+        logger.error(f"Get portfolio chart error: {e}")
+        return jsonify({
+            'portfolio_return': 0,
+            'sp500_return': 0,
+            'chart_data': [],
+            'period': period
+        })
+
+
+# =============================================================================
+# Trade Endpoints (Buy / Sell)
+# =============================================================================
+
+@mobile_api.route('/portfolio/trade', methods=['POST'])
+@require_auth
+def execute_trade():
+    """
+    Execute a buy or sell trade.
+    
+    Request body:
+    {
+        "ticker": "AAPL",
+        "quantity": 10,
+        "price": 175.50,
+        "type": "buy" or "sell"
+    }
+    """
+    from models import db, Stock, Transaction
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'missing_request_body'}), 400
+    
+    ticker = (data.get('ticker') or '').strip().upper()
+    quantity = data.get('quantity')
+    price = data.get('price', 0)
+    trade_type = (data.get('type') or '').lower()
+    
+    if not ticker:
+        return jsonify({'error': 'ticker_required'}), 400
+    if not quantity or quantity <= 0:
+        return jsonify({'error': 'positive_quantity_required'}), 400
+    if trade_type not in ('buy', 'sell'):
+        return jsonify({'error': 'type_must_be_buy_or_sell'}), 400
+    
+    try:
+        existing = Stock.query.filter_by(user_id=g.user_id, ticker=ticker).first()
+        
+        if trade_type == 'sell':
+            if not existing or existing.quantity < quantity:
+                available = existing.quantity if existing else 0
+                return jsonify({'error': 'insufficient_shares', 'available': available}), 400
+            
+            existing.quantity -= quantity
+            if existing.quantity == 0:
+                db.session.delete(existing)
+        else:
+            # Buy
+            if existing:
+                # Update average cost
+                total_cost = (existing.purchase_price * existing.quantity) + (price * quantity)
+                existing.quantity += quantity
+                existing.purchase_price = total_cost / existing.quantity if existing.quantity > 0 else price
+            else:
+                stock = Stock(
+                    ticker=ticker,
+                    quantity=quantity,
+                    purchase_price=price,
+                    user_id=g.user_id
+                )
+                db.session.add(stock)
+        
+        # Record the transaction
+        try:
+            transaction = Transaction(
+                ticker=ticker,
+                quantity=quantity,
+                price=price,
+                type=trade_type.upper(),
+                user_id=g.user_id,
+                timestamp=datetime.utcnow()
+            )
+            db.session.add(transaction)
+        except Exception as tx_err:
+            logger.warning(f"Failed to record transaction: {tx_err}")
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'trade': {
+                'ticker': ticker,
+                'quantity': quantity,
+                'price': price,
+                'type': trade_type
+            }
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Trade execution error: {e}")
+        return jsonify({'error': 'trade_failed'}), 500
+
+
+# =============================================================================
+# Admin Bot Backdoor API
+# =============================================================================
+
+def require_admin_key(f):
+    """Decorator to require admin API key for bot endpoints"""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        admin_key = request.headers.get('X-Admin-Key')
+        expected_key = os.environ.get('ADMIN_API_KEY')
+        
+        if not expected_key:
+            return jsonify({'error': 'admin_api_not_configured'}), 503
+        
+        if not admin_key or admin_key != expected_key:
+            return jsonify({'error': 'invalid_admin_key'}), 403
+        
+        return f(*args, **kwargs)
+    return decorated
+
+
+@mobile_api.route('/admin/bot/create-user', methods=['POST'])
+@require_admin_key
+def bot_create_user():
+    """
+    Create a bot user account.
+    
+    Request body:
+    {
+        "username": "trader_bot_1",
+        "email": "bot1@apestogether.ai"
+    }
+    """
+    from models import db, User
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'missing_request_body'}), 400
+    
+    username = data.get('username')
+    email = data.get('email')
+    
+    if not username or not email:
+        return jsonify({'error': 'username_and_email_required'}), 400
+    
+    try:
+        # Check for existing
+        existing = User.query.filter(
+            (User.username == username) | (User.email == email)
+        ).first()
+        if existing:
+            return jsonify({'error': 'user_already_exists', 'user_id': existing.id}), 409
+        
+        user = User(
+            username=username,
+            email=email,
+            portfolio_slug=_generate_portfolio_slug()
+        )
+        db.session.add(user)
+        db.session.commit()
+        
+        # Generate a long-lived token for the bot
+        token = generate_jwt_token(user.id, user.email, expires_hours=24 * 365)
+        
+        return jsonify({
+            'success': True,
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'portfolio_slug': user.portfolio_slug
+            },
+            'token': token
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Bot create user error: {e}")
+        return jsonify({'error': 'create_failed'}), 500
+
+
+@mobile_api.route('/admin/bot/add-stocks', methods=['POST'])
+@require_admin_key
+def bot_add_stocks():
+    """
+    Add stocks to a bot user's portfolio.
+    
+    Request body:
+    {
+        "user_id": 123,
+        "stocks": [
+            {"ticker": "AAPL", "quantity": 50, "purchase_price": 175.00},
+            {"ticker": "TSLA", "quantity": 25, "purchase_price": 250.00}
+        ]
+    }
+    """
+    from models import db, User, Stock
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'missing_request_body'}), 400
+    
+    user_id = data.get('user_id')
+    stocks_list = data.get('stocks', [])
+    
+    if not user_id or not stocks_list:
+        return jsonify({'error': 'user_id_and_stocks_required'}), 400
+    
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'user_not_found'}), 404
+        
+        added = 0
+        for item in stocks_list:
+            ticker = (item.get('ticker') or '').strip().upper()
+            quantity = item.get('quantity', 0)
+            price = item.get('purchase_price', 0)
+            
+            if not ticker or quantity <= 0:
+                continue
+            
+            existing = Stock.query.filter_by(user_id=user_id, ticker=ticker).first()
+            if existing:
+                existing.quantity += quantity
+            else:
+                stock = Stock(
+                    ticker=ticker,
+                    quantity=quantity,
+                    purchase_price=price,
+                    user_id=user_id
+                )
+                db.session.add(stock)
+            added += 1
+        
+        db.session.commit()
+        return jsonify({'success': True, 'added_count': added})
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Bot add stocks error: {e}")
+        return jsonify({'error': 'add_stocks_failed'}), 500
+
+
+@mobile_api.route('/admin/bot/subscribe', methods=['POST'])
+@require_admin_key
+def bot_subscribe():
+    """
+    Create a subscription from one user to another.
+    
+    Request body:
+    {
+        "subscriber_id": 123,
+        "subscribed_to_id": 456
+    }
+    """
+    from models import db, MobileSubscription
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'missing_request_body'}), 400
+    
+    subscriber_id = data.get('subscriber_id')
+    subscribed_to_id = data.get('subscribed_to_id')
+    
+    if not subscriber_id or not subscribed_to_id:
+        return jsonify({'error': 'subscriber_id_and_subscribed_to_id_required'}), 400
+    
+    try:
+        # Check for existing subscription
+        existing = MobileSubscription.query.filter_by(
+            subscriber_id=subscriber_id,
+            subscribed_to_id=subscribed_to_id,
+            status='active'
+        ).first()
+        
+        if existing:
+            return jsonify({'error': 'already_subscribed', 'subscription_id': existing.id}), 409
+        
+        from datetime import timedelta
+        sub = MobileSubscription(
+            subscriber_id=subscriber_id,
+            subscribed_to_id=subscribed_to_id,
+            platform='admin_bot',
+            status='active',
+            expires_at=datetime.utcnow() + timedelta(days=365),
+            push_notifications_enabled=False
+        )
+        db.session.add(sub)
+        db.session.commit()
+        
+        return jsonify({'success': True, 'subscription_id': sub.id})
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Bot subscribe error: {e}")
+        return jsonify({'error': 'subscribe_failed'}), 500
+
+
+@mobile_api.route('/admin/bot/execute-trade', methods=['POST'])
+@require_admin_key
+def bot_execute_trade():
+    """
+    Execute a trade for a bot user.
+    
+    Request body:
+    {
+        "user_id": 123,
+        "ticker": "AAPL",
+        "quantity": 10,
+        "price": 175.50,
+        "type": "buy" or "sell"
+    }
+    """
+    from models import db, Stock, Transaction
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'missing_request_body'}), 400
+    
+    user_id = data.get('user_id')
+    ticker = (data.get('ticker') or '').strip().upper()
+    quantity = data.get('quantity', 0)
+    price = data.get('price', 0)
+    trade_type = (data.get('type') or '').lower()
+    
+    if not user_id or not ticker or quantity <= 0:
+        return jsonify({'error': 'user_id_ticker_quantity_required'}), 400
+    if trade_type not in ('buy', 'sell'):
+        return jsonify({'error': 'type_must_be_buy_or_sell'}), 400
+    
+    try:
+        existing = Stock.query.filter_by(user_id=user_id, ticker=ticker).first()
+        
+        if trade_type == 'sell':
+            if not existing or existing.quantity < quantity:
+                return jsonify({'error': 'insufficient_shares'}), 400
+            existing.quantity -= quantity
+            if existing.quantity == 0:
+                db.session.delete(existing)
+        else:
+            if existing:
+                total_cost = (existing.purchase_price * existing.quantity) + (price * quantity)
+                existing.quantity += quantity
+                existing.purchase_price = total_cost / existing.quantity if existing.quantity > 0 else price
+            else:
+                stock = Stock(ticker=ticker, quantity=quantity, purchase_price=price, user_id=user_id)
+                db.session.add(stock)
+        
+        try:
+            transaction = Transaction(
+                ticker=ticker, quantity=quantity, price=price,
+                type=trade_type.upper(), user_id=user_id,
+                timestamp=datetime.utcnow()
+            )
+            db.session.add(transaction)
+        except Exception:
+            pass
+        
+        db.session.commit()
+        return jsonify({'success': True})
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Bot trade error: {e}")
+        return jsonify({'error': 'trade_failed'}), 500
+
+
+@mobile_api.route('/admin/bot/list-users', methods=['GET'])
+@require_admin_key
+def bot_list_users():
+    """List all users with their portfolio info"""
+    from models import User, Stock
+    
+    try:
+        users = User.query.all()
+        user_list = []
+        for u in users:
+            stock_count = Stock.query.filter_by(user_id=u.id).count()
+            user_list.append({
+                'id': u.id,
+                'username': u.username,
+                'email': u.email,
+                'portfolio_slug': u.portfolio_slug,
+                'stock_count': stock_count
+            })
+        return jsonify({'users': user_list})
+    except Exception as e:
+        logger.error(f"Bot list users error: {e}")
+        return jsonify({'error': 'list_failed'}), 500

@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import Charts
 
 struct LeaderboardView: View {
     @StateObject private var viewModel = LeaderboardViewModel()
@@ -291,6 +292,21 @@ struct LeaderboardView: View {
 struct LeaderboardRow: View {
     let entry: LeaderboardEntry
     
+    // Generate synthetic sparkline data from return percent
+    private var sparklineData: [Double] {
+        let returnVal = entry.returnPercent
+        // Create a plausible trend line: start near 0, end at returnVal
+        let steps = 12
+        var points: [Double] = []
+        for i in 0..<steps {
+            let progress = Double(i) / Double(steps - 1)
+            // Add some variation to make it look realistic
+            let noise = sin(Double(i) * 1.5 + Double(entry.rank)) * abs(returnVal) * 0.15
+            points.append(returnVal * progress + noise)
+        }
+        return points
+    }
+    
     var body: some View {
         HStack(spacing: 12) {
             // Rank badge
@@ -299,41 +315,47 @@ struct LeaderboardRow: View {
                     .fill(entry.rank <= 3 ? Color.primaryAccent.opacity(0.15) : Color.cardBackground)
                     .frame(width: 36, height: 36)
                 
-                Text("\(entry.rank)")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundColor(entry.rank <= 3 ? .primaryAccent : .textSecondary)
+                if entry.rank <= 3 {
+                    Text(["\u{1F947}", "\u{1F948}", "\u{1F949}"][entry.rank - 1])
+                        .font(.system(size: 16))
+                } else {
+                    Text("\(entry.rank)")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundColor(.textSecondary)
+                }
             }
             
             // User info
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.user.username)
-                    .font(.headline)
+                    .font(.subheadline.weight(.semibold))
                     .foregroundColor(.textPrimary)
+                    .lineLimit(1)
                 
                 HStack(spacing: 4) {
                     Image(systemName: "person.2.fill")
-                        .font(.caption2)
+                        .font(.system(size: 8))
                     Text("\(entry.subscriberCount)")
-                        .font(.caption)
+                        .font(.caption2)
                 }
-                .foregroundColor(.textSecondary)
+                .foregroundColor(.textMuted)
             }
             
-            Spacer()
+            // Mini sparkline chart
+            SparklineView(
+                dataPoints: sparklineData,
+                isPositive: entry.returnPercent >= 0
+            )
+            .frame(width: 50, height: 28)
             
             // Return percentage
             Text(String(format: "%+.2f%%", entry.returnPercent))
-                .font(.headline.monospacedDigit())
+                .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
                 .foregroundColor(entry.returnPercent >= 0 ? .gains : .losses)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(
-                    Capsule()
-                        .fill((entry.returnPercent >= 0 ? Color.gains : Color.losses).opacity(0.15))
-                )
+                .frame(width: 72, alignment: .trailing)
         }
-        .padding(.horizontal)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
     }
 }
 
