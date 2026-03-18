@@ -5,6 +5,9 @@ struct MyPortfolioView: View {
     @State private var showAddStocks = false
     @State private var showSettings = false
     @State private var showShareSheet = false
+    @State private var shareImage: UIImage?
+    @State private var showCopiedToast = false
+    @StateObject private var shareViewModel = ShareDataViewModel()
     
     private var personalURL: String {
         if let slug = authManager.currentUser?.portfolioSlug {
@@ -23,22 +26,49 @@ struct MyPortfolioView: View {
                         VStack(spacing: 0) {
                             PortfolioDetailView(slug: slug)
                             
-                            // Share portfolio button
-                            Button {
-                                showShareSheet = true
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "square.and.arrow.up")
-                                    Text("Share Portfolio")
+                            // Share buttons row
+                            HStack(spacing: 10) {
+                                // Share card button (primary)
+                                Button {
+                                    generateAndShare(slug: slug)
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "square.and.arrow.up")
+                                            .font(.system(size: 14))
+                                        Text("Share Performance")
+                                            .font(.subheadline.weight(.semibold))
+                                    }
+                                    .foregroundColor(.appBackground)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .fill(Color.primaryAccent)
+                                    )
                                 }
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundColor(.primaryAccent)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 12)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .stroke(Color.primaryAccent.opacity(0.4), lineWidth: 1)
-                                )
+                                
+                                // Copy link button
+                                Button {
+                                    UIPasteboard.general.string = personalURL
+                                    withAnimation { showCopiedToast = true }
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                        withAnimation { showCopiedToast = false }
+                                    }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: showCopiedToast ? "checkmark" : "link")
+                                            .font(.system(size: 14))
+                                        Text(showCopiedToast ? "Copied!" : "Copy Link")
+                                            .font(.subheadline.weight(.semibold))
+                                    }
+                                    .foregroundColor(.primaryAccent)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .stroke(Color.primaryAccent.opacity(0.4), lineWidth: 1)
+                                    )
+                                }
                             }
                             .padding(.horizontal, 16)
                             .padding(.bottom, 8)
@@ -85,12 +115,73 @@ struct MyPortfolioView: View {
                 .environmentObject(authManager)
             }
             .sheet(isPresented: $showShareSheet) {
-                ShareSheet(items: [
-                    "Check out my portfolio on Apes Together! 🦍📈\n\(personalURL)"
-                ])
+                if let image = shareImage {
+                    ShareSheet(items: [
+                        image,
+                        "Check out my portfolio on Apes Together! 🦍📈\n\(personalURL)" as Any
+                    ])
+                } else {
+                    ShareSheet(items: [
+                        "Check out my portfolio on Apes Together! 🦍📈\n\(personalURL)"
+                    ])
+                }
+            }
+            .onAppear {
+                if let slug = authManager.currentUser?.portfolioSlug {
+                    Task { await shareViewModel.loadData(slug: slug) }
+                }
             }
         }
         .navigationViewStyle(.stack)
+    }
+    
+    private func generateAndShare(slug: String) {
+        guard let user = authManager.currentUser else {
+            showShareSheet = true
+            return
+        }
+        
+        if #available(iOS 16.0, *) {
+            shareImage = ShareCardGenerator.shared.generatePortfolioCard(
+                username: user.username,
+                portfolioReturn: shareViewModel.portfolioReturn,
+                sp500Return: shareViewModel.sp500Return,
+                chartData: shareViewModel.chartData,
+                holdingsCount: shareViewModel.holdingsCount,
+                subscriberCount: shareViewModel.subscriberCount,
+                period: shareViewModel.selectedPeriod,
+                slug: slug
+            )
+        }
+        
+        showShareSheet = true
+    }
+}
+
+// MARK: - Share Data View Model
+
+@MainActor
+class ShareDataViewModel: ObservableObject {
+    @Published var portfolioReturn: Double = 0
+    @Published var sp500Return: Double = 0
+    @Published var chartData: [ChartPoint] = []
+    @Published var holdingsCount: Int = 0
+    @Published var subscriberCount: Int = 0
+    @Published var selectedPeriod: String = "7D"
+    
+    func loadData(slug: String) async {
+        do {
+            let portfolio = try await APIService.shared.getPortfolio(slug: slug)
+            holdingsCount = portfolio.holdings?.count ?? 0
+            subscriberCount = portfolio.subscriberCount
+        } catch {}
+        
+        do {
+            let chart = try await APIService.shared.getPortfolioChart(slug: slug, period: selectedPeriod)
+            chartData = chart.chartData
+            portfolioReturn = chart.portfolioReturn
+            sp500Return = chart.sp500Return
+        } catch {}
     }
 }
 
@@ -109,5 +200,69 @@ struct MyPortfolioView_Previews: PreviewProvider {
         MyPortfolioView()
             .environmentObject(AuthenticationManager())
             .environmentObject(SubscriptionManager())
+    }
+}
+
+// MARK: - Share after Trade helper
+
+struct PostTradeSharePrompt: View {
+    let username: String
+    let ticker: String
+    let tradeType: String
+    let quantity: Int
+    let price: Double
+    let slug: String
+    let onDismiss: () -> Void
+    
+    @State private var showShareSheet = false
+    @State private var shareImage: UIImage?
+    
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 44))
+                .foregroundColor(.primaryAccent)
+            
+            Text("Trade Executed!")
+                .font(.title3.bold())
+                .foregroundColor(.textPrimary)
+            
+            Text("\(tradeType.uppercased()) \(quantity) \(ticker) @ $\(String(format: "%.2f", price))")
+                .font(.subheadline)
+                .foregroundColor(.textSecondary)
+            
+            Button {
+                if #available(iOS 16.0, *) {
+                    shareImage = ShareCardGenerator.shared.generateTradeCard(
+                        username: username,
+                        ticker: ticker,
+                        tradeType: tradeType,
+                        quantity: quantity,
+                        price: price,
+                        slug: slug
+                    )
+                }
+                showShareSheet = true
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "square.and.arrow.up")
+                    Text("Share This Trade")
+                }
+            }
+            .buttonStyle(PrimaryButtonStyle())
+            .padding(.horizontal, 20)
+            
+            Button("Done") {
+                onDismiss()
+            }
+            .font(.subheadline)
+            .foregroundColor(.textSecondary)
+        }
+        .padding(24)
+        .sheet(isPresented: $showShareSheet) {
+            if let image = shareImage {
+                ShareSheet(items: [image, "I just traded \(ticker) on Apes Together! \u{1F98D}" as Any])
+            }
+        }
     }
 }
