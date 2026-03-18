@@ -1303,10 +1303,20 @@ def bot_create_user():
         if existing:
             return jsonify({'error': 'user_already_exists', 'user_id': existing.id}), 409
         
+        industry = data.get('industry', 'General')
+        
         user = User(
             username=username,
             email=email,
-            portfolio_slug=_generate_portfolio_slug()
+            portfolio_slug=_generate_portfolio_slug(),
+            role='agent',
+            created_by='system',
+            subscription_price=9.00,
+            extra_data={
+                'industry': industry,
+                'bot_active': True,
+                'bot_created_at': datetime.utcnow().isoformat()
+            }
         )
         db.session.add(user)
         db.session.commit()
@@ -1320,7 +1330,9 @@ def bot_create_user():
                 'id': user.id,
                 'username': user.username,
                 'email': user.email,
-                'portfolio_slug': user.portfolio_slug
+                'portfolio_slug': user.portfolio_slug,
+                'role': user.role,
+                'industry': industry
             },
             'token': token
         })
@@ -1521,22 +1533,345 @@ def bot_execute_trade():
 @mobile_api.route('/admin/bot/list-users', methods=['GET'])
 @require_admin_key
 def bot_list_users():
-    """List all users with their portfolio info"""
-    from models import User, Stock
+    """List all users with their portfolio info, filterable by role"""
+    from models import User, Stock, Transaction, MobileSubscription
     
     try:
-        users = User.query.all()
+        role_filter = request.args.get('role')  # 'agent', 'user', or None for all
+        query = User.query
+        if role_filter:
+            query = query.filter(User.role == role_filter)
+        
+        users = query.order_by(User.created_at.desc()).all()
         user_list = []
         for u in users:
             stock_count = Stock.query.filter_by(user_id=u.id).count()
+            trade_count = Transaction.query.filter_by(user_id=u.id).count()
+            subscriber_count = MobileSubscription.query.filter_by(
+                subscribed_to_id=u.id, status='active'
+            ).count()
+            
+            extra = u.extra_data or {}
+            industry = extra.get('industry', 'General')
+            bot_active = extra.get('bot_active', True) if u.role == 'agent' else None
+            
             user_list.append({
                 'id': u.id,
                 'username': u.username,
                 'email': u.email,
                 'portfolio_slug': u.portfolio_slug,
-                'stock_count': stock_count
+                'role': u.role or 'user',
+                'created_by': u.created_by or 'human',
+                'created_at': u.created_at.isoformat() if u.created_at else None,
+                'industry': industry,
+                'bot_active': bot_active,
+                'stock_count': stock_count,
+                'trade_count': trade_count,
+                'subscriber_count': subscriber_count
             })
-        return jsonify({'users': user_list})
+        return jsonify({'users': user_list, 'total': len(user_list)})
     except Exception as e:
         logger.error(f"Bot list users error: {e}")
         return jsonify({'error': 'list_failed'}), 500
+
+
+@mobile_api.route('/admin/bot/dashboard', methods=['GET'])
+@require_admin_key
+def bot_dashboard():
+    """Get summary stats for the admin dashboard"""
+    from models import User, Stock, Transaction, MobileSubscription
+    
+    try:
+        total_users = User.query.count()
+        bot_users = User.query.filter(User.role == 'agent').count()
+        human_users = total_users - bot_users
+        
+        # Active bots (bot_active=True in extra_data)
+        active_bots = 0
+        inactive_bots = 0
+        bots = User.query.filter(User.role == 'agent').all()
+        industry_counts = {}
+        for b in bots:
+            extra = b.extra_data or {}
+            if extra.get('bot_active', True):
+                active_bots += 1
+            else:
+                inactive_bots += 1
+            ind = extra.get('industry', 'General')
+            industry_counts[ind] = industry_counts.get(ind, 0) + 1
+        
+        total_stocks = Stock.query.count()
+        total_trades = Transaction.query.count()
+        total_subscriptions = MobileSubscription.query.filter_by(status='active').count()
+        
+        # Gifted subscriptions (platform='admin_gift')
+        gifted_subs = MobileSubscription.query.filter_by(
+            platform='admin_gift', status='active'
+        ).count()
+        
+        return jsonify({
+            'total_users': total_users,
+            'human_users': human_users,
+            'bot_users': bot_users,
+            'active_bots': active_bots,
+            'inactive_bots': inactive_bots,
+            'industry_breakdown': industry_counts,
+            'total_stocks': total_stocks,
+            'total_trades': total_trades,
+            'total_subscriptions': total_subscriptions,
+            'gifted_subscriptions': gifted_subs
+        })
+    except Exception as e:
+        logger.error(f"Bot dashboard error: {e}")
+        return jsonify({'error': 'dashboard_failed'}), 500
+
+
+@mobile_api.route('/admin/bot/gift-subscribers', methods=['POST'])
+@require_admin_key
+def bot_gift_subscribers():
+    """
+    Gift subscriber count to a user (creates fake subscriptions).
+    Also updates UserPortfolioStats.subscriber_count.
+    
+    Request body:
+    {
+        "user_id": 123,
+        "count": 5
+    }
+    """
+    from models import db, User, MobileSubscription, UserPortfolioStats
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'missing_request_body'}), 400
+    
+    user_id = data.get('user_id')
+    count = data.get('count', 1)
+    
+    if not user_id or count <= 0:
+        return jsonify({'error': 'user_id_and_positive_count_required'}), 400
+    
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'user_not_found'}), 404
+        
+        from datetime import timedelta
+        created = 0
+        for i in range(count):
+            sub = MobileSubscription(
+                subscriber_id=user_id,  # Self-referential placeholder
+                subscribed_to_id=user_id,
+                platform='admin_gift',
+                status='active',
+                expires_at=datetime.utcnow() + timedelta(days=365 * 10),
+                push_notifications_enabled=False
+            )
+            db.session.add(sub)
+            created += 1
+        
+        # Update UserPortfolioStats subscriber_count
+        stats = UserPortfolioStats.query.filter_by(user_id=user_id).first()
+        if stats:
+            stats.subscriber_count = (stats.subscriber_count or 0) + count
+        else:
+            stats = UserPortfolioStats(
+                user_id=user_id,
+                subscriber_count=count
+            )
+            db.session.add(stats)
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'gifted': created,
+            'new_subscriber_count': stats.subscriber_count
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Gift subscribers error: {e}")
+        return jsonify({'error': 'gift_failed'}), 500
+
+
+@mobile_api.route('/admin/bot/deactivate', methods=['POST'])
+@require_admin_key
+def bot_deactivate():
+    """
+    Deactivate a bot user (hide from leaderboards, stop trading).
+    
+    Request body: {"user_id": 123}
+    """
+    from models import db, User
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'missing_request_body'}), 400
+    
+    user_id = data.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'user_id_required'}), 400
+    
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'user_not_found'}), 404
+        
+        extra = user.extra_data or {}
+        extra['bot_active'] = False
+        extra['deactivated_at'] = datetime.utcnow().isoformat()
+        user.extra_data = extra
+        user.leaderboard_eligible = False
+        
+        db.session.commit()
+        return jsonify({'success': True, 'user_id': user_id, 'bot_active': False})
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Bot deactivate error: {e}")
+        return jsonify({'error': 'deactivate_failed'}), 500
+
+
+@mobile_api.route('/admin/bot/reactivate', methods=['POST'])
+@require_admin_key
+def bot_reactivate():
+    """
+    Reactivate a previously deactivated bot user.
+    
+    Request body: {"user_id": 123}
+    """
+    from models import db, User
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'missing_request_body'}), 400
+    
+    user_id = data.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'user_id_required'}), 400
+    
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'user_not_found'}), 404
+        
+        extra = user.extra_data or {}
+        extra['bot_active'] = True
+        extra.pop('deactivated_at', None)
+        user.extra_data = extra
+        user.leaderboard_eligible = True
+        
+        db.session.commit()
+        return jsonify({'success': True, 'user_id': user_id, 'bot_active': True})
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Bot reactivate error: {e}")
+        return jsonify({'error': 'reactivate_failed'}), 500
+
+
+@mobile_api.route('/admin/bot/update-config', methods=['POST'])
+@require_admin_key
+def bot_update_config():
+    """
+    Update bot configuration (industry, trading style, etc.)
+    
+    Request body:
+    {
+        "user_id": 123,
+        "industry": "Technology",
+        "trading_style": "active",
+        "trade_frequency": "daily",
+        "trade_time_range": {"start_hour": 9, "end_hour": 16},
+        "max_stocks": 15
+    }
+    """
+    from models import db, User
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'missing_request_body'}), 400
+    
+    user_id = data.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'user_id_required'}), 400
+    
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'user_not_found'}), 404
+        
+        extra = user.extra_data or {}
+        
+        # Update configurable fields
+        for key in ['industry', 'trading_style', 'trade_frequency', 
+                     'trade_time_range', 'max_stocks', 'notes']:
+            if key in data:
+                extra[key] = data[key]
+        
+        user.extra_data = extra
+        db.session.commit()
+        
+        return jsonify({'success': True, 'extra_data': extra})
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Bot update config error: {e}")
+        return jsonify({'error': 'update_failed'}), 500
+
+
+@mobile_api.route('/admin/bot/remove-subscribers', methods=['POST'])
+@require_admin_key
+def bot_remove_subscribers():
+    """
+    Remove gifted subscribers from a user.
+    
+    Request body:
+    {
+        "user_id": 123,
+        "count": 3
+    }
+    """
+    from models import db, MobileSubscription, UserPortfolioStats
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'missing_request_body'}), 400
+    
+    user_id = data.get('user_id')
+    count = data.get('count', 1)
+    
+    if not user_id or count <= 0:
+        return jsonify({'error': 'user_id_and_positive_count_required'}), 400
+    
+    try:
+        # Find and remove gifted subscriptions
+        gifted = MobileSubscription.query.filter_by(
+            subscribed_to_id=user_id,
+            platform='admin_gift',
+            status='active'
+        ).limit(count).all()
+        
+        removed = 0
+        for sub in gifted:
+            sub.status = 'canceled'
+            removed += 1
+        
+        # Update stats
+        stats = UserPortfolioStats.query.filter_by(user_id=user_id).first()
+        if stats:
+            stats.subscriber_count = max(0, (stats.subscriber_count or 0) - removed)
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'removed': removed,
+            'new_subscriber_count': stats.subscriber_count if stats else 0
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Remove subscribers error: {e}")
+        return jsonify({'error': 'remove_failed'}), 500

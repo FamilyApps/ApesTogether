@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apes Together — Bot Admin Dashboard</title>
+    <style>
+        :root {
+            --bg: #0A0F0D;
+            --card: #141A17;
+            --border: #1F2A24;
+            --accent: #00D9A5;
+            --text: #E5E7EB;
+            --muted: #6B7280;
+            --green: #22C55E;
+            --red: #EF4444;
+            --yellow: #F59E0B;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+        .header {
+            background: var(--card);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .header h1 { font-size: 18px; }
+        .header h1 span { color: var(--accent); }
+        .header .auth-bar {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .header input[type="password"] {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            width: 280px;
+        }
+        .header button {
+            background: var(--accent);
+            color: var(--bg);
+            border: none;
+            padding: 6px 16px;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+        
+        /* Stats grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+        .stat-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+        }
+        .stat-card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat-card .value { font-size: 28px; font-weight: 700; margin-top: 4px; }
+        .stat-card .value.accent { color: var(--accent); }
+        .stat-card .value.green { color: var(--green); }
+        .stat-card .value.red { color: var(--red); }
+        .stat-card .value.yellow { color: var(--yellow); }
+
+        /* Sections */
+        .section {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            overflow: hidden;
+        }
+        .section-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .section-header h2 { font-size: 15px; font-weight: 600; }
+        .section-body { padding: 16px 20px; }
+
+        /* Tables */
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th { text-align: left; padding: 8px 12px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
+        td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+        tr:last-child td { border-bottom: none; }
+        tr:hover { background: rgba(0,217,165,0.03); }
+
+        /* Badges */
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .badge.bot { background: var(--accent); color: var(--bg); }
+        .badge.human { background: #3B82F6; color: white; }
+        .badge.active { background: var(--green); color: white; }
+        .badge.inactive { background: var(--red); color: white; }
+        .badge.industry { background: rgba(0,217,165,0.1); color: var(--accent); border: 1px solid rgba(0,217,165,0.2); }
+
+        /* Buttons */
+        .btn {
+            padding: 5px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: opacity 0.2s;
+        }
+        .btn:hover { opacity: 0.8; }
+        .btn-accent { background: var(--accent); color: var(--bg); }
+        .btn-red { background: var(--red); color: white; }
+        .btn-outline {
+            background: transparent;
+            color: var(--accent);
+            border: 1px solid var(--accent);
+        }
+        .btn-sm { padding: 3px 8px; font-size: 11px; }
+        .btn-group { display: flex; gap: 4px; }
+
+        /* Forms */
+        .form-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 12px;
+            align-items: flex-end;
+            flex-wrap: wrap;
+        }
+        .form-group { display: flex; flex-direction: column; gap: 4px; }
+        .form-group label { font-size: 11px; color: var(--muted); text-transform: uppercase; }
+        .form-group input, .form-group select {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 12px 20px;
+            border-radius: 10px;
+            font-size: 13px;
+            display: none;
+            z-index: 999;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        }
+        .toast.success { border-color: var(--green); }
+        .toast.error { border-color: var(--red); }
+
+        /* Industry breakdown */
+        .industry-bar {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+        .industry-chip {
+            padding: 4px 10px;
+            background: rgba(0,217,165,0.08);
+            border: 1px solid rgba(0,217,165,0.15);
+            border-radius: 8px;
+            font-size: 12px;
+            color: var(--accent);
+        }
+        .industry-chip .count { font-weight: 700; }
+
+        /* Filter tabs */
+        .filter-tabs {
+            display: flex;
+            gap: 6px;
+        }
+        .filter-tab {
+            padding: 4px 14px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            background: transparent;
+            color: var(--muted);
+            border: 1px solid var(--border);
+        }
+        .filter-tab.active {
+            background: var(--accent);
+            color: var(--bg);
+            border-color: var(--accent);
+        }
+
+        /* Locked screen */
+        .locked {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 60vh;
+            gap: 16px;
+        }
+        .locked .lock-icon { font-size: 48px; opacity: 0.3; }
+        .locked p { color: var(--muted); font-size: 14px; }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .form-row { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🦍 Apes Together — <span>Bot Admin</span></h1>
+        <div class="auth-bar">
+            <input type="password" id="adminKey" placeholder="Enter Admin API Key..." />
+            <button onclick="authenticate()">Connect</button>
+        </div>
+    </div>
+
+    <div class="container" id="dashboard" style="display:none;">
+        <!-- Stats Grid -->
+        <div class="stats-grid" id="statsGrid"></div>
+
+        <!-- Industry Breakdown -->
+        <div class="section">
+            <div class="section-header">
+                <h2>Industry Breakdown</h2>
+            </div>
+            <div class="section-body">
+                <div class="industry-bar" id="industryBar"></div>
+            </div>
+        </div>
+
+        <!-- Create Bot -->
+        <div class="section">
+            <div class="section-header">
+                <h2>Create New Bot</h2>
+            </div>
+            <div class="section-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Username</label>
+                        <input type="text" id="newBotUsername" placeholder="e.g. tech_trader_42" />
+                    </div>
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="text" id="newBotEmail" placeholder="e.g. bot42@apestogether.ai" />
+                    </div>
+                    <div class="form-group">
+                        <label>Industry</label>
+                        <select id="newBotIndustry">
+                            <option value="Technology">Technology</option>
+                            <option value="Healthcare">Healthcare</option>
+                            <option value="Finance">Finance</option>
+                            <option value="Energy">Energy</option>
+                            <option value="Consumer">Consumer</option>
+                            <option value="Industrial">Industrial</option>
+                            <option value="Real Estate">Real Estate</option>
+                            <option value="Crypto">Crypto</option>
+                            <option value="ETF">ETF / Index</option>
+                            <option value="General">General / Mixed</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-accent" onclick="createBot()">Create Bot</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="section">
+            <div class="section-header">
+                <h2>Quick Actions</h2>
+            </div>
+            <div class="section-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>User ID</label>
+                        <input type="number" id="actionUserId" placeholder="User ID" />
+                    </div>
+                    <div class="form-group">
+                        <label>Action</label>
+                        <select id="actionType">
+                            <option value="gift">Gift Subscribers</option>
+                            <option value="remove-subs">Remove Gifted Subscribers</option>
+                            <option value="deactivate">Deactivate Bot</option>
+                            <option value="reactivate">Reactivate Bot</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="actionCountGroup">
+                        <label>Count</label>
+                        <input type="number" id="actionCount" value="1" min="1" />
+                    </div>
+                    <button class="btn btn-accent" onclick="executeAction()">Execute</button>
+                </div>
+
+                <hr style="border-color: var(--border); margin: 16px 0;">
+                <h3 style="font-size: 13px; margin-bottom: 12px; color: var(--muted);">Add Stocks to Bot</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>User ID</label>
+                        <input type="number" id="stockUserId" placeholder="User ID" />
+                    </div>
+                    <div class="form-group">
+                        <label>Stocks (JSON)</label>
+                        <input type="text" id="stocksJson" placeholder='[{"ticker":"AAPL","quantity":50,"purchase_price":175}]' style="width: 400px;" />
+                    </div>
+                    <button class="btn btn-accent" onclick="addStocks()">Add Stocks</button>
+                </div>
+
+                <hr style="border-color: var(--border); margin: 16px 0;">
+                <h3 style="font-size: 13px; margin-bottom: 12px; color: var(--muted);">Execute Trade</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>User ID</label>
+                        <input type="number" id="tradeUserId" placeholder="User ID" />
+                    </div>
+                    <div class="form-group">
+                        <label>Ticker</label>
+                        <input type="text" id="tradeTicker" placeholder="AAPL" style="width: 80px;" />
+                    </div>
+                    <div class="form-group">
+                        <label>Qty</label>
+                        <input type="number" id="tradeQty" placeholder="10" style="width: 70px;" />
+                    </div>
+                    <div class="form-group">
+                        <label>Price</label>
+                        <input type="number" id="tradePrice" placeholder="175.50" step="0.01" style="width: 90px;" />
+                    </div>
+                    <div class="form-group">
+                        <label>Type</label>
+                        <select id="tradeType">
+                            <option value="buy">Buy</option>
+                            <option value="sell">Sell</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-accent" onclick="executeTrade()">Execute Trade</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bot Catalog -->
+        <div class="section">
+            <div class="section-header">
+                <h2>Bot Catalog</h2>
+                <div class="filter-tabs">
+                    <button class="filter-tab active" onclick="filterUsers('all', this)">All</button>
+                    <button class="filter-tab" onclick="filterUsers('agent', this)">Bots</button>
+                    <button class="filter-tab" onclick="filterUsers('user', this)">Humans</button>
+                </div>
+            </div>
+            <div style="overflow-x: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Username</th>
+                            <th>Role</th>
+                            <th>Industry</th>
+                            <th>Status</th>
+                            <th>Stocks</th>
+                            <th>Trades</th>
+                            <th>Subscribers</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="userTable"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Locked screen -->
+    <div class="container" id="lockedScreen">
+        <div class="locked">
+            <div class="lock-icon">🔒</div>
+            <p>Enter your Admin API Key above to access the dashboard</p>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <script>
+        const BASE = '/api/mobile';
+        let ADMIN_KEY = localStorage.getItem('admin_key') || '';
+        let allUsers = [];
+
+        // Auto-connect if key is saved
+        if (ADMIN_KEY) {
+            document.getElementById('adminKey').value = '••••••••';
+            authenticate();
+        }
+
+        function authenticate() {
+            const input = document.getElementById('adminKey').value;
+            if (input && input !== '••••••••') {
+                ADMIN_KEY = input;
+                localStorage.setItem('admin_key', ADMIN_KEY);
+            }
+            if (!ADMIN_KEY) return showToast('Enter an API key', 'error');
+            
+            loadDashboard();
+        }
+
+        async function api(path, method = 'GET', body = null) {
+            const opts = {
+                method,
+                headers: {
+                    'X-Admin-Key': ADMIN_KEY,
+                    'Content-Type': 'application/json'
+                }
+            };
+            if (body) opts.body = JSON.stringify(body);
+            
+            const res = await fetch(BASE + path, opts);
+            const data = await res.json();
+            
+            if (res.status === 403) {
+                showToast('Invalid API key', 'error');
+                localStorage.removeItem('admin_key');
+                ADMIN_KEY = '';
+                document.getElementById('dashboard').style.display = 'none';
+                document.getElementById('lockedScreen').style.display = 'block';
+                throw new Error('Unauthorized');
+            }
+            
+            return data;
+        }
+
+        async function loadDashboard() {
+            try {
+                const stats = await api('/admin/bot/dashboard');
+                
+                document.getElementById('dashboard').style.display = 'block';
+                document.getElementById('lockedScreen').style.display = 'none';
+
+                // Stats grid
+                document.getElementById('statsGrid').innerHTML = `
+                    <div class="stat-card"><div class="label">Total Users</div><div class="value accent">${stats.total_users}</div></div>
+                    <div class="stat-card"><div class="label">Human Users</div><div class="value">${stats.human_users}</div></div>
+                    <div class="stat-card"><div class="label">Bot Users</div><div class="value accent">${stats.bot_users}</div></div>
+                    <div class="stat-card"><div class="label">Active Bots</div><div class="value green">${stats.active_bots}</div></div>
+                    <div class="stat-card"><div class="label">Inactive Bots</div><div class="value red">${stats.inactive_bots}</div></div>
+                    <div class="stat-card"><div class="label">Total Stocks</div><div class="value">${stats.total_stocks}</div></div>
+                    <div class="stat-card"><div class="label">Total Trades</div><div class="value">${stats.total_trades}</div></div>
+                    <div class="stat-card"><div class="label">Subscriptions</div><div class="value accent">${stats.total_subscriptions}</div></div>
+                    <div class="stat-card"><div class="label">Gifted Subs</div><div class="value yellow">${stats.gifted_subscriptions}</div></div>
+                `;
+
+                // Industry breakdown
+                const bar = document.getElementById('industryBar');
+                bar.innerHTML = Object.entries(stats.industry_breakdown || {})
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([ind, count]) => `<div class="industry-chip"><span class="count">${count}</span> ${ind}</div>`)
+                    .join('');
+
+                // Load users
+                await loadUsers();
+            } catch (e) {
+                if (e.message !== 'Unauthorized') {
+                    showToast('Failed to load dashboard: ' + e.message, 'error');
+                }
+            }
+        }
+
+        async function loadUsers(roleFilter = null) {
+            try {
+                const url = roleFilter ? `/admin/bot/list-users?role=${roleFilter}` : '/admin/bot/list-users';
+                const data = await api(url);
+                allUsers = data.users || [];
+                renderUsers(allUsers);
+            } catch (e) {}
+        }
+
+        function filterUsers(role, btn) {
+            document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+            btn.classList.add('active');
+            
+            if (role === 'all') {
+                renderUsers(allUsers);
+            } else {
+                renderUsers(allUsers.filter(u => u.role === role));
+            }
+        }
+
+        function renderUsers(users) {
+            const tbody = document.getElementById('userTable');
+            tbody.innerHTML = users.map(u => {
+                const roleBadge = u.role === 'agent' 
+                    ? '<span class="badge bot">Bot</span>' 
+                    : '<span class="badge human">Human</span>';
+                
+                const statusBadge = u.role === 'agent'
+                    ? (u.bot_active !== false 
+                        ? '<span class="badge active">Active</span>'
+                        : '<span class="badge inactive">Inactive</span>')
+                    : '—';
+                
+                const created = u.created_at 
+                    ? new Date(u.created_at).toLocaleDateString() 
+                    : '—';
+                
+                const actions = u.role === 'agent' ? `
+                    <div class="btn-group">
+                        ${u.bot_active !== false 
+                            ? `<button class="btn btn-red btn-sm" onclick="deactivateBot(${u.id})">Deactivate</button>`
+                            : `<button class="btn btn-accent btn-sm" onclick="reactivateBot(${u.id})">Reactivate</button>`
+                        }
+                        <button class="btn btn-outline btn-sm" onclick="giftSubs(${u.id})">+Sub</button>
+                    </div>
+                ` : `<button class="btn btn-outline btn-sm" onclick="giftSubs(${u.id})">+Sub</button>`;
+
+                return `<tr>
+                    <td>${u.id}</td>
+                    <td><strong>${u.username}</strong><br><span style="font-size:11px;color:var(--muted)">${u.email}</span></td>
+                    <td>${roleBadge}</td>
+                    <td><span class="badge industry">${u.industry || 'General'}</span></td>
+                    <td>${statusBadge}</td>
+                    <td>${u.stock_count}</td>
+                    <td>${u.trade_count}</td>
+                    <td>${u.subscriber_count}</td>
+                    <td style="font-size:12px;color:var(--muted)">${created}</td>
+                    <td>${actions}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        async function createBot() {
+            const username = document.getElementById('newBotUsername').value.trim();
+            const email = document.getElementById('newBotEmail').value.trim();
+            const industry = document.getElementById('newBotIndustry').value;
+            
+            if (!username || !email) return showToast('Username and email required', 'error');
+            
+            try {
+                const data = await api('/admin/bot/create-user', 'POST', { username, email, industry });
+                if (data.success) {
+                    showToast(`Bot "${username}" created (ID: ${data.user.id})`, 'success');
+                    document.getElementById('newBotUsername').value = '';
+                    document.getElementById('newBotEmail').value = '';
+                    loadDashboard();
+                } else {
+                    showToast(data.error || 'Create failed', 'error');
+                }
+            } catch (e) {
+                showToast('Create failed: ' + e.message, 'error');
+            }
+        }
+
+        async function executeAction() {
+            const userId = parseInt(document.getElementById('actionUserId').value);
+            const action = document.getElementById('actionType').value;
+            const count = parseInt(document.getElementById('actionCount').value) || 1;
+            
+            if (!userId) return showToast('Enter a User ID', 'error');
+            
+            try {
+                let data;
+                if (action === 'gift') {
+                    data = await api('/admin/bot/gift-subscribers', 'POST', { user_id: userId, count });
+                } else if (action === 'remove-subs') {
+                    data = await api('/admin/bot/remove-subscribers', 'POST', { user_id: userId, count });
+                } else if (action === 'deactivate') {
+                    data = await api('/admin/bot/deactivate', 'POST', { user_id: userId });
+                } else if (action === 'reactivate') {
+                    data = await api('/admin/bot/reactivate', 'POST', { user_id: userId });
+                }
+                
+                if (data.success) {
+                    showToast(`Action "${action}" succeeded for user ${userId}`, 'success');
+                    loadDashboard();
+                } else {
+                    showToast(data.error || 'Action failed', 'error');
+                }
+            } catch (e) {
+                showToast('Action failed: ' + e.message, 'error');
+            }
+        }
+
+        async function addStocks() {
+            const userId = parseInt(document.getElementById('stockUserId').value);
+            const stocksStr = document.getElementById('stocksJson').value.trim();
+            
+            if (!userId || !stocksStr) return showToast('User ID and stocks JSON required', 'error');
+            
+            try {
+                const stocks = JSON.parse(stocksStr);
+                const data = await api('/admin/bot/add-stocks', 'POST', { user_id: userId, stocks });
+                if (data.success) {
+                    showToast(`Added ${data.added_count} stocks to user ${userId}`, 'success');
+                    loadDashboard();
+                } else {
+                    showToast(data.error || 'Add stocks failed', 'error');
+                }
+            } catch (e) {
+                showToast('Invalid JSON or request failed', 'error');
+            }
+        }
+
+        async function executeTrade() {
+            const userId = parseInt(document.getElementById('tradeUserId').value);
+            const ticker = document.getElementById('tradeTicker').value.trim().toUpperCase();
+            const quantity = parseFloat(document.getElementById('tradeQty').value);
+            const price = parseFloat(document.getElementById('tradePrice').value);
+            const type = document.getElementById('tradeType').value;
+            
+            if (!userId || !ticker || !quantity || !price) {
+                return showToast('All trade fields required', 'error');
+            }
+            
+            try {
+                const data = await api('/admin/bot/execute-trade', 'POST', {
+                    user_id: userId, ticker, quantity, price, type
+                });
+                if (data.success) {
+                    showToast(`${type.toUpperCase()} ${quantity} ${ticker} @ $${price} for user ${userId}`, 'success');
+                    loadDashboard();
+                } else {
+                    showToast(data.error || 'Trade failed', 'error');
+                }
+            } catch (e) {
+                showToast('Trade failed: ' + e.message, 'error');
+            }
+        }
+
+        async function deactivateBot(userId) {
+            if (!confirm(`Deactivate bot ID ${userId}?`)) return;
+            try {
+                const data = await api('/admin/bot/deactivate', 'POST', { user_id: userId });
+                if (data.success) {
+                    showToast(`Bot ${userId} deactivated`, 'success');
+                    loadDashboard();
+                }
+            } catch (e) {}
+        }
+
+        async function reactivateBot(userId) {
+            try {
+                const data = await api('/admin/bot/reactivate', 'POST', { user_id: userId });
+                if (data.success) {
+                    showToast(`Bot ${userId} reactivated`, 'success');
+                    loadDashboard();
+                }
+            } catch (e) {}
+        }
+
+        async function giftSubs(userId) {
+            const count = prompt(`Gift how many subscribers to user ${userId}?`, '1');
+            if (!count) return;
+            try {
+                const data = await api('/admin/bot/gift-subscribers', 'POST', {
+                    user_id: userId, count: parseInt(count)
+                });
+                if (data.success) {
+                    showToast(`Gifted ${count} subscribers (new total: ${data.new_subscriber_count})`, 'success');
+                    loadDashboard();
+                }
+            } catch (e) {}
+        }
+
+        // Toggle count field visibility
+        document.getElementById('actionType').addEventListener('change', function() {
+            const show = this.value === 'gift' || this.value === 'remove-subs';
+            document.getElementById('actionCountGroup').style.display = show ? 'flex' : 'none';
+        });
+
+        function showToast(msg, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.className = 'toast ' + type;
+            toast.style.display = 'block';
+            setTimeout(() => { toast.style.display = 'none'; }, 4000);
+        }
+    </script>
+</body>
+</html>

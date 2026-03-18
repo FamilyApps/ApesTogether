@@ -22417,6 +22417,11 @@ def get_public_portfolio_chart(username, period):
         logger.error(f"Public portfolio chart error for {username}: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/bot-dashboard')
+def admin_bot_dashboard():
+    """Serve the bot admin dashboard (protected by API key in the JS)"""
+    return render_template('admin_bot_dashboard.html')
+
 @app.route('/admin/debug-dashboard-apis')
 @login_required
 def admin_debug_dashboard_apis():
