@@ -139,7 +139,7 @@ struct CardStyle: ViewModifier {
                 RoundedRectangle(cornerRadius: 16)
                     .stroke(Color.cardBorder, lineWidth: 1)
             )
-            .shadow(color: Color.primaryAccent.opacity(0.04), radius: 8, y: 4)
+            .shadow(color: Color.primaryAccent.opacity(0.06), radius: 10, y: 4)
     }
 }
 
@@ -221,6 +221,7 @@ struct SectionHeader: View {
             Spacer()
         }
         .font(.headline)
+        .shadow(color: Color.primaryAccent.opacity(0.2), radius: 6, x: 0, y: 0)
     }
 }
 

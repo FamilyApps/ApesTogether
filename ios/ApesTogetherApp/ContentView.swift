@@ -112,11 +112,17 @@ struct MainTabView: View {
                 }
                 .tag(0)
             
+            TopInfluencersView()
+                .tabItem {
+                    Label("Influencers", systemImage: "star.circle.fill")
+                }
+                .tag(1)
+            
             MyPortfolioView()
                 .tabItem {
                     Label("Portfolio", systemImage: "chart.pie.fill")
                 }
-                .tag(1)
+                .tag(2)
             
             SubscriptionsView()
                 .tabItem {
@@ -130,7 +136,7 @@ struct MainTabView: View {
                             .frame(width: 24, height: 24)
                     }
                 }
-                .tag(2)
+                .tag(3)
         }
         .accentColor(.primaryAccent)
     }

@@ -106,6 +106,12 @@ class APIService {
         let _: EmptyResponse = try await delete("/auth/account")
     }
     
+    // MARK: - Top Influencers
+    
+    func getTopInfluencers(industry: String = "all", limit: Int = 20) async throws -> TopInfluencersResponse {
+        return try await get("/top-influencers?industry=\(industry.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? industry)&limit=\(limit)")
+    }
+    
     // MARK: - Portfolio Charts
     
     func getPortfolioChart(slug: String, period: String = "7D") async throws -> ChartResponse {

@@ -920,6 +920,109 @@ def health_check():
 
 
 # =============================================================================
+# Top Influencers (by Subscriber Count)
+# =============================================================================
+
+@mobile_api.route('/top-influencers', methods=['GET'])
+@require_auth
+def get_top_influencers():
+    """
+    GET /api/mobile/top-influencers?industry=Technology&limit=20
+    Returns users ranked by subscriber count, optionally filtered by industry.
+    """
+    from models import User, UserPortfolioStats, MobileSubscription
+    
+    industry = request.args.get('industry', 'all')
+    limit = min(int(request.args.get('limit', 20)), 50)
+    
+    try:
+        # Query UserPortfolioStats joined with User, ordered by subscriber_count desc
+        query = db.session.query(UserPortfolioStats, User).join(
+            User, UserPortfolioStats.user_id == User.id
+        ).filter(
+            UserPortfolioStats.subscriber_count > 0
+        )
+        
+        # Industry filter: check if the industry appears in the JSON industry_mix
+        if industry and industry.lower() != 'all':
+            try:
+                # Filter users where the industry exists in their industry_mix JSON
+                # and represents >= 10% of their portfolio
+                query = query.filter(
+                    UserPortfolioStats.industry_mix.isnot(None)
+                )
+            except Exception:
+                pass
+        
+        results = query.order_by(
+            UserPortfolioStats.subscriber_count.desc()
+        ).limit(limit).all()
+        
+        entries = []
+        rank = 0
+        for stats, user in results:
+            # If industry filter is active, check the JSON in Python
+            if industry and industry.lower() != 'all':
+                mix = stats.industry_mix or {}
+                # Check if the filtered industry exists with >= 10%
+                matched = False
+                for ind_name, pct in mix.items():
+                    if industry.lower() in ind_name.lower() and pct >= 5:
+                        matched = True
+                        break
+                if not matched:
+                    continue
+            
+            rank += 1
+            # Get top industries for display
+            top_industries = []
+            if stats.industry_mix:
+                sorted_industries = sorted(stats.industry_mix.items(), key=lambda x: x[1], reverse=True)
+                top_industries = [
+                    {'name': name, 'percent': round(pct, 1)}
+                    for name, pct in sorted_industries[:3]
+                ]
+            
+            entries.append({
+                'rank': rank,
+                'user': {
+                    'id': user.id,
+                    'username': user.username,
+                    'portfolio_slug': user.portfolio_slug
+                },
+                'subscriber_count': stats.subscriber_count or 0,
+                'unique_stocks': stats.unique_stocks_count or 0,
+                'avg_trades_per_week': round(stats.avg_trades_per_week or 0, 1),
+                'top_industries': top_industries
+            })
+        
+        # Get available industries for filter UI
+        all_industries = set()
+        try:
+            all_stats = UserPortfolioStats.query.filter(
+                UserPortfolioStats.industry_mix.isnot(None),
+                UserPortfolioStats.subscriber_count > 0
+            ).all()
+            for s in all_stats:
+                if s.industry_mix:
+                    for ind_name, pct in s.industry_mix.items():
+                        if pct >= 5:
+                            all_industries.add(ind_name)
+        except Exception:
+            pass
+        
+        return jsonify({
+            'entries': entries,
+            'available_industries': sorted(list(all_industries)),
+            'total': len(entries)
+        })
+        
+    except Exception as e:
+        logger.error(f"Top influencers error: {e}")
+        return jsonify({'entries': [], 'available_industries': [], 'total': 0})
+
+
+# =============================================================================
 # Portfolio Performance / Chart Data
 # =============================================================================
 

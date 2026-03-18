@@ -154,3 +154,29 @@ struct TradeDetail: Codable {
     let price: Double
     let type: String
 }
+
+// MARK: - Top Influencers
+
+struct TopInfluencersResponse: Codable {
+    let entries: [InfluencerEntry]
+    let availableIndustries: [String]
+    let total: Int
+}
+
+struct InfluencerEntry: Codable, Identifiable {
+    let rank: Int
+    let user: LeaderboardUser
+    let subscriberCount: Int
+    let uniqueStocks: Int
+    let avgTradesPerWeek: Double
+    let topIndustries: [IndustryInfo]
+    
+    var id: Int { user.id }
+}
+
+struct IndustryInfo: Codable, Identifiable {
+    let name: String
+    let percent: Double
+    
+    var id: String { name }
+}
