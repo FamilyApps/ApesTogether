@@ -1,470 +1,544 @@
 """
-Bot Agent Orchestrator for Apes Together
-=========================================
-Creates realistic bot portfolios across industries and executes trades
-with human-like timing variations.
+Bot Agent Orchestrator v2 for Apes Together
+=============================================
+Intelligent autonomous trading agents that do real market research,
+apply parameterized strategies, and make informed buy/sell decisions.
 
 Usage:
-    python bot_agent.py --action seed --count 5 --industry Technology
-    python bot_agent.py --action trade --rounds 3
-    python bot_agent.py --action seed-all --bots-per-industry 3
-    python bot_agent.py --action gift --user-id 42 --count 5
-    python bot_agent.py --action status
+    python bot_agent.py seed --count 1                     # Create 1 bot (default)
+    python bot_agent.py seed --count 5 --industry Tech     # Create 5 tech bots
+    python bot_agent.py seed --count 3 --strategy momentum # 3 momentum bots
+    python bot_agent.py trade                              # Run one trading session
+    python bot_agent.py trade --wave 1                     # Trade wave 1 only
+    python bot_agent.py trade --dry-run                    # Preview decisions only
+    python bot_agent.py remove --user-id 42                # Deactivate bot #42
+    python bot_agent.py remove --last 3                    # Deactivate last 3 created
+    python bot_agent.py gift --user-id 42 --count 5        # Gift 5 subscribers
+    python bot_agent.py status                             # Dashboard overview
+    python bot_agent.py refresh                            # Refresh market data only
 
 Environment:
-    ADMIN_API_KEY  - Required, must match the server's admin key
-    API_BASE_URL   - Optional, defaults to https://apestogether.ai/api/mobile
+    ADMIN_API_KEY          - Required
+    API_BASE_URL           - Optional, defaults to https://apestogether.ai/api/mobile
+    ALPHA_VANTAGE_API_KEY  - Required for news sentiment
+    FINNHUB_API_KEY        - Optional, enables social sentiment
 """
 
 import os
 import sys
+import io
 import json
 import time
 import random
-import string
 import argparse
-import requests
-from datetime import datetime, timedelta
+import logging
+from datetime import datetime
 
-# ── Config ──────────────────────────────────────────────────────────────────
+# Load .env file before anything else reads environment variables
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed; rely on shell-exported env vars
 
-API_BASE = os.environ.get('API_BASE_URL', 'https://apestogether.ai/api/mobile')
-ADMIN_KEY = os.environ.get('ADMIN_API_KEY', '')
+# Fix Windows console encoding for emoji/unicode output
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
-# ── Industry Stock Pools ────────────────────────────────────────────────────
-# Realistic stock picks per industry with typical price ranges
+# ── Logging ──────────────────────────────────────────────────────────────────
 
-INDUSTRY_STOCKS = {
-    'Technology': [
-        ('AAPL', 170, 195), ('MSFT', 380, 430), ('GOOGL', 150, 175),
-        ('NVDA', 800, 950), ('META', 480, 550), ('CRM', 270, 310),
-        ('ADBE', 520, 580), ('INTC', 30, 45), ('AMD', 140, 175),
-        ('ORCL', 120, 145), ('CSCO', 48, 56), ('SHOP', 70, 90),
-        ('SNOW', 150, 180), ('PLTR', 22, 32), ('NET', 80, 100),
-        ('SQ', 70, 85), ('TWLO', 60, 80), ('ZS', 200, 240),
-    ],
-    'Healthcare': [
-        ('JNJ', 155, 170), ('UNH', 500, 560), ('PFE', 26, 32),
-        ('ABBV', 170, 195), ('LLY', 700, 800), ('MRK', 120, 135),
-        ('TMO', 540, 600), ('ABT', 105, 120), ('BMY', 50, 58),
-        ('AMGN', 280, 310), ('GILD', 75, 88), ('ISRG', 380, 420),
-        ('VRTX', 400, 450), ('REGN', 900, 1000), ('ZTS', 175, 195),
-    ],
-    'Finance': [
-        ('JPM', 190, 215), ('BAC', 35, 42), ('WFC', 55, 65),
-        ('GS', 420, 480), ('MS', 90, 105), ('BLK', 780, 860),
-        ('SCHW', 70, 82), ('C', 58, 68), ('AXP', 210, 240),
-        ('V', 270, 295), ('MA', 440, 480), ('COF', 140, 160),
-        ('USB', 42, 50), ('PNC', 155, 175),
-    ],
-    'Energy': [
-        ('XOM', 105, 120), ('CVX', 150, 170), ('COP', 110, 130),
-        ('SLB', 48, 58), ('EOG', 120, 140), ('PXD', 230, 260),
-        ('MPC', 160, 180), ('VLO', 140, 160), ('PSX', 130, 150),
-        ('OKE', 70, 82), ('WMB', 35, 42), ('ENPH', 100, 130),
-        ('FSLR', 170, 210), ('NEE', 65, 78),
-    ],
-    'Consumer': [
-        ('AMZN', 175, 195), ('TSLA', 230, 280), ('HD', 360, 400),
-        ('MCD', 280, 310), ('NKE', 95, 115), ('SBUX', 95, 110),
-        ('TGT', 140, 165), ('COST', 700, 780), ('WMT', 165, 185),
-        ('PG', 160, 175), ('KO', 58, 65), ('PEP', 170, 185),
-        ('DIS', 100, 120), ('LULU', 380, 430),
-    ],
-    'Industrial': [
-        ('CAT', 310, 360), ('DE', 380, 430), ('HON', 200, 225),
-        ('UPS', 145, 165), ('BA', 200, 240), ('RTX', 95, 110),
-        ('LMT', 440, 490), ('GE', 155, 175), ('MMM', 100, 120),
-        ('EMR', 105, 120), ('ITW', 250, 275), ('FDX', 260, 290),
-    ],
-    'Real Estate': [
-        ('AMT', 195, 220), ('PLD', 125, 145), ('CCI', 105, 120),
-        ('EQIX', 780, 860), ('PSA', 280, 310), ('SPG', 145, 165),
-        ('O', 55, 62), ('VICI', 30, 35), ('DLR', 135, 155),
-        ('ARE', 120, 140), ('AVB', 190, 215),
-    ],
-    'ETF': [
-        ('SPY', 490, 530), ('QQQ', 430, 480), ('VTI', 250, 275),
-        ('IWM', 200, 225), ('DIA', 390, 420), ('ARKK', 45, 60),
-        ('XLF', 40, 46), ('XLK', 200, 225), ('XLE', 85, 98),
-        ('XLV', 140, 155), ('GLD', 210, 230), ('TLT', 90, 102),
-        ('VOO', 470, 510), ('SCHD', 78, 86),
-    ],
-    'General': [
-        ('AAPL', 170, 195), ('MSFT', 380, 430), ('AMZN', 175, 195),
-        ('GOOGL', 150, 175), ('JPM', 190, 215), ('JNJ', 155, 170),
-        ('XOM', 105, 120), ('SPY', 490, 530), ('TSLA', 230, 280),
-        ('V', 270, 295), ('HD', 360, 400), ('PG', 160, 175),
-    ],
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(name)s] %(levelname)s: %(message)s',
+    datefmt='%H:%M:%S'
+)
+logger = logging.getLogger('bot_agent')
+
+# Quiet down noisy libraries
+logging.getLogger('urllib3').setLevel(logging.WARNING)
+logging.getLogger('yfinance').setLevel(logging.WARNING)
+
+
+# ── Imports (local modules) ──────────────────────────────────────────────────
+
+from bot_data_hub import MarketDataHub
+from bot_strategies import generate_trade_decisions, generate_strategy_profile, STRATEGY_TEMPLATES
+from bot_behaviors import (
+    should_trade_today, get_trade_wave, apply_human_biases,
+    apply_fomo_trades, is_market_hours, add_trade_delay
+)
+from bot_executor import (
+    get_active_bots, execute_bot_decisions, create_bot_account,
+    seed_initial_portfolio, gift_subscribers, get_dashboard_stats, api_call
+)
+from bot_personas import generate_bot_persona, generate_bot_batch
+
+
+# ── Seed Command ─────────────────────────────────────────────────────────────
+
+# Archetype → preferred industry mapping.
+# Some archetypes are best suited to a specific sector;
+# the rest get a random mixed portfolio.
+ARCHETYPE_INDUSTRY_MAP = {
+    'momentum':         None,            # mixed
+    'value':            None,            # mixed
+    'news_reactor':     None,            # mixed — reacts to any sector news
+    'swing':            None,            # mixed
+    'earnings':         'Finance',       # earnings plays suit finance sector
+    'sector_rotation':  None,            # mixed by definition
+    'insider_follower': 'Healthcare',    # insider activity most meaningful here
+    'dividend_growth':  'Energy',        # energy/utilities heavy on dividends
+    'social_momentum':  'Technology',    # Reddit/Twitter buzz = mostly tech
+    'balanced':         None,            # mixed
 }
 
-# ── Username Generation ─────────────────────────────────────────────────────
 
-ADJECTIVES = [
-    'swift', 'bold', 'clever', 'calm', 'sharp', 'bright', 'keen',
-    'steady', 'wise', 'quick', 'prime', 'deep', 'iron', 'core',
-    'alpha', 'apex', 'chill', 'true', 'pure', 'wild', 'lunar',
-    'solar', 'sonic', 'cyber', 'neo', 'zen', 'max', 'top',
-]
+def cmd_seed(args):
+    """Create new bot accounts with strategy profiles and initial portfolios."""
+    one_each = args.one_per_archetype
+    count = args.count
+    industry = args.industry
+    strategy = args.strategy
 
-NOUNS = [
-    'trader', 'hawk', 'bull', 'wolf', 'fox', 'eagle', 'lion',
-    'shark', 'bear', 'titan', 'atlas', 'viper', 'falcon', 'raven',
-    'orca', 'phoenix', 'lynx', 'cobra', 'panther', 'mustang',
-    'rhino', 'jaguar', 'puma', 'raptor', 'condor', 'heron',
-]
+    # Build the persona list
+    if one_each:
+        # One bot per archetype — ignore --count and --strategy
+        archetype_names = list(STRATEGY_TEMPLATES.keys())
+        total = len(archetype_names)
+        print(f"\n🦍 Seeding 1 bot per archetype ({total} total)...")
+    else:
+        total = count
+        print(f"\n🦍 Seeding {total} bot(s)...")
+        if industry:
+            print(f"   Industry: {industry}")
+        if strategy:
+            print(f"   Strategy: {strategy}")
 
-def generate_username():
-    """Generate a human-looking username like 'swift-hawk-42'"""
-    adj = random.choice(ADJECTIVES)
-    noun = random.choice(NOUNS)
-    num = random.randint(1, 99)
-    sep = random.choice(['-', '_', ''])
-    
-    patterns = [
-        f"{adj}{sep}{noun}",
-        f"{adj}{sep}{noun}{num}",
-        f"{noun}{sep}{adj}",
-        f"{noun}{num}",
-        f"{adj}{num}{sep}{noun}",
-    ]
-    return random.choice(patterns)
+    # First, refresh market data so we can seed with real prices
+    print(f"\n📊 Refreshing market data for initial portfolios...")
+    hub = MarketDataHub()
+    hub.refresh(include_extras=False)  # Core data only for seeding
 
+    if not hub.is_core_available():
+        print("⚠️  Warning: Market data unavailable. Seeding without initial portfolio.")
+        hub = None
 
-def generate_email(username):
-    """Generate a plausible email for a bot"""
-    domains = ['apestogether.ai']
-    return f"{username.replace('-', '.').replace('_', '.')}@{random.choice(domains)}"
+    # Generate personas
+    if one_each:
+        personas = []
+        for arch in archetype_names:
+            # Use mapped industry or override with --industry flag
+            ind = industry or ARCHETYPE_INDUSTRY_MAP.get(arch)
+            personas.append(generate_bot_persona(strategy_name=arch, industry=ind))
+    else:
+        personas = generate_bot_batch(count, industry=industry, strategy=strategy)
 
-
-# ── API Helpers ─────────────────────────────────────────────────────────────
-
-def api_call(endpoint, method='GET', data=None):
-    """Make an authenticated admin API call"""
-    headers = {
-        'X-Admin-Key': ADMIN_KEY,
-        'Content-Type': 'application/json'
-    }
-    url = f"{API_BASE}{endpoint}"
-    
-    try:
-        if method == 'GET':
-            resp = requests.get(url, headers=headers, timeout=30)
-        else:
-            resp = requests.post(url, headers=headers, json=data, timeout=30)
-        
-        result = resp.json()
-        if resp.status_code == 403:
-            print(f"  ❌ AUTH ERROR: Invalid admin key")
-            sys.exit(1)
-        return result, resp.status_code
-    except Exception as e:
-        print(f"  ❌ REQUEST ERROR: {e}")
-        return {'error': str(e)}, 500
-
-
-# ── Bot Seeding ─────────────────────────────────────────────────────────────
-
-def seed_bots(industry, count=1):
-    """Create bot accounts with realistic portfolios for a given industry"""
-    stocks_pool = INDUSTRY_STOCKS.get(industry, INDUSTRY_STOCKS['General'])
     created = []
-    
-    for i in range(count):
-        username = generate_username()
-        email = generate_email(username)
-        
-        print(f"\n  Creating bot: {username} ({industry})")
-        
-        # 1. Create user
-        result, status = api_call('/admin/bot/create-user', 'POST', {
-            'username': username,
-            'email': email,
-            'industry': industry
-        })
-        
-        if status == 409:
-            # Username taken, retry with suffix
-            username = username + str(random.randint(100, 999))
-            email = generate_email(username)
-            result, status = api_call('/admin/bot/create-user', 'POST', {
-                'username': username,
-                'email': email,
-                'industry': industry
-            })
-        
-        if not result.get('success'):
-            print(f"    ⚠️  Failed: {result.get('error', 'unknown')}")
+    for i, persona in enumerate(personas):
+        username = persona['username']
+        email = persona['email']
+        ind = persona['industry']
+        strat = persona['strategy_name']
+        profile = persona['strategy_profile']
+
+        print(f"\n  [{i+1}/{total}] Creating: {username}")
+        print(f"    Industry: {ind} | Strategy: {strat}")
+        print(f"    Life stage: {profile.get('life_stage')} | Risk: {profile.get('risk_tolerance'):.2f}")
+        print(f"    Attention universe: {len(profile.get('attention_universe', []))} tickers")
+
+        # Create account
+        user_id, success = create_bot_account(username, email, ind, profile)
+        if not success:
+            print(f"    ❌ Failed to create account")
             continue
-        
-        user_id = result['user']['id']
-        print(f"    ✅ Created ID={user_id}")
-        
-        # 2. Build a realistic portfolio (5-12 stocks)
-        num_stocks = random.randint(5, min(12, len(stocks_pool)))
-        selected = random.sample(stocks_pool, num_stocks)
-        
-        stocks = []
-        for ticker, low, high in selected:
-            price = round(random.uniform(low, high), 2)
-            # Realistic quantities: cheaper stocks get more shares
-            if price < 50:
-                qty = random.randint(20, 200)
-            elif price < 150:
-                qty = random.randint(10, 80)
-            elif price < 400:
-                qty = random.randint(5, 40)
-            else:
-                qty = random.randint(2, 20)
-            
-            stocks.append({
-                'ticker': ticker,
-                'quantity': qty,
-                'purchase_price': price
-            })
-        
-        result, _ = api_call('/admin/bot/add-stocks', 'POST', {
-            'user_id': user_id,
-            'stocks': stocks
-        })
-        
-        if result.get('success'):
-            print(f"    📊 Added {len(stocks)} stocks")
-        
-        # 3. Gift some initial subscribers (1-8, weighted toward lower)
-        sub_count = random.choices(
-            [1, 2, 3, 4, 5, 6, 7, 8],
-            weights=[25, 20, 15, 12, 10, 8, 5, 5],
-            k=1
-        )[0]
-        
-        result, _ = api_call('/admin/bot/gift-subscribers', 'POST', {
-            'user_id': user_id,
-            'count': sub_count
-        })
-        
-        if result.get('success'):
+
+        print(f"    ✅ Created (ID={user_id})")
+
+        # Seed initial portfolio with real prices
+        if hub and hub.is_core_available():
+            stock_count = seed_initial_portfolio(user_id, profile, hub)
+            print(f"    📊 Seeded {stock_count} stocks")
+        else:
+            print(f"    ⚠️  Skipped portfolio seeding (no market data)")
+
+        # Gift initial subscribers
+        sub_count = persona['subscriber_count']
+        if gift_subscribers(user_id, sub_count):
             print(f"    👥 Gifted {sub_count} subscribers")
-        
+
+        # Store full strategy profile as JSON for future reference
+        _save_bot_profile(user_id, profile)
+
         created.append({
             'user_id': user_id,
             'username': username,
-            'industry': industry,
-            'stocks': len(stocks),
-            'subscribers': sub_count
+            'industry': ind,
+            'strategy': strat,
         })
-        
-        # Small delay between creations to look natural
+
         time.sleep(random.uniform(0.3, 0.8))
-    
-    return created
+
+    print(f"\n✅ Created {len(created)}/{total} bots")
+    for c in created:
+        print(f"   ID={c['user_id']} | {c['username']} | {c['industry']} | {c['strategy']}")
 
 
-def seed_all_industries(bots_per_industry=3):
-    """Seed bots across all industries"""
-    industries = list(INDUSTRY_STOCKS.keys())
-    all_created = []
-    
-    for industry in industries:
-        print(f"\n{'='*50}")
-        print(f"  Industry: {industry} ({bots_per_industry} bots)")
-        print(f"{'='*50}")
-        
-        created = seed_bots(industry, bots_per_industry)
-        all_created.extend(created)
-        time.sleep(random.uniform(0.5, 1.5))
-    
-    return all_created
+# ── Trade Command ────────────────────────────────────────────────────────────
 
+def cmd_trade(args):
+    """Run a trading session for all active bots."""
+    dry_run = args.dry_run
+    wave_filter = args.wave
+    force = args.force
 
-# ── Trading Simulation ──────────────────────────────────────────────────────
+    print(f"\n🦍 Trading Session {'(DRY RUN)' if dry_run else ''}")
+    print(f"   Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
 
-def simulate_trades(rounds=1):
-    """
-    Execute realistic trades for active bots.
-    Each round, a random subset of bots will make 0-2 trades.
-    """
-    # Get all active bots
-    result, _ = api_call('/admin/bot/list-users?role=agent')
-    bots = [u for u in (result.get('users') or []) if u.get('bot_active') is not False]
-    
-    if not bots:
-        print("  No active bots found.")
+    if not force and not is_market_hours():
+        print("   ⚠️  Market is closed. Use --force to trade anyway.")
         return
-    
-    print(f"\n  Found {len(bots)} active bots")
-    
-    for round_num in range(1, rounds + 1):
-        print(f"\n  ── Round {round_num}/{rounds} ──")
-        
-        # Pick ~30-60% of bots to trade this round
-        trade_count = max(1, int(len(bots) * random.uniform(0.3, 0.6)))
-        traders = random.sample(bots, min(trade_count, len(bots)))
-        
-        for bot in traders:
-            user_id = bot['id']
-            username = bot['username']
-            industry = bot.get('industry', 'General')
-            stocks_pool = INDUSTRY_STOCKS.get(industry, INDUSTRY_STOCKS['General'])
-            
-            # Decide: buy new stock, or sell existing?
-            # 60% buy, 40% sell (if they have stocks)
-            if bot['stock_count'] > 0 and random.random() < 0.4:
-                # Sell a portion of an existing holding
-                trade_type = 'sell'
-                # Pick a random stock from their portfolio to sell
-                # We don't know exact holdings, so pick from their industry pool
-                ticker, low, high = random.choice(stocks_pool)
-                price = round(random.uniform(low, high), 2)
-                qty = random.randint(1, 5)
-                
-                result, status = api_call('/admin/bot/execute-trade', 'POST', {
-                    'user_id': user_id,
-                    'ticker': ticker,
-                    'quantity': qty,
-                    'price': price,
-                    'type': 'sell'
-                })
-                
-                if result.get('success'):
-                    print(f"    {username}: SELL {qty} {ticker} @ ${price}")
-                elif result.get('error') == 'insufficient_shares':
-                    # Try a buy instead
-                    trade_type = 'buy'
-                    result, _ = api_call('/admin/bot/execute-trade', 'POST', {
-                        'user_id': user_id,
-                        'ticker': ticker,
-                        'quantity': qty,
-                        'price': price,
-                        'type': 'buy'
-                    })
-                    if result.get('success'):
-                        print(f"    {username}: BUY {qty} {ticker} @ ${price}")
-            else:
-                # Buy a stock
-                ticker, low, high = random.choice(stocks_pool)
-                price = round(random.uniform(low, high), 2)
-                if price < 50:
-                    qty = random.randint(5, 30)
-                elif price < 150:
-                    qty = random.randint(3, 15)
-                elif price < 400:
-                    qty = random.randint(1, 8)
-                else:
-                    qty = random.randint(1, 4)
-                
-                result, _ = api_call('/admin/bot/execute-trade', 'POST', {
-                    'user_id': user_id,
-                    'ticker': ticker,
-                    'quantity': qty,
-                    'price': price,
-                    'type': 'buy'
-                })
-                
-                if result.get('success'):
-                    print(f"    {username}: BUY {qty} {ticker} @ ${price}")
-            
-            # Human-like delay between trades
-            time.sleep(random.uniform(0.2, 1.0))
-        
-        # Delay between rounds
-        if round_num < rounds:
-            delay = random.uniform(1, 3)
-            print(f"\n  Waiting {delay:.1f}s before next round...")
-            time.sleep(delay)
+
+    # Step 1: Refresh market data
+    print(f"\n📊 Refreshing market data...")
+    hub = MarketDataHub()
+    hub.refresh(include_extras=True)
+
+    if not hub.is_core_available():
+        print("❌ Cannot trade: no price/indicator data available")
+        return
+
+    summary = hub.summary()
+    print(f"   Tickers with data: {summary['tickers_with_indicators']}")
+    print(f"   News sentiment: {summary['tickers_with_news']} tickers")
+    print(f"   Social sentiment: {summary['tickers_with_social']} tickers")
+
+    # Step 2: Get active bots
+    bots = get_active_bots()
+    if not bots:
+        print("   No active bots found. Run 'seed' first.")
+        return
+
+    print(f"\n🤖 Active bots: {len(bots)}")
+
+    # Step 3: Process each bot
+    total_trades = 0
+    for bot in bots:
+        user_id = bot['id']
+        username = bot['username']
+        industry = bot.get('industry', 'General')
+
+        # Load strategy profile
+        profile = _load_bot_profile(user_id)
+        if not profile:
+            # Generate a default profile if none saved
+            from bot_strategies import pick_random_strategy
+            strategy_name = bot.get('extra_data', {}).get('trading_style', pick_random_strategy())
+            profile = generate_strategy_profile(strategy_name, industry)
+
+        # Check if bot should trade today
+        if not force and not should_trade_today(profile):
+            logger.debug(f"  {username}: skipping today (frequency/patience)")
+            continue
+
+        # Check wave filter
+        bot_wave = get_trade_wave(profile)
+        if wave_filter and bot_wave != wave_filter:
+            logger.debug(f"  {username}: not in wave {wave_filter} (assigned wave {bot_wave})")
+            continue
+
+        print(f"\n  🧠 {username} (ID={user_id}, {profile.get('strategy', '?')}, wave {bot_wave})")
+
+        # Get current holdings (from bot data)
+        holdings = _get_bot_holdings_from_api(user_id)
+
+        # Generate trade decisions
+        decisions = generate_trade_decisions(profile, hub, holdings)
+
+        # Apply human biases
+        recent_trades = []  # TODO: fetch from trade history
+        decisions = apply_human_biases(decisions, profile, recent_trades)
+
+        # Add FOMO trades
+        fomo = apply_fomo_trades(profile, hub, decisions)
+        if fomo:
+            decisions.extend(fomo)
+
+        if not decisions:
+            print(f"    → No trades (signals below threshold)")
+            continue
+
+        # Display decisions
+        for d in decisions:
+            fomo_tag = " 🔥FOMO" if d.get('is_fomo') else ""
+            print(f"    → {d['action'].upper()} {d['ticker']} "
+                  f"(score={d['score']:.3f}) — {d['reason']}{fomo_tag}")
+
+        if dry_run:
+            print(f"    [DRY RUN — not executed]")
+            continue
+
+        # Execute trades
+        executed = execute_bot_decisions(user_id, username, decisions, profile, hub)
+        total_trades += len(executed)
+
+    print(f"\n✅ Trading session complete: {total_trades} trades executed across {len(bots)} bots")
 
 
-# ── Status ──────────────────────────────────────────────────────────────────
+# ── Remove Command ───────────────────────────────────────────────────────────
 
-def show_status():
-    """Display current dashboard status"""
-    result, _ = api_call('/admin/bot/dashboard')
-    
-    print(f"\n  {'='*40}")
-    print(f"  Apes Together — Bot Dashboard Status")
-    print(f"  {'='*40}")
-    print(f"  Total Users:       {result.get('total_users', '?')}")
-    print(f"  Human Users:       {result.get('human_users', '?')}")
-    print(f"  Bot Users:         {result.get('bot_users', '?')}")
-    print(f"  Active Bots:       {result.get('active_bots', '?')}")
-    print(f"  Inactive Bots:     {result.get('inactive_bots', '?')}")
-    print(f"  Total Stocks:      {result.get('total_stocks', '?')}")
-    print(f"  Total Trades:      {result.get('total_trades', '?')}")
-    print(f"  Subscriptions:     {result.get('total_subscriptions', '?')}")
-    print(f"  Gifted Subs:       {result.get('gifted_subscriptions', '?')}")
-    
-    breakdown = result.get('industry_breakdown', {})
+def cmd_remove(args):
+    """Deactivate (soft-delete) bot accounts."""
+    if args.user_id:
+        user_ids = [args.user_id]
+    elif args.last:
+        # Deactivate the last N created bots
+        bots = get_active_bots()
+        bots.sort(key=lambda b: b.get('created_at', ''), reverse=True)
+        user_ids = [b['id'] for b in bots[:args.last]]
+    else:
+        print("❌ Specify --user-id or --last N")
+        return
+
+    print(f"\n🦍 Deactivating {len(user_ids)} bot(s)...")
+
+    for uid in user_ids:
+        result, status = api_call('/admin/bot/deactivate', 'POST', {'user_id': uid})
+        if result.get('success'):
+            print(f"  ✅ Deactivated bot ID={uid}")
+        else:
+            print(f"  ❌ Failed to deactivate ID={uid}: {result.get('error', 'unknown')}")
+
+    print(f"\n✅ Done. Use 'status' to verify.")
+
+
+# ── Reactivate Command ──────────────────────────────────────────────────────
+
+def cmd_reactivate(args):
+    """Reactivate previously deactivated bots."""
+    if not args.user_id:
+        print("❌ Specify --user-id")
+        return
+
+    result, status = api_call('/admin/bot/reactivate', 'POST', {'user_id': args.user_id})
+    if result.get('success'):
+        print(f"✅ Reactivated bot ID={args.user_id}")
+    else:
+        print(f"❌ Failed: {result.get('error', 'unknown')}")
+
+
+# ── Gift Command ─────────────────────────────────────────────────────────────
+
+def cmd_gift(args):
+    """Gift subscribers to a bot account."""
+    if not args.user_id:
+        print("❌ --user-id required")
+        return
+
+    if gift_subscribers(args.user_id, args.count):
+        print(f"✅ Gifted {args.count} subscribers to bot ID={args.user_id}")
+    else:
+        print(f"❌ Gift failed")
+
+
+# ── Status Command ───────────────────────────────────────────────────────────
+
+def cmd_status(args):
+    """Display bot dashboard status."""
+    stats = get_dashboard_stats()
+
+    print(f"\n  {'='*45}")
+    print(f"  🦍 Apes Together — Bot Agent Dashboard")
+    print(f"  {'='*45}")
+    print(f"  Total Users:       {stats.get('total_users', '?')}")
+    print(f"  Human Users:       {stats.get('human_users', '?')}")
+    print(f"  Bot Users:         {stats.get('bot_users', '?')}")
+    print(f"  Active Bots:       {stats.get('active_bots', '?')}")
+    print(f"  Inactive Bots:     {stats.get('inactive_bots', '?')}")
+    print(f"  Total Stocks:      {stats.get('total_stocks', '?')}")
+    print(f"  Total Trades:      {stats.get('total_trades', '?')}")
+    print(f"  Subscriptions:     {stats.get('total_subscriptions', '?')}")
+    print(f"  Gifted Subs:       {stats.get('gifted_subscriptions', '?')}")
+
+    breakdown = stats.get('industry_breakdown', {})
     if breakdown:
         print(f"\n  Industry Breakdown:")
         for ind, count in sorted(breakdown.items(), key=lambda x: -x[1]):
             print(f"    {ind:20s} {count} bots")
-    
+
+    # Show active bots with strategy info
+    bots = get_active_bots()
+    if bots:
+        print(f"\n  Active Bot Details:")
+        print(f"  {'ID':>5} {'Username':<25} {'Industry':<15} {'Stocks':>6} {'Trades':>6}")
+        print(f"  {'-'*5} {'-'*25} {'-'*15} {'-'*6} {'-'*6}")
+        for b in bots[:30]:  # Show first 30
+            print(f"  {b['id']:>5} {b['username']:<25} "
+                  f"{b.get('industry', 'General'):<15} "
+                  f"{b.get('stock_count', 0):>6} "
+                  f"{b.get('trade_count', 0):>6}")
+        if len(bots) > 30:
+            print(f"  ... and {len(bots) - 30} more")
+
     print()
 
 
-# ── CLI ─────────────────────────────────────────────────────────────────────
+# ── Refresh Command ──────────────────────────────────────────────────────────
+
+def cmd_refresh(args):
+    """Refresh market data without trading (for testing/inspection)."""
+    print(f"\n📊 Refreshing market data...")
+
+    hub = MarketDataHub()
+    hub.refresh(include_extras=not args.core_only)
+
+    summary = hub.summary()
+    print(f"\n  Data Hub Summary:")
+    print(f"  Tickers with indicators: {summary['tickers_with_indicators']}")
+    print(f"  Tickers with news:       {summary['tickers_with_news']}")
+    print(f"  Tickers with social:     {summary['tickers_with_social']}")
+    print(f"  Tickers with analyst:    {summary['tickers_with_analyst']}")
+    print(f"  Tickers with insider:    {summary['tickers_with_insider']}")
+    print(f"  Top gainers:             {summary['top_gainers']}")
+    print(f"  Data quality:            {summary['data_quality']}")
+
+    if args.ticker:
+        ticker = args.ticker.upper()
+        data = hub.get_stock_data(ticker)
+        if data:
+            print(f"\n  {ticker} Detail:")
+            for k, v in sorted(data.items()):
+                if k != 'ticker':
+                    print(f"    {k:25s} {v}")
+        else:
+            print(f"\n  No data for {ticker}")
+
+
+# ── Profile Storage ──────────────────────────────────────────────────────────
+# Store/load strategy profiles as JSON files for persistence between runs
+
+PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.bot_profiles')
+
+def _save_bot_profile(user_id, profile):
+    """Save a bot's strategy profile to disk."""
+    os.makedirs(PROFILE_DIR, exist_ok=True)
+    path = os.path.join(PROFILE_DIR, f'{user_id}.json')
+    # Convert any non-serializable types
+    clean = json.loads(json.dumps(profile, default=str))
+    with open(path, 'w') as f:
+        json.dump(clean, f, indent=2)
+
+def _load_bot_profile(user_id):
+    """Load a bot's strategy profile from disk."""
+    path = os.path.join(PROFILE_DIR, f'{user_id}.json')
+    if os.path.exists(path):
+        with open(path) as f:
+            return json.load(f)
+    return None
+
+def _get_bot_holdings_from_api(user_id):
+    """Get a bot's current holdings from the admin API."""
+    from bot_executor import get_bot_holdings
+    return get_bot_holdings(user_id)
+
+
+# ── CLI ──────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description='Apes Together Bot Agent')
-    parser.add_argument('--action', required=True,
-                        choices=['seed', 'seed-all', 'trade', 'gift', 'status'],
-                        help='Action to perform')
-    parser.add_argument('--count', type=int, default=3,
-                        help='Number of bots to create (seed) or subscribers to gift')
-    parser.add_argument('--industry', type=str, default='Technology',
-                        help='Industry for seeding bots')
-    parser.add_argument('--bots-per-industry', type=int, default=3,
-                        help='Bots per industry for seed-all')
-    parser.add_argument('--rounds', type=int, default=1,
-                        help='Number of trading rounds')
-    parser.add_argument('--user-id', type=int,
-                        help='User ID for gift action')
-    parser.add_argument('--base-url', type=str,
-                        help='Override API base URL')
-    
+    parser = argparse.ArgumentParser(
+        description='🦍 Apes Together — Bot Agent Orchestrator v2',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python bot_agent.py seed --one-per-archetype       # 1 bot per strategy (10 total)
+  python bot_agent.py seed --count 5 --industry Technology
+  python bot_agent.py seed --count 3 --strategy momentum --industry Finance
+  python bot_agent.py trade --dry-run --force        # Preview decisions
+  python bot_agent.py trade --force                  # Execute trades
+  python bot_agent.py remove --user-id 42            # Deactivate a bot
+  python bot_agent.py remove --last 3                # Remove last 3 bots
+  python bot_agent.py reactivate --user-id 42        # Bring back a bot
+  python bot_agent.py status                         # Dashboard overview
+  python bot_agent.py refresh --ticker AAPL           # Check data for a ticker
+        """
+    )
+
+    subparsers = parser.add_subparsers(dest='command', help='Command to run')
+
+    # seed
+    p_seed = subparsers.add_parser('seed', help='Create new bot accounts')
+    p_seed.add_argument('--count', type=int, default=1, help='Number of bots (default: 1)')
+    p_seed.add_argument('--industry', type=str, default=None,
+                        help='Industry focus (Technology, Healthcare, Finance, Energy, Consumer, Industrial, Real Estate, ETF)')
+    p_seed.add_argument('--strategy', type=str, default=None,
+                        choices=list(STRATEGY_TEMPLATES.keys()),
+                        help='Strategy archetype')
+    p_seed.add_argument('--one-per-archetype', action='store_true',
+                        help='Create 1 bot for each of the 10 strategy archetypes')
+    p_seed.set_defaults(func=cmd_seed)
+
+    # trade
+    p_trade = subparsers.add_parser('trade', help='Run a trading session')
+    p_trade.add_argument('--dry-run', action='store_true', help='Preview only')
+    p_trade.add_argument('--wave', type=int, choices=[1,2,3,4], help='Trade specific wave only')
+    p_trade.add_argument('--force', action='store_true', help='Trade even if market closed')
+    p_trade.set_defaults(func=cmd_trade)
+
+    # remove
+    p_remove = subparsers.add_parser('remove', help='Deactivate bot(s)')
+    p_remove.add_argument('--user-id', type=int, help='Specific bot ID')
+    p_remove.add_argument('--last', type=int, help='Deactivate last N created bots')
+    p_remove.set_defaults(func=cmd_remove)
+
+    # reactivate
+    p_react = subparsers.add_parser('reactivate', help='Reactivate a deactivated bot')
+    p_react.add_argument('--user-id', type=int, required=True, help='Bot ID')
+    p_react.set_defaults(func=cmd_reactivate)
+
+    # gift
+    p_gift = subparsers.add_parser('gift', help='Gift subscribers to a bot')
+    p_gift.add_argument('--user-id', type=int, required=True, help='Bot ID')
+    p_gift.add_argument('--count', type=int, default=1, help='Number of subscribers')
+    p_gift.set_defaults(func=cmd_gift)
+
+    # status
+    p_status = subparsers.add_parser('status', help='Dashboard overview')
+    p_status.set_defaults(func=cmd_status)
+
+    # refresh
+    p_refresh = subparsers.add_parser('refresh', help='Refresh market data')
+    p_refresh.add_argument('--ticker', type=str, help='Show detail for a ticker')
+    p_refresh.add_argument('--core-only', action='store_true', help='Skip extras (news/social)')
+    p_refresh.set_defaults(func=cmd_refresh)
+
+    # Global options
+    parser.add_argument('--base-url', type=str, help='Override API base URL')
+    parser.add_argument('--verbose', '-v', action='store_true', help='Verbose logging')
+
     args = parser.parse_args()
-    
-    global API_BASE, ADMIN_KEY
+
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
     if args.base_url:
-        API_BASE = args.base_url
-    
-    if not ADMIN_KEY:
+        import bot_executor
+        bot_executor.API_BASE = args.base_url
+
+    if not hasattr(args, 'func'):
+        parser.print_help()
+        sys.exit(0)
+
+    # Validate admin key (not needed for refresh)
+    admin_key = os.environ.get('ADMIN_API_KEY', '')
+    if not admin_key and args.command != 'refresh':
         print("❌ ADMIN_API_KEY environment variable not set")
-        print("   Set it with: export ADMIN_API_KEY=your_key_here")
+        print("   Set it: $env:ADMIN_API_KEY='your_key_here'  (PowerShell)")
         sys.exit(1)
-    
-    print(f"\n🦍 Apes Together Bot Agent")
-    print(f"   API: {API_BASE}")
-    print(f"   Action: {args.action}")
-    
-    if args.action == 'seed':
-        created = seed_bots(args.industry, args.count)
-        print(f"\n✅ Created {len(created)} bots in {args.industry}")
-        
-    elif args.action == 'seed-all':
-        created = seed_all_industries(args.bots_per_industry)
-        print(f"\n✅ Created {len(created)} bots across all industries")
-        
-    elif args.action == 'trade':
-        simulate_trades(args.rounds)
-        print(f"\n✅ Trading simulation complete")
-        
-    elif args.action == 'gift':
-        if not args.user_id:
-            print("❌ --user-id required for gift action")
-            sys.exit(1)
-        result, _ = api_call('/admin/bot/gift-subscribers', 'POST', {
-            'user_id': args.user_id,
-            'count': args.count
-        })
-        if result.get('success'):
-            print(f"\n✅ Gifted {args.count} subscribers to user {args.user_id}")
-            print(f"   New total: {result.get('new_subscriber_count')}")
-        else:
-            print(f"\n❌ Gift failed: {result.get('error')}")
-        
-    elif args.action == 'status':
-        show_status()
+
+    print(f"\n🦍 Apes Together Bot Agent v2")
+    print(f"   Command: {args.command}")
+
+    args.func(args)
 
 
 if __name__ == '__main__':

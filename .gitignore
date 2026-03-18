@@ -19,3 +19,6 @@ GoogleService-Info.plist
 # Xcode user data
 *.xcuserstate
 xcuserdata/
+
+# Bot agent profile storage
+.bot_profiles/

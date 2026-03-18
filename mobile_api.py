@@ -1626,6 +1626,33 @@ def bot_dashboard():
         return jsonify({'error': 'dashboard_failed'}), 500
 
 
+@mobile_api.route('/admin/bot/holdings', methods=['GET'])
+@require_admin_key
+def bot_holdings():
+    """
+    Get a user's current stock holdings.
+    Query param: user_id
+    Returns list of {ticker, quantity, purchase_price}
+    """
+    from models import Stock
+    
+    user_id = request.args.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'user_id_required'}), 400
+    
+    try:
+        stocks = Stock.query.filter_by(user_id=int(user_id)).all()
+        holdings = [{
+            'ticker': s.ticker,
+            'quantity': s.quantity,
+            'purchase_price': round(float(s.purchase_price), 2) if s.purchase_price else 0,
+        } for s in stocks if s.quantity > 0]
+        return jsonify({'holdings': holdings, 'count': len(holdings)})
+    except Exception as e:
+        logger.error(f"Bot holdings error: {e}")
+        return jsonify({'error': 'holdings_failed'}), 500
+
+
 @mobile_api.route('/admin/bot/gift-subscribers', methods=['POST'])
 @require_admin_key
 def bot_gift_subscribers():
