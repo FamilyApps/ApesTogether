@@ -39,16 +39,19 @@ function checkForTradeEmails() {
   }
 
   // Search for unread Public.com trade notification emails
+  // Broad queries — the API auto-detects which bot portfolio each email belongs to
+  // by matching traded tickers against each bot's current holdings
   const queries = [
     'from:notifications@public.com subject:"rebalanced" is:unread',
     'from:notifications@public.com subject:"trade" is:unread',
     'from:notifications@public.com subject:"bought" is:unread',
     'from:notifications@public.com subject:"sold" is:unread',
-    'from:notifications@public.com subject:"Grok" is:unread',
-    'from:notifications@public.com subject:"Wolff" is:unread',
+    'from:notifications@public.com subject:"executed" is:unread',
+    'from:notifications@public.com subject:"order" is:unread',
   ];
 
   let processedCount = 0;
+  const processedIds = new Set(); // Avoid processing same message from multiple query matches
 
   for (const query of queries) {
     const threads = GmailApp.search(query, 0, 10);
@@ -56,12 +59,13 @@ function checkForTradeEmails() {
     for (const thread of threads) {
       const messages = thread.getMessages();
       for (const message of messages) {
-        if (message.isUnread()) {
+        if (message.isUnread() && !processedIds.has(message.getId())) {
+          processedIds.add(message.getId());
           try {
             const result = processTradeEmail(message, config);
             if (result) {
               processedCount++;
-              Logger.log(`Processed: ${message.getSubject()} → ${result.trades_executed} trades`);
+              Logger.log(`Processed: ${message.getSubject()} → ${result.trades_executed} trades (auto-routed to ${result.bot_username})`);
             }
           } catch (e) {
             Logger.log(`ERROR processing "${message.getSubject()}": ${e.message}`);
@@ -83,26 +87,6 @@ function processTradeEmail(message, config) {
   const body = message.getPlainBody();
   const htmlBody = message.getBody();
 
-  // Determine which portfolio this is for
-  let botUsername = null;
-  let source = null;
-
-  if (/grok/i.test(subject) || /grok/i.test(body)) {
-    botUsername = config.GROK_BOT_USERNAME;
-    source = 'grok_portfolio';
-  } else if (/wolff/i.test(subject) || /wolff/i.test(body)) {
-    botUsername = config.WOLFF_BOT_USERNAME;
-    source = 'wolffs_flagship';
-  } else {
-    Logger.log(`Skipping email — not Grok or Wolff: "${subject}"`);
-    return null;
-  }
-
-  if (!botUsername) {
-    Logger.log(`ERROR: Bot username not configured for ${source}`);
-    return null;
-  }
-
   // Parse trades from the email body
   const trades = parseTradesFromEmail(body, htmlBody);
 
@@ -111,9 +95,15 @@ function processTradeEmail(message, config) {
     return null;
   }
 
-  Logger.log(`Found ${trades.length} trades for ${source}: ${JSON.stringify(trades)}`);
+  // Use 'auto' — the API will match traded tickers against each bot's
+  // current holdings and route to the bot with the most overlap.
+  // This works because Grok and Wolff hold entirely different stocks.
+  const botUsername = 'auto';
+  const source = 'public_email';
 
-  // Submit trades to the API
+  Logger.log(`Found ${trades.length} trades, sending for auto-detection: ${JSON.stringify(trades.map(t => t.ticker))}`);
+
+  // Submit trades to the API (auto-detection will route to correct bot)
   return submitTrades(config, botUsername, trades, source, body);
 }
 

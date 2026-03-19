@@ -1454,6 +1454,75 @@ def bot_set_cash():
         return jsonify({'error': 'set_cash_failed'}), 500
 
 
+@mobile_api.route('/admin/bot/scale-holdings', methods=['POST'])
+@require_admin_key
+def bot_scale_holdings():
+    """
+    Scale all holdings and cash values for a bot user by a multiplier.
+    Used to obfuscate portfolio values so they don't match source accounts.
+    
+    Request body:
+    {
+        "user_id": 123,
+        "multiplier": 1.37
+    }
+    """
+    from models import db, User, Stock
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'missing_request_body'}), 400
+    
+    user_id = data.get('user_id')
+    multiplier = data.get('multiplier')
+    
+    if not user_id or not multiplier:
+        return jsonify({'error': 'user_id_and_multiplier_required'}), 400
+    
+    if multiplier <= 0:
+        return jsonify({'error': 'multiplier_must_be_positive'}), 400
+    
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'user_not_found'}), 404
+        
+        # Scale all stock quantities
+        stocks = Stock.query.filter_by(user_id=user_id).all()
+        scaled_stocks = []
+        for stock in stocks:
+            old_qty = stock.quantity
+            stock.quantity = round(old_qty * multiplier, 6)
+            scaled_stocks.append({
+                'ticker': stock.ticker,
+                'old_quantity': old_qty,
+                'new_quantity': stock.quantity
+            })
+        
+        # Scale cash tracking values
+        old_cash = user.cash_proceeds or 0
+        old_deployed = user.max_cash_deployed or 0
+        user.cash_proceeds = round(old_cash * multiplier, 2)
+        user.max_cash_deployed = round(old_deployed * multiplier, 2)
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'user_id': user_id,
+            'multiplier': multiplier,
+            'stocks_scaled': len(scaled_stocks),
+            'cash_proceeds': {'old': old_cash, 'new': user.cash_proceeds},
+            'max_cash_deployed': {'old': old_deployed, 'new': user.max_cash_deployed},
+            'stocks': scaled_stocks
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Bot scale holdings error: {e}")
+        return jsonify({'error': 'scale_holdings_failed'}), 500
+
+
 @mobile_api.route('/admin/bot/subscribe', methods=['POST'])
 @require_admin_key
 def bot_subscribe():
@@ -1972,10 +2041,58 @@ def bot_email_trade():
         return jsonify({'error': 'bot_username required'}), 400
     
     try:
-        # Find the bot user
-        bot = User.query.filter_by(username=bot_username, role='agent').first()
-        if not bot:
-            return jsonify({'error': f'Bot user "{bot_username}" not found'}), 404
+        # Auto-detect which bot this email is for by matching tickers
+        if bot_username == 'auto':
+            trades_list = data.get('trades', [])
+            if not trades_list and data.get('ticker'):
+                trades_list = [{'ticker': data.get('ticker', '')}]
+            
+            email_tickers = set(t.get('ticker', '').upper() for t in trades_list if t.get('ticker'))
+            
+            if not email_tickers:
+                return jsonify({'error': 'No tickers found for auto-detection'}), 400
+            
+            # Find all copytrade bot users
+            copytrade_bots = User.query.filter_by(role='agent').all()
+            best_bot = None
+            best_overlap = -1
+            match_details = []
+            
+            for candidate in copytrade_bots:
+                held_tickers = set(
+                    s.ticker.upper() for s in Stock.query.filter_by(user_id=candidate.id).all()
+                    if s.quantity > 0
+                )
+                overlap = len(email_tickers & held_tickers)
+                match_details.append({
+                    'username': candidate.username,
+                    'user_id': candidate.id,
+                    'held_tickers': len(held_tickers),
+                    'overlap': overlap,
+                    'matching_tickers': sorted(email_tickers & held_tickers)
+                })
+                if overlap > best_overlap:
+                    best_overlap = overlap
+                    best_bot = candidate
+            
+            if not best_bot or best_overlap == 0:
+                logger.warning(f"Auto-detect: no bot matched tickers {email_tickers}. Details: {match_details}")
+                return jsonify({
+                    'error': 'auto_detect_failed',
+                    'message': 'No bot holdings match the traded tickers',
+                    'email_tickers': sorted(email_tickers),
+                    'candidates': match_details
+                }), 404
+            
+            bot = best_bot
+            bot_username = bot.username
+            source = f'auto_{source}' if not source.startswith('auto_') else source
+            logger.info(f"Auto-detect: matched {email_tickers} to {bot_username} (overlap={best_overlap}). Details: {match_details}")
+        else:
+            # Find the bot user by explicit username
+            bot = User.query.filter_by(username=bot_username, role='agent').first()
+            if not bot:
+                return jsonify({'error': f'Bot user "{bot_username}" not found'}), 404
         
         # Parse trades — support both single-trade and batch format
         trades = data.get('trades', [])
