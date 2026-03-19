@@ -1529,7 +1529,7 @@ class PortfolioPerformanceCalculator:
                         
                         chart_data.append({
                             'date': date_label,
-                            'portfolio': 0,  # No portfolio data available
+                            'portfolio': None,  # No portfolio data available - line absent
                             'sp500': round(sp500_pct, 2)
                         })
         

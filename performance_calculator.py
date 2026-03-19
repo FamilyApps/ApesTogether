@@ -631,15 +631,15 @@ def _generate_chart_points(
                     else:
                         portfolio_pct = 0.0
             else:
-                # User hasn't started yet - show 0%
-                portfolio_pct = 0.0
+                # User hasn't started yet - portfolio line absent (None)
+                portfolio_pct = None
             
-            if portfolio_pct is not None:
-                chart_data.append({
-                    'date': date_str,
-                    'portfolio': round(portfolio_pct, 2),
-                    'sp500': round(sp500_pct, 2)
-                })
+            # Always emit chart point (S&P always present, portfolio may be None)
+            chart_data.append({
+                'date': date_str,
+                'portfolio': round(portfolio_pct, 2) if portfolio_pct is not None else None,
+                'sp500': round(sp500_pct, 2)
+            })
     
     logger.info(f"Generated {len(chart_data)} chart points")
     if chart_data:

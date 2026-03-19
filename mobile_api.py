@@ -1101,7 +1101,7 @@ def get_portfolio_chart(slug):
                     for i, label in enumerate(labels):
                         chart_data.append({
                             'date': label,
-                            'portfolio': portfolio_vals[i] if i < len(portfolio_vals) else 0,
+                            'portfolio': portfolio_vals[i] if i < len(portfolio_vals) else None,
                             'sp500': sp500_vals[i] if i < len(sp500_vals) else 0
                         })
                     
@@ -1132,7 +1132,7 @@ def get_portfolio_chart(slug):
                         sp500_pct = ((float(rec.close_price) - base_sp500) / base_sp500) * 100 if base_sp500 > 0 else 0
                         chart_data.append({
                             'date': rec.date.strftime('%b %d'),
-                            'portfolio': 0,
+                            'portfolio': None,
                             'sp500': round(sp500_pct, 2)
                         })
             except Exception as e:
