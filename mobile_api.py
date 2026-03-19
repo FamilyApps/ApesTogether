@@ -1438,6 +1438,10 @@ def bot_set_cash():
             user.max_cash_deployed = float(data['max_cash_deployed'])
         if 'cash_proceeds' in data:
             user.cash_proceeds = float(data['cash_proceeds'])
+        if 'extra_data' in data and isinstance(data['extra_data'], dict):
+            if not user.extra_data or not isinstance(user.extra_data, dict):
+                user.extra_data = {}
+            user.extra_data = {**user.extra_data, **data['extra_data']}
         
         db.session.commit()
         
