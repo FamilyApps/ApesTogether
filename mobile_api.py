@@ -1406,6 +1406,54 @@ def bot_add_stocks():
         return jsonify({'error': 'add_stocks_failed'}), 500
 
 
+@mobile_api.route('/admin/bot/set-cash', methods=['POST'])
+@require_admin_key
+def bot_set_cash():
+    """
+    Set cash tracking values for a bot user (used during portfolio seeding).
+    
+    Request body:
+    {
+        "user_id": 123,
+        "max_cash_deployed": 10000.00,
+        "cash_proceeds": 50.00
+    }
+    """
+    from models import db, User
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'missing_request_body'}), 400
+    
+    user_id = data.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'user_id_required'}), 400
+    
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'user_not_found'}), 404
+        
+        if 'max_cash_deployed' in data:
+            user.max_cash_deployed = float(data['max_cash_deployed'])
+        if 'cash_proceeds' in data:
+            user.cash_proceeds = float(data['cash_proceeds'])
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'user_id': user_id,
+            'max_cash_deployed': user.max_cash_deployed,
+            'cash_proceeds': user.cash_proceeds
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Bot set cash error: {e}")
+        return jsonify({'error': 'set_cash_failed'}), 500
+
+
 @mobile_api.route('/admin/bot/subscribe', methods=['POST'])
 @require_admin_key
 def bot_subscribe():
