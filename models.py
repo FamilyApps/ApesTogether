@@ -202,6 +202,36 @@ class UserPortfolioChartCache(db.Model):
     def __repr__(self):
         return f"<UserPortfolioChartCache user_id={self.user_id} {self.period} generated at {self.generated_at}>"
 
+class Dividend(db.Model):
+    """Dividend payment records for portfolio value tracking.
+    
+    Dividends increase cash_proceeds (and thus total_value) without
+    increasing max_cash_deployed. This correctly flows through the
+    Modified Dietz formula as additional return.
+    """
+    __tablename__ = 'dividend'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    ticker = db.Column(db.String(10), nullable=False)
+    amount_per_share = db.Column(db.Float, nullable=False)  # Dividend per share
+    shares_held = db.Column(db.Float, nullable=False)  # Shares held at ex-dividend date
+    total_amount = db.Column(db.Float, nullable=False)  # amount_per_share * shares_held
+    ex_date = db.Column(db.Date, nullable=False)  # Ex-dividend date
+    pay_date = db.Column(db.Date, nullable=True)  # Payment date (when cash received)
+    recorded_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationship
+    user = db.relationship('User', backref=db.backref('dividends', lazy='dynamic'))
+    
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'ticker', 'ex_date', name='unique_user_ticker_exdate_dividend'),
+    )
+    
+    def __repr__(self):
+        return f"<Dividend {self.user_id} {self.ticker} ${self.total_amount} ex:{self.ex_date}>"
+
+
 class AlphaVantageAPILog(db.Model):
     """Track Alpha Vantage API calls for monitoring and rate limiting"""
     __tablename__ = 'alpha_vantage_api_log'

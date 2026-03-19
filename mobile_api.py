@@ -1801,6 +1801,238 @@ def bot_trade_cron():
         return jsonify({'error': str(e)}), 500
 
 
+@mobile_api.route('/admin/dividend', methods=['POST'])
+@require_admin_key
+def admin_record_dividend():
+    """
+    Record a dividend payment for a user.
+    
+    POST body (JSON):
+        user_id: int — user who received the dividend
+        ticker: str — stock ticker
+        amount_per_share: float — dividend per share
+        ex_date: str — ex-dividend date (YYYY-MM-DD)
+        pay_date: str (optional) — payment date (YYYY-MM-DD)
+    
+    The endpoint automatically calculates total_amount from shares held.
+    Dividends add to cash_proceeds (increasing portfolio value) without
+    increasing max_cash_deployed (they are return, not new capital).
+    """
+    from models import db, User, Stock, Dividend
+    from cash_tracking import process_transaction
+    
+    data = request.get_json() or {}
+    user_id = data.get('user_id')
+    ticker = data.get('ticker', '').upper()
+    amount_per_share = data.get('amount_per_share')
+    ex_date_str = data.get('ex_date')
+    pay_date_str = data.get('pay_date')
+    
+    if not all([user_id, ticker, amount_per_share, ex_date_str]):
+        return jsonify({'error': 'user_id, ticker, amount_per_share, and ex_date required'}), 400
+    
+    try:
+        from datetime import date as dt_date
+        ex_date = datetime.strptime(ex_date_str, '%Y-%m-%d').date()
+        pay_date = datetime.strptime(pay_date_str, '%Y-%m-%d').date() if pay_date_str else None
+        
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        # Get shares held for this ticker
+        stock = Stock.query.filter_by(user_id=user_id, ticker=ticker).first()
+        if not stock or stock.quantity <= 0:
+            return jsonify({'error': f'User {user_id} does not hold {ticker}'}), 400
+        
+        shares_held = stock.quantity
+        total_amount = round(amount_per_share * shares_held, 2)
+        
+        # Check for duplicate
+        existing = Dividend.query.filter_by(user_id=user_id, ticker=ticker, ex_date=ex_date).first()
+        if existing:
+            return jsonify({'error': 'Dividend already recorded', 'existing_id': existing.id}), 409
+        
+        # Record dividend in Dividend table
+        dividend = Dividend(
+            user_id=user_id,
+            ticker=ticker,
+            amount_per_share=amount_per_share,
+            shares_held=shares_held,
+            total_amount=total_amount,
+            ex_date=ex_date,
+            pay_date=pay_date
+        )
+        db.session.add(dividend)
+        
+        # Process as a dividend transaction (adds to cash_proceeds, not max_cash_deployed)
+        result = process_transaction(
+            db, user_id, ticker, shares_held, amount_per_share,
+            'dividend', timestamp=datetime.combine(pay_date or ex_date, datetime.min.time())
+        )
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'dividend_id': dividend.id,
+            'ticker': ticker,
+            'amount_per_share': amount_per_share,
+            'shares_held': shares_held,
+            'total_amount': total_amount,
+            'ex_date': ex_date_str,
+            'cash_proceeds_after': result['cash_proceeds'],
+            'max_cash_deployed': result['max_cash_deployed']
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Dividend recording error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@mobile_api.route('/admin/bot/email-trade', methods=['POST'])
+@require_admin_key
+def bot_email_trade():
+    """
+    Process a trade notification forwarded from Public.com email.
+    Used for the Grok Portfolio and Wolff's Flagship Fund copy-trading bots.
+    
+    POST body (JSON):
+        bot_username: str — username of the copy-trading bot
+        trades: list of {action: 'buy'|'sell', ticker: str, quantity: float, price: float}
+        source: str — 'grok_portfolio' or 'wolffs_flagship'
+        notes: str (optional) — raw email text or description
+    
+    Or for simple single-trade format:
+        bot_username: str
+        action: 'buy' or 'sell'
+        ticker: str
+        quantity: float
+        price: float (optional — will fetch current price if omitted)
+        source: str
+    """
+    from models import db, User, Stock, Transaction
+    from cash_tracking import process_transaction
+    
+    data = request.get_json() or {}
+    bot_username = data.get('bot_username')
+    source = data.get('source', 'public_email')
+    notes = data.get('notes', '')
+    
+    if not bot_username:
+        return jsonify({'error': 'bot_username required'}), 400
+    
+    try:
+        # Find the bot user
+        bot = User.query.filter_by(username=bot_username, role='agent').first()
+        if not bot:
+            return jsonify({'error': f'Bot user "{bot_username}" not found'}), 404
+        
+        # Parse trades — support both single-trade and batch format
+        trades = data.get('trades', [])
+        if not trades and data.get('action'):
+            trades = [{
+                'action': data['action'],
+                'ticker': data.get('ticker', '').upper(),
+                'quantity': data.get('quantity', 1),
+                'price': data.get('price')
+            }]
+        
+        if not trades:
+            return jsonify({'error': 'No trades specified'}), 400
+        
+        results = []
+        for trade in trades:
+            action = trade.get('action', '').lower()
+            ticker = trade.get('ticker', '').upper()
+            quantity = float(trade.get('quantity', 1))
+            price = trade.get('price')
+            
+            if action not in ('buy', 'sell'):
+                results.append({'ticker': ticker, 'error': f'Invalid action: {action}'})
+                continue
+            
+            if not ticker:
+                results.append({'error': 'ticker required'})
+                continue
+            
+            # Fetch current price if not provided
+            if not price:
+                try:
+                    from portfolio_performance import PortfolioPerformanceCalculator
+                    calc = PortfolioPerformanceCalculator()
+                    price_data = calc.get_stock_data(ticker)
+                    if price_data and price_data.get('price'):
+                        price = price_data['price']
+                    else:
+                        results.append({'ticker': ticker, 'error': 'Could not fetch price'})
+                        continue
+                except Exception as e:
+                    results.append({'ticker': ticker, 'error': f'Price fetch failed: {e}'})
+                    continue
+            
+            price = float(price)
+            
+            try:
+                # Process transaction through cash tracking
+                tx_result = process_transaction(
+                    db, bot.id, ticker, quantity, price, action,
+                    timestamp=datetime.utcnow()
+                )
+                
+                # Update Stock table
+                stock = Stock.query.filter_by(user_id=bot.id, ticker=ticker).first()
+                if action == 'buy':
+                    if stock:
+                        # Weighted average purchase price
+                        total_cost = (stock.quantity * stock.purchase_price) + (quantity * price)
+                        stock.quantity += quantity
+                        stock.purchase_price = total_cost / stock.quantity if stock.quantity > 0 else price
+                    else:
+                        stock = Stock(user_id=bot.id, ticker=ticker, quantity=quantity, purchase_price=price)
+                        db.session.add(stock)
+                elif action == 'sell':
+                    if stock and stock.quantity >= quantity:
+                        stock.quantity -= quantity
+                    else:
+                        results.append({'ticker': ticker, 'error': 'Insufficient shares'})
+                        continue
+                
+                results.append({
+                    'ticker': ticker,
+                    'action': action,
+                    'quantity': quantity,
+                    'price': price,
+                    'total_value': round(quantity * price, 2),
+                    'status': 'executed',
+                    'source': source
+                })
+                
+            except Exception as e:
+                db.session.rollback()
+                results.append({'ticker': ticker, 'error': str(e)})
+        
+        db.session.commit()
+        
+        executed = [r for r in results if r.get('status') == 'executed']
+        
+        return jsonify({
+            'success': True,
+            'bot_username': bot_username,
+            'bot_id': bot.id,
+            'source': source,
+            'trades_submitted': len(trades),
+            'trades_executed': len(executed),
+            'results': results
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Bot email trade error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @mobile_api.route('/admin/bot/sp500-backfill', methods=['POST'])
 @require_admin_key
 def bot_sp500_backfill():

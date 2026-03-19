@@ -90,6 +90,17 @@ def process_transaction(db, user_id, ticker, quantity, price, transaction_type, 
         logger.info(f"Added ${transaction_value} to cash_proceeds")
         logger.info(f"After: max_cash_deployed=${user.max_cash_deployed}, cash_proceeds=${user.cash_proceeds}")
     
+    elif transaction_type == 'dividend':
+        # DIVIDEND RECEIVED — adds to cash_proceeds (income), does NOT increase max_cash_deployed
+        # This correctly flows through Modified Dietz: increases V_end without increasing CF_net
+        logger.info(f"Processing dividend: {ticker} ${transaction_value} ({quantity} shares @ ${price}/share)")
+        logger.info(f"Before: max_cash_deployed=${user.max_cash_deployed}, cash_proceeds=${user.cash_proceeds}")
+        
+        user.cash_proceeds += transaction_value
+        
+        logger.info(f"Added ${transaction_value} dividend to cash_proceeds")
+        logger.info(f"After: max_cash_deployed=${user.max_cash_deployed}, cash_proceeds=${user.cash_proceeds}")
+    
     else:
         raise ValueError(f"Invalid transaction_type: {transaction_type}")
     
@@ -193,6 +204,9 @@ def calculate_cash_proceeds_as_of_date(user_id, target_date):
         
         elif txn.transaction_type == 'sell':
             cash_proceeds += transaction_value
+        
+        elif txn.transaction_type == 'dividend':
+            cash_proceeds += transaction_value
     
     return cash_proceeds
 
@@ -251,6 +265,9 @@ def backfill_cash_tracking_for_user(db, user_id):
                 user.max_cash_deployed += new_capital
         
         elif txn.transaction_type == 'sell':
+            user.cash_proceeds += transaction_value
+        
+        elif txn.transaction_type == 'dividend':
             user.cash_proceeds += transaction_value
     
     logger.info(f"Backfilled user {user.username}: max_cash_deployed=${user.max_cash_deployed}, cash_proceeds=${user.cash_proceeds}")
