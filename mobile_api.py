@@ -1626,6 +1626,63 @@ def bot_dashboard():
         return jsonify({'error': 'dashboard_failed'}), 500
 
 
+@mobile_api.route('/admin/bot/sp500-check', methods=['GET'])
+@require_admin_key
+def bot_sp500_check():
+    """Check S&P 500 data coverage in the database for diagnostics."""
+    from models import MarketData
+    from datetime import timedelta
+    
+    try:
+        today = datetime.utcnow().date()
+        
+        # Count total records
+        total = MarketData.query.filter(MarketData.ticker == 'SPY_SP500').count()
+        
+        # Get date range
+        earliest = MarketData.query.filter(
+            MarketData.ticker == 'SPY_SP500'
+        ).order_by(MarketData.date.asc()).first()
+        
+        latest = MarketData.query.filter(
+            MarketData.ticker == 'SPY_SP500'
+        ).order_by(MarketData.date.desc()).first()
+        
+        # Check last 30 days
+        thirty_ago = today - timedelta(days=30)
+        recent = MarketData.query.filter(
+            MarketData.ticker == 'SPY_SP500',
+            MarketData.date >= thirty_ago
+        ).order_by(MarketData.date.desc()).all()
+        
+        recent_dates = [{'date': r.date.isoformat(), 'price': round(r.close_price, 2)} for r in recent]
+        
+        # Check key periods
+        periods = {'1M': 30, '3M': 90, 'YTD': (today - today.replace(month=1, day=1)).days, '1Y': 365, '5Y': 1825}
+        coverage = {}
+        for label, days in periods.items():
+            start = today - timedelta(days=days)
+            count = MarketData.query.filter(
+                MarketData.ticker == 'SPY_SP500',
+                MarketData.date >= start,
+                MarketData.date <= today
+            ).count()
+            coverage[label] = count
+        
+        return jsonify({
+            'total_records': total,
+            'earliest_date': earliest.date.isoformat() if earliest else None,
+            'earliest_price': round(earliest.close_price, 2) if earliest else None,
+            'latest_date': latest.date.isoformat() if latest else None,
+            'latest_price': round(latest.close_price, 2) if latest else None,
+            'period_coverage': coverage,
+            'last_30_days': recent_dates
+        })
+    except Exception as e:
+        logger.error(f"SP500 check error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @mobile_api.route('/admin/bot/holdings', methods=['GET'])
 @require_admin_key
 def bot_holdings():

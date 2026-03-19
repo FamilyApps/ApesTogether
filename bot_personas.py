@@ -14,88 +14,131 @@ logger = logging.getLogger('bot_personas')
 
 
 # ── Name Generation ──────────────────────────────────────────────────────────
-# Mix of realistic-sounding usernames across different styles
+# Modeled after real usernames on Polymarket, Kalshi, StockTwits, etc.
+# Patterns: CamelCase compounds, lowercase+num, short punchy, real-name-ish
+# NO underscores, hyphens, or corporate suffixes like "_capital" or "_trader"
 
-FIRST_PARTS = [
-    # Animal-themed
-    'bull', 'bear', 'hawk', 'wolf', 'fox', 'eagle', 'lion', 'shark',
-    'falcon', 'raven', 'orca', 'phoenix', 'lynx', 'cobra', 'panther',
-    'raptor', 'condor', 'viper', 'puma', 'tiger',
-    # Trait-themed
-    'swift', 'bold', 'clever', 'calm', 'sharp', 'bright', 'keen',
-    'steady', 'wise', 'quick', 'prime', 'deep', 'iron', 'core',
-    'alpha', 'apex', 'zen', 'max', 'true', 'pure',
-    # Finance-themed
-    'profit', 'yield', 'gains', 'divi', 'chart', 'candle', 'green',
-    'stack', 'fund', 'trade', 'cash', 'hedge', 'margin', 'equity',
-    # Tech-bro themed
-    'cyber', 'neo', 'data', 'pixel', 'quantum', 'node', 'byte',
-    'crypto', 'algo', 'sigma', 'delta', 'gamma',
+# CamelCase compound words (Polymarket style: HorizonSplendidView, CemeterySun)
+CAMEL_FIRST = [
+    'Autumn', 'Azure', 'Bright', 'Canyon', 'Cedar', 'Cobalt', 'Coast',
+    'Copper', 'Coral', 'Crimson', 'Crystal', 'Dawn', 'Desert', 'Ember',
+    'Falcon', 'Forest', 'Frost', 'Golden', 'Harbor', 'Horizon', 'Iron',
+    'Ivory', 'Jade', 'Jasper', 'Lunar', 'Maple', 'Meadow', 'Mesa',
+    'Midnight', 'Moss', 'Mountain', 'North', 'Nova', 'Ocean', 'Onyx',
+    'Orion', 'Pacific', 'Peak', 'Phoenix', 'Pine', 'Polar', 'Prairie',
+    'Raven', 'Ridge', 'River', 'Sage', 'Shadow', 'Sierra', 'Silver',
+    'Solar', 'South', 'Steel', 'Stone', 'Storm', 'Summit', 'Tidal',
+    'Timber', 'Valley', 'Velvet', 'Vintage', 'Violet', 'Wild', 'Winter',
 ]
 
-SECOND_PARTS = [
-    'trader', 'investor', 'capital', 'wealth', 'plays', 'picks',
-    'street', 'market', 'returns', 'portfolio', 'finance', 'stocks',
-    'runner', 'hunter', 'seeker', 'master', 'king', 'pro',
-    'genius', 'wizard', 'monk', 'sage', 'guru', 'chief',
-    'whale', 'ape', 'diamond', 'rocket', 'moon', 'titan',
+CAMEL_SECOND = [
+    'Arc', 'Bay', 'Bear', 'Bell', 'Bird', 'Blaze', 'Bloom', 'Bolt',
+    'Brook', 'Cliff', 'Cloud', 'Crest', 'Dale', 'Drift', 'Dusk',
+    'Edge', 'Elk', 'Fall', 'Field', 'Fire', 'Flare', 'Flow', 'Fox',
+    'Glen', 'Grove', 'Gust', 'Hawk', 'Haven', 'Hill', 'Isle', 'Jay',
+    'Lake', 'Lane', 'Lark', 'Leaf', 'Light', 'Lynx', 'Moon', 'Oak',
+    'Path', 'Point', 'Rain', 'Reed', 'Rock', 'Rose', 'Run', 'Rush',
+    'Sand', 'Sky', 'Spark', 'Spring', 'Star', 'Sun', 'Swift', 'Tide',
+    'Trail', 'Vale', 'View', 'Wave', 'West', 'Wind', 'Wolf', 'Wren',
 ]
 
-# Some realistic "real name" style usernames
-REAL_NAMES = [
-    'mike_trades', 'sarah_invests', 'jt_capital', 'alex_markets',
-    'chris_gains', 'sam_stocks', 'jordan_plays', 'taylor_picks',
-    'casey_wealth', 'riley_returns', 'morgan_port', 'drew_finance',
-    'pat_trader', 'jamie_bull', 'quinn_alpha', 'avery_hedge',
-    'logan_yield', 'reese_gains', 'blake_capital', 'skyler_trades',
-    'parker_invest', 'cameron_stocks', 'dakota_gains', 'emery_wealth',
-    'finley_trades', 'harley_picks', 'kendall_port', 'lennox_alpha',
-    'marley_bull', 'oakley_cap', 'peyton_trade', 'rowan_invest',
-    'sage_returns', 'tatum_plays', 'val_stocks', 'wren_capital',
+# Lowercase fused words (Polymarket style: reachingthesky, beachboy4, swisstony)
+LOWERCASE_WORDS = [
+    'reaching', 'morning', 'evening', 'coastal', 'northern', 'southern',
+    'western', 'eastern', 'rising', 'falling', 'running', 'rolling',
+    'sleeping', 'waking', 'chasing', 'quiet', 'golden', 'silver',
+    'copper', 'marble', 'velvet', 'autumn', 'winter', 'summer',
+    'spring', 'frozen', 'broken', 'hidden', 'steady', 'lucky',
+    'dusty', 'rusty', 'misty', 'cloudy', 'sunny', 'rainy', 'snowy',
+    'blue', 'green', 'red', 'grey', 'dark', 'bright', 'deep',
+    'tall', 'old', 'new', 'swift', 'slow', 'loud', 'calm',
+]
+
+LOWERCASE_NOUNS = [
+    'thesky', 'thehill', 'thewind', 'moon', 'sun', 'stars', 'rain',
+    'creek', 'river', 'lake', 'ocean', 'beach', 'mountain', 'valley',
+    'forest', 'meadow', 'canyon', 'desert', 'island', 'harbor',
+    'fox', 'wolf', 'hawk', 'bear', 'elk', 'owl', 'crow', 'jay',
+    'oak', 'pine', 'birch', 'cedar', 'maple', 'sage', 'fern',
+    'stone', 'sand', 'clay', 'iron', 'frost', 'ember', 'spark',
+    'boy', 'kid', 'dude', 'tony', 'mike', 'dave', 'sam', 'joe',
+]
+
+# Short punchy handles (Kalshi/StockTwits style: gatorr, cobybets1)
+SHORT_HANDLES = [
+    'gatorr', 'bucky', 'jojo', 'momo', 'nemo', 'zazu', 'kiko',
+    'remy', 'bobo', 'lulu', 'coco', 'milo', 'otto', 'tito',
+    'ziggy', 'bongo', 'fizzy', 'jazzy', 'peppy', 'dizzy',
+    'sparky', 'rocky', 'lucky', 'stormy', 'dusty', 'rusty',
+    'frosty', 'smoky', 'misty', 'buddy', 'scout', 'bandit',
+    'rebel', 'maverick', 'blaze', 'flash', 'dash', 'ace',
+]
+
+# Real-ish first names (no suffixes, just the name + optional number)
+REAL_FIRST_NAMES = [
+    'alex', 'jordan', 'riley', 'casey', 'morgan', 'avery',
+    'blake', 'cameron', 'drew', 'emery', 'finley', 'harper',
+    'jamie', 'kai', 'logan', 'mason', 'nolan', 'parker',
+    'quinn', 'reese', 'sawyer', 'taylor', 'wren', 'skyler',
+    'rowan', 'sage', 'river', 'phoenix', 'kendall', 'devon',
+    'hayden', 'peyton', 'rory', 'shay', 'tatum', 'lennox',
+    'marley', 'oakley', 'harley', 'dallas', 'jules', 'nico',
 ]
 
 
 def generate_username():
     """
-    Generate a unique, human-looking username.
-    Mixes several patterns to avoid uniformity.
+    Generate a modern, trendy username matching Polymarket/Kalshi/StockTwits style.
+    No underscores, hyphens, or corporate suffixes.
     """
     pattern = random.choices(
-        ['compound', 'real_name', 'simple_num', 'initials'],
-        weights=[40, 25, 25, 10],
+        ['camel', 'lowercase_fused', 'short_handle', 'real_name', 'real_num'],
+        weights=[30, 25, 15, 15, 15],
         k=1
     )[0]
 
-    if pattern == 'compound':
-        first = random.choice(FIRST_PARTS)
-        second = random.choice(SECOND_PARTS)
-        sep = random.choice(['-', '_', '', '.'])
-        num = random.choice(['', str(random.randint(1, 99)),
-                             str(random.randint(2020, 2026))])
-        variants = [
-            f"{first}{sep}{second}{num}",
-            f"{second}{sep}{first}{num}",
-            f"{first}{num}{sep}{second}",
-        ]
-        return random.choice(variants)
+    if pattern == 'camel':
+        # CamelCase: SilverFox, MidnightStar, CoastalBreezeView
+        first = random.choice(CAMEL_FIRST)
+        second = random.choice(CAMEL_SECOND)
+        # Sometimes add a third word or number
+        extra = random.choices(
+            ['', random.choice(CAMEL_SECOND), str(random.randint(1, 99))],
+            weights=[50, 30, 20], k=1
+        )[0]
+        return f"{first}{second}{extra}"
+
+    elif pattern == 'lowercase_fused':
+        # Fused lowercase: reachingthesky, goldenoak7, quietstorm
+        word = random.choice(LOWERCASE_WORDS)
+        noun = random.choice(LOWERCASE_NOUNS)
+        num = random.choice(['', str(random.randint(1, 99))])
+        return f"{word}{noun}{num}"
+
+    elif pattern == 'short_handle':
+        # Short punchy: gatorr, sparky22, ace
+        handle = random.choice(SHORT_HANDLES)
+        num = random.choices(
+            ['', str(random.randint(1, 9)), str(random.randint(10, 99))],
+            weights=[40, 30, 30], k=1
+        )[0]
+        return f"{handle}{num}"
 
     elif pattern == 'real_name':
-        base = random.choice(REAL_NAMES)
-        suffix = random.choice(['', str(random.randint(1, 99)),
-                                str(random.randint(100, 999))])
-        return f"{base}{suffix}"
+        # Just a name, maybe with a short number: alex, jordan7, reese42
+        name = random.choice(REAL_FIRST_NAMES)
+        num = random.choices(
+            ['', str(random.randint(1, 9)), str(random.randint(10, 99)),
+             str(random.randint(100, 999))],
+            weights=[30, 25, 30, 15], k=1
+        )[0]
+        return f"{name}{num}"
 
-    elif pattern == 'simple_num':
-        first = random.choice(FIRST_PARTS)
-        num = random.randint(1, 9999)
-        return f"{first}{num}"
-
-    else:  # initials
-        letters = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz', k=2))
-        suffix = random.choice(['_trades', '_capital', '_invest', '_stocks',
-                                '_picks', '_wealth', '_port'])
-        num = random.choice(['', str(random.randint(1, 99))])
-        return f"{letters}{suffix}{num}"
+    else:  # real_num — just initials/letters + numbers
+        # kch123 style
+        letters = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz', k=random.randint(2, 4)))
+        num = str(random.randint(1, 999))
+        return f"{letters}{num}"
 
 
 def generate_email(username):
