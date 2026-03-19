@@ -1626,6 +1626,181 @@ def bot_dashboard():
         return jsonify({'error': 'dashboard_failed'}), 500
 
 
+@mobile_api.route('/admin/bot/trade', methods=['POST'])
+@require_admin_key
+def bot_trade_cron():
+    """
+    Trigger bot trading for a specific wave. Designed to be called by an external
+    scheduler (GitHub Actions, cron) at staggered times during market hours.
+    
+    POST body (JSON):
+        wave: int (1-4) — which trading wave to execute
+        dry_run: bool (optional, default false)
+    
+    Wave schedule (ET):
+        Wave 1: ~9:45 AM   (market open traders)
+        Wave 2: ~10:45 AM  (mid-morning traders)
+        Wave 3: ~1:15 PM   (afternoon traders)
+        Wave 4: ~3:30 PM   (close traders)
+    
+    Each bot is assigned preferred waves in its strategy profile.
+    Not all bots trade every day (frequency + patience controls).
+    """
+    import random
+    from datetime import timedelta
+    
+    data = request.get_json() or {}
+    wave = data.get('wave')
+    dry_run = data.get('dry_run', False)
+    
+    if not wave or wave not in [1, 2, 3, 4]:
+        return jsonify({'error': 'wave required (1-4)'}), 400
+    
+    try:
+        from models import db, User, Stock
+        
+        # Get active bot users
+        bots = User.query.filter_by(role='agent', bot_active=True).all()
+        if not bots:
+            return jsonify({'success': True, 'message': 'No active bots', 'trades': 0})
+        
+        results = {
+            'wave': wave,
+            'dry_run': dry_run,
+            'bots_checked': len(bots),
+            'bots_traded': 0,
+            'trades_executed': 0,
+            'decisions': [],
+            'errors': []
+        }
+        
+        # Lazy-import bot modules (heavy dependencies)
+        try:
+            from bot_strategies import generate_strategy_profile, generate_trade_decisions, compute_signal_score
+            from bot_behaviors import should_trade_today, get_trade_wave, apply_human_biases, apply_fomo_trades
+            from bot_data_hub import MarketDataHub
+        except ImportError as e:
+            return jsonify({'error': f'Bot modules not available: {e}'}), 500
+        
+        # Refresh market data once for all bots
+        hub = MarketDataHub()
+        hub.refresh(include_extras=True)
+        
+        if not hub.is_core_available():
+            return jsonify({'error': 'Market data unavailable'}), 503
+        
+        for bot in bots:
+            try:
+                # Load or generate profile
+                import json, os
+                profile_path = os.path.join('.bot_profiles', f'{bot.id}.json')
+                if os.path.exists(profile_path):
+                    with open(profile_path) as f:
+                        profile = json.load(f)
+                else:
+                    profile = generate_strategy_profile('balanced', bot.industry or 'General')
+                
+                # Check if bot should trade today
+                if not should_trade_today(profile):
+                    continue
+                
+                # Check if bot is in this wave
+                bot_wave = get_trade_wave(profile)
+                if bot_wave != wave:
+                    continue
+                
+                # Get holdings
+                holdings = []
+                stocks = Stock.query.filter_by(user_id=bot.id).all()
+                for s in stocks:
+                    if s.quantity > 0:
+                        holdings.append({
+                            'ticker': s.ticker,
+                            'quantity': s.quantity,
+                            'purchase_price': float(s.purchase_price) if s.purchase_price else 0
+                        })
+                
+                # Generate decisions
+                decisions = generate_trade_decisions(profile, hub, holdings)
+                decisions = apply_human_biases(decisions, profile)
+                fomo = apply_fomo_trades(profile, hub, decisions)
+                if fomo:
+                    decisions.extend(fomo)
+                
+                if not decisions:
+                    continue
+                
+                results['bots_traded'] += 1
+                
+                for d in decisions:
+                    decision_info = {
+                        'bot_id': bot.id,
+                        'username': bot.username,
+                        'action': d['action'],
+                        'ticker': d['ticker'],
+                        'score': round(d['score'], 3)
+                    }
+                    
+                    if dry_run:
+                        decision_info['status'] = 'dry_run'
+                        results['decisions'].append(decision_info)
+                        continue
+                    
+                    # Execute trade via the existing bot execute-trade endpoint logic
+                    try:
+                        action = d['action']
+                        ticker = d['ticker']
+                        quantity = d.get('quantity', 1)
+                        price = d.get('price', 0)
+                        
+                        if action == 'buy':
+                            from models import Transaction
+                            stock = Stock.query.filter_by(user_id=bot.id, ticker=ticker).first()
+                            if stock:
+                                stock.quantity += quantity
+                                stock.purchase_price = price
+                            else:
+                                stock = Stock(user_id=bot.id, ticker=ticker, quantity=quantity, purchase_price=price)
+                                db.session.add(stock)
+                            
+                            tx = Transaction(user_id=bot.id, ticker=ticker, quantity=quantity,
+                                           price=price, type='buy', notes=f'Bot wave {wave}')
+                            db.session.add(tx)
+                            
+                        elif action == 'sell':
+                            stock = Stock.query.filter_by(user_id=bot.id, ticker=ticker).first()
+                            if stock and stock.quantity >= quantity:
+                                stock.quantity -= quantity
+                                tx = Transaction(user_id=bot.id, ticker=ticker, quantity=quantity,
+                                               price=price, type='sell', notes=f'Bot wave {wave}')
+                                db.session.add(tx)
+                            else:
+                                decision_info['status'] = 'skipped_insufficient_shares'
+                                results['decisions'].append(decision_info)
+                                continue
+                        
+                        db.session.commit()
+                        decision_info['status'] = 'executed'
+                        results['trades_executed'] += 1
+                        
+                    except Exception as e:
+                        db.session.rollback()
+                        decision_info['status'] = f'error: {str(e)}'
+                        results['errors'].append(str(e))
+                    
+                    results['decisions'].append(decision_info)
+                    
+            except Exception as e:
+                results['errors'].append(f'Bot {bot.id}: {str(e)}')
+                logger.error(f"Bot trade error for {bot.id}: {e}")
+        
+        return jsonify(results)
+        
+    except Exception as e:
+        logger.error(f"Bot trade cron error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @mobile_api.route('/admin/bot/sp500-backfill', methods=['POST'])
 @require_admin_key
 def bot_sp500_backfill():

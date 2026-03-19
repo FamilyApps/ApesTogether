@@ -137,7 +137,14 @@ struct ChartPoint: Codable, Identifiable {
     let portfolio: Double?
     let sp500: Double?
     
-    var id: String { date }
+    // Use index-based ID to avoid crashes from duplicate date labels
+    // (e.g. "Mar '25" appearing multiple times in 1Y chart)
+    var index: Int?
+    var id: String { "\(index ?? 0)_\(date)" }
+    
+    enum CodingKeys: String, CodingKey {
+        case date, portfolio, sp500
+    }
 }
 
 // MARK: - Trade

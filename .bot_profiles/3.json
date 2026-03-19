@@ -1,0 +1,63 @@
+{
+  "strategy": "momentum",
+  "strategy_description": "Rides trends using momentum indicators",
+  "industry": "General",
+  "indicator_weights": {
+    "rsi": 0.1349,
+    "macd": 0.4458,
+    "news_sentiment": 0.0389,
+    "social_buzz": 0.094,
+    "volume": 0.1521,
+    "insider": 0.0434,
+    "price_trend": 0.091
+  },
+  "buy_threshold": 0.4008,
+  "sell_threshold": -0.2915,
+  "hold_period_days": [
+    5,
+    12
+  ],
+  "max_positions": 12,
+  "risk_tolerance": 0.679,
+  "trade_frequency": "daily",
+  "preferred_cap": "any",
+  "personality": {
+    "fomo_factor": 0.462,
+    "loss_aversion": 0.611,
+    "overconfidence": 0.471,
+    "recency_bias": 0.653,
+    "patience": 0.224
+  },
+  "life_stage": "busy_parent",
+  "preferred_waves": [
+    1,
+    4
+  ],
+  "attention_universe": [
+    "SPY",
+    "VYM",
+    "RTX",
+    "UPS",
+    "CAT",
+    "XLV",
+    "MDT",
+    "EW",
+    "WM",
+    "GLD",
+    "AMGN",
+    "TMO",
+    "NOC",
+    "HON",
+    "DE",
+    "RSG",
+    "VIG",
+    "ABT",
+    "ZTS",
+    "XLF",
+    "REGN",
+    "LMT",
+    "ARKK",
+    "DXCM",
+    "FDX"
+  ]
+}

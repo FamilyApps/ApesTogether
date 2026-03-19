@@ -10,8 +10,31 @@ struct PerformanceChartView: View {
     
     private let periods = ["1D", "5D", "7D", "1M", "3M", "YTD", "1Y"]
     
+    private var xAxisLabelCount: Int {
+        switch selectedPeriod {
+        case "1D": return 4
+        case "5D": return 5
+        case "7D": return 4
+        case "1M": return 4
+        case "3M": return 5
+        case "YTD": return 5
+        case "1Y": return 5
+        default: return 4
+        }
+    }
+    
     private var portfolioColor: Color {
         portfolioReturn >= 0 ? .gains : .losses
+    }
+    
+    private func formatYAxisLabel(_ val: Double) -> String {
+        if abs(val) >= 100 {
+            return String(format: "%.0f%%", val)
+        } else if abs(val) >= 10 {
+            return String(format: "%.0f%%", val)
+        } else {
+            return String(format: "%.1f%%", val)
+        }
     }
     
     var body: some View {
@@ -91,19 +114,19 @@ struct PerformanceChartView: View {
                         .lineStyle(StrokeStyle(lineWidth: 0.5))
                 }
                 .chartXAxis {
-                    AxisMarks(values: .automatic(desiredCount: 5)) { value in
+                    AxisMarks(values: .automatic(desiredCount: xAxisLabelCount)) { value in
                         AxisValueLabel()
                             .foregroundStyle(Color.textMuted)
                             .font(.system(size: 9))
                     }
                 }
                 .chartYAxis {
-                    AxisMarks(position: .trailing) { value in
+                    AxisMarks(position: .trailing, values: .automatic(desiredCount: 4)) { value in
                         AxisGridLine(stroke: StrokeStyle(lineWidth: 0.3))
                             .foregroundStyle(Color.cardBorder.opacity(0.5))
                         AxisValueLabel {
                             if let val = value.as(Double.self) {
-                                Text(String(format: "%.1f%%", val))
+                                Text(formatYAxisLabel(val))
                                     .font(.system(size: 9))
                                     .foregroundColor(.textMuted)
                             }

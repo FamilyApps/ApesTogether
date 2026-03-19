@@ -553,7 +553,11 @@ class PortfolioDetailViewModel: ObservableObject {
         
         do {
             let response = try await APIService.shared.getPortfolioChart(slug: slug, period: selectedPeriod)
-            chartData = response.chartData
+            chartData = response.chartData.enumerated().map { idx, point in
+                var p = point
+                p.index = idx
+                return p
+            }
             portfolioReturn = response.portfolioReturn
             sp500Return = response.sp500Return
         } catch {

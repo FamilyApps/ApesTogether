@@ -1,0 +1,59 @@
+{
+  "strategy": "social_momentum",
+  "strategy_description": "Trades Reddit/Twitter buzz + volume surge",
+  "industry": "Technology",
+  "indicator_weights": {
+    "rsi": 0.0702,
+    "macd": 0.0827,
+    "news_sentiment": 0.0503,
+    "social_buzz": 0.5715,
+    "volume": 0.1578,
+    "insider": 0.0095,
+    "price_trend": 0.058
+  },
+  "buy_threshold": 0.5171,
+  "sell_threshold": -0.3683,
+  "hold_period_days": [
+    2,
+    3
+  ],
+  "max_positions": 8,
+  "risk_tolerance": 0.827,
+  "trade_frequency": "daily",
+  "preferred_cap": "any",
+  "personality": {
+    "fomo_factor": 0.746,
+    "loss_aversion": 0.407,
+    "overconfidence": 0.369,
+    "recency_bias": 0.407,
+    "patience": 0.342
+  },
+  "life_stage": "finance_nerd",
+  "preferred_waves": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "attention_universe": [
+    "PLTR",
+    "CRM",
+    "MSFT",
+    "TEAM",
+    "AMD",
+    "NET",
+    "TWLO",
+    "NVDA",
+    "SHOP",
+    "CSCO",
+    "INTC",
+    "SNOW",
+    "ORCL",
+    "PANW",
+    "ADBE",
+    "GOOGL",
+    "ZS",
+    "MDB",
+    "UBER"
+  ]
+}

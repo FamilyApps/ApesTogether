@@ -1,0 +1,94 @@
+name: Bot Trading Waves
+
+on:
+  schedule:
+    # Wave 1: Market open traders — 9:45 AM ET (13:45 UTC / 14:45 UTC depending on DST)
+    # Using 13:45 UTC for EDT (summer) — adjust to 14:45 for EST (winter)
+    - cron: '45 13 * * 1-5'
+    
+    # Wave 2: Mid-morning traders — 10:45 AM ET (14:45 UTC / 15:45 UTC)
+    - cron: '45 14 * * 1-5'
+    
+    # Wave 3: Afternoon traders — 1:15 PM ET (17:15 UTC / 18:15 UTC)
+    - cron: '15 17 * * 1-5'
+    
+    # Wave 4: Close traders — 3:30 PM ET (19:30 UTC / 20:30 UTC)
+    - cron: '30 19 * * 1-5'
+  
+  workflow_dispatch:
+    inputs:
+      wave:
+        description: 'Trading wave (1-4), or 0 for all waves'
+        required: true
+        default: '0'
+      dry_run:
+        description: 'Dry run (true/false)'
+        required: false
+        default: 'false'
+
+jobs:
+  trade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: pip install requests yfinance python-dotenv finnhub-python numpy
+      
+      - name: Determine wave from schedule
+        id: wave
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "wave=${{ github.event.inputs.wave }}" >> $GITHUB_OUTPUT
+            echo "dry_run=${{ github.event.inputs.dry_run }}" >> $GITHUB_OUTPUT
+          else
+            # Determine wave from cron schedule time (UTC hour)
+            HOUR=$(date -u +%H)
+            MINUTE=$(date -u +%M)
+            
+            if [ "$HOUR" = "13" ] || [ "$HOUR" = "14" -a "$MINUTE" -lt "30" ]; then
+              WAVE=1
+            elif [ "$HOUR" = "14" ] || [ "$HOUR" = "15" -a "$MINUTE" -lt "30" ]; then
+              WAVE=2
+            elif [ "$HOUR" = "17" ] || [ "$HOUR" = "18" -a "$MINUTE" -lt "30" ]; then
+              WAVE=3
+            elif [ "$HOUR" = "19" ] || [ "$HOUR" = "20" -a "$MINUTE" -lt "30" ]; then
+              WAVE=4
+            else
+              WAVE=0
+            fi
+            
+            echo "wave=$WAVE" >> $GITHUB_OUTPUT
+            echo "dry_run=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Run bot trading (Wave ${{ steps.wave.outputs.wave }})
+        env:
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+          ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+        run: |
+          WAVE=${{ steps.wave.outputs.wave }}
+          DRY_RUN=${{ steps.wave.outputs.dry_run }}
+          
+          if [ "$WAVE" = "0" ]; then
+            echo "Running all waves sequentially..."
+            python bot_agent.py trade --force --wave 1 $( [ "$DRY_RUN" = "true" ] && echo "--dry-run" )
+            sleep 5
+            python bot_agent.py trade --force --wave 2 $( [ "$DRY_RUN" = "true" ] && echo "--dry-run" )
+            sleep 5
+            python bot_agent.py trade --force --wave 3 $( [ "$DRY_RUN" = "true" ] && echo "--dry-run" )
+            sleep 5
+            python bot_agent.py trade --force --wave 4 $( [ "$DRY_RUN" = "true" ] && echo "--dry-run" )
+          else
+            echo "Running wave $WAVE..."
+            python bot_agent.py trade --force --wave $WAVE $( [ "$DRY_RUN" = "true" ] && echo "--dry-run" )
+          fi

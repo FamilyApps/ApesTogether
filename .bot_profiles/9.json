@@ -1,0 +1,67 @@
+{
+  "strategy": "insider_follower",
+  "strategy_description": "Follows insider buying activity with technical confirmation",
+  "industry": "Healthcare",
+  "indicator_weights": {
+    "rsi": 0.0197,
+    "macd": 0.1005,
+    "news_sentiment": 0.1235,
+    "social_buzz": 0.0115,
+    "volume": 0.3509,
+    "insider": 0.2592,
+    "price_trend": 0.1346
+  },
+  "buy_threshold": 0.3874,
+  "sell_threshold": -0.2877,
+  "hold_period_days": [
+    9,
+    43
+  ],
+  "max_positions": 6,
+  "risk_tolerance": 0.489,
+  "trade_frequency": "twice_weekly",
+  "preferred_cap": "large",
+  "personality": {
+    "fomo_factor": 0.129,
+    "loss_aversion": 0.351,
+    "overconfidence": 0.388,
+    "recency_bias": 0.44,
+    "patience": 0.289
+  },
+  "life_stage": "finance_nerd",
+  "preferred_waves": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "attention_universe": [
+    "VYM",
+    "TLT",
+    "SYK",
+    "COST",
+    "JNJ",
+    "UNH",
+    "MDT",
+    "BMY",
+    "EW",
+    "IDXX",
+    "ISRG",
+    "VOO",
+    "NKE",
+    "AMGN",
+    "TMO",
+    "ABBV",
+    "VIG",
+    "GILD",
+    "NFLX",
+    "MRK",
+    "ABT",
+    "ZTS",
+    "TGT",
+    "XLE",
+    "VTI",
+    "REGN",
+    "PFE"
+  ]
+}

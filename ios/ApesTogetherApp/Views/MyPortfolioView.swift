@@ -178,7 +178,11 @@ class ShareDataViewModel: ObservableObject {
         
         do {
             let chart = try await APIService.shared.getPortfolioChart(slug: slug, period: selectedPeriod)
-            chartData = chart.chartData
+            chartData = chart.chartData.enumerated().map { idx, point in
+                var p = point
+                p.index = idx
+                return p
+            }
             portfolioReturn = chart.portfolioReturn
             sp500Return = chart.sp500Return
         } catch {}

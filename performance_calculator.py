@@ -440,7 +440,7 @@ def _generate_chart_points(
                     # Add UTC timezone info
                     ts = ts.replace(tzinfo=dt_timezone.utc)
                 ts_et = ts.astimezone(ET)
-                date_str = ts_et.strftime('%b %d %I:%M %p')  # "Oct 31 09:30 AM"
+                date_str = ts_et.strftime('%I:%M %p')  # "09:30 AM" (compact for mobile)
             else:
                 date_str = snapshot.date.strftime('%b %d')
             
@@ -503,11 +503,38 @@ def _generate_chart_points(
                 'sp500': round(sp500_pct, 2)
             })
     else:
-        # For longer periods: Generate points for S&P 500 dates (original logic)
+        # For longer periods: Generate points for S&P 500 dates
+        # Sample data to avoid overcrowded charts on mobile screens
+        if period in ['5Y']:
+            # ~5 years: show ~60 monthly points (every ~21 trading days)
+            step = max(1, len(sp500_data) // 60)
+        elif period in ['1Y']:
+            # ~1 year: show ~50 weekly points (every ~5 trading days)
+            step = max(1, len(sp500_data) // 50)
+        elif period in ['YTD', '3M']:
+            # 3-6 months: every 2-3 trading days for ~30-40 points
+            step = max(1, len(sp500_data) // 40)
+        else:
+            step = 1  # 1M and shorter: every trading day
+        
+        sampled_sp500 = sp500_data[::step]
+        # Always include the last data point
+        if sp500_data and sampled_sp500[-1] != sp500_data[-1]:
+            sampled_sp500.append(sp500_data[-1])
+        
         user_started = False
         
-        for sp500_record in sp500_data:
-            date_str = sp500_record.date.strftime('%b %d')
+        for idx, sp500_record in enumerate(sampled_sp500):
+            # Period-appropriate date format for mobile screens
+            # IMPORTANT: date_str must be unique per point (used as chart ID in iOS)
+            if period in ['5Y']:
+                date_str = sp500_record.date.strftime("%b '%y")  # "Mar '23" — monthly samples, year avoids ambiguity
+            elif period in ['1Y']:
+                date_str = sp500_record.date.strftime('%b %d')  # "Mar 18" — weekly samples, unique within a year
+            elif period in ['YTD', '3M']:
+                date_str = sp500_record.date.strftime('%b %d')  # "Mar 18"
+            else:
+                date_str = f"{sp500_record.date.month}/{sp500_record.date.day}"  # "3/18" — compact for 1M and shorter
             
             # S&P 500 percentage (always calculated from period start)
             sp500_value = float(sp500_record.close_price)
