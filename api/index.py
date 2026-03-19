@@ -19149,6 +19149,36 @@ def market_close_cron():
                     'results': results
                 }), 500
             
+            # PHASE 1.8: Automatic Dividend Detection
+            # Check all held tickers for ex-dividend dates and credit users
+            try:
+                logger.info("PHASE 1.8: Checking for dividends...")
+                results['pipeline_phases'].append('dividends_started')
+                
+                from dividend_tracker import process_dividends_for_date
+                div_results = process_dividends_for_date(db, target_date=today_et)
+                
+                results['dividends_found'] = div_results.get('dividends_found', 0)
+                results['dividends_recorded'] = div_results.get('dividends_recorded', 0)
+                results['dividend_total_amount'] = div_results.get('total_amount', 0.0)
+                
+                if div_results.get('dividends_recorded', 0) > 0:
+                    db.session.commit()
+                    logger.info(f"✅ PHASE 1.8 Complete: {div_results['dividends_recorded']} dividends recorded (${div_results['total_amount']:.2f} total)")
+                else:
+                    logger.info(f"PHASE 1.8 Complete: No dividends for {today_et}")
+                
+                results['pipeline_phases'].append('dividends_completed')
+                
+            except Exception as e:
+                logger.warning(f"PHASE 1.8 WARNING: Dividend check failed (non-critical): {e}")
+                results['errors'].append(f"Dividend check failed: {str(e)}")
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+                # Non-critical — continue with leaderboard updates
+            
             # PHASE 2: Update Leaderboard Cache (includes chart cache generation)
             # Now in separate transaction - if this fails, core data is already safe
             # Grok recommendation: Wrap in try-catch with rollback to prevent session corruption
