@@ -78,7 +78,7 @@ def create_bot(label, industry, strategy_desc):
     if resp.status_code == 200:
         data = resp.json()
         user_id = data.get('user', {}).get('id') or data.get('user_id')
-        print(f"  ✅ Created! user_id={user_id}")
+        print(f"  [OK] Created! user_id={user_id}")
         
         # Gift some subscribers for visibility
         sub_resp = requests.post(f"{API_BASE}/admin/bot/gift-subscribers", headers=HEADERS, json={
@@ -86,16 +86,16 @@ def create_bot(label, industry, strategy_desc):
             'count': 3
         })
         if sub_resp.status_code == 200:
-            print(f"  👥 Gifted 3 subscribers")
+            print(f"  [+] Gifted 3 subscribers")
         
         return {'user_id': user_id, 'username': username, 'label': label}
     else:
-        print(f"  ❌ Failed: {resp.status_code} {resp.text}")
+        print(f"  [FAIL] {resp.status_code} {resp.text}")
         return None
 
 
 def main():
-    print("🦍 Seeding Copy-Trading Bots for Apes Together")
+    print("[*] Seeding Copy-Trading Bots for Apes Together")
     print(f"   API: {API_BASE}")
     
     created = []
@@ -106,9 +106,9 @@ def main():
             created.append(result)
     
     print(f"\n{'='*50}")
-    print(f"✅ Created {len(created)}/{len(BOTS)} bots\n")
+    print(f"[OK] Created {len(created)}/{len(BOTS)} bots\n")
     
-    print("📋 Google Apps Script Configuration:")
+    print("Google Apps Script Configuration:")
     print("   Set these as Script Properties in your Google Apps Script project:\n")
     
     for bot in created:
@@ -118,7 +118,7 @@ def main():
     print(f"   ADMIN_API_KEY = (your admin key)")
     print(f"   API_BASE_URL = {API_BASE}")
     
-    print(f"\n📝 Bot Summary:")
+    print(f"\nBot Summary:")
     for bot in created:
         print(f"   {bot['label']}: username={bot['username']}, user_id={bot['user_id']}")
 
