@@ -1505,6 +1505,12 @@ def bot_scale_holdings():
         user.cash_proceeds = round(old_cash * multiplier, 2)
         user.max_cash_deployed = round(old_deployed * multiplier, 2)
         
+        # Store the cumulative trade multiplier so future email trades get scaled too
+        if not user.extra_data or not isinstance(user.extra_data, dict):
+            user.extra_data = {}
+        existing_multiplier = float(user.extra_data.get('trade_multiplier', 1.0))
+        user.extra_data = {**user.extra_data, 'trade_multiplier': round(existing_multiplier * multiplier, 6)}
+        
         db.session.commit()
         
         return jsonify({
@@ -2094,6 +2100,12 @@ def bot_email_trade():
             if not bot:
                 return jsonify({'error': f'Bot user "{bot_username}" not found'}), 404
         
+        # Check if bot has a trade multiplier for obfuscation
+        # (stored in extra_data['trade_multiplier'] by the scale-holdings endpoint)
+        trade_multiplier = 1.0
+        if bot.extra_data and isinstance(bot.extra_data, dict):
+            trade_multiplier = float(bot.extra_data.get('trade_multiplier', 1.0))
+        
         # Parse trades — support both single-trade and batch format
         trades = data.get('trades', [])
         if not trades and data.get('action'):
@@ -2113,6 +2125,12 @@ def bot_email_trade():
             ticker = trade.get('ticker', '').upper()
             quantity = float(trade.get('quantity', 1))
             price = trade.get('price')
+            
+            # Scale quantity by bot's trade multiplier for obfuscation
+            if trade_multiplier != 1.0:
+                original_qty = quantity
+                quantity = round(quantity * trade_multiplier, 6)
+                logger.info(f"Scaled {ticker} qty: {original_qty} -> {quantity} (x{trade_multiplier})")
             
             if action not in ('buy', 'sell'):
                 results.append({'ticker': ticker, 'error': f'Invalid action: {action}'})
