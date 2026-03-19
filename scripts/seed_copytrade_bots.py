@@ -67,7 +67,7 @@ def create_bot(label, industry, strategy_desc):
     print(f"  Industry: {industry}")
     
     # Create user via admin API
-    resp = requests.post(f"{API_BASE}/admin/bot/create", headers=HEADERS, json={
+    resp = requests.post(f"{API_BASE}/admin/bot/create-user", headers=HEADERS, json={
         'username': username,
         'email': email,
         'industry': industry,
@@ -77,7 +77,7 @@ def create_bot(label, industry, strategy_desc):
     
     if resp.status_code == 200:
         data = resp.json()
-        user_id = data.get('user_id')
+        user_id = data.get('user', {}).get('id') or data.get('user_id')
         print(f"  ✅ Created! user_id={user_id}")
         
         # Gift some subscribers for visibility
