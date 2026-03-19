@@ -1626,6 +1626,94 @@ def bot_dashboard():
         return jsonify({'error': 'dashboard_failed'}), 500
 
 
+@mobile_api.route('/admin/bot/sp500-backfill', methods=['POST'])
+@require_admin_key
+def bot_sp500_backfill():
+    """
+    Backfill S&P 500 historical data from AlphaVantage SPY daily prices.
+    Uses the full outputsize to get 20+ years of data and stores SPY*10 as SPY_SP500.
+    Query param: years (default 5)
+    """
+    from models import db, MarketData
+    from datetime import timedelta
+    import os
+    
+    years = int(request.args.get('years', 5))
+    av_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
+    if not av_key:
+        return jsonify({'error': 'ALPHA_VANTAGE_API_KEY not configured'}), 500
+    
+    try:
+        import requests as req
+        url = 'https://www.alphavantage.co/query'
+        params = {
+            'function': 'TIME_SERIES_DAILY',
+            'symbol': 'SPY',
+            'outputsize': 'full',
+            'apikey': av_key
+        }
+        
+        resp = req.get(url, params=params, timeout=30)
+        data = resp.json()
+        
+        if 'Error Message' in data:
+            return jsonify({'error': data['Error Message']}), 500
+        if 'Time Series (Daily)' not in data:
+            return jsonify({'error': 'Invalid response', 'keys': list(data.keys())}), 500
+        
+        time_series = data['Time Series (Daily)']
+        today = datetime.utcnow().date()
+        start_date = today - timedelta(days=years * 365)
+        
+        inserted = 0
+        updated = 0
+        skipped = 0
+        errors = []
+        
+        for date_str, daily in time_series.items():
+            try:
+                data_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                if data_date < start_date:
+                    continue
+                
+                spy_close = float(daily['4. close'])
+                sp500_value = round(spy_close * 10, 2)
+                
+                existing = MarketData.query.filter_by(
+                    ticker='SPY_SP500', date=data_date
+                ).first()
+                
+                if existing:
+                    if abs(existing.close_price - sp500_value) > 0.01:
+                        existing.close_price = sp500_value
+                        updated += 1
+                    else:
+                        skipped += 1
+                else:
+                    db.session.add(MarketData(
+                        ticker='SPY_SP500', date=data_date, close_price=sp500_value
+                    ))
+                    inserted += 1
+            except Exception as e:
+                errors.append(f"{date_str}: {str(e)}")
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'total_api_records': len(time_series),
+            'inserted': inserted,
+            'updated': updated,
+            'skipped': skipped,
+            'errors': errors[:10],
+            'years_requested': years
+        })
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"SP500 backfill error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @mobile_api.route('/admin/bot/sp500-check', methods=['GET'])
 @require_admin_key
 def bot_sp500_check():
