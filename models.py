@@ -486,7 +486,16 @@ class AgentConfig(db.Model):
         return f"<AgentConfig user_id={self.user_id} status={self.status} trades={self.total_trades}>"
 
 class AdminSubscription(db.Model):
-    """Bonus subscribers - admin pays 60% payout from platform pocket, no actual app store transactions"""
+    """Promotional/gifted subscribers — company pays influencer directly.
+    
+    No Apple/Google fees are paid (no real IAP transaction).
+    No platform cut is taken (admin is paying out of pocket).
+    The influencer receives the same amount they'd get from a real subscription:
+      $9.00 × (1 - store_fee) × (1 - platform_fee) = $6.50 per sub (small biz rate)
+    
+    In Xero accounting, these are tracked separately from real subscriptions so we
+    know the company owes the influencer directly (no store fees to reconcile).
+    """
     __tablename__ = 'admin_subscription'
     
     id = db.Column(db.Integer, primary_key=True)
@@ -504,11 +513,21 @@ class AdminSubscription(db.Model):
     # Relationship
     portfolio_user = db.relationship('User', foreign_keys=[portfolio_user_id], backref='bonus_subscriptions')
     
-    # Flat pricing (mobile app model - January 2026)
+    # ── Revenue split constants (mobile app model) ──
     SUBSCRIPTION_PRICE = 9.00
-    INFLUENCER_PAYOUT_PERCENT = 0.60  # 60% to influencer
-    PLATFORM_PERCENT = 0.10  # 10% to platform
-    STORE_FEE_PERCENT = 0.30  # 30% to Apple/Google
+    
+    # Small Business Program rate (< $1M annual revenue)
+    STORE_FEE_PERCENT = 0.15       # 15% to Apple/Google
+    # Standard rate (once > $1M annual revenue):
+    # STORE_FEE_PERCENT = 0.30     # 30% to Apple/Google
+    
+    PLATFORM_FEE_PERCENT = 0.15    # 15% of post-store remainder to platform
+    
+    # Derived constants (auto-calculated from the above)
+    _AFTER_STORE = SUBSCRIPTION_PRICE * (1 - STORE_FEE_PERCENT)       # $7.65
+    PLATFORM_CUT_PER_SUB = round(_AFTER_STORE * PLATFORM_FEE_PERCENT, 2)  # $1.15
+    INFLUENCER_PAYOUT_PER_SUB = round(_AFTER_STORE * (1 - PLATFORM_FEE_PERCENT), 2)  # $6.50
+    STORE_FEE_PER_SUB = round(SUBSCRIPTION_PRICE * STORE_FEE_PERCENT, 2)  # $1.35
     
     @property
     def monthly_revenue(self):
@@ -517,11 +536,12 @@ class AdminSubscription(db.Model):
     
     @property
     def payout_amount(self):
-        """Calculate 60% payout for bonus subscribers (paid from platform pocket)"""
-        return self.bonus_subscriber_count * self.SUBSCRIPTION_PRICE * self.INFLUENCER_PAYOUT_PERCENT
+        """Influencer payout for gifted subs (company pays this directly).
+        Same amount as a real sub — influencer can't tell the difference."""
+        return self.bonus_subscriber_count * self.INFLUENCER_PAYOUT_PER_SUB
     
     def calculate_payout(self):
-        """Calculate 60% payout - matches new mobile pricing model"""
+        """Calculate influencer payout for gifted subscribers."""
         return self.payout_amount
     
     def __repr__(self):
@@ -694,14 +714,15 @@ class XeroPayoutRecord(db.Model):
     bonus_subscriber_count = db.Column(db.Integer, default=0)  # From AdminSubscription
     total_subscriber_count = db.Column(db.Integer, default=0)  # real + bonus
     
-    # Revenue breakdown (all at $9/subscriber)
-    gross_revenue = db.Column(db.Float, default=0.0)  # total_subs × $9
-    store_fees = db.Column(db.Float, default=0.0)  # 30% to Apple/Google
-    platform_revenue = db.Column(db.Float, default=0.0)  # 10% ($0.90/sub)
-    influencer_payout = db.Column(db.Float, default=0.0)  # 60% ($5.40/sub)
+    # Revenue breakdown for REAL subscribers ($9/subscriber)
+    # Uses AdminSubscription constants for the split
+    gross_revenue = db.Column(db.Float, default=0.0)  # real_subs × $9
+    store_fees = db.Column(db.Float, default=0.0)  # 15% to Apple/Google ($1.35/sub, small biz rate)
+    platform_revenue = db.Column(db.Float, default=0.0)  # 15% of post-store ($1.15/sub)
+    influencer_payout = db.Column(db.Float, default=0.0)  # 85% of post-store ($6.50/sub)
     
-    # Bonus payout (paid from platform pocket)
-    bonus_payout = db.Column(db.Float, default=0.0)  # bonus_subs × $5.40
+    # Bonus/gifted payout (paid from company funds, no store fees or platform cut)
+    bonus_payout = db.Column(db.Float, default=0.0)  # bonus_subs × $6.50
     
     # Xero sync status
     xero_invoice_id = db.Column(db.String(100), nullable=True)
@@ -722,13 +743,18 @@ class XeroPayoutRecord(db.Model):
     portfolio_user = db.relationship('User', backref='payout_records')
     
     def calculate_totals(self):
-        """Recalculate all amounts based on subscriber counts"""
+        """Recalculate all amounts based on subscriber counts.
+        
+        Real subs: $9 → Apple/Google gets 15% ($1.35), platform gets 15% of remainder ($1.15),
+                   influencer gets 85% of remainder ($6.50).
+        Gifted subs: Company pays influencer $6.50 directly. No store fees, no platform cut.
+        """
         self.total_subscriber_count = self.real_subscriber_count + self.bonus_subscriber_count
-        self.gross_revenue = self.real_subscriber_count * 9.00
-        self.store_fees = self.real_subscriber_count * 2.70
-        self.platform_revenue = self.real_subscriber_count * 0.90
-        self.influencer_payout = self.real_subscriber_count * 5.40
-        self.bonus_payout = self.bonus_subscriber_count * 5.40
+        self.gross_revenue = self.real_subscriber_count * AdminSubscription.SUBSCRIPTION_PRICE
+        self.store_fees = self.real_subscriber_count * AdminSubscription.STORE_FEE_PER_SUB
+        self.platform_revenue = self.real_subscriber_count * AdminSubscription.PLATFORM_CUT_PER_SUB
+        self.influencer_payout = self.real_subscriber_count * AdminSubscription.INFLUENCER_PAYOUT_PER_SUB
+        self.bonus_payout = self.bonus_subscriber_count * AdminSubscription.INFLUENCER_PAYOUT_PER_SUB
     
     @property
     def total_payout(self):

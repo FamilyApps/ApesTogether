@@ -17,15 +17,63 @@ Endpoints:
 from flask import Blueprint, request, jsonify, g
 from functools import wraps
 from datetime import datetime
+from collections import defaultdict
 import logging
 import jwt
 import os
 import secrets
 import string
+import time as _time
 
 logger = logging.getLogger(__name__)
 
 mobile_api = Blueprint('mobile_api', __name__, url_prefix='/api/mobile')
+
+
+# In-memory sliding window rate limiter (serverless-safe, resets on cold start)
+_rate_limit_store = defaultdict(list)
+
+
+def rate_limit(max_requests, per_seconds=60):
+    """Rate limit decorator using in-memory sliding window.
+    
+    Args:
+        max_requests: Maximum number of requests allowed in the window
+        per_seconds: Window size in seconds (default 60 = per minute)
+    
+    Returns 429 with Retry-After header when limit exceeded.
+    """
+    def decorator(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            # Key by IP + endpoint (or admin key for admin endpoints)
+            admin_key = request.headers.get('X-Admin-Key')
+            if admin_key:
+                client_id = f"admin:{admin_key[:8]}"
+            elif hasattr(g, 'user_id') and g.user_id:
+                client_id = f"user:{g.user_id}"
+            else:
+                client_id = f"ip:{request.remote_addr}"
+            
+            key = f"{client_id}:{f.__name__}"
+            now = _time.time()
+            window_start = now - per_seconds
+            
+            # Clean old entries and count recent ones
+            _rate_limit_store[key] = [t for t in _rate_limit_store[key] if t > window_start]
+            
+            if len(_rate_limit_store[key]) >= max_requests:
+                retry_after = int(per_seconds - (now - _rate_limit_store[key][0])) + 1
+                return jsonify({
+                    'error': 'rate_limit_exceeded',
+                    'message': f'Too many requests. Limit: {max_requests} per {per_seconds}s.',
+                    'retry_after': retry_after
+                }), 429, {'Retry-After': str(retry_after)}
+            
+            _rate_limit_store[key].append(now)
+            return f(*args, **kwargs)
+        return wrapper
+    return decorator
 
 
 def require_auth(f):
@@ -371,6 +419,7 @@ def unsubscribe(subscription_id):
 
 @mobile_api.route('/portfolio/<slug>', methods=['GET'])
 @require_auth
+@rate_limit(60)
 def get_portfolio(slug):
     """
     Get portfolio data for mobile app
@@ -458,6 +507,7 @@ def get_portfolio(slug):
 
 @mobile_api.route('/portfolio/stocks', methods=['POST'])
 @require_auth
+@rate_limit(20)
 def add_stocks():
     """
     Add stocks to the authenticated user's portfolio
@@ -479,6 +529,8 @@ def add_stocks():
     stocks_list = data['stocks']
     if not isinstance(stocks_list, list) or len(stocks_list) == 0:
         return jsonify({'error': 'stocks_must_be_non_empty_list'}), 400
+    if len(stocks_list) > 50:
+        return jsonify({'error': 'batch_too_large', 'max_stocks_per_request': 50}), 400
     
     added_count = 0
     errors = []
@@ -533,6 +585,7 @@ def add_stocks():
 
 
 @mobile_api.route('/leaderboard', methods=['GET'])
+@rate_limit(60)
 def get_leaderboard():
     """
     Get leaderboard for mobile app
@@ -1028,6 +1081,7 @@ def get_top_influencers():
 
 @mobile_api.route('/portfolio/<slug>/chart', methods=['GET'])
 @require_auth
+@rate_limit(60)
 def get_portfolio_chart(slug):
     """
     Get portfolio performance chart data with S&P 500 overlay.
@@ -1161,6 +1215,7 @@ def get_portfolio_chart(slug):
 
 @mobile_api.route('/portfolio/trade', methods=['POST'])
 @require_auth
+@rate_limit(20)
 def execute_trade():
     """
     Execute a buy or sell trade.
@@ -1186,8 +1241,12 @@ def execute_trade():
     
     if not ticker:
         return jsonify({'error': 'ticker_required'}), 400
+    if len(ticker) > 10:
+        return jsonify({'error': 'invalid_ticker'}), 400
     if not quantity or quantity <= 0:
         return jsonify({'error': 'positive_quantity_required'}), 400
+    if quantity > 1_000_000:
+        return jsonify({'error': 'quantity_too_large', 'max': 1000000}), 400
     if trade_type not in ('buy', 'sell'):
         return jsonify({'error': 'type_must_be_buy_or_sell'}), 400
     
@@ -1658,6 +1717,7 @@ def bot_subscribe():
 
 @mobile_api.route('/admin/bot/execute-trade', methods=['POST'])
 @require_admin_key
+@rate_limit(30)
 def bot_execute_trade():
     """
     Execute a trade for a bot user.
@@ -2088,6 +2148,7 @@ def admin_record_dividend():
 
 @mobile_api.route('/admin/bot/email-trade', methods=['POST'])
 @require_admin_key
+@rate_limit(30)
 def bot_email_trade():
     """
     Process a trade notification forwarded from Public.com email.
@@ -2117,6 +2178,11 @@ def bot_email_trade():
     
     if not bot_username:
         return jsonify({'error': 'bot_username required'}), 400
+    
+    # Cap batch size to prevent abuse
+    raw_trades = data.get('trades', [])
+    if isinstance(raw_trades, list) and len(raw_trades) > 50:
+        return jsonify({'error': 'batch_too_large', 'max_trades_per_request': 50}), 400
     
     try:
         # Auto-detect which bot this email is for by matching tickers
@@ -2346,6 +2412,7 @@ def bot_email_trade():
 
 @mobile_api.route('/admin/bot/process-pending-trades', methods=['POST'])
 @require_admin_key
+@rate_limit(10)
 def bot_process_pending_trades():
     """
     Retry routing pending trades. Called periodically (e.g. by GAS every 5 min).
@@ -2831,16 +2898,21 @@ def bot_holdings():
 @require_admin_2fa
 def bot_gift_subscribers():
     """
-    Gift subscriber count to a user (creates fake subscriptions).
-    Also updates UserPortfolioStats.subscriber_count.
+    Gift promotional subscribers to a user (influencer).
+    
+    Uses AdminSubscription to track gifted subs separately from real ones.
+    No Apple/Google fees, no platform cut — company pays influencer directly.
+    The influencer sees the subscriber count go up and gets paid the same $6.50/sub
+    they would from a real subscription.
     
     Request body:
     {
         "user_id": 123,
-        "count": 5
+        "count": 5,
+        "reason": "Marketing boost for launch"  (optional)
     }
     """
-    from models import db, User, MobileSubscription, UserPortfolioStats
+    from models import db, User, AdminSubscription, UserPortfolioStats
     
     data = request.get_json()
     if not data:
@@ -2848,6 +2920,7 @@ def bot_gift_subscribers():
     
     user_id = data.get('user_id')
     count = data.get('count', 1)
+    reason = data.get('reason', '')
     
     if not user_id or count <= 0:
         return jsonify({'error': 'user_id_and_positive_count_required'}), 400
@@ -2857,21 +2930,22 @@ def bot_gift_subscribers():
         if not user:
             return jsonify({'error': 'user_not_found'}), 404
         
-        from datetime import timedelta
-        created = 0
-        for i in range(count):
-            sub = MobileSubscription(
-                subscriber_id=user_id,  # Self-referential placeholder
-                subscribed_to_id=user_id,
-                platform='admin_gift',
-                status='active',
-                expires_at=datetime.utcnow() + timedelta(days=365 * 10),
-                push_notifications_enabled=False
+        # Get or create AdminSubscription record for this user
+        admin_sub = AdminSubscription.query.filter_by(portfolio_user_id=user_id).first()
+        if admin_sub:
+            admin_sub.bonus_subscriber_count = (admin_sub.bonus_subscriber_count or 0) + count
+            if reason:
+                existing_reason = admin_sub.reason or ''
+                admin_sub.reason = f"{existing_reason}; {reason}" if existing_reason else reason
+        else:
+            admin_sub = AdminSubscription(
+                portfolio_user_id=user_id,
+                bonus_subscriber_count=count,
+                reason=reason
             )
-            db.session.add(sub)
-            created += 1
+            db.session.add(admin_sub)
         
-        # Update UserPortfolioStats subscriber_count
+        # Update UserPortfolioStats subscriber_count (what the influencer sees)
         stats = UserPortfolioStats.query.filter_by(user_id=user_id).first()
         if stats:
             stats.subscriber_count = (stats.subscriber_count or 0) + count
@@ -2886,8 +2960,16 @@ def bot_gift_subscribers():
         
         return jsonify({
             'success': True,
-            'gifted': created,
-            'new_subscriber_count': stats.subscriber_count
+            'gifted': count,
+            'total_bonus_subscribers': admin_sub.bonus_subscriber_count,
+            'new_subscriber_count': stats.subscriber_count,
+            'accounting': {
+                'payout_per_sub': AdminSubscription.INFLUENCER_PAYOUT_PER_SUB,
+                'total_monthly_payout': admin_sub.payout_amount,
+                'store_fees': 0.0,
+                'platform_cut': 0.0,
+                'note': 'Gifted — company pays influencer directly, no store/platform fees'
+            }
         })
         
     except Exception as e:
@@ -3026,7 +3108,8 @@ def bot_update_config():
 @require_admin_2fa
 def bot_remove_subscribers():
     """
-    Remove gifted subscribers from a user.
+    Remove gifted/promotional subscribers from a user.
+    Decrements AdminSubscription.bonus_subscriber_count and UserPortfolioStats.subscriber_count.
     
     Request body:
     {
@@ -3034,7 +3117,7 @@ def bot_remove_subscribers():
         "count": 3
     }
     """
-    from models import db, MobileSubscription, UserPortfolioStats
+    from models import db, AdminSubscription, UserPortfolioStats
     
     data = request.get_json()
     if not data:
@@ -3047,28 +3130,25 @@ def bot_remove_subscribers():
         return jsonify({'error': 'user_id_and_positive_count_required'}), 400
     
     try:
-        # Find and remove gifted subscriptions
-        gifted = MobileSubscription.query.filter_by(
-            subscribed_to_id=user_id,
-            platform='admin_gift',
-            status='active'
-        ).limit(count).all()
+        admin_sub = AdminSubscription.query.filter_by(portfolio_user_id=user_id).first()
+        if not admin_sub or (admin_sub.bonus_subscriber_count or 0) == 0:
+            return jsonify({'error': 'no_gifted_subscribers_to_remove'}), 400
         
-        removed = 0
-        for sub in gifted:
-            sub.status = 'canceled'
-            removed += 1
+        # Don't remove more than exist
+        actual_remove = min(count, admin_sub.bonus_subscriber_count or 0)
+        admin_sub.bonus_subscriber_count = (admin_sub.bonus_subscriber_count or 0) - actual_remove
         
         # Update stats
         stats = UserPortfolioStats.query.filter_by(user_id=user_id).first()
         if stats:
-            stats.subscriber_count = max(0, (stats.subscriber_count or 0) - removed)
+            stats.subscriber_count = max(0, (stats.subscriber_count or 0) - actual_remove)
         
         db.session.commit()
         
         return jsonify({
             'success': True,
-            'removed': removed,
+            'removed': actual_remove,
+            'remaining_bonus_subscribers': admin_sub.bonus_subscriber_count,
             'new_subscriber_count': stats.subscriber_count if stats else 0
         })
         

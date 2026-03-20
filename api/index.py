@@ -334,6 +334,7 @@ try:
     app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-for-testing')
     app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024  # 1 MB max request body
     # Serverless-friendly SQLAlchemy engine options to avoid pool exhaustion
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
         'poolclass': NullPool,       # Disable pooling; connections are short-lived on serverless
@@ -350,6 +351,23 @@ try:
     # Debug logging for session configuration
     logger.info(f"Session configuration: TYPE={app.config.get('SESSION_TYPE')}, LIFETIME={app.config.get('PERMANENT_SESSION_LIFETIME')}")
     logger.info(f"Database URL for sessions: [REDACTED]")
+
+    # Initialize rate limiter (in-memory for serverless; upgrade to Redis when >1K users)
+    try:
+        from flask_limiter import Limiter
+        from flask_limiter.util import get_remote_address
+        
+        limiter = Limiter(
+            app=app,
+            key_func=get_remote_address,
+            default_limits=["200 per day", "50 per hour"],
+            storage_uri="memory://",
+        )
+        app.limiter = limiter  # Store on app so blueprints can access it
+        logger.info("Rate limiter initialized (in-memory)")
+    except Exception as limiter_err:
+        logger.warning(f"Rate limiter not available: {limiter_err}")
+        app.limiter = None
 
     # Initialize Flask-Login
     login_manager = LoginManager()
@@ -2537,6 +2555,7 @@ def index():
     return redirect('/leaderboard/?period=5D&category=all')
 
 @app.route('/login', methods=['GET', 'POST'])
+@limiter.limit("10 per minute")
 def login():
     """User login page"""
     try:
@@ -2615,6 +2634,7 @@ def privacy_policy():
     return render_template_with_defaults('privacy_policy.html')
 
 @app.route('/register', methods=['GET', 'POST'])
+@limiter.limit("5 per minute")
 def register():
     """User registration page"""
     if request.method == 'POST':
@@ -3170,6 +3190,7 @@ def authorize_apple():
 # The duplicate dashboard route definition was removed to fix the server error
 
 @app.route('/add_stock', methods=['POST'])
+@limiter.limit("30 per minute")
 def add_stock():
     """Add a stock to user's portfolio"""
     if 'user_id' not in session:
