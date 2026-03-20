@@ -739,6 +739,43 @@ class XeroPayoutRecord(db.Model):
         return f"<XeroPayoutRecord user={self.portfolio_user_id} period={self.period_start}-{self.period_end} payout=${self.total_payout}>"
 
 
+class PendingTrade(db.Model):
+    """Trades from email that couldn't be auto-routed to a bot.
+    
+    When an email trade contains tickers that don't match any bot's holdings,
+    the trades are stored here. A retry process checks every 5 minutes:
+    - If other trades from the same email_batch were routed to a bot, assign these too
+    - If 30 minutes pass with no match, mark as unroutable and notify admin
+    """
+    __tablename__ = 'pending_trade'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    email_batch_id = db.Column(db.String(100), nullable=False)  # Groups trades from same email
+    ticker = db.Column(db.String(10), nullable=False)
+    action = db.Column(db.String(10), nullable=False)  # 'buy' or 'sell'
+    quantity = db.Column(db.Float, nullable=False)
+    price = db.Column(db.Float, nullable=True)  # May be None if not in email
+    
+    # Routing state
+    status = db.Column(db.String(20), nullable=False, default='pending')  # 'pending', 'routed', 'unroutable'
+    assigned_bot_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    routed_at = db.Column(db.DateTime, nullable=True)
+    
+    # Context
+    source_email_subject = db.Column(db.String(500), nullable=True)
+    raw_email_snippet = db.Column(db.Text, nullable=True)
+    
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    expires_at = db.Column(db.DateTime, nullable=False)  # 30 min after created_at
+    
+    # Relationship
+    assigned_bot = db.relationship('User', foreign_keys=[assigned_bot_id])
+    
+    def __repr__(self):
+        return f"<PendingTrade {self.ticker} {self.action} status={self.status} batch={self.email_batch_id}>"
+
+
 class MobileSubscription(db.Model):
     """Mobile app subscription linking - replaces Stripe-based Subscription for mobile"""
     __tablename__ = 'mobile_subscription'

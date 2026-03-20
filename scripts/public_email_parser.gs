@@ -78,6 +78,25 @@ function checkForTradeEmails() {
   }
 
   Logger.log(`Processed ${processedCount} trade emails`);
+
+  // Retry any pending trades that couldn't be auto-routed earlier
+  // (new stock tickers that didn't match any bot at the time)
+  try {
+    const retryUrl = config.API_BASE_URL + '/admin/bot/process-pending-trades';
+    const retryResp = UrlFetchApp.fetch(retryUrl, {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { 'X-Admin-Key': config.ADMIN_API_KEY },
+      payload: JSON.stringify({}),
+      muteHttpExceptions: true,
+    });
+    const retryResult = JSON.parse(retryResp.getContentText());
+    if (retryResult.routed > 0 || retryResult.expired > 0) {
+      Logger.log(`Pending trades: ${retryResult.routed} routed, ${retryResult.expired} expired, ${retryResult.still_pending} still pending`);
+    }
+  } catch (e) {
+    Logger.log(`Pending trade retry error: ${e.message}`);
+  }
 }
 
 // ── Email Parsing ──────────────────────────────────────────────────────────
@@ -104,7 +123,7 @@ function processTradeEmail(message, config) {
   Logger.log(`Found ${trades.length} trades, sending for auto-detection: ${JSON.stringify(trades.map(t => t.ticker))}`);
 
   // Submit trades to the API (auto-detection will route to correct bot)
-  return submitTrades(config, botUsername, trades, source, body);
+  return submitTrades(config, botUsername, trades, source, body, subject);
 }
 
 function parseTradesFromEmail(plainBody, htmlBody) {
@@ -196,14 +215,15 @@ function parseTradesFromEmail(plainBody, htmlBody) {
 
 // ── API Submission ─────────────────────────────────────────────────────────
 
-function submitTrades(config, botUsername, trades, source, rawEmail) {
+function submitTrades(config, botUsername, trades, source, rawEmail, emailSubject) {
   const url = `${config.API_BASE_URL}/admin/bot/email-trade`;
 
   const payload = {
     bot_username: botUsername,
     trades: trades,
     source: source,
-    notes: rawEmail.substring(0, 500) // Truncate for storage
+    notes: rawEmail.substring(0, 500), // Truncate for storage
+    email_subject: emailSubject || ''
   };
 
   const options = {
@@ -221,7 +241,11 @@ function submitTrades(config, botUsername, trades, source, rawEmail) {
   const body = JSON.parse(response.getContentText());
 
   if (status === 200 && body.success) {
-    Logger.log(`API Success: ${body.trades_executed} trades executed for ${botUsername}`);
+    if (body.status === 'deferred') {
+      Logger.log(`API Deferred: ${body.message} (batch=${body.batch_id})`);
+    } else {
+      Logger.log(`API Success: ${body.trades_executed} trades executed for ${body.bot_username}`);
+    }
     return body;
   } else {
     Logger.log(`API Error (${status}): ${JSON.stringify(body)}`);

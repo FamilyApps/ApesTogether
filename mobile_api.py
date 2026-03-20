@@ -1271,6 +1271,74 @@ def require_admin_key(f):
     return decorated
 
 
+def _verify_totp(otp_code):
+    """Verify a TOTP code against the admin secret. Returns True if valid."""
+    import hmac
+    import hashlib
+    import struct
+    import base64
+    import time as _time
+    
+    totp_secret = os.environ.get('ADMIN_TOTP_SECRET')
+    if not totp_secret:
+        return False
+    
+    # Decode base32 secret
+    try:
+        key = base64.b32decode(totp_secret.upper().replace(' ', ''), casefold=True)
+    except Exception:
+        return False
+    
+    # Check current and adjacent 30-second windows (allows 30s clock skew)
+    now = int(_time.time())
+    for offset in [-1, 0, 1]:
+        counter = (now // 30) + offset
+        msg = struct.pack('>Q', counter)
+        h = hmac.new(key, msg, hashlib.sha1).digest()
+        o = h[-1] & 0x0F
+        code = struct.unpack('>I', h[o:o+4])[0] & 0x7FFFFFFF
+        code = code % 1_000_000
+        if str(code).zfill(6) == str(otp_code).zfill(6):
+            return True
+    return False
+
+
+def require_admin_2fa(f):
+    """Decorator requiring admin API key + TOTP for sensitive endpoints.
+    
+    Headers required:
+        X-Admin-Key: the admin API key
+        X-Admin-OTP: 6-digit TOTP code from authenticator app
+    
+    If ADMIN_TOTP_SECRET is not set, falls back to key-only auth with a warning.
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        # First check admin key
+        admin_key = request.headers.get('X-Admin-Key')
+        expected_key = os.environ.get('ADMIN_API_KEY')
+        
+        if not expected_key:
+            return jsonify({'error': 'admin_api_not_configured'}), 503
+        
+        if not admin_key or admin_key != expected_key:
+            return jsonify({'error': 'invalid_admin_key'}), 403
+        
+        # Then check TOTP
+        totp_secret = os.environ.get('ADMIN_TOTP_SECRET')
+        if totp_secret:
+            otp_code = request.headers.get('X-Admin-OTP')
+            if not otp_code:
+                return jsonify({'error': '2fa_required', 'message': 'X-Admin-OTP header required'}), 401
+            if not _verify_totp(otp_code):
+                return jsonify({'error': 'invalid_otp', 'message': 'Invalid or expired TOTP code'}), 403
+        else:
+            logger.warning(f"2FA not configured (ADMIN_TOTP_SECRET missing) — allowing key-only access to {f.__name__}")
+        
+        return f(*args, **kwargs)
+    return decorated
+
+
 @mobile_api.route('/admin/bot/create-user', methods=['POST'])
 @require_admin_key
 def bot_create_user():
@@ -1459,7 +1527,7 @@ def bot_set_cash():
 
 
 @mobile_api.route('/admin/bot/scale-holdings', methods=['POST'])
-@require_admin_key
+@require_admin_2fa
 def bot_scale_holdings():
     """
     Scale all holdings and cash values for a bot user by a multiplier.
@@ -2086,18 +2154,74 @@ def bot_email_trade():
                     best_bot = candidate
             
             if not best_bot or best_overlap == 0:
-                logger.warning(f"Auto-detect: no bot matched tickers {email_tickers}. Details: {match_details}")
+                # No match — defer these trades for up to 30 minutes
+                from models import PendingTrade
+                from datetime import timedelta
+                import uuid
+                
+                batch_id = str(uuid.uuid4())[:12]
+                email_subject = data.get('email_subject', '')
+                raw_snippet = notes[:500] if notes else ''
+                expires = datetime.utcnow() + timedelta(minutes=30)
+                
+                pending_count = 0
+                for t in trades_list:
+                    pt = PendingTrade(
+                        email_batch_id=batch_id,
+                        ticker=t.get('ticker', '').upper(),
+                        action=t.get('action', 'buy').lower(),
+                        quantity=float(t.get('quantity', 1)),
+                        price=float(t['price']) if t.get('price') else None,
+                        status='pending',
+                        source_email_subject=email_subject,
+                        raw_email_snippet=raw_snippet,
+                        expires_at=expires,
+                    )
+                    db.session.add(pt)
+                    pending_count += 1
+                
+                db.session.commit()
+                logger.warning(f"Auto-detect: no match for {email_tickers}. Stored {pending_count} pending trades (batch={batch_id}, expires={expires}). Details: {match_details}")
+                
                 return jsonify({
-                    'error': 'auto_detect_failed',
-                    'message': 'No bot holdings match the traded tickers',
+                    'success': True,
+                    'status': 'deferred',
+                    'message': f'No bot matched. {pending_count} trades stored for deferred routing (30 min window).',
+                    'batch_id': batch_id,
                     'email_tickers': sorted(email_tickers),
+                    'expires_at': expires.isoformat(),
                     'candidates': match_details
-                }), 404
+                })
             
             bot = best_bot
             bot_username = bot.username
             source = f'auto_{source}' if not source.startswith('auto_') else source
             logger.info(f"Auto-detect: matched {email_tickers} to {bot_username} (overlap={best_overlap}). Details: {match_details}")
+            
+            # Check if there are pending trades that should now be routed to this same bot
+            # (trades from the last 30 min that couldn't be matched earlier)
+            from models import PendingTrade
+            pending = PendingTrade.query.filter_by(status='pending').filter(
+                PendingTrade.expires_at > datetime.utcnow()
+            ).all()
+            
+            if pending:
+                # Group by batch — if any trade in a batch's time window overlaps with
+                # this bot's tickers (now including the ones we just matched), route them
+                for pt in pending:
+                    pt.assigned_bot_id = bot.id
+                    pt.status = 'routed'
+                    pt.routed_at = datetime.utcnow()
+                    # Add this pending trade to the trades list for execution
+                    trades_list.append({
+                        'action': pt.action,
+                        'ticker': pt.ticker,
+                        'quantity': pt.quantity,
+                        'price': pt.price,
+                    })
+                    logger.info(f"Resolved pending trade: {pt.ticker} {pt.action} -> {bot_username} (batch={pt.email_batch_id})")
+                
+                db.session.commit()
         else:
             # Find the bot user by explicit username
             bot = User.query.filter_by(username=bot_username, role='agent').first()
@@ -2218,6 +2342,317 @@ def bot_email_trade():
         db.session.rollback()
         logger.error(f"Bot email trade error: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@mobile_api.route('/admin/bot/process-pending-trades', methods=['POST'])
+@require_admin_key
+def bot_process_pending_trades():
+    """
+    Retry routing pending trades. Called periodically (e.g. by GAS every 5 min).
+    
+    For each pending trade batch:
+    - Check if any bot executed trades in the same 30-min window
+    - If yes, route pending trades to that bot
+    - If expired (>30 min), mark as unroutable and notify admin
+    """
+    from models import db, User, Stock, PendingTrade, Transaction
+    from cash_tracking import process_transaction
+    from datetime import timedelta
+    
+    try:
+        now = datetime.utcnow()
+        pending = PendingTrade.query.filter_by(status='pending').all()
+        
+        if not pending:
+            return jsonify({'success': True, 'message': 'No pending trades', 'processed': 0})
+        
+        # Group by batch
+        batches = {}
+        for pt in pending:
+            batches.setdefault(pt.email_batch_id, []).append(pt)
+        
+        routed_count = 0
+        expired_count = 0
+        
+        for batch_id, trades in batches.items():
+            # Check if any bot had trades executed in the time window around these pending trades
+            batch_created = min(t.created_at for t in trades)
+            window_start = batch_created - timedelta(minutes=5)
+            window_end = batch_created + timedelta(minutes=35)
+            
+            # Look for recent transactions on copytrade bots
+            copytrade_bots = User.query.filter_by(role='agent').all()
+            matched_bot = None
+            
+            for candidate in copytrade_bots:
+                recent_txns = Transaction.query.filter(
+                    Transaction.user_id == candidate.id,
+                    Transaction.timestamp >= window_start,
+                    Transaction.timestamp <= window_end
+                ).count()
+                
+                if recent_txns > 0:
+                    matched_bot = candidate
+                    break
+            
+            if matched_bot:
+                # Route all pending trades in this batch to the matched bot
+                trade_multiplier = 1.0
+                if matched_bot.extra_data and isinstance(matched_bot.extra_data, dict):
+                    trade_multiplier = float(matched_bot.extra_data.get('trade_multiplier', 1.0))
+                
+                for pt in trades:
+                    pt.assigned_bot_id = matched_bot.id
+                    pt.status = 'routed'
+                    pt.routed_at = now
+                    
+                    # Execute the trade
+                    qty = pt.quantity
+                    if trade_multiplier != 1.0:
+                        qty = round(qty * trade_multiplier, 6)
+                    
+                    price = pt.price
+                    if not price:
+                        try:
+                            from portfolio_performance import PortfolioPerformanceCalculator
+                            calc = PortfolioPerformanceCalculator()
+                            price_data = calc.get_stock_data(pt.ticker)
+                            price = price_data['price'] if price_data and price_data.get('price') else None
+                        except Exception:
+                            price = None
+                    
+                    if price:
+                        try:
+                            process_transaction(db, matched_bot.id, pt.ticker, qty, float(price), pt.action, timestamp=now)
+                            stock = Stock.query.filter_by(user_id=matched_bot.id, ticker=pt.ticker).first()
+                            if pt.action == 'buy':
+                                if stock:
+                                    total_cost = (stock.quantity * stock.purchase_price) + (qty * float(price))
+                                    stock.quantity += qty
+                                    stock.purchase_price = total_cost / stock.quantity if stock.quantity > 0 else float(price)
+                                else:
+                                    stock = Stock(user_id=matched_bot.id, ticker=pt.ticker, quantity=qty, purchase_price=float(price))
+                                    db.session.add(stock)
+                            elif pt.action == 'sell' and stock and stock.quantity >= qty:
+                                stock.quantity -= qty
+                        except Exception as e:
+                            logger.error(f"Failed to execute deferred trade {pt.ticker}: {e}")
+                    
+                    routed_count += 1
+                    logger.info(f"Deferred route: {pt.ticker} {pt.action} -> {matched_bot.username} (batch={batch_id})")
+            
+            elif trades[0].expires_at <= now:
+                # Expired — mark as unroutable and notify admin
+                for pt in trades:
+                    pt.status = 'unroutable'
+                    expired_count += 1
+                
+                # Send admin notification email
+                _notify_admin_unroutable_trades(batch_id, trades)
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'pending_batches': len(batches),
+            'routed': routed_count,
+            'expired': expired_count,
+            'still_pending': len(pending) - routed_count - expired_count
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Process pending trades error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@mobile_api.route('/admin/bot/pending-trades', methods=['GET'])
+@require_admin_key
+def bot_pending_trades():
+    """List all pending/unroutable trades for admin review."""
+    from models import PendingTrade
+    
+    status_filter = request.args.get('status', 'all')
+    query = PendingTrade.query
+    if status_filter != 'all':
+        query = query.filter_by(status=status_filter)
+    
+    trades = query.order_by(PendingTrade.created_at.desc()).limit(100).all()
+    
+    return jsonify({
+        'count': len(trades),
+        'trades': [{
+            'id': t.id,
+            'batch_id': t.email_batch_id,
+            'ticker': t.ticker,
+            'action': t.action,
+            'quantity': t.quantity,
+            'price': t.price,
+            'status': t.status,
+            'assigned_bot_id': t.assigned_bot_id,
+            'created_at': t.created_at.isoformat() if t.created_at else None,
+            'expires_at': t.expires_at.isoformat() if t.expires_at else None,
+            'routed_at': t.routed_at.isoformat() if t.routed_at else None,
+            'email_subject': t.source_email_subject,
+        } for t in trades]
+    })
+
+
+@mobile_api.route('/admin/bot/assign-pending-trades', methods=['POST'])
+@require_admin_2fa
+def bot_assign_pending_trades():
+    """
+    Manually assign pending/unroutable trades to a specific bot.
+    
+    Request body:
+    {
+        "batch_id": "abc123",      // or "trade_ids": [1, 2, 3]
+        "bot_user_id": 13
+    }
+    """
+    from models import db, User, Stock, PendingTrade
+    from cash_tracking import process_transaction
+    
+    data = request.get_json() or {}
+    bot_user_id = data.get('bot_user_id')
+    batch_id = data.get('batch_id')
+    trade_ids = data.get('trade_ids', [])
+    
+    if not bot_user_id:
+        return jsonify({'error': 'bot_user_id required'}), 400
+    if not batch_id and not trade_ids:
+        return jsonify({'error': 'batch_id or trade_ids required'}), 400
+    
+    try:
+        bot = User.query.get(bot_user_id)
+        if not bot:
+            return jsonify({'error': 'bot_not_found'}), 404
+        
+        trade_multiplier = 1.0
+        if bot.extra_data and isinstance(bot.extra_data, dict):
+            trade_multiplier = float(bot.extra_data.get('trade_multiplier', 1.0))
+        
+        if batch_id:
+            pending = PendingTrade.query.filter_by(email_batch_id=batch_id).filter(
+                PendingTrade.status.in_(['pending', 'unroutable'])
+            ).all()
+        else:
+            pending = PendingTrade.query.filter(
+                PendingTrade.id.in_(trade_ids),
+                PendingTrade.status.in_(['pending', 'unroutable'])
+            ).all()
+        
+        if not pending:
+            return jsonify({'error': 'No matching pending trades found'}), 404
+        
+        executed = []
+        now = datetime.utcnow()
+        
+        for pt in pending:
+            pt.assigned_bot_id = bot.id
+            pt.status = 'routed'
+            pt.routed_at = now
+            
+            qty = pt.quantity
+            if trade_multiplier != 1.0:
+                qty = round(qty * trade_multiplier, 6)
+            
+            price = pt.price
+            if not price:
+                try:
+                    from portfolio_performance import PortfolioPerformanceCalculator
+                    calc = PortfolioPerformanceCalculator()
+                    price_data = calc.get_stock_data(pt.ticker)
+                    price = price_data['price'] if price_data and price_data.get('price') else None
+                except Exception:
+                    price = None
+            
+            if price:
+                try:
+                    process_transaction(db, bot.id, pt.ticker, qty, float(price), pt.action, timestamp=now)
+                    stock = Stock.query.filter_by(user_id=bot.id, ticker=pt.ticker).first()
+                    if pt.action == 'buy':
+                        if stock:
+                            total_cost = (stock.quantity * stock.purchase_price) + (qty * float(price))
+                            stock.quantity += qty
+                            stock.purchase_price = total_cost / stock.quantity if stock.quantity > 0 else float(price)
+                        else:
+                            stock = Stock(user_id=bot.id, ticker=pt.ticker, quantity=qty, purchase_price=float(price))
+                            db.session.add(stock)
+                    elif pt.action == 'sell' and stock and stock.quantity >= qty:
+                        stock.quantity -= qty
+                    
+                    executed.append({'ticker': pt.ticker, 'action': pt.action, 'quantity': qty, 'price': float(price)})
+                except Exception as e:
+                    logger.error(f"Manual assign trade error {pt.ticker}: {e}")
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'bot_user_id': bot.id,
+            'bot_username': bot.username,
+            'assigned': len(pending),
+            'executed': len(executed),
+            'trades': executed
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Assign pending trades error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+def _notify_admin_unroutable_trades(batch_id, trades):
+    """Send email notification to admin about unroutable trades."""
+    try:
+        import smtplib
+        from email.mime.text import MIMEText
+        
+        admin_email = os.environ.get('ADMIN_NOTIFY_EMAIL', 'bobford00@gmail.com')
+        smtp_user = os.environ.get('SMTP_USER')
+        smtp_pass = os.environ.get('SMTP_PASS')
+        
+        if not smtp_user or not smtp_pass:
+            # Fall back to just logging if SMTP not configured
+            tickers = ', '.join(t.ticker for t in trades)
+            logger.warning(f"UNROUTABLE TRADES (no SMTP configured) batch={batch_id}: {tickers}")
+            return
+        
+        tickers = ', '.join(t.ticker for t in trades)
+        body = f"""Unroutable Trade Alert - Apes Together
+        
+Batch ID: {batch_id}
+Trades that could not be auto-routed to any bot after 30 minutes:
+
+"""
+        for t in trades:
+            body += f"  {t.action.upper()} {t.quantity} {t.ticker}"
+            if t.price:
+                body += f" @ ${t.price:.2f}"
+            body += "\n"
+        
+        body += f"""
+To manually assign these trades, call:
+POST /admin/bot/assign-pending-trades
+{{
+    "batch_id": "{batch_id}",
+    "bot_user_id": <13 for Grok, 14 for Wolff>
+}}
+"""
+        
+        msg = MIMEText(body)
+        msg['Subject'] = f'[ApesTogether] Unroutable trades: {tickers}'
+        msg['From'] = smtp_user
+        msg['To'] = admin_email
+        
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
+        
+        logger.info(f"Admin notified about unroutable trades batch={batch_id}")
+    except Exception as e:
+        logger.error(f"Failed to send admin notification: {e}")
 
 
 @mobile_api.route('/admin/bot/sp500-backfill', methods=['POST'])
@@ -2393,7 +2828,7 @@ def bot_holdings():
 
 
 @mobile_api.route('/admin/bot/gift-subscribers', methods=['POST'])
-@require_admin_key
+@require_admin_2fa
 def bot_gift_subscribers():
     """
     Gift subscriber count to a user (creates fake subscriptions).
@@ -2462,7 +2897,7 @@ def bot_gift_subscribers():
 
 
 @mobile_api.route('/admin/bot/deactivate', methods=['POST'])
-@require_admin_key
+@require_admin_2fa
 def bot_deactivate():
     """
     Deactivate a bot user (hide from leaderboards, stop trading).
@@ -2500,7 +2935,7 @@ def bot_deactivate():
 
 
 @mobile_api.route('/admin/bot/reactivate', methods=['POST'])
-@require_admin_key
+@require_admin_2fa
 def bot_reactivate():
     """
     Reactivate a previously deactivated bot user.
@@ -2588,7 +3023,7 @@ def bot_update_config():
 
 
 @mobile_api.route('/admin/bot/remove-subscribers', methods=['POST'])
-@require_admin_key
+@require_admin_2fa
 def bot_remove_subscribers():
     """
     Remove gifted subscribers from a user.

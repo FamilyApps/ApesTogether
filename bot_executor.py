@@ -268,6 +268,21 @@ def create_bot_account(username, email, industry, strategy_profile):
     return user_id, True
 
 
+def _generate_portfolio_size():
+    """
+    Generate a realistic random portfolio size based on American stock holdings.
+    Uses a log-normal distribution:
+      - Median ~$40K (typical retail investor)
+      - Range roughly $5K–$500K
+      - Right-skewed: most portfolios are smaller, few are very large
+    """
+    import math
+    # Log-normal: mu=10.6, sigma=0.9 gives median ~$40K, mean ~$60K
+    raw = random.lognormvariate(10.6, 0.9)
+    # Clamp to $5K–$500K
+    return max(5_000, min(500_000, raw))
+
+
 def seed_initial_portfolio(user_id, strategy_profile, market_hub):
     """
     Give a new bot an initial portfolio of stocks based on its strategy.
@@ -282,6 +297,10 @@ def seed_initial_portfolio(user_id, strategy_profile, market_hub):
     num_stocks = random.randint(4, min(10, len(attention)))
     selected = random.sample(attention, num_stocks)
 
+    # Realistic random portfolio size (not a fixed $100K)
+    portfolio_size = _generate_portfolio_size()
+    logger.info(f"  Portfolio size for user_id={user_id}: ${portfolio_size:,.0f}")
+
     stocks = []
     for ticker in selected:
         stock_data = market_hub.get_stock_data(ticker)
@@ -292,8 +311,8 @@ def seed_initial_portfolio(user_id, strategy_profile, market_hub):
         if price <= 0:
             continue
 
-        # Calculate initial quantity based on $100K portfolio
-        allocation = 100_000 / num_stocks
+        # Calculate initial quantity based on randomized portfolio size
+        allocation = portfolio_size / num_stocks
         qty = max(1, int(allocation / price))
 
         # Human noise on quantity
