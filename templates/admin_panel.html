@@ -34,7 +34,7 @@ input,select,textarea,button{font-family:inherit}
 </head>
 <body>
 <div id="root"></div>
-<script type="text/babel">
+{% raw %}<script type="text/babel">
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
 const { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area, CartesianGrid } = Recharts;
 
@@ -827,6 +827,7 @@ try {
   document.getElementById('root').innerHTML = '<div style="padding:40px;color:#ef4444;font-family:monospace"><h2>React Render Error</h2><pre>' + err.message + '\n' + err.stack + '</pre></div>';
 }
 </script>
+{% endraw %}
 <script>
 // Fallback: if Babel fails to compile, show the error
 window.onerror = function(msg, url, line, col, err) {
