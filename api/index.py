@@ -335,14 +335,16 @@ try:
     app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024  # 1 MB max request body
-    # Serverless-friendly SQLAlchemy engine options to avoid pool exhaustion
+    # Serverless-friendly SQLAlchemy engine options
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-        'poolclass': NullPool,       # Disable pooling; connections are short-lived on serverless
-        'pool_pre_ping': True,       # Validate connections before use
+        'poolclass': NullPool,       # No pooling — fresh connection each time (serverless)
+        'connect_args': {
+            'connect_timeout': 10,   # Fail fast (10s) instead of hanging
+            'options': '-c statement_timeout=30000',  # 30s query timeout
+        },
     }
     
-    # Configure Flask-Session with SQLAlchemy backend for serverless environment
-    app.config['SESSION_TYPE'] = 'sqlalchemy'
+    # Session config — using Flask's built-in signed cookie sessions (no Flask-Session)
     app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
     app.config['SESSION_COOKIE_SECURE'] = True
     app.config['SESSION_COOKIE_HTTPONLY'] = True
@@ -459,60 +461,25 @@ try:
     db = SQLAlchemy(app)
     migrate = Migrate(app, db)
     
-    # Initialize Flask-Session with SQLAlchemy backend (shared across serverless instances)
-    # Filesystem sessions do NOT work on Vercel — each invocation may hit a different
-    # instance with its own /tmp, breaking OAuth (state/nonce lost between requests).
+    # Use Flask's built-in signed cookie sessions (SecureCookieSession).
+    # This stores session data client-side in a signed cookie — zero DB dependency.
+    # Much more resilient on serverless than DB-backed sessions: no stale connections,
+    # no schema issues, works across all Vercel instances automatically.
+    # OAuth state/nonce fits fine in a cookie (< 4KB).
+    # Flask-Session is NOT used — just Flask's default session mechanism.
+    logger.info("Using Flask built-in signed cookie sessions (no DB dependency)")
+    
+    # Ensure pending_trade table exists
     try:
-        logger.info("Initializing SQLAlchemy session backend")
-        app.config['SESSION_TYPE'] = 'sqlalchemy'
-        app.config['SESSION_SQLALCHEMY'] = db
-        app.config['SESSION_SQLALCHEMY_TABLE'] = 'sessions'
-        
-        # Ensure sessions table exists with correct schema for Flask-Session
-        # Flask-Session's SqlAlchemySessionInterface model uses:
-        #   id (Integer PK), session_id (String 255), data (LargeBinary → BYTEA), expiry (DateTime)
         with app.app_context():
-            # Always drop and recreate to ensure correct schema
-            # Sessions are ephemeral — no user data is lost
+            # Clean up old sessions table (no longer needed)
             try:
-                result = db.session.execute(text(
-                    "SELECT data_type FROM information_schema.columns "
-                    "WHERE table_name = 'sessions' AND column_name = 'data'"
-                ))
-                row = result.fetchone()
-                if row and row[0] != 'bytea':
-                    logger.info(f"Sessions 'data' column is {row[0]}, need bytea — recreating table")
-                    db.session.execute(text("DROP TABLE IF EXISTS sessions"))
-                    db.session.commit()
-                elif not row:
-                    # Table doesn't exist or has no 'data' column — drop to be safe
-                    db.session.execute(text("DROP TABLE IF EXISTS sessions"))
-                    db.session.commit()
-            except Exception as check_err:
-                logger.warning(f"Could not check sessions schema: {check_err}")
-                try:
-                    db.session.rollback()
-                    db.session.execute(text("DROP TABLE IF EXISTS sessions"))
-                    db.session.commit()
-                except Exception:
-                    pass
+                db.session.execute(text("DROP TABLE IF EXISTS sessions"))
+                db.session.commit()
+                logger.info("Dropped unused sessions table")
+            except Exception:
+                db.session.rollback()
             
-            db.session.execute(text("""
-            CREATE TABLE IF NOT EXISTS sessions (
-                id SERIAL PRIMARY KEY,
-                session_id VARCHAR(255) UNIQUE NOT NULL,
-                data BYTEA NOT NULL,
-                expiry TIMESTAMP(6) NOT NULL
-            )
-            """))
-            db.session.execute(text("""
-            CREATE INDEX IF NOT EXISTS ix_sessions_session_id ON sessions (session_id)
-            """))
-            db.session.execute(text("""
-            CREATE INDEX IF NOT EXISTS ix_sessions_expiry ON sessions (expiry)
-            """))
-            
-            # Also create pending_trade table if missing
             db.session.execute(text("""
             CREATE TABLE IF NOT EXISTS pending_trade (
                 id SERIAL PRIMARY KEY,
@@ -530,20 +497,10 @@ try:
                 expires_at TIMESTAMP
             )
             """))
-            
             db.session.commit()
-            logger.info("Sessions and pending_trade tables verified/created")
-        
-        Session(app)
-        logger.info("Flask-Session initialized with SQLAlchemy backend")
+            logger.info("pending_trade table verified/created")
     except Exception as e:
-        logger.error(f"Failed to initialize SQLAlchemy sessions: {str(e)}", extra={'traceback': traceback.format_exc()})
-        # Fall back to filesystem sessions as a last resort (OAuth may not work)
-        app.config['SESSION_TYPE'] = 'filesystem'
-        os.makedirs('/tmp/flask_session', exist_ok=True)
-        app.config['SESSION_FILE_DIR'] = '/tmp/flask_session'
-        Session(app)
-        logger.warning("Falling back to filesystem sessions — OAuth may be unreliable")
+        logger.warning(f"Could not create pending_trade table: {e}")
     logger.info("Database and migrations initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize database: {str(e)}")
