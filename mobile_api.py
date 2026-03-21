@@ -3421,6 +3421,20 @@ def bot_revenue_summary():
                     inf['gifted_payout'] = 0.0
                     inf['total_payout'] = 0.0
         
+        # Compute bot-specific revenue summary
+        bot_real_subs = sum(i['real_subs'] for i in influencers if i.get('is_company_bot'))
+        bot_gifted_subs = sum(i['gifted_subs'] for i in influencers if i.get('is_company_bot'))
+        human_real_subs = real_subs - bot_real_subs
+        
+        bot_revenue = {
+            'real_subs': bot_real_subs,
+            'gifted_subs': bot_gifted_subs,
+            'gross_revenue': round(bot_real_subs * price, 2),
+            'store_fees': round(bot_real_subs * store_fee, 2),
+            'company_keeps': round(bot_real_subs * (price - store_fee), 2),
+            'note': 'No influencer payout — company retains full post-store revenue',
+        }
+        
         return jsonify({
             'real_subscriptions': real_subs,
             'gifted_subscriptions': total_gifted,
@@ -3428,10 +3442,11 @@ def bot_revenue_summary():
             'mrr': round(real_subs * price, 2),
             'store_fees': round(real_subs * store_fee, 2),
             'platform_revenue': round(real_subs * platform_cut, 2),
-            'influencer_payouts_real': round(real_subs * influencer_pay, 2),
+            'influencer_payouts_real': round(human_real_subs * influencer_pay, 2),
             'influencer_payouts_gifted': round(total_gifted * influencer_pay, 2),
             'company_obligation': round(total_gifted * influencer_pay, 2),
-            'total_payout_obligation': round((real_subs + total_gifted) * influencer_pay, 2),
+            'total_payout_obligation': round((human_real_subs + total_gifted) * influencer_pay, 2),
+            'bot_revenue': bot_revenue,
             'per_sub': {
                 'price': price,
                 'store_fee': store_fee,

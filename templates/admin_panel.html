@@ -649,17 +649,54 @@ const RevenuePage = ({ api }) => {
         <MetricCard label="Company Obligation" value={`$${(r.company_obligation || 0).toFixed(2)}`} sub={`${r.gifted_subscriptions || 0} gifted subs`} color="var(--red)" />
       </div>
 
+      {/* Bot Portfolio Revenue */}
+      {(r.bot_revenue) && (
+        <Card>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div style={{ fontSize: 14, fontWeight: 600 }}>{Icons.bot} Bot Portfolio Revenue</div>
+            <Badge text={r.bot_revenue.real_subs > 0 ? `${r.bot_revenue.real_subs} paying subs` : 'No paying subs yet'} color={r.bot_revenue.real_subs > 0 ? 'var(--green)' : 'var(--text-muted)'} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
+            <div style={{ padding: 12, background: 'var(--bg-elevated)', borderRadius: 8, textAlign: 'center' }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--accent)' }}>${(r.bot_revenue.company_keeps || 0).toFixed(2)}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>Company Keeps /mo</div>
+            </div>
+            <div style={{ padding: 12, background: 'var(--bg-elevated)', borderRadius: 8, textAlign: 'center' }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)' }}>${(r.bot_revenue.gross_revenue || 0).toFixed(2)}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>Gross Revenue /mo</div>
+            </div>
+            <div style={{ padding: 12, background: 'var(--bg-elevated)', borderRadius: 8, textAlign: 'center' }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-muted)' }}>${(r.bot_revenue.store_fees || 0).toFixed(2)}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>Store Fees</div>
+            </div>
+            <div style={{ padding: 12, background: 'var(--bg-elevated)', borderRadius: 8, textAlign: 'center' }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--green)' }}>{r.bot_revenue.gifted_subs || 0}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>Gifted Subs</div>
+            </div>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10, fontStyle: 'italic' }}>
+            No influencer payout needed — company retains full post-store revenue from bot portfolio subscriptions.
+          </div>
+        </Card>
+      )}
+
       <Card style={{ padding: 0 }}>
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontWeight: 600, fontSize: 14 }}>Influencer Payouts</span>
           <Btn variant="secondary" small onClick={load}>{Icons.refresh}</Btn>
         </div>
         <Table columns={[
-          { key: 'username', label: 'Username' },
+          { key: 'username', label: 'Username', render: (v, row) => (
+            <span>{v} {row.is_company_bot && <Badge text="BOT" color="var(--blue)" />}</span>
+          )},
           { key: 'real_subs', label: 'Real Subs' },
           { key: 'gifted_subs', label: 'Gifted', render: v => v > 0 ? <Badge text={v} color="var(--yellow)" /> : '0' },
           { key: 'total_subs', label: 'Total' },
-          { key: 'total_payout', label: 'Monthly Payout', render: v => <span style={{ color: 'var(--accent)', fontWeight: 600 }}>${v.toFixed(2)}</span> },
+          { key: 'total_payout', label: 'Monthly Payout', render: (v, row) => (
+            row.is_company_bot
+              ? <span style={{ color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic' }}>$0 (company)</span>
+              : <span style={{ color: 'var(--accent)', fontWeight: 600 }}>${v.toFixed(2)}</span>
+          )},
           { key: 'user_id', label: 'Actions', render: (id, row) => (
             <Btn small variant="secondary" onClick={(e) => { e.stopPropagation(); setGiftModal({ userId: id, username: row.username }); }}>{Icons.gift} Gift</Btn>
           )},
