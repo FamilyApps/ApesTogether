@@ -18,7 +18,7 @@ from functools import wraps
 from dotenv import load_dotenv
 from zoneinfo import ZoneInfo
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime, Boolean, func, text, and_, or_, cast, Date
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import QueuePool
 from flask import Flask, render_template_string, render_template, redirect, url_for, request, session, flash, jsonify, send_from_directory
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from flask_sqlalchemy import SQLAlchemy
@@ -333,13 +333,17 @@ try:
         separator = '&' if '?' in DATABASE_URL else '?'
         DATABASE_URL += f'{separator}sslmode=require'
     
-    # Log connection info (redact password)
+    # Log connection info (redact password but show enough to debug $ interpolation)
     try:
         from urllib.parse import urlparse
         parsed = urlparse(DATABASE_URL)
-        logger.info(f"DB connection: host={parsed.hostname}, port={parsed.port}, db={parsed.path}, sslmode={'in url' if 'sslmode' in DATABASE_URL else 'missing'}")
-    except Exception:
-        pass
+        # Show first 3 + last 2 chars of password to detect shell interpolation of $
+        pw = parsed.password or ''
+        pw_hint = f"{pw[:3]}...{pw[-2:]}" if len(pw) > 5 else '***'
+        logger.info(f"DB connection: host={parsed.hostname}, port={parsed.port}, user={parsed.username}, pw_hint={pw_hint}, db={parsed.path}")
+        logger.info(f"DB URL query params: {parsed.query}")
+    except Exception as log_err:
+        logger.warning(f"Could not parse DB URL for logging: {log_err}")
     logger.info(f"Using database type: {DATABASE_URL.split('://')[0]}")
 
     # Configure Flask app
@@ -348,19 +352,22 @@ try:
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024  # 1 MB max request body
     # Serverless-friendly SQLAlchemy engine options
-    # Supabase shared pooler uses PgBouncer in transaction mode:
-    # - NullPool: fresh connection per request (no stale connections)
-    # - prepare_threshold=0: disable prepared statements (PgBouncer incompatible)
-    # - keepalives: prevent idle connection drops
+    # Supabase shared pooler uses PgBouncer in transaction mode.
+    # Use QueuePool with pool_size=1 + pool_pre_ping so SQLAlchemy can
+    # detect and replace dead connections (NullPool doesn't support pre_ping).
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-        'poolclass': NullPool,
+        'poolclass': QueuePool,
+        'pool_size': 1,
+        'max_overflow': 2,
+        'pool_timeout': 10,
+        'pool_recycle': 60,             # Recycle connections every 60s (PgBouncer may kill older)
         'pool_pre_ping': True,          # Test connection before use (detects dead connections)
         'connect_args': {
             'connect_timeout': 10,
             'keepalives': 1,
-            'keepalives_idle': 30,
-            'keepalives_interval': 10,
-            'keepalives_count': 5,
+            'keepalives_idle': 10,       # Send keepalive after 10s idle (was 30)
+            'keepalives_interval': 5,    # Retry every 5s (was 10)
+            'keepalives_count': 3,       # Give up after 3 retries (was 5)
         },
     }
     
@@ -449,9 +456,14 @@ try:
     @login_manager.user_loader
     def load_user(user_id):
         try:
-            return User.query.get(int(user_id))
+            return db_retry(lambda: User.query.get(int(user_id)))
         except Exception as e:
             logger.error(f"Error loading user: {str(e)}")
+            try:
+                db.session.rollback()
+                db.session.remove()
+            except Exception:
+                pass
             return None
 
     # DISABLED (Feb 2026): Web payments disabled, mobile uses Apple IAP
@@ -489,6 +501,44 @@ try:
     # Initialize SQLAlchemy
     db = SQLAlchemy(app)
     migrate = Migrate(app, db)
+    
+    # Retry helper for DB operations that may fail due to PgBouncer SSL drops
+    def db_retry(fn, max_retries=2):
+        """Execute fn(), retrying on SSL/connection errors with fresh DB session."""
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                return fn()
+            except Exception as e:
+                last_error = e
+                err_str = str(e).lower()
+                is_connection_error = (
+                    'ssl connection has been closed' in err_str or
+                    'connection has been closed' in err_str or
+                    'invalid transaction' in err_str or
+                    'could not connect' in err_str or
+                    'connection refused' in err_str or
+                    'server closed the connection' in err_str
+                )
+                if is_connection_error and attempt < max_retries:
+                    logger.warning(f"DB connection error (attempt {attempt+1}/{max_retries+1}): {e}")
+                    try:
+                        db.session.rollback()
+                    except Exception:
+                        pass
+                    try:
+                        db.session.remove()
+                    except Exception:
+                        pass
+                    try:
+                        db.engine.dispose()
+                    except Exception:
+                        pass
+                    continue
+                raise last_error
+    
+    # Store on app so blueprints can access it
+    app.db_retry = db_retry
     
     # Use Flask's built-in signed cookie sessions (SecureCookieSession).
     # This stores session data client-side in a signed cookie — zero DB dependency.
