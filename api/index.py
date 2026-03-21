@@ -354,6 +354,7 @@ try:
     # - keepalives: prevent idle connection drops
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
         'poolclass': NullPool,
+        'pool_pre_ping': True,          # Test connection before use (detects dead connections)
         'connect_args': {
             'connect_timeout': 10,
             'keepalives': 1,
@@ -408,6 +409,15 @@ try:
         # Skip session processing for static files and favicon
         if request.path.startswith('/static/') or request.path == '/favicon.png':
             return  # Skip session processing for static files
+        
+        # CRITICAL: Remove any leftover DB session from previous requests.
+        # On Vercel serverless, the module persists between requests but the
+        # underlying DB connection may be dead (PgBouncer closed it).
+        # This ensures every request starts with a completely fresh session.
+        try:
+            db.session.remove()
+        except Exception:
+            pass
         
         try:
             session.permanent = True
