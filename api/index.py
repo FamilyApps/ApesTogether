@@ -18,7 +18,7 @@ from functools import wraps
 from dotenv import load_dotenv
 from zoneinfo import ZoneInfo
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime, Boolean, func, text, and_, or_, cast, Date
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.pool import NullPool
 from flask import Flask, render_template_string, render_template, redirect, url_for, request, session, flash, jsonify, send_from_directory
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from flask_sqlalchemy import SQLAlchemy
@@ -352,22 +352,19 @@ try:
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024  # 1 MB max request body
     # Serverless-friendly SQLAlchemy engine options
-    # Supabase shared pooler uses PgBouncer in transaction mode.
-    # Use QueuePool with pool_size=1 + pool_pre_ping so SQLAlchemy can
-    # detect and replace dead connections (NullPool doesn't support pre_ping).
+    # NullPool: no connection pooling — each DB operation gets a fresh connection
+    # and returns it immediately. This is the ONLY safe option for Vercel serverless
+    # because QueuePool causes pool exhaustion (connections aren't returned between
+    # Lambda invocations that share the same module-level state).
+    # SSL drops from PgBouncer are handled by the db_retry() wrapper instead.
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-        'poolclass': QueuePool,
-        'pool_size': 1,
-        'max_overflow': 2,
-        'pool_timeout': 10,
-        'pool_recycle': 60,             # Recycle connections every 60s (PgBouncer may kill older)
-        'pool_pre_ping': True,          # Test connection before use (detects dead connections)
+        'poolclass': NullPool,
         'connect_args': {
             'connect_timeout': 10,
             'keepalives': 1,
-            'keepalives_idle': 10,       # Send keepalive after 10s idle (was 30)
-            'keepalives_interval': 5,    # Retry every 5s (was 10)
-            'keepalives_count': 3,       # Give up after 3 retries (was 5)
+            'keepalives_idle': 10,
+            'keepalives_interval': 5,
+            'keepalives_count': 3,
         },
     }
     
@@ -518,7 +515,9 @@ try:
                     'invalid transaction' in err_str or
                     'could not connect' in err_str or
                     'connection refused' in err_str or
-                    'server closed the connection' in err_str
+                    'server closed the connection' in err_str or
+                    'closed the connection unexpectedly' in err_str or
+                    'connection timed out' in err_str
                 )
                 if is_connection_error and attempt < max_retries:
                     logger.warning(f"DB connection error (attempt {attempt+1}/{max_retries+1}): {e}")
@@ -3111,23 +3110,14 @@ def authorize_google():
         # Step 2: Check if user exists in our database
         email = user_info.get('email')
         
-        # Make sure we have a valid database session
-        if not db.session.is_active:
-            logger.warning("Database session is not active, creating new session")
-            db.session = db.create_scoped_session()
-            
-        # Try to find the user
+        # Try to find the user (with retry for SSL drops)
         try:
-            user = User.query.filter_by(email=email).first()
+            user = db_retry(lambda: User.query.filter_by(email=email).first())
             logger.info(f"User exists in database: {user is not None}")
         except Exception as user_query_error:
-            logger.error(f"Error querying user: {str(user_query_error)}")
-            # Try to reconnect to the database
-            db.session.remove()
-            db.session = db.create_scoped_session()
-            # Try one more time
-            user = User.query.filter_by(email=email).first()
-            logger.info(f"User exists in database (after reconnect): {user is not None}")
+            logger.error(f"Error querying user after retries: {str(user_query_error)}")
+            flash('Database connection error. Please try again.', 'danger')
+            return redirect(url_for('login'))
         
         # Step 3: Create new user if not found
         if not user:
@@ -3159,14 +3149,18 @@ def authorize_google():
             )
             user.set_password('')  # Empty password for OAuth users
             
-            # Make sure we have a valid database session
-            if not db.session.is_active:
-                logger.warning("Database session is not active during user creation, creating new session")
-                db.session = db.create_scoped_session()
-                
-            db.session.add(user)
-            db.session.commit()
-            logger.info(f"Successfully created new OAuth user with ID: {user.id}")
+            def _create_user():
+                db.session.add(user)
+                db.session.commit()
+                return user
+            
+            try:
+                user = db_retry(_create_user)
+                logger.info(f"Successfully created new OAuth user with ID: {user.id}")
+            except Exception as create_err:
+                logger.error(f"Error creating user after retries: {create_err}")
+                flash('Database error during account creation. Please try again.', 'danger')
+                return redirect(url_for('login'))
         
         # Step 4: Log the user in using Flask-Login
         # Double check we have a valid user object
