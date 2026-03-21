@@ -1804,13 +1804,14 @@ def bot_execute_trade():
 @require_admin_key
 def bot_list_users():
     """List all users with their portfolio info, filterable by role"""
-    from models import User, Stock, Transaction, MobileSubscription
+    from models import User, Stock, Transaction
     from sqlalchemy import func
     
     try:
         role_filter = request.args.get('role')  # 'agent', 'user', or None for all
         
-        # Build aggregated counts as subqueries to avoid N+1
+        # Simple two-join query: users + stock counts + trade counts
+        # Skip MobileSubscription join (table may not exist, and adds complexity)
         stock_sq = db.session.query(
             Stock.user_id, func.count(Stock.id).label('cnt')
         ).group_by(Stock.user_id).subquery()
@@ -1819,29 +1820,34 @@ def bot_list_users():
             Transaction.user_id, func.count(Transaction.id).label('cnt')
         ).group_by(Transaction.user_id).subquery()
         
-        sub_sq = db.session.query(
-            MobileSubscription.subscribed_to_id.label('user_id'),
-            func.count(MobileSubscription.id).label('cnt')
-        ).filter(MobileSubscription.status == 'active').group_by(
-            MobileSubscription.subscribed_to_id
-        ).subquery()
-        
         query = db.session.query(
             User,
             func.coalesce(stock_sq.c.cnt, 0).label('stock_count'),
             func.coalesce(trade_sq.c.cnt, 0).label('trade_count'),
-            func.coalesce(sub_sq.c.cnt, 0).label('subscriber_count'),
         ).outerjoin(stock_sq, User.id == stock_sq.c.user_id
-        ).outerjoin(trade_sq, User.id == trade_sq.c.user_id
-        ).outerjoin(sub_sq, User.id == sub_sq.c.user_id)
+        ).outerjoin(trade_sq, User.id == trade_sq.c.user_id)
         
         if role_filter:
             query = query.filter(User.role == role_filter)
         
         rows = query.order_by(User.created_at.desc()).all()
         
+        # Get subscriber counts separately (table may not exist)
+        sub_counts = {}
+        try:
+            from models import MobileSubscription
+            sub_rows = db.session.query(
+                MobileSubscription.subscribed_to_id,
+                func.count(MobileSubscription.id)
+            ).filter(MobileSubscription.status == 'active').group_by(
+                MobileSubscription.subscribed_to_id
+            ).all()
+            sub_counts = {uid: cnt for uid, cnt in sub_rows}
+        except Exception:
+            pass  # Table doesn't exist yet — that's fine
+        
         user_list = []
-        for u, stock_count, trade_count, subscriber_count in rows:
+        for u, stock_count, trade_count in rows:
             extra = u.extra_data or {}
             industry = extra.get('industry', 'General')
             bot_active = extra.get('bot_active', True) if u.role == 'agent' else None
@@ -1860,7 +1866,7 @@ def bot_list_users():
                 'bot_active': bot_active,
                 'stock_count': stock_count,
                 'trade_count': trade_count,
-                'subscriber_count': subscriber_count
+                'subscriber_count': sub_counts.get(u.id, 0)
             })
         return jsonify({'users': user_list, 'total': len(user_list)})
     except Exception as e:
@@ -1874,7 +1880,7 @@ def bot_list_users():
 @require_admin_key
 def bot_dashboard():
     """Get summary stats for the admin dashboard"""
-    from models import User, Stock, Transaction, MobileSubscription, AdminSubscription
+    from models import User, Stock, Transaction
     from sqlalchemy import func
     
     try:
@@ -1898,12 +1904,22 @@ def bot_dashboard():
         
         total_stocks = Stock.query.count()
         total_trades = Transaction.query.count()
-        real_subscriptions = MobileSubscription.query.filter_by(status='active').count()
         
-        # Gifted subscriptions from AdminSubscription
-        gifted_subs = db.session.query(
-            func.coalesce(func.sum(AdminSubscription.bonus_subscriber_count), 0)
-        ).scalar()
+        # These tables may not exist yet — query safely
+        real_subscriptions = 0
+        gifted_subs = 0
+        try:
+            from models import MobileSubscription
+            real_subscriptions = MobileSubscription.query.filter_by(status='active').count()
+        except Exception:
+            pass
+        try:
+            from models import AdminSubscription
+            gifted_subs = db.session.query(
+                func.coalesce(func.sum(AdminSubscription.bonus_subscriber_count), 0)
+            ).scalar() or 0
+        except Exception:
+            pass
         
         return jsonify({
             'total_users': total_users,
@@ -3206,7 +3222,7 @@ def bot_remove_subscribers():
 @require_admin_key
 def bot_activity_feed():
     """Recent activity across the platform for the admin dashboard."""
-    from models import db, User, Transaction, AdminSubscription, PendingTrade
+    from models import db, User, Transaction
     from sqlalchemy import desc, func
     
     limit = min(int(request.args.get('limit', 30)), 100)
@@ -3231,16 +3247,20 @@ def bot_activity_feed():
                 'action': txn.transaction_type,
             })
         
-        # Recent pending trades
-        pending = PendingTrade.query.order_by(desc(PendingTrade.created_at)).limit(10).all()
-        for pt in pending:
-            events.append({
-                'type': 'pending_trade',
-                'timestamp': pt.created_at.isoformat() if pt.created_at else None,
-                'detail': f"{pt.action.upper()} {pt.quantity} {pt.ticker} — {pt.status}",
-                'status': pt.status,
-                'ticker': pt.ticker,
-            })
+        # Recent pending trades (table may not exist)
+        try:
+            from models import PendingTrade
+            pending = PendingTrade.query.order_by(desc(PendingTrade.created_at)).limit(10).all()
+            for pt in pending:
+                events.append({
+                    'type': 'pending_trade',
+                    'timestamp': pt.created_at.isoformat() if pt.created_at else None,
+                    'detail': f"{pt.action.upper()} {pt.quantity} {pt.ticker} — {pt.status}",
+                    'status': pt.status,
+                    'ticker': pt.ticker,
+                })
+        except Exception:
+            pass
         
         # Sort all events by timestamp descending
         events.sort(key=lambda e: e.get('timestamp') or '', reverse=True)
@@ -3255,21 +3275,26 @@ def bot_activity_feed():
 @require_admin_key
 def bot_alert_summary():
     """Get alert counts and health status for the admin dashboard."""
-    from models import db, User, Transaction, PendingTrade, PortfolioSnapshot
+    from models import db, User, Transaction, PortfolioSnapshot
     from sqlalchemy import func, and_
     
     try:
         now = datetime.utcnow()
         today = now.date()
         
-        # Unroutable / pending trades
-        pending_count = PendingTrade.query.filter(
-            PendingTrade.status.in_(['pending', 'unroutable'])
-        ).count()
-        
-        oldest_pending = PendingTrade.query.filter(
-            PendingTrade.status.in_(['pending', 'unroutable'])
-        ).order_by(PendingTrade.created_at.asc()).first()
+        # Unroutable / pending trades (table may not exist)
+        pending_count = 0
+        oldest_pending = None
+        try:
+            from models import PendingTrade
+            pending_count = PendingTrade.query.filter(
+                PendingTrade.status.in_(['pending', 'unroutable'])
+            ).count()
+            oldest_pending = PendingTrade.query.filter(
+                PendingTrade.status.in_(['pending', 'unroutable'])
+            ).order_by(PendingTrade.created_at.asc()).first()
+        except Exception:
+            pass
         
         # Bots with 0 trades today
         agent_ids = [u.id for u in User.query.filter_by(role='agent').all()]
@@ -3345,24 +3370,38 @@ def bot_alert_summary():
 @require_admin_key
 def bot_revenue_summary():
     """Revenue breakdown for the admin dashboard."""
-    from models import db, User, MobileSubscription, AdminSubscription, UserPortfolioStats
+    from models import db, User
     from sqlalchemy import func
     
+    # Pricing constants (same as AdminSubscription model)
+    price = 9.00
+    store_fee_pct = 0.15
+    platform_fee_pct = 0.15
+    store_fee = round(price * store_fee_pct, 2)            # $1.35
+    after_store = price * (1 - store_fee_pct)               # $7.65
+    platform_cut = round(after_store * platform_fee_pct, 2) # $1.15
+    influencer_pay = round(after_store * (1 - platform_fee_pct), 2)  # $6.50
+    
     try:
-        # Real subscriptions
-        real_subs = MobileSubscription.query.filter_by(status='active').count()
+        # Real subscriptions (table may not exist)
+        real_subs = 0
+        try:
+            from models import MobileSubscription
+            real_subs = MobileSubscription.query.filter_by(status='active').count()
+        except Exception:
+            pass
         
-        # Per-user gifted breakdown
-        gifted_rows = AdminSubscription.query.filter(
-            AdminSubscription.bonus_subscriber_count > 0
-        ).all()
-        
-        total_gifted = sum(r.bonus_subscriber_count or 0 for r in gifted_rows)
-        
-        price = AdminSubscription.SUBSCRIPTION_PRICE
-        store_fee = AdminSubscription.STORE_FEE_PER_SUB
-        platform_cut = AdminSubscription.PLATFORM_CUT_PER_SUB
-        influencer_pay = AdminSubscription.INFLUENCER_PAYOUT_PER_SUB
+        # Per-user gifted breakdown (table may not exist)
+        gifted_rows = []
+        total_gifted = 0
+        try:
+            from models import AdminSubscription
+            gifted_rows = AdminSubscription.query.filter(
+                AdminSubscription.bonus_subscriber_count > 0
+            ).all()
+            total_gifted = sum(r.bonus_subscriber_count or 0 for r in gifted_rows)
+        except Exception:
+            pass
         
         # Per-influencer breakdown
         influencers = []
@@ -3371,9 +3410,14 @@ def bot_revenue_summary():
             username = user.username if user else f'user_{row.portfolio_user_id}'
             
             # Count real subs for this user
-            real_for_user = MobileSubscription.query.filter_by(
-                subscribed_to_id=row.portfolio_user_id, status='active'
-            ).count()
+            real_for_user = 0
+            try:
+                from models import MobileSubscription
+                real_for_user = MobileSubscription.query.filter_by(
+                    subscribed_to_id=row.portfolio_user_id, status='active'
+                ).count()
+            except Exception:
+                pass
             
             influencers.append({
                 'user_id': row.portfolio_user_id,
@@ -3387,29 +3431,33 @@ def bot_revenue_summary():
             })
         
         # Also include users with real subs but no gifted record
-        users_with_real = db.session.query(
-            MobileSubscription.subscribed_to_id,
-            func.count(MobileSubscription.id)
-        ).filter_by(status='active').group_by(
-            MobileSubscription.subscribed_to_id
-        ).all()
-        
-        existing_ids = {i['user_id'] for i in influencers}
-        for uid, cnt in users_with_real:
-            if uid not in existing_ids:
-                user = User.query.get(uid)
-                is_bot = user and user.role == 'agent'
-                influencers.append({
-                    'user_id': uid,
-                    'username': user.username if user else f'user_{uid}',
-                    'is_company_bot': is_bot,
-                    'real_subs': cnt,
-                    'gifted_subs': 0,
-                    'total_subs': cnt,
-                    'real_payout': 0.0 if is_bot else round(cnt * influencer_pay, 2),
-                    'gifted_payout': 0,
-                    'total_payout': 0.0 if is_bot else round(cnt * influencer_pay, 2),
-                })
+        try:
+            from models import MobileSubscription
+            users_with_real = db.session.query(
+                MobileSubscription.subscribed_to_id,
+                func.count(MobileSubscription.id)
+            ).filter_by(status='active').group_by(
+                MobileSubscription.subscribed_to_id
+            ).all()
+            
+            existing_ids = {i['user_id'] for i in influencers}
+            for uid, cnt in users_with_real:
+                if uid not in existing_ids:
+                    user = User.query.get(uid)
+                    is_bot = user and user.role == 'agent'
+                    influencers.append({
+                        'user_id': uid,
+                        'username': user.username if user else f'user_{uid}',
+                        'is_company_bot': is_bot,
+                        'real_subs': cnt,
+                        'gifted_subs': 0,
+                        'total_subs': cnt,
+                        'real_payout': 0.0 if is_bot else round(cnt * influencer_pay, 2),
+                        'gifted_payout': 0,
+                        'total_payout': 0.0 if is_bot else round(cnt * influencer_pay, 2),
+                    })
+        except Exception:
+            pass
         
         # Mark bot-owned influencers in existing list too
         for inf in influencers:
@@ -3464,7 +3512,7 @@ def bot_revenue_summary():
 @require_admin_key
 def bot_cron_health():
     """Check health of cron jobs based on data freshness."""
-    from models import db, PortfolioSnapshot, PortfolioSnapshotIntraday, Transaction, User, PendingTrade
+    from models import db, PortfolioSnapshot, PortfolioSnapshotIntraday, Transaction, User
     from sqlalchemy import func, desc
     
     try:
@@ -3488,10 +3536,15 @@ def bot_cron_health():
             User, Transaction.user_id == User.id
         ).filter(User.role == 'agent').order_by(desc(Transaction.timestamp)).first()
         
-        # Last pending trade processed
-        last_routed = PendingTrade.query.filter_by(status='routed').order_by(
-            desc(PendingTrade.routed_at)
-        ).first()
+        # Last pending trade processed (table may not exist)
+        last_routed = None
+        try:
+            from models import PendingTrade
+            last_routed = PendingTrade.query.filter_by(status='routed').order_by(
+                desc(PendingTrade.routed_at)
+            ).first()
+        except Exception:
+            pass
         
         jobs = []
         

@@ -1,0 +1,156 @@
+/* Main Styles */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f8f9fc;
+    color: #333;
+}
+
+/* Card Styles */
+.card {
+    border-radius: 8px;
+    border: none;
+    box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.15);
+    margin-bottom: 1.5rem;
+}
+
+.card-header {
+    border-top-left-radius: 8px !important;
+    border-top-right-radius: 8px !important;
+    padding: 0.75rem 1.25rem;
+}
+
+/* Button Styles */
+.btn {
+    border-radius: 6px;
+    padding: 0.5rem 1rem;
+    font-weight: 500;
+}
+
+.btn-primary {
+    background-color: #4e73df;
+    border-color: #4e73df;
+}
+
+.btn-primary:hover {
+    background-color: #2e59d9;
+    border-color: #2653d4;
+}
+
+/* Navigation */
+.navbar {
+    box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.15);
+}
+
+.navbar-brand {
+    font-weight: 700;
+    font-size: 1.2rem;
+}
+
+/* Authentication Cards */
+.auth-card {
+    max-width: 450px;
+    margin: 0 auto;
+}
+
+/* Dashboard */
+.stock-card {
+    transition: transform 0.2s;
+}
+
+.stock-card:hover {
+    transform: translateY(-5px);
+}
+
+.gain {
+    color: #1cc88a;
+}
+
+.loss {
+    color: #e74a3b;
+}
+
+/* Table Styles */
+.table th {
+    font-weight: 600;
+    border-top: none;
+}
+
+.table td, .table th {
+    vertical-align: middle;
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.fade-in {
+    animation: fadeIn 0.5s;
+}
+
+/* Responsive Adjustments */
+@media (max-width: 768px) {
+    .card-body {
+        padding: 1rem;
+    }
+    
+    h1 {
+        font-size: 1.8rem;
+    }
+    
+    .display-4 {
+        font-size: 2.5rem;
+    }
+}
+
+/* FaceID/Face Unlock Styling */
+.biometric-icon {
+    font-size: 1.5rem;
+    margin-right: 0.5rem;
+    color: #4e73df;
+}
+
+/* Portfolio Summary Cards */
+.summary-card {
+    height: 100%;
+}
+
+.summary-value {
+    font-size: 1.8rem;
+    font-weight: 700;
+}
+
+/* Chart Container */
+.chart-container {
+    position: relative;
+    height: 250px;
+}
+
+/* Modal Customization */
+.modal-content {
+    border: none;
+    border-radius: 8px;
+}
+
+.modal-header {
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+}
+
+/* Form Elements */
+.form-control {
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+}
+
+.form-control:focus {
+    border-color: #4e73df;
+    box-shadow: 0 0 0 0.25rem rgba(78, 115, 223, 0.25);
+}
+
+/* Footer */
+footer {
+    background-color: #f8f9fc;
+    border-top: 1px solid #e3e6f0;
+}

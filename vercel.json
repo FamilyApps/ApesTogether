@@ -10,7 +10,7 @@
   "routes": [
     {
       "src": "/static/(.*)",
-      "dest": "/api/vercel.py"
+      "dest": "/public/static/$1"
     },
     {
       "src": "/.well-known/apple-app-site-association",
