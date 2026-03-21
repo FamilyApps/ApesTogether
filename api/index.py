@@ -363,13 +363,6 @@ try:
         },
     }
     
-    # Append prepare_threshold=0 to DATABASE_URL for PgBouncer compatibility
-    if 'postgresql' in DATABASE_URL:
-        separator = '&' if '?' in DATABASE_URL else '?'
-        if 'prepare_threshold' not in DATABASE_URL:
-            DATABASE_URL += f'{separator}prepare_threshold=0'
-            app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
-    
     # Session config — using Flask's built-in signed cookie sessions (no Flask-Session)
     app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
     app.config['SESSION_COOKIE_SECURE'] = True
