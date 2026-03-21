@@ -3161,10 +3161,11 @@ def authorize_google():
             
         # Step 6: Final redirect
         # If admin was trying to access /admin-panel, redirect back there
-        if session.pop('admin_panel_redirect', None) and user.is_admin:
+        _is_admin_user = (user.email == ADMIN_EMAIL)
+        if session.pop('admin_panel_redirect', None) and _is_admin_user:
             logger.info(f"Admin user {user.email} logged in, redirecting to admin panel")
             return redirect(url_for('admin_panel'))
-        elif user.is_admin:
+        elif _is_admin_user:
             logger.info(f"Admin user {user.email} logged in, redirecting to admin dashboard")
             return redirect(url_for('admin_dashboard'))
         else:
