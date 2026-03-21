@@ -1805,25 +1805,47 @@ def bot_execute_trade():
 def bot_list_users():
     """List all users with their portfolio info, filterable by role"""
     from models import User, Stock, Transaction, MobileSubscription
+    from sqlalchemy import func
     
     try:
         role_filter = request.args.get('role')  # 'agent', 'user', or None for all
-        query = User.query
+        
+        # Build aggregated counts as subqueries to avoid N+1
+        stock_sq = db.session.query(
+            Stock.user_id, func.count(Stock.id).label('cnt')
+        ).group_by(Stock.user_id).subquery()
+        
+        trade_sq = db.session.query(
+            Transaction.user_id, func.count(Transaction.id).label('cnt')
+        ).group_by(Transaction.user_id).subquery()
+        
+        sub_sq = db.session.query(
+            MobileSubscription.subscribed_to_id.label('user_id'),
+            func.count(MobileSubscription.id).label('cnt')
+        ).filter(MobileSubscription.status == 'active').group_by(
+            MobileSubscription.subscribed_to_id
+        ).subquery()
+        
+        query = db.session.query(
+            User,
+            func.coalesce(stock_sq.c.cnt, 0).label('stock_count'),
+            func.coalesce(trade_sq.c.cnt, 0).label('trade_count'),
+            func.coalesce(sub_sq.c.cnt, 0).label('subscriber_count'),
+        ).outerjoin(stock_sq, User.id == stock_sq.c.user_id
+        ).outerjoin(trade_sq, User.id == trade_sq.c.user_id
+        ).outerjoin(sub_sq, User.id == sub_sq.c.user_id)
+        
         if role_filter:
             query = query.filter(User.role == role_filter)
         
-        users = query.order_by(User.created_at.desc()).all()
+        rows = query.order_by(User.created_at.desc()).all()
+        
         user_list = []
-        for u in users:
-            stock_count = Stock.query.filter_by(user_id=u.id).count()
-            trade_count = Transaction.query.filter_by(user_id=u.id).count()
-            subscriber_count = MobileSubscription.query.filter_by(
-                subscribed_to_id=u.id, status='active'
-            ).count()
-            
+        for u, stock_count, trade_count, subscriber_count in rows:
             extra = u.extra_data or {}
             industry = extra.get('industry', 'General')
             bot_active = extra.get('bot_active', True) if u.role == 'agent' else None
+            strategy = extra.get('trading_style', extra.get('strategy_name', None))
             
             user_list.append({
                 'id': u.id,
@@ -1834,6 +1856,7 @@ def bot_list_users():
                 'created_by': u.created_by or 'human',
                 'created_at': u.created_at.isoformat() if u.created_at else None,
                 'industry': industry,
+                'strategy': strategy,
                 'bot_active': bot_active,
                 'stock_count': stock_count,
                 'trade_count': trade_count,
@@ -1842,7 +1865,9 @@ def bot_list_users():
         return jsonify({'users': user_list, 'total': len(user_list)})
     except Exception as e:
         logger.error(f"Bot list users error: {e}")
-        return jsonify({'error': 'list_failed'}), 500
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({'error': 'list_failed', 'detail': str(e)}), 500
 
 
 @mobile_api.route('/admin/bot/dashboard', methods=['GET'])
@@ -3937,12 +3962,14 @@ def _save_auto_create_settings(settings):
     
     try:
         from models import db, User
+        from sqlalchemy.orm.attributes import flag_modified
         admin_email = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
         admin = User.query.filter_by(email=admin_email).first()
         if admin:
-            extra = admin.extra_data or {}
+            extra = dict(admin.extra_data or {})
             extra['auto_create_bots'] = settings
             admin.extra_data = extra
+            flag_modified(admin, 'extra_data')
             db.session.commit()
     except Exception as e:
         logger.error(f"Save auto-create settings error: {e}")
