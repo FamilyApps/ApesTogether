@@ -42,18 +42,9 @@ const { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie
 const API_BASE = '/api/mobile';
 
 // ─── API Helper (session-cookie auth) ────────────────────────────────────────
+// NOTE: Server already verified Google OAuth + TOTP before serving this file.
+// No client-side auth check needed — just provide the api() helper.
 function useApi() {
-  const [authed, setAuthed] = useState(null); // null = checking, true/false
-  const [adminEmail, setAdminEmail] = useState('');
-
-  // Check session on mount
-  useEffect(() => {
-    fetch('/api/admin-panel/auth-status', { credentials: 'include' })
-      .then(r => r.json())
-      .then(d => { setAuthed(d.authenticated === true); setAdminEmail(d.email || ''); })
-      .catch(() => setAuthed(false));
-  }, []);
-
   const api = useCallback(async (endpoint, opts = {}) => {
     const headers = { 'Content-Type': 'application/json' };
     if (opts.otp) headers['X-Admin-OTP'] = opts.otp;
@@ -71,7 +62,7 @@ function useApi() {
     return data;
   }, []);
 
-  return { api, isAuthed: authed, adminEmail };
+  return { api };
 }
 
 // ─── Icons (inline SVGs) ────────────────────────────────────────────────────
@@ -804,18 +795,12 @@ const Sidebar = ({ active, onNav, onLogout }) => (
 
 // ─── App ────────────────────────────────────────────────────────────────────
 const App = () => {
-  const { api, isAuthed, adminEmail } = useApi();
+  const { api } = useApi();
   const [page, setPage] = useState('command');
 
   const handleLogout = () => {
     window.location.href = '/logout';
   };
-
-  // Still checking session
-  if (isAuthed === null) return <LoadingScreen />;
-
-  // Not authenticated — show Google sign-in
-  if (!isAuthed) return <AuthScreen />;
 
   const pages = {
     command: <CommandCenter api={api} />,
