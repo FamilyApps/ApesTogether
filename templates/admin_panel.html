@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ApesTogether Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg-base:#0a0a0f;--bg-card:#12121a;--bg-elevated:#181822;--bg-hover:#1e1e2e;
+  --border:#1e1e2e;--border-light:#2a2a3a;
+  --text-primary:#f0f0f5;--text-secondary:#8888a0;--text-muted:#55556a;
+  --accent:#2dd4a8;--accent-dim:#1a8a6e;--accent-glow:rgba(45,212,168,0.15);
+  --red:#ef4444;--red-dim:#7f1d1d;--yellow:#f59e0b;--yellow-dim:#78350f;
+  --green:#22c55e;--blue:#3b82f6;
+}
+html,body,#root{height:100%;font-family:'Inter',sans-serif;background:var(--bg-base);color:var(--text-primary);overflow:hidden}
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:var(--bg-base)}
+::-webkit-scrollbar-thumb{background:var(--border-light);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--text-muted)}
+input,select,textarea,button{font-family:inherit}
+.fade-in{animation:fadeIn .3s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.pulse{animation:pulse 2s infinite}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useCallback, useRef, useMemo } = React;
+const { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area, CartesianGrid } = Recharts;
+
+// ─── Config ──────────────────────────────────────────────────────────────────
+const API_BASE = '/api/mobile';
+
+// ─── API Helper ──────────────────────────────────────────────────────────────
+function useApi() {
+  const [adminKey, setAdminKey] = useState(() => localStorage.getItem('apes_admin_key') || '');
+  
+  const api = useCallback(async (endpoint, opts = {}) => {
+    const headers = { 'X-Admin-Key': adminKey, 'Content-Type': 'application/json' };
+    if (opts.otp) headers['X-Admin-OTP'] = opts.otp;
+    const url = `${API_BASE}${endpoint}`;
+    const res = await fetch(url, {
+      method: opts.method || 'GET',
+      headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+    const data = await res.json();
+    if (res.status === 403) throw new Error('AUTH_FAILED');
+    if (res.status === 401) throw new Error('2FA_REQUIRED');
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+  }, [adminKey]);
+
+  const saveKey = useCallback((key) => {
+    localStorage.setItem('apes_admin_key', key);
+    setAdminKey(key);
+  }, []);
+
+  return { api, adminKey, saveKey, isAuthed: !!adminKey };
+}
+
+// ─── Icons (inline SVGs) ────────────────────────────────────────────────────
+const Icons = {
+  command: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/></svg>,
+  bot: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>,
+  dollar: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>,
+  users: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
+  mail: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>,
+  activity: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>,
+  logout: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
+  refresh: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>,
+  alert: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
+  check: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>,
+  plus: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+  search: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
+  arrowUp: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>,
+  arrowDown: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>,
+  gift: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>,
+  trash: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>,
+  play: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>,
+  pause: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>,
+};
+
+// ─── Shared Components ──────────────────────────────────────────────────────
+const Card = ({ children, className = '', style = {} }) => (
+  <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, ...style }} className={className}>{children}</div>
+);
+
+const MetricCard = ({ label, value, sub, color, icon }) => (
+  <Card style={{ minWidth: 160, flex: 1 }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div>
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 8 }}>{label}</div>
+        <div style={{ fontSize: 28, fontWeight: 700, color: color || 'var(--text-primary)', lineHeight: 1 }}>{value}</div>
+        {sub && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>{sub}</div>}
+      </div>
+      {icon && <div style={{ color: color || 'var(--accent)', opacity: 0.6 }}>{icon}</div>}
+    </div>
+  </Card>
+);
+
+const Badge = ({ text, color = 'var(--accent)' }) => (
+  <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600, background: color + '22', color, border: `1px solid ${color}44` }}>{text}</span>
+);
+
+const Btn = ({ children, onClick, variant = 'primary', small, disabled, style = {} }) => {
+  const base = { border: 'none', borderRadius: 8, cursor: disabled ? 'not-allowed' : 'pointer', fontWeight: 600, fontSize: small ? 12 : 14, padding: small ? '5px 12px' : '10px 20px', transition: 'all .2s', display: 'inline-flex', alignItems: 'center', gap: 6, opacity: disabled ? 0.5 : 1 };
+  const variants = {
+    primary: { background: 'var(--accent)', color: '#000' },
+    secondary: { background: 'var(--bg-elevated)', color: 'var(--text-primary)', border: '1px solid var(--border-light)' },
+    danger: { background: 'var(--red-dim)', color: 'var(--red)' },
+    ghost: { background: 'transparent', color: 'var(--text-secondary)' },
+  };
+  return <button style={{ ...base, ...variants[variant], ...style }} onClick={onClick} disabled={disabled}>{children}</button>;
+};
+
+const Spinner = () => <div style={{ width: 20, height: 20, border: '2px solid var(--border-light)', borderTop: '2px solid var(--accent)', borderRadius: '50%', animation: 'spin .6s linear infinite' }}><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>;
+
+const Modal = ({ open, onClose, title, children }) => {
+  if (!open) return null;
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.7)', backdropFilter: 'blur(4px)' }} onClick={onClose}>
+      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)', borderRadius: 16, padding: 28, minWidth: 400, maxWidth: 520, maxHeight: '80vh', overflow: 'auto' }} onClick={e => e.stopPropagation()} className="fade-in">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <h3 style={{ fontSize: 18, fontWeight: 600 }}>{title}</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 20 }}>&times;</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+};
+
+const Input = ({ label, ...props }) => (
+  <div style={{ marginBottom: 14 }}>
+    {label && <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4, fontWeight: 500 }}>{label}</label>}
+    <input style={{ width: '100%', padding: '10px 14px', background: 'var(--bg-elevated)', border: '1px solid var(--border-light)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 14, outline: 'none' }} {...props} />
+  </div>
+);
+
+const Select = ({ label, options, ...props }) => (
+  <div style={{ marginBottom: 14 }}>
+    {label && <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4, fontWeight: 500 }}>{label}</label>}
+    <select style={{ width: '100%', padding: '10px 14px', background: 'var(--bg-elevated)', border: '1px solid var(--border-light)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 14, outline: 'none' }} {...props}>
+      {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  </div>
+);
+
+const Table = ({ columns, data, onRowClick }) => (
+  <div style={{ overflowX: 'auto' }}>
+    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <thead>
+        <tr>{columns.map(c => <th key={c.key} style={{ textAlign: 'left', padding: '10px 12px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.5px', borderBottom: '1px solid var(--border)' }}>{c.label}</th>)}</tr>
+      </thead>
+      <tbody>
+        {data.map((row, i) => (
+          <tr key={i} style={{ cursor: onRowClick ? 'pointer' : 'default', transition: 'background .15s' }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            onClick={() => onRowClick && onRowClick(row)}>
+            {columns.map(c => <td key={c.key} style={{ padding: '10px 12px', fontSize: 13, borderBottom: '1px solid var(--border)', color: 'var(--text-primary)' }}>{c.render ? c.render(row[c.key], row) : row[c.key]}</td>)}
+          </tr>
+        ))}
+        {data.length === 0 && <tr><td colSpan={columns.length} style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)' }}>No data</td></tr>}
+      </tbody>
+    </table>
+  </div>
+);
+
+const AlertBanner = ({ alerts }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+    {alerts.map((a, i) => {
+      const colors = { error: 'var(--red)', warning: 'var(--yellow)', ok: 'var(--green)' };
+      const bgs = { error: 'var(--red-dim)', warning: 'var(--yellow-dim)', ok: 'rgba(34,197,94,.1)' };
+      return (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 8, background: bgs[a.level], border: `1px solid ${colors[a.level]}33` }}>
+          <span style={{ color: colors[a.level] }}>{a.level === 'ok' ? Icons.check : Icons.alert}</span>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: colors[a.level] }}>{a.title}</div>
+            {a.detail && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{a.detail}</div>}
+          </div>
+        </div>
+      );
+    })}
+  </div>
+);
+
+const chartTooltipStyle = { contentStyle: { background: 'var(--bg-elevated)', border: '1px solid var(--border-light)', borderRadius: 8, fontSize: 12, color: 'var(--text-primary)' }, cursor: { fill: 'rgba(45,212,168,.08)' } };
+
+// ─── Auth Screen ────────────────────────────────────────────────────────────
+const AuthScreen = ({ onAuth }) => {
+  const [key, setKey] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`${API_BASE}/admin/bot/dashboard`, { headers: { 'X-Admin-Key': key } });
+      if (res.status === 403) { setError('Invalid admin key'); setLoading(false); return; }
+      if (!res.ok) { setError('Connection failed'); setLoading(false); return; }
+      onAuth(key);
+    } catch { setError('Network error'); }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)' }}>
+      <div className="fade-in" style={{ width: 400, padding: 40, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 20 }}>
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: 'linear-gradient(135deg, var(--accent), var(--accent-dim))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <span style={{ fontSize: 20 }}>🦍</span>
+            </div>
+            <span style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.5px' }}>ApesTogether</span>
+          </div>
+          <div style={{ fontSize: 14, color: 'var(--text-secondary)' }}>Admin Command Center</div>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <Input label="Admin API Key" type="password" value={key} onChange={e => setKey(e.target.value)} placeholder="Enter your admin key" autoFocus />
+          {error && <div style={{ color: 'var(--red)', fontSize: 13, marginBottom: 12 }}>{error}</div>}
+          <Btn onClick={handleSubmit} disabled={!key || loading} style={{ width: '100%', justifyContent: 'center', marginTop: 8 }}>
+            {loading ? <Spinner /> : 'Authenticate'}
+          </Btn>
+        </form>
+        <div style={{ textAlign: 'center', marginTop: 20, fontSize: 11, color: 'var(--text-muted)' }}>
+          Secured with API key + TOTP 2FA
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── OTP Modal ──────────────────────────────────────────────────────────────
+const OtpModal = ({ open, onClose, onConfirm, title }) => {
+  const [otp, setOtp] = useState('');
+  return (
+    <Modal open={open} onClose={onClose} title={title || '2FA Verification'}>
+      <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>Enter the 6-digit code from your authenticator app.</p>
+      <Input label="TOTP Code" value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g,'').slice(0,6))} placeholder="000000" autoFocus />
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 8 }}>
+        <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
+        <Btn onClick={() => { onConfirm(otp); setOtp(''); }} disabled={otp.length !== 6}>Confirm</Btn>
+      </div>
+    </Modal>
+  );
+};
+
+// ─── Page: Command Center ───────────────────────────────────────────────────
+const CommandCenter = ({ api }) => {
+  const [dashboard, setDashboard] = useState(null);
+  const [alerts, setAlerts] = useState(null);
+  const [feed, setFeed] = useState(null);
+  const [revenue, setRevenue] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [d, a, f, r] = await Promise.all([
+        api('/admin/bot/dashboard'),
+        api('/admin/bot/alert-summary'),
+        api('/admin/bot/activity-feed?limit=20'),
+        api('/admin/bot/revenue-summary'),
+      ]);
+      setDashboard(d); setAlerts(a); setFeed(f); setRevenue(r);
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  }, [api]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}><Spinner /></div>;
+
+  const d = dashboard || {};
+  const r = revenue || {};
+
+  // Build chart data from industry breakdown
+  const industryData = Object.entries(d.industry_breakdown || {}).map(([name, value]) => ({ name, value }));
+  const COLORS = ['#2dd4a8', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
+
+  return (
+    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* Metrics Row */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 14 }}>
+        <MetricCard label="Total Users" value={d.total_users || 0} sub={`${d.human_users || 0} human / ${d.bot_users || 0} bots`} color="var(--accent)" icon={Icons.users} />
+        <MetricCard label="Active Bots" value={d.active_bots || 0} sub={`${d.inactive_bots || 0} inactive`} color="var(--blue)" icon={Icons.bot} />
+        <MetricCard label="Subscriptions" value={d.total_subscriptions || 0} sub={`${d.real_subscriptions || 0} real / ${d.gifted_subscriptions || 0} gifted`} color="var(--green)" icon={Icons.gift} />
+        <MetricCard label="MRR" value={`$${(r.mrr || 0).toFixed(2)}`} sub={`Platform: $${(r.platform_revenue || 0).toFixed(2)}`} color="var(--accent)" icon={Icons.dollar} />
+        <MetricCard label="Payout Obligation" value={`$${(r.total_payout_obligation || 0).toFixed(2)}`} sub={`Gifted: $${(r.company_obligation || 0).toFixed(2)}`} color="var(--yellow)" icon={Icons.dollar} />
+        <MetricCard label="Total Trades" value={(d.total_trades || 0).toLocaleString()} sub={`${d.total_stocks || 0} positions held`} color="var(--text-primary)" icon={Icons.activity} />
+      </div>
+
+      {/* Alerts */}
+      {alerts && <AlertBanner alerts={alerts.alerts || []} />}
+
+      {/* Charts Row */}
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 14 }}>
+        <Card>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Revenue Breakdown</div>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={[
+              { name: 'Store Fees', amount: r.store_fees || 0, fill: 'var(--text-muted)' },
+              { name: 'Platform', amount: r.platform_revenue || 0, fill: 'var(--accent)' },
+              { name: 'Influencer (Real)', amount: r.influencer_payouts_real || 0, fill: 'var(--blue)' },
+              { name: 'Influencer (Gift)', amount: r.influencer_payouts_gifted || 0, fill: 'var(--yellow)' },
+            ]} barSize={36}>
+              <XAxis dataKey="name" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => `$${v}`} />
+              <Tooltip {...chartTooltipStyle} formatter={(v) => [`$${v.toFixed(2)}`, 'Amount']} />
+              <Bar dataKey="amount" radius={[4,4,0,0]}>
+                {[
+                  { fill: '#55556a' },
+                  { fill: '#2dd4a8' },
+                  { fill: '#3b82f6' },
+                  { fill: '#f59e0b' },
+                ].map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+        <Card>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Bot Industries</div>
+          {industryData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={220}>
+              <PieChart>
+                <Pie data={industryData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={3} stroke="none">
+                  {industryData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                </Pie>
+                <Tooltip {...chartTooltipStyle} />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 220, color: 'var(--text-muted)', fontSize: 13 }}>No bot data</div>}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+            {industryData.map((d, i) => (
+              <span key={i} style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: COLORS[i % COLORS.length], display: 'inline-block' }} />
+                {d.name}
+              </span>
+            ))}
+          </div>
+        </Card>
+      </div>
+
+      {/* Activity Feed */}
+      <Card>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>Activity Feed</div>
+          <Btn variant="ghost" small onClick={load}>{Icons.refresh} Refresh</Btn>
+        </div>
+        <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {(feed?.events || []).map((e, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 6, fontSize: 13, borderBottom: '1px solid var(--border)' }}>
+              <span style={{ color: e.action === 'buy' ? 'var(--green)' : e.action === 'sell' ? 'var(--red)' : 'var(--text-muted)', fontWeight: 600, width: 14, flexShrink: 0 }}>
+                {e.action === 'buy' ? Icons.arrowUp : e.action === 'sell' ? Icons.arrowDown : '•'}
+              </span>
+              <span style={{ flex: 1, color: 'var(--text-primary)' }}>{e.detail}</span>
+              {e.user && <Badge text={e.role === 'agent' ? '🤖 ' + e.user : e.user} color={e.role === 'agent' ? 'var(--blue)' : 'var(--accent)'} />}
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                {e.timestamp ? new Date(e.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+              </span>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </div>
+  );
+};
+
+// ─── Page: Bot Management ───────────────────────────────────────────────────
+const BotManagement = ({ api }) => {
+  const [bots, setBots] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
+  const [showOtp, setShowOtp] = useState(null); // { action, botId, ... }
+  const [createForm, setCreateForm] = useState({ username: '', industry: 'Technology', trading_style: 'balanced', trade_frequency: 'daily', max_stocks: 8 });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await api('/admin/bot/list-users?role=agent');
+      setBots(data.users || []);
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  }, [api]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleCreate = async () => {
+    try {
+      const username = createForm.username || `${createForm.industry.toLowerCase()}-${Math.random().toString(36).slice(2,6)}`;
+      const email = `${username.replace(/[^a-z0-9]/g, '.')}@apestogether.ai`;
+      await api('/admin/bot/create-user', { method: 'POST', body: { username, email, industry: createForm.industry } });
+      setShowCreate(false);
+      load();
+    } catch (e) { alert('Create failed: ' + e.message); }
+  };
+
+  const handleOtpAction = async (otp) => {
+    if (!showOtp) return;
+    try {
+      const { action, userId } = showOtp;
+      if (action === 'deactivate') {
+        await api('/admin/bot/deactivate', { method: 'POST', body: { user_id: userId }, otp });
+      } else if (action === 'reactivate') {
+        await api('/admin/bot/reactivate', { method: 'POST', body: { user_id: userId }, otp });
+      } else if (action === 'scale') {
+        await api('/admin/bot/scale-holdings', { method: 'POST', body: { user_id: userId, multiplier: showOtp.multiplier || 1 }, otp });
+      }
+      setShowOtp(null);
+      load();
+    } catch (e) { alert('Action failed: ' + e.message); }
+  };
+
+  const cols = [
+    { key: 'username', label: 'Username' },
+    { key: 'industry', label: 'Industry', render: (v) => <Badge text={v || 'General'} color="var(--blue)" /> },
+    { key: 'stock_count', label: 'Stocks' },
+    { key: 'subscriber_count', label: 'Subs' },
+    { key: 'bot_active', label: 'Status', render: (v) => v !== false ? <Badge text="Active" color="var(--green)" /> : <Badge text="Inactive" color="var(--red)" /> },
+    { key: 'id', label: 'Actions', render: (id, row) => (
+      <div style={{ display: 'flex', gap: 6 }}>
+        {row.bot_active !== false
+          ? <Btn small variant="danger" onClick={(e) => { e.stopPropagation(); setShowOtp({ action: 'deactivate', userId: id }); }}>{Icons.pause} Kill</Btn>
+          : <Btn small variant="secondary" onClick={(e) => { e.stopPropagation(); setShowOtp({ action: 'reactivate', userId: id }); }}>{Icons.play} Revive</Btn>
+        }
+      </div>
+    )},
+  ];
+
+  const botData = bots.map(b => ({
+    ...b,
+    industry: b.extra_data?.industry || b.industry || 'General',
+    stock_count: b.stock_count || 0,
+    subscriber_count: b.subscriber_count || 0,
+    bot_active: b.bot_active !== false,
+  }));
+
+  return (
+    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h2 style={{ fontSize: 20, fontWeight: 700 }}>Bot Fleet</h2>
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{bots.length} total bots &middot; {botData.filter(b => b.bot_active).length} active</p>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn variant="secondary" small onClick={load}>{Icons.refresh}</Btn>
+          <Btn onClick={() => setShowCreate(true)}>{Icons.plus} Create Bot</Btn>
+        </div>
+      </div>
+
+      <Card style={{ padding: 0 }}>
+        {loading ? <div style={{ padding: 40, textAlign: 'center' }}><Spinner /></div> : <Table columns={cols} data={botData} />}
+      </Card>
+
+      {/* Create Bot Modal */}
+      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create New Bot">
+        <Input label="Username (auto-generated if blank)" value={createForm.username} onChange={e => setCreateForm(p => ({ ...p, username: e.target.value }))} placeholder="tech-falcon" />
+        <Select label="Industry" value={createForm.industry} onChange={e => setCreateForm(p => ({ ...p, industry: e.target.value }))} options={[
+          { value: 'Technology', label: 'Technology' }, { value: 'Healthcare', label: 'Healthcare' },
+          { value: 'Energy', label: 'Energy' }, { value: 'Finance', label: 'Finance' },
+          { value: 'Consumer', label: 'Consumer' }, { value: 'Industrial', label: 'Industrial' },
+          { value: 'Crypto', label: 'Crypto' }, { value: 'General', label: 'General' },
+        ]} />
+        <Select label="Trading Style" value={createForm.trading_style} onChange={e => setCreateForm(p => ({ ...p, trading_style: e.target.value }))} options={[
+          { value: 'balanced', label: 'Balanced' }, { value: 'momentum', label: 'Momentum' },
+          { value: 'value', label: 'Value' }, { value: 'swing', label: 'Swing' },
+        ]} />
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
+          <Btn variant="secondary" onClick={() => setShowCreate(false)}>Cancel</Btn>
+          <Btn onClick={handleCreate}>Create & Seed</Btn>
+        </div>
+      </Modal>
+
+      <OtpModal open={!!showOtp} onClose={() => setShowOtp(null)} onConfirm={handleOtpAction} title={showOtp ? `Confirm ${showOtp.action}` : ''} />
+    </div>
+  );
+};
+
+// ─── Page: Revenue ──────────────────────────────────────────────────────────
+const RevenuePage = ({ api }) => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [giftModal, setGiftModal] = useState(null); // { userId, username }
+  const [giftCount, setGiftCount] = useState(1);
+  const [showOtp, setShowOtp] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setData(await api('/admin/bot/revenue-summary')); } catch (e) { console.error(e); }
+    setLoading(false);
+  }, [api]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleGift = (otp) => {
+    if (!giftModal) return;
+    api('/admin/bot/gift-subscribers', { method: 'POST', body: { user_id: giftModal.userId, count: giftCount }, otp })
+      .then(() => { setShowOtp(null); setGiftModal(null); setGiftCount(1); load(); })
+      .catch(e => alert('Gift failed: ' + e.message));
+  };
+
+  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}><Spinner /></div>;
+  const r = data || {};
+
+  return (
+    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <h2 style={{ fontSize: 20, fontWeight: 700 }}>Revenue & Payouts</h2>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 14 }}>
+        <MetricCard label="MRR" value={`$${(r.mrr || 0).toFixed(2)}`} sub={`${r.real_subscriptions || 0} real subs × $9`} color="var(--accent)" />
+        <MetricCard label="Store Fees" value={`$${(r.store_fees || 0).toFixed(2)}`} sub="Apple/Google 15%" color="var(--text-muted)" />
+        <MetricCard label="Platform Revenue" value={`$${(r.platform_revenue || 0).toFixed(2)}`} sub="15% of post-store" color="var(--accent)" />
+        <MetricCard label="Influencer Payouts" value={`$${(r.total_payout_obligation || 0).toFixed(2)}`} sub={`Real: $${(r.influencer_payouts_real || 0).toFixed(2)} | Gift: $${(r.influencer_payouts_gifted || 0).toFixed(2)}`} color="var(--yellow)" />
+        <MetricCard label="Company Obligation" value={`$${(r.company_obligation || 0).toFixed(2)}`} sub={`${r.gifted_subscriptions || 0} gifted subs`} color="var(--red)" />
+      </div>
+
+      <Card style={{ padding: 0 }}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontWeight: 600, fontSize: 14 }}>Influencer Payouts</span>
+          <Btn variant="secondary" small onClick={load}>{Icons.refresh}</Btn>
+        </div>
+        <Table columns={[
+          { key: 'username', label: 'Username' },
+          { key: 'real_subs', label: 'Real Subs' },
+          { key: 'gifted_subs', label: 'Gifted', render: v => v > 0 ? <Badge text={v} color="var(--yellow)" /> : '0' },
+          { key: 'total_subs', label: 'Total' },
+          { key: 'total_payout', label: 'Monthly Payout', render: v => <span style={{ color: 'var(--accent)', fontWeight: 600 }}>${v.toFixed(2)}</span> },
+          { key: 'user_id', label: 'Actions', render: (id, row) => (
+            <Btn small variant="secondary" onClick={(e) => { e.stopPropagation(); setGiftModal({ userId: id, username: row.username }); }}>{Icons.gift} Gift</Btn>
+          )},
+        ]} data={r.influencers || []} />
+      </Card>
+
+      {/* Gift Modal */}
+      <Modal open={!!giftModal} onClose={() => setGiftModal(null)} title={`Gift subscribers to ${giftModal?.username || ''}`}>
+        <Input label="Number of subscribers to gift" type="number" min="1" value={giftCount} onChange={e => setGiftCount(parseInt(e.target.value) || 1)} />
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>Company will owe ${(giftCount * (r.per_sub?.influencer_pay || 6.50)).toFixed(2)}/mo to this influencer.</p>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <Btn variant="secondary" onClick={() => setGiftModal(null)}>Cancel</Btn>
+          <Btn onClick={() => setShowOtp({ action: 'gift' })}>Gift (requires 2FA)</Btn>
+        </div>
+      </Modal>
+
+      <OtpModal open={!!showOtp} onClose={() => setShowOtp(null)} onConfirm={handleGift} title="Confirm Gift Subscribers" />
+    </div>
+  );
+};
+
+// ─── Page: Users ────────────────────────────────────────────────────────────
+const UsersPage = ({ api }) => {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await api('/admin/bot/list-users');
+      setUsers(data.users || []);
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  }, [api]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = useMemo(() => {
+    if (!searchTerm) return users;
+    const s = searchTerm.toLowerCase();
+    return users.filter(u => u.username?.toLowerCase().includes(s) || u.email?.toLowerCase().includes(s) || String(u.id).includes(s));
+  }, [users, searchTerm]);
+
+  return (
+    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h2 style={{ fontSize: 20, fontWeight: 700 }}>User Management</h2>
+        <div style={{ position: 'relative', width: 260 }}>
+          <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}>{Icons.search}</span>
+          <input style={{ width: '100%', padding: '8px 12px 8px 34px', background: 'var(--bg-elevated)', border: '1px solid var(--border-light)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 13, outline: 'none' }}
+            placeholder="Search users..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+        </div>
+      </div>
+      <Card style={{ padding: 0 }}>
+        {loading ? <div style={{ padding: 40, textAlign: 'center' }}><Spinner /></div> : (
+          <Table columns={[
+            { key: 'id', label: 'ID' },
+            { key: 'username', label: 'Username' },
+            { key: 'email', label: 'Email', render: v => <span style={{ color: 'var(--text-secondary)' }}>{v}</span> },
+            { key: 'role', label: 'Role', render: v => <Badge text={v || 'user'} color={v === 'agent' ? 'var(--blue)' : v === 'admin' ? 'var(--red)' : 'var(--accent)'} /> },
+            { key: 'stock_count', label: 'Stocks' },
+            { key: 'subscriber_count', label: 'Subs' },
+          ]} data={filtered} />
+        )}
+      </Card>
+    </div>
+  );
+};
+
+// ─── Page: Email Trade Monitor ──────────────────────────────────────────────
+const EmailMonitor = ({ api }) => {
+  const [pending, setPending] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showOtp, setShowOtp] = useState(null);
+  const [assignData, setAssignData] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await api('/admin/bot/pending-trades');
+      setPending(data.pending_trades || []);
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  }, [api]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleProcess = async () => {
+    try { await api('/admin/bot/process-pending-trades', { method: 'POST' }); load(); } catch (e) { alert(e.message); }
+  };
+
+  const handleAssign = (otp) => {
+    if (!assignData) return;
+    api('/admin/bot/assign-pending-trades', { method: 'POST', body: { trade_ids: [assignData.id], bot_id: assignData.botId }, otp })
+      .then(() => { setShowOtp(null); setAssignData(null); load(); })
+      .catch(e => alert('Assign failed: ' + e.message));
+  };
+
+  return (
+    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h2 style={{ fontSize: 20, fontWeight: 700 }}>Email Trade Pipeline</h2>
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{pending.length} pending trade(s)</p>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn variant="secondary" small onClick={load}>{Icons.refresh}</Btn>
+          <Btn small onClick={handleProcess}>{Icons.play} Reprocess</Btn>
+        </div>
+      </div>
+      <Card style={{ padding: 0 }}>
+        {loading ? <div style={{ padding: 40, textAlign: 'center' }}><Spinner /></div> : (
+          <Table columns={[
+            { key: 'id', label: 'ID' },
+            { key: 'ticker', label: 'Ticker', render: v => <span style={{ fontWeight: 600 }}>{v}</span> },
+            { key: 'action', label: 'Action', render: v => <Badge text={v?.toUpperCase()} color={v === 'buy' ? 'var(--green)' : 'var(--red)'} /> },
+            { key: 'quantity', label: 'Qty' },
+            { key: 'status', label: 'Status', render: v => <Badge text={v} color={v === 'routed' ? 'var(--green)' : v === 'pending' ? 'var(--yellow)' : 'var(--red)'} /> },
+            { key: 'assigned_bot_id', label: 'Bot', render: v => v || '—' },
+            { key: 'created_at', label: 'Age', render: v => v ? `${Math.round((Date.now() - new Date(v).getTime()) / 60000)}m` : '—' },
+          ]} data={pending} />
+        )}
+      </Card>
+      <OtpModal open={!!showOtp} onClose={() => setShowOtp(null)} onConfirm={handleAssign} title="Confirm Trade Assignment" />
+    </div>
+  );
+};
+
+// ─── Page: System Health ────────────────────────────────────────────────────
+const SystemHealth = ({ api }) => {
+  const [cron, setCron] = useState(null);
+  const [trades, setTrades] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [c, t] = await Promise.all([
+        api('/admin/bot/cron-health'),
+        api('/admin/bot/trade-history?per_page=20'),
+      ]);
+      setCron(c); setTrades(t);
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  }, [api]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}><Spinner /></div>;
+
+  return (
+    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h2 style={{ fontSize: 20, fontWeight: 700 }}>System Health</h2>
+        <Btn variant="secondary" small onClick={load}>{Icons.refresh}</Btn>
+      </div>
+
+      <Card>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>Cron Jobs</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {(cron?.jobs || []).map((job, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: 'var(--bg-elevated)', borderRadius: 8, border: '1px solid var(--border)' }}>
+              <div style={{ width: 10, height: 10, borderRadius: '50%', background: job.status === 'ok' ? 'var(--green)' : job.status === 'error' ? 'var(--red)' : 'var(--yellow)', boxShadow: `0 0 8px ${job.status === 'ok' ? 'var(--green)' : job.status === 'error' ? 'var(--red)' : 'var(--yellow)'}44` }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{job.name}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{job.schedule}</div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Last run</div>
+                <div style={{ fontSize: 12, fontWeight: 500 }}>{job.last_run ? new Date(job.last_run).toLocaleDateString() + ' ' + new Date(job.last_run).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Never'}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+        {cron?.server_time && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10 }}>Server time: {new Date(cron.server_time).toLocaleString()}</div>}
+      </Card>
+
+      <Card>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>Recent Trades (All Users)</div>
+        <Table columns={[
+          { key: 'timestamp', label: 'Time', render: v => v ? new Date(v).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—' },
+          { key: 'username', label: 'User' },
+          { key: 'role', label: 'Role', render: v => <Badge text={v} color={v === 'agent' ? 'var(--blue)' : 'var(--accent)'} /> },
+          { key: 'type', label: 'Type', render: v => <Badge text={v?.toUpperCase()} color={v === 'buy' ? 'var(--green)' : v === 'sell' ? 'var(--red)' : 'var(--text-muted)'} /> },
+          { key: 'ticker', label: 'Ticker', render: v => <span style={{ fontWeight: 600 }}>{v}</span> },
+          { key: 'quantity', label: 'Qty' },
+          { key: 'value', label: 'Value', render: v => `$${(v || 0).toFixed(2)}` },
+        ]} data={trades?.trades || []} />
+        {trades && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10 }}>Showing {trades.trades?.length || 0} of {trades.total || 0} total trades</div>}
+      </Card>
+    </div>
+  );
+};
+
+// ─── Sidebar ────────────────────────────────────────────────────────────────
+const navItems = [
+  { id: 'command', label: 'Command Center', icon: Icons.command },
+  { id: 'bots', label: 'Bot Management', icon: Icons.bot },
+  { id: 'revenue', label: 'Revenue', icon: Icons.dollar },
+  { id: 'users', label: 'Users', icon: Icons.users },
+  { id: 'email', label: 'Email Trades', icon: Icons.mail },
+  { id: 'health', label: 'System Health', icon: Icons.activity },
+];
+
+const Sidebar = ({ active, onNav, onLogout }) => (
+  <div style={{
+    width: 220, height: '100vh', background: 'var(--bg-card)', borderRight: '1px solid var(--border)',
+    display: 'flex', flexDirection: 'column', flexShrink: 0, position: 'relative', zIndex: 10,
+  }}>
+    {/* Logo */}
+    <div style={{ padding: '20px 16px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid var(--border)' }}>
+      <div style={{ width: 34, height: 34, borderRadius: 8, background: 'linear-gradient(135deg, var(--accent), var(--accent-dim))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>🦍</div>
+      <div>
+        <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.3px' }}>ApesTogether</div>
+        <div style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 600, letterSpacing: '.5px' }}>ADMIN</div>
+      </div>
+    </div>
+
+    {/* Nav */}
+    <nav style={{ flex: 1, padding: '12px 8px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {navItems.map(item => {
+        const isActive = active === item.id;
+        return (
+          <button key={item.id} onClick={() => onNav(item.id)} style={{
+            display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 8,
+            border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: isActive ? 600 : 400,
+            background: isActive ? 'var(--accent-glow)' : 'transparent',
+            color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
+            transition: 'all .15s',
+          }}
+          onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--bg-hover)'; }}
+          onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}>
+            {item.icon}
+            {item.label}
+          </button>
+        );
+      })}
+    </nav>
+
+    {/* Logout */}
+    <div style={{ padding: '12px 8px', borderTop: '1px solid var(--border)' }}>
+      <button onClick={onLogout} style={{
+        display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 8,
+        border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--text-muted)',
+        background: 'transparent', width: '100%', transition: 'all .15s',
+      }}
+      onMouseEnter={e => e.currentTarget.style.color = 'var(--red)'}
+      onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}>
+        {Icons.logout}
+        Log Out
+      </button>
+    </div>
+  </div>
+);
+
+// ─── App ────────────────────────────────────────────────────────────────────
+const App = () => {
+  const { api, adminKey, saveKey, isAuthed } = useApi();
+  const [page, setPage] = useState('command');
+
+  const handleLogout = () => {
+    localStorage.removeItem('apes_admin_key');
+    window.location.reload();
+  };
+
+  if (!isAuthed) return <AuthScreen onAuth={saveKey} />;
+
+  const pages = {
+    command: <CommandCenter api={api} />,
+    bots: <BotManagement api={api} />,
+    revenue: <RevenuePage api={api} />,
+    users: <UsersPage api={api} />,
+    email: <EmailMonitor api={api} />,
+    health: <SystemHealth api={api} />,
+  };
+
+  return (
+    <div style={{ display: 'flex', height: '100vh' }}>
+      <Sidebar active={page} onNav={setPage} onLogout={handleLogout} />
+      <main style={{ flex: 1, overflow: 'auto', padding: 28 }}>
+        {pages[page] || <div>Page not found</div>}
+      </main>
+    </div>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

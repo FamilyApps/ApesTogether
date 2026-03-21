@@ -1441,6 +1441,12 @@ def profile(username):
         stripe_public_key=app.config['STRIPE_PUBLIC_KEY']
     )
 
+@app.route('/admin-panel')
+def admin_panel():
+    """Serve the standalone admin dashboard SPA (auth via API key, not session)."""
+    return render_template('admin_panel.html')
+
+
 @app.route('/admin/subscription-analytics')
 @login_required
 def admin_subscription_analytics():

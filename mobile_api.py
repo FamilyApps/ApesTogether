@@ -1834,7 +1834,8 @@ def bot_list_users():
 @require_admin_key
 def bot_dashboard():
     """Get summary stats for the admin dashboard"""
-    from models import User, Stock, Transaction, MobileSubscription
+    from models import User, Stock, Transaction, MobileSubscription, AdminSubscription
+    from sqlalchemy import func
     
     try:
         total_users = User.query.count()
@@ -1857,12 +1858,12 @@ def bot_dashboard():
         
         total_stocks = Stock.query.count()
         total_trades = Transaction.query.count()
-        total_subscriptions = MobileSubscription.query.filter_by(status='active').count()
+        real_subscriptions = MobileSubscription.query.filter_by(status='active').count()
         
-        # Gifted subscriptions (platform='admin_gift')
-        gifted_subs = MobileSubscription.query.filter_by(
-            platform='admin_gift', status='active'
-        ).count()
+        # Gifted subscriptions from AdminSubscription
+        gifted_subs = db.session.query(
+            func.coalesce(func.sum(AdminSubscription.bonus_subscriber_count), 0)
+        ).scalar()
         
         return jsonify({
             'total_users': total_users,
@@ -1873,8 +1874,9 @@ def bot_dashboard():
             'industry_breakdown': industry_counts,
             'total_stocks': total_stocks,
             'total_trades': total_trades,
-            'total_subscriptions': total_subscriptions,
-            'gifted_subscriptions': gifted_subs
+            'real_subscriptions': real_subscriptions,
+            'gifted_subscriptions': gifted_subs,
+            'total_subscriptions': real_subscriptions + gifted_subs
         })
     except Exception as e:
         logger.error(f"Bot dashboard error: {e}")
@@ -3156,3 +3158,371 @@ def bot_remove_subscribers():
         db.session.rollback()
         logger.error(f"Remove subscribers error: {e}")
         return jsonify({'error': 'remove_failed'}), 500
+
+
+# ── Dashboard API Endpoints ──────────────────────────────────────────────────
+
+@mobile_api.route('/admin/bot/activity-feed', methods=['GET'])
+@require_admin_key
+def bot_activity_feed():
+    """Recent activity across the platform for the admin dashboard."""
+    from models import db, User, Transaction, AdminSubscription, PendingTrade
+    from sqlalchemy import desc, func
+    
+    limit = min(int(request.args.get('limit', 30)), 100)
+    
+    try:
+        events = []
+        
+        # Recent trades (last 30)
+        trades = db.session.query(Transaction, User).join(
+            User, Transaction.user_id == User.id
+        ).order_by(desc(Transaction.timestamp)).limit(limit).all()
+        
+        for txn, user in trades:
+            events.append({
+                'type': 'trade',
+                'timestamp': txn.timestamp.isoformat() if txn.timestamp else None,
+                'user': user.username,
+                'user_id': user.id,
+                'role': user.role or 'user',
+                'detail': f"{txn.transaction_type.upper()} {txn.quantity} {txn.ticker} @ ${txn.price:.2f}" if txn.price else f"{txn.transaction_type.upper()} {txn.quantity} {txn.ticker}",
+                'ticker': txn.ticker,
+                'action': txn.transaction_type,
+            })
+        
+        # Recent pending trades
+        pending = PendingTrade.query.order_by(desc(PendingTrade.created_at)).limit(10).all()
+        for pt in pending:
+            events.append({
+                'type': 'pending_trade',
+                'timestamp': pt.created_at.isoformat() if pt.created_at else None,
+                'detail': f"{pt.action.upper()} {pt.quantity} {pt.ticker} — {pt.status}",
+                'status': pt.status,
+                'ticker': pt.ticker,
+            })
+        
+        # Sort all events by timestamp descending
+        events.sort(key=lambda e: e.get('timestamp') or '', reverse=True)
+        
+        return jsonify({'events': events[:limit]})
+    except Exception as e:
+        logger.error(f"Activity feed error: {e}")
+        return jsonify({'error': 'activity_feed_failed'}), 500
+
+
+@mobile_api.route('/admin/bot/alert-summary', methods=['GET'])
+@require_admin_key
+def bot_alert_summary():
+    """Get alert counts and health status for the admin dashboard."""
+    from models import db, User, Transaction, PendingTrade, PortfolioSnapshot
+    from sqlalchemy import func, and_
+    
+    try:
+        now = datetime.utcnow()
+        today = now.date()
+        
+        # Unroutable / pending trades
+        pending_count = PendingTrade.query.filter(
+            PendingTrade.status.in_(['pending', 'unroutable'])
+        ).count()
+        
+        oldest_pending = PendingTrade.query.filter(
+            PendingTrade.status.in_(['pending', 'unroutable'])
+        ).order_by(PendingTrade.created_at.asc()).first()
+        
+        # Bots with 0 trades today
+        agent_ids = [u.id for u in User.query.filter_by(role='agent').all()]
+        bots_with_trades_today = set()
+        if agent_ids:
+            rows = db.session.query(Transaction.user_id).filter(
+                Transaction.user_id.in_(agent_ids),
+                func.date(Transaction.timestamp) == today
+            ).distinct().all()
+            bots_with_trades_today = {r[0] for r in rows}
+        
+        active_bots = []
+        for u in User.query.filter_by(role='agent').all():
+            extra = u.extra_data or {}
+            if extra.get('bot_active', True):
+                active_bots.append(u.id)
+        
+        silent_bots = [bid for bid in active_bots if bid not in bots_with_trades_today]
+        
+        # Last bot trade
+        last_agent_trade = db.session.query(Transaction).join(
+            User, Transaction.user_id == User.id
+        ).filter(User.role == 'agent').order_by(Transaction.timestamp.desc()).first()
+        
+        # Last snapshot (proxy for market-close cron health)
+        last_snapshot = PortfolioSnapshot.query.order_by(
+            PortfolioSnapshot.date.desc()
+        ).first()
+        
+        alerts = []
+        
+        if pending_count > 0:
+            alerts.append({
+                'level': 'error',
+                'title': f'{pending_count} unroutable trade(s)',
+                'detail': f'Oldest: {oldest_pending.created_at.isoformat()}' if oldest_pending else '',
+            })
+        
+        if len(silent_bots) > 0 and now.hour >= 14:  # only alert after market has been open a while
+            alerts.append({
+                'level': 'warning',
+                'title': f'{len(silent_bots)} active bot(s) with 0 trades today',
+                'detail': f'IDs: {silent_bots[:5]}',
+            })
+        
+        if last_snapshot and (today - last_snapshot.date).days > 2:
+            alerts.append({
+                'level': 'error',
+                'title': 'Market-close cron may be stale',
+                'detail': f'Last snapshot: {last_snapshot.date.isoformat()}',
+            })
+        
+        if not alerts:
+            alerts.append({
+                'level': 'ok',
+                'title': 'All systems operational',
+                'detail': '',
+            })
+        
+        return jsonify({
+            'alerts': alerts,
+            'pending_trades': pending_count,
+            'silent_bots': len(silent_bots),
+            'last_bot_trade': last_agent_trade.timestamp.isoformat() if last_agent_trade and last_agent_trade.timestamp else None,
+            'last_snapshot_date': last_snapshot.date.isoformat() if last_snapshot else None,
+        })
+    except Exception as e:
+        logger.error(f"Alert summary error: {e}")
+        return jsonify({'error': 'alert_summary_failed'}), 500
+
+
+@mobile_api.route('/admin/bot/revenue-summary', methods=['GET'])
+@require_admin_key
+def bot_revenue_summary():
+    """Revenue breakdown for the admin dashboard."""
+    from models import db, User, MobileSubscription, AdminSubscription, UserPortfolioStats
+    from sqlalchemy import func
+    
+    try:
+        # Real subscriptions
+        real_subs = MobileSubscription.query.filter_by(status='active').count()
+        
+        # Per-user gifted breakdown
+        gifted_rows = AdminSubscription.query.filter(
+            AdminSubscription.bonus_subscriber_count > 0
+        ).all()
+        
+        total_gifted = sum(r.bonus_subscriber_count or 0 for r in gifted_rows)
+        
+        price = AdminSubscription.SUBSCRIPTION_PRICE
+        store_fee = AdminSubscription.STORE_FEE_PER_SUB
+        platform_cut = AdminSubscription.PLATFORM_CUT_PER_SUB
+        influencer_pay = AdminSubscription.INFLUENCER_PAYOUT_PER_SUB
+        
+        # Per-influencer breakdown
+        influencers = []
+        for row in gifted_rows:
+            user = User.query.get(row.portfolio_user_id)
+            username = user.username if user else f'user_{row.portfolio_user_id}'
+            
+            # Count real subs for this user
+            real_for_user = MobileSubscription.query.filter_by(
+                subscribed_to_id=row.portfolio_user_id, status='active'
+            ).count()
+            
+            influencers.append({
+                'user_id': row.portfolio_user_id,
+                'username': username,
+                'real_subs': real_for_user,
+                'gifted_subs': row.bonus_subscriber_count or 0,
+                'total_subs': real_for_user + (row.bonus_subscriber_count or 0),
+                'real_payout': round(real_for_user * influencer_pay, 2),
+                'gifted_payout': round((row.bonus_subscriber_count or 0) * influencer_pay, 2),
+                'total_payout': round((real_for_user + (row.bonus_subscriber_count or 0)) * influencer_pay, 2),
+            })
+        
+        # Also include users with real subs but no gifted record
+        users_with_real = db.session.query(
+            MobileSubscription.subscribed_to_id,
+            func.count(MobileSubscription.id)
+        ).filter_by(status='active').group_by(
+            MobileSubscription.subscribed_to_id
+        ).all()
+        
+        existing_ids = {i['user_id'] for i in influencers}
+        for uid, cnt in users_with_real:
+            if uid not in existing_ids:
+                user = User.query.get(uid)
+                influencers.append({
+                    'user_id': uid,
+                    'username': user.username if user else f'user_{uid}',
+                    'real_subs': cnt,
+                    'gifted_subs': 0,
+                    'total_subs': cnt,
+                    'real_payout': round(cnt * influencer_pay, 2),
+                    'gifted_payout': 0,
+                    'total_payout': round(cnt * influencer_pay, 2),
+                })
+        
+        return jsonify({
+            'real_subscriptions': real_subs,
+            'gifted_subscriptions': total_gifted,
+            'total_subscriptions': real_subs + total_gifted,
+            'mrr': round(real_subs * price, 2),
+            'store_fees': round(real_subs * store_fee, 2),
+            'platform_revenue': round(real_subs * platform_cut, 2),
+            'influencer_payouts_real': round(real_subs * influencer_pay, 2),
+            'influencer_payouts_gifted': round(total_gifted * influencer_pay, 2),
+            'company_obligation': round(total_gifted * influencer_pay, 2),
+            'total_payout_obligation': round((real_subs + total_gifted) * influencer_pay, 2),
+            'per_sub': {
+                'price': price,
+                'store_fee': store_fee,
+                'platform_cut': platform_cut,
+                'influencer_pay': influencer_pay,
+            },
+            'influencers': sorted(influencers, key=lambda x: x['total_subs'], reverse=True),
+        })
+    except Exception as e:
+        logger.error(f"Revenue summary error: {e}")
+        return jsonify({'error': 'revenue_summary_failed'}), 500
+
+
+@mobile_api.route('/admin/bot/cron-health', methods=['GET'])
+@require_admin_key
+def bot_cron_health():
+    """Check health of cron jobs based on data freshness."""
+    from models import db, PortfolioSnapshot, PortfolioSnapshotIntraday, Transaction, User, PendingTrade
+    from sqlalchemy import func, desc
+    
+    try:
+        now = datetime.utcnow()
+        today = now.date()
+        
+        # Last portfolio snapshot (market-close cron)
+        last_snap = PortfolioSnapshot.query.order_by(PortfolioSnapshot.date.desc()).first()
+        
+        # Last intraday snapshot
+        last_intraday = None
+        try:
+            last_intraday = PortfolioSnapshotIntraday.query.order_by(
+                desc(PortfolioSnapshotIntraday.timestamp)
+            ).first()
+        except Exception:
+            pass
+        
+        # Last bot trade (proxy for bot trading waves)
+        last_bot_trade = db.session.query(Transaction).join(
+            User, Transaction.user_id == User.id
+        ).filter(User.role == 'agent').order_by(desc(Transaction.timestamp)).first()
+        
+        # Last pending trade processed
+        last_routed = PendingTrade.query.filter_by(status='routed').order_by(
+            desc(PendingTrade.routed_at)
+        ).first()
+        
+        jobs = []
+        
+        # Market Close
+        snap_date = last_snap.date.isoformat() if last_snap else None
+        snap_stale = last_snap and (today - last_snap.date).days > 2
+        jobs.append({
+            'name': 'Market Close Snapshots',
+            'schedule': '4:30 PM ET weekdays',
+            'last_run': snap_date,
+            'status': 'error' if snap_stale else ('ok' if last_snap else 'unknown'),
+        })
+        
+        # Intraday Collection
+        intraday_ts = last_intraday.timestamp.isoformat() if last_intraday and hasattr(last_intraday, 'timestamp') and last_intraday.timestamp else None
+        jobs.append({
+            'name': 'Intraday Collection',
+            'schedule': 'Every 30min during market hours',
+            'last_run': intraday_ts,
+            'status': 'ok' if intraday_ts else 'unknown',
+        })
+        
+        # Bot Trading Waves
+        bot_ts = last_bot_trade.timestamp.isoformat() if last_bot_trade and last_bot_trade.timestamp else None
+        jobs.append({
+            'name': 'Bot Trading Waves',
+            'schedule': '9:45, 10:45, 1:15, 3:30 ET',
+            'last_run': bot_ts,
+            'status': 'ok' if bot_ts else 'unknown',
+        })
+        
+        # Pending Trade Retry
+        routed_ts = last_routed.routed_at.isoformat() if last_routed and last_routed.routed_at else None
+        jobs.append({
+            'name': 'Pending Trade Retry',
+            'schedule': 'Every 5min (Google Apps Script)',
+            'last_run': routed_ts,
+            'status': 'ok' if routed_ts else 'unknown',
+        })
+        
+        return jsonify({'jobs': jobs, 'server_time': now.isoformat()})
+    except Exception as e:
+        logger.error(f"Cron health error: {e}")
+        return jsonify({'error': 'cron_health_failed'}), 500
+
+
+@mobile_api.route('/admin/bot/trade-history', methods=['GET'])
+@require_admin_key
+def bot_trade_history():
+    """Paginated trade history with filtering for the admin dashboard."""
+    from models import db, User, Transaction
+    from sqlalchemy import desc
+    
+    try:
+        page = max(1, int(request.args.get('page', 1)))
+        per_page = min(int(request.args.get('per_page', 50)), 200)
+        role_filter = request.args.get('role')  # 'agent', 'user', or None for all
+        user_id_filter = request.args.get('user_id')
+        ticker_filter = request.args.get('ticker')
+        
+        query = db.session.query(Transaction, User).join(
+            User, Transaction.user_id == User.id
+        )
+        
+        if role_filter:
+            query = query.filter(User.role == role_filter)
+        if user_id_filter:
+            query = query.filter(Transaction.user_id == int(user_id_filter))
+        if ticker_filter:
+            query = query.filter(Transaction.ticker == ticker_filter.upper())
+        
+        total = query.count()
+        trades = query.order_by(desc(Transaction.timestamp)).offset(
+            (page - 1) * per_page
+        ).limit(per_page).all()
+        
+        results = []
+        for txn, user in trades:
+            results.append({
+                'id': txn.id,
+                'user_id': user.id,
+                'username': user.username,
+                'role': user.role or 'user',
+                'ticker': txn.ticker,
+                'quantity': txn.quantity,
+                'price': txn.price,
+                'type': txn.transaction_type,
+                'timestamp': txn.timestamp.isoformat() if txn.timestamp else None,
+                'value': round(txn.quantity * txn.price, 2) if txn.price else 0,
+            })
+        
+        return jsonify({
+            'trades': results,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'pages': (total + per_page - 1) // per_page,
+        })
+    except Exception as e:
+        logger.error(f"Trade history error: {e}")
+        return jsonify({'error': 'trade_history_failed'}), 500
