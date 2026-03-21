@@ -348,16 +348,27 @@ try:
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024  # 1 MB max request body
     # Serverless-friendly SQLAlchemy engine options
+    # Supabase shared pooler uses PgBouncer in transaction mode:
+    # - NullPool: fresh connection per request (no stale connections)
+    # - prepare_threshold=0: disable prepared statements (PgBouncer incompatible)
+    # - keepalives: prevent idle connection drops
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-        'poolclass': NullPool,       # No pooling — fresh connection each time (serverless)
+        'poolclass': NullPool,
         'connect_args': {
-            'connect_timeout': 10,       # Fail fast (10s) instead of hanging
-            'keepalives': 1,             # Enable TCP keepalives
-            'keepalives_idle': 30,       # Send keepalive after 30s idle
-            'keepalives_interval': 10,   # Retry every 10s
-            'keepalives_count': 5,       # Give up after 5 retries
+            'connect_timeout': 10,
+            'keepalives': 1,
+            'keepalives_idle': 30,
+            'keepalives_interval': 10,
+            'keepalives_count': 5,
         },
     }
+    
+    # Append prepare_threshold=0 to DATABASE_URL for PgBouncer compatibility
+    if 'postgresql' in DATABASE_URL:
+        separator = '&' if '?' in DATABASE_URL else '?'
+        if 'prepare_threshold' not in DATABASE_URL:
+            DATABASE_URL += f'{separator}prepare_threshold=0'
+            app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
     
     # Session config — using Flask's built-in signed cookie sessions (no Flask-Session)
     app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
