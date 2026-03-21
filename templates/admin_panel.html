@@ -821,7 +821,20 @@ const App = () => {
   );
 };
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+try {
+  ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+} catch(err) {
+  document.getElementById('root').innerHTML = '<div style="padding:40px;color:#ef4444;font-family:monospace"><h2>React Render Error</h2><pre>' + err.message + '\n' + err.stack + '</pre></div>';
+}
+</script>
+<script>
+// Fallback: if Babel fails to compile, show the error
+window.onerror = function(msg, url, line, col, err) {
+  var root = document.getElementById('root');
+  if (root && !root.children.length) {
+    root.innerHTML = '<div style="padding:40px;color:#ef4444;font-family:monospace"><h2>JS Error</h2><pre>' + msg + '\nLine: ' + line + ', Col: ' + col + (err ? '\n' + err.stack : '') + '</pre></div>';
+  }
+};
 </script>
 </body>
 </html>

@@ -1461,8 +1461,16 @@ def admin_panel():
         return render_template('admin_2fa_gate.html')
     # Serve as raw HTML — NOT render_template — because React JSX uses {{ }}
     # which conflicts with Jinja2's template syntax
-    template_dir = app.template_folder or os.path.join(app.root_path, 'templates')
-    return send_from_directory(template_dir, 'admin_panel.html')
+    try:
+        template_dir = app.template_folder or os.path.join(app.root_path, 'templates')
+        filepath = os.path.join(template_dir, 'admin_panel.html')
+        with open(filepath, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        from flask import Response
+        return Response(html_content, mimetype='text/html')
+    except Exception as e:
+        logger.error(f"Error serving admin panel: {e}")
+        return jsonify({'error': str(e), 'template_dir': template_dir}), 500
 
 @app.route('/admin-panel/verify-2fa', methods=['POST'])
 def admin_panel_verify_2fa():
