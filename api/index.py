@@ -328,6 +328,18 @@ try:
         # Heroku-style postgres:// URL needs to be converted for SQLAlchemy
         DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
     
+    # Ensure sslmode is set for Supabase
+    if 'postgresql' in DATABASE_URL and 'sslmode' not in DATABASE_URL:
+        separator = '&' if '?' in DATABASE_URL else '?'
+        DATABASE_URL += f'{separator}sslmode=require'
+    
+    # Log connection info (redact password)
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(DATABASE_URL)
+        logger.info(f"DB connection: host={parsed.hostname}, port={parsed.port}, db={parsed.path}, sslmode={'in url' if 'sslmode' in DATABASE_URL else 'missing'}")
+    except Exception:
+        pass
     logger.info(f"Using database type: {DATABASE_URL.split('://')[0]}")
 
     # Configure Flask app
@@ -339,8 +351,11 @@ try:
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
         'poolclass': NullPool,       # No pooling — fresh connection each time (serverless)
         'connect_args': {
-            'connect_timeout': 10,   # Fail fast (10s) instead of hanging
-            'options': '-c statement_timeout=30000',  # 30s query timeout
+            'connect_timeout': 10,       # Fail fast (10s) instead of hanging
+            'keepalives': 1,             # Enable TCP keepalives
+            'keepalives_idle': 30,       # Send keepalive after 30s idle
+            'keepalives_interval': 10,   # Retry every 10s
+            'keepalives_count': 5,       # Give up after 5 retries
         },
     }
     
@@ -469,17 +484,9 @@ try:
     # Flask-Session is NOT used — just Flask's default session mechanism.
     logger.info("Using Flask built-in signed cookie sessions (no DB dependency)")
     
-    # Ensure pending_trade table exists
+    # Ensure pending_trade table exists (non-blocking — app works even if this fails)
     try:
         with app.app_context():
-            # Clean up old sessions table (no longer needed)
-            try:
-                db.session.execute(text("DROP TABLE IF EXISTS sessions"))
-                db.session.commit()
-                logger.info("Dropped unused sessions table")
-            except Exception:
-                db.session.rollback()
-            
             db.session.execute(text("""
             CREATE TABLE IF NOT EXISTS pending_trade (
                 id SERIAL PRIMARY KEY,
@@ -500,7 +507,13 @@ try:
             db.session.commit()
             logger.info("pending_trade table verified/created")
     except Exception as e:
-        logger.warning(f"Could not create pending_trade table: {e}")
+        logger.warning(f"Could not create pending_trade table (will retry on first use): {e}")
+        try:
+            db.session.rollback()
+            db.session.remove()          # Reset scoped session completely
+            db.engine.dispose()          # Dispose engine to drop any broken connections
+        except Exception:
+            pass
     logger.info("Database and migrations initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize database: {str(e)}")
