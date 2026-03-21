@@ -367,6 +367,13 @@ try:
         logger.info("Rate limiter initialized (in-memory)")
     except Exception as limiter_err:
         logger.warning(f"Rate limiter not available: {limiter_err}")
+        # No-op limiter so @limiter.limit() decorators don't crash
+        class _NoOpLimiter:
+            def limit(self, *a, **kw):
+                def decorator(f):
+                    return f
+                return decorator
+        limiter = _NoOpLimiter()
         app.limiter = None
 
     # Initialize Flask-Login
