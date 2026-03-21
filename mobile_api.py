@@ -3541,3 +3541,408 @@ def bot_trade_history():
     except Exception as e:
         logger.error(f"Trade history error: {e}")
         return jsonify({'error': 'trade_history_failed'}), 500
+
+
+# ── Batch Bot Seed & Auto-Creation ───────────────────────────────────────────
+
+@mobile_api.route('/admin/bot/batch-seed', methods=['POST'])
+@require_admin_key
+def bot_batch_seed():
+    """
+    Create multiple bots at once with strategy profiles and initial portfolios.
+    Reuses bot_personas + bot_executor logic server-side.
+    
+    Request body:
+    {
+        "count": 5,
+        "strategy": "momentum",   // optional — random if omitted
+        "industry": "Technology"   // optional — random if omitted
+    }
+    """
+    from models import db, User
+    
+    data = request.get_json() or {}
+    count = min(data.get('count', 1), 20)  # Cap at 20 per request
+    strategy = data.get('strategy')
+    industry = data.get('industry')
+    
+    if count < 1:
+        return jsonify({'error': 'count must be >= 1'}), 400
+    
+    try:
+        from bot_personas import generate_bot_persona, generate_bot_batch
+        from bot_strategies import STRATEGY_TEMPLATES, generate_strategy_profile
+    except ImportError as ie:
+        logger.error(f"Bot modules not available: {ie}")
+        return jsonify({'error': 'bot_modules_unavailable', 'detail': str(ie)}), 500
+    
+    # Validate strategy if provided
+    if strategy and strategy not in STRATEGY_TEMPLATES:
+        return jsonify({'error': 'invalid_strategy', 'valid': list(STRATEGY_TEMPLATES.keys())}), 400
+    
+    created = []
+    errors = []
+    
+    personas = generate_bot_batch(count, industry=industry, strategy=strategy)
+    
+    for i, persona in enumerate(personas):
+        username = persona['username']
+        email = persona['email']
+        ind = persona['industry']
+        strat = persona['strategy_name']
+        profile = persona['strategy_profile']
+        sub_count = persona.get('subscriber_count', 0)
+        
+        try:
+            # Check for existing user
+            existing = User.query.filter(
+                (User.username == username) | (User.email == email)
+            ).first()
+            if existing:
+                # Append random suffix
+                import random as _rnd
+                username = username + str(_rnd.randint(100, 999))
+                email = f"{username.replace('-', '.').replace('_', '.')}@apestogether.ai"
+            
+            user = User(
+                username=username,
+                email=email,
+                portfolio_slug=_generate_portfolio_slug(),
+                role='agent',
+                created_by='system',
+                subscription_price=9.00,
+                extra_data={
+                    'industry': ind,
+                    'bot_active': True,
+                    'bot_created_at': datetime.utcnow().isoformat(),
+                    'trading_style': strat,
+                    'strategy_profile': profile,
+                }
+            )
+            db.session.add(user)
+            db.session.flush()  # Get user.id
+            
+            user_id = user.id
+            
+            # Seed initial portfolio using attention universe + real prices
+            stock_count = 0
+            attention = profile.get('attention_universe', [])
+            if attention:
+                stock_count = _seed_bot_portfolio(user_id, profile, attention)
+            
+            # Gift initial subscribers
+            gifted = 0
+            if sub_count > 0:
+                gifted = _gift_bot_subscribers(user_id, sub_count)
+            
+            created.append({
+                'user_id': user_id,
+                'username': username,
+                'industry': ind,
+                'strategy': strat,
+                'stocks_seeded': stock_count,
+                'subscribers_gifted': gifted,
+            })
+            
+        except Exception as e:
+            logger.error(f"Batch seed error for {username}: {e}")
+            errors.append({'username': username, 'error': str(e)})
+    
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'created': len(created),
+        'requested': count,
+        'bots': created,
+        'errors': errors,
+    })
+
+
+def _seed_bot_portfolio(user_id, profile, attention):
+    """Seed a bot's initial portfolio with stocks from its attention universe."""
+    from models import db, Stock
+    import random as _rnd
+    import math
+    
+    num_stocks = _rnd.randint(4, min(10, len(attention)))
+    selected = _rnd.sample(attention, num_stocks)
+    
+    # Log-normal portfolio size: median ~$40K, range $5K–$500K
+    raw = _rnd.lognormvariate(10.6, 0.9)
+    portfolio_size = max(5_000, min(500_000, raw))
+    
+    added = 0
+    for ticker in selected:
+        # Use a reasonable default price since we don't have live data in this context
+        # The bot_agent CLI fetches real prices; here we approximate
+        try:
+            price = _get_approximate_price(ticker)
+            if price <= 0:
+                continue
+            
+            allocation = portfolio_size / num_stocks
+            qty = max(1, int(allocation / price))
+            qty = max(1, int(qty * _rnd.uniform(0.7, 1.3)))
+            if qty > 20:
+                qty = round(qty / 5) * 5
+            elif qty > 10:
+                qty = round(qty / 2) * 2
+            
+            price_noise = _rnd.uniform(-0.02, 0.02)
+            purchase_price = round(price * (1 + price_noise), 2)
+            
+            stock = Stock(
+                user_id=user_id,
+                ticker=ticker.upper(),
+                quantity=qty,
+                purchase_price=purchase_price,
+                purchase_date=datetime.utcnow().date(),
+            )
+            db.session.add(stock)
+            added += 1
+        except Exception as e:
+            logger.debug(f"Skip seeding {ticker} for user {user_id}: {e}")
+    
+    return added
+
+
+def _get_approximate_price(ticker):
+    """Get an approximate stock price. Uses MarketData cache or hardcoded fallbacks."""
+    try:
+        from models import MarketData
+        md = MarketData.query.filter_by(ticker=ticker.upper()).first()
+        if md and md.current_price and md.current_price > 0:
+            return float(md.current_price)
+    except Exception:
+        pass
+    
+    # Fallback: approximate prices for common tickers
+    APPROX = {
+        'AAPL': 195, 'MSFT': 420, 'GOOGL': 175, 'AMZN': 185, 'NVDA': 880,
+        'META': 500, 'TSLA': 175, 'JPM': 195, 'V': 280, 'JNJ': 155,
+        'UNH': 520, 'XOM': 105, 'PG': 165, 'MA': 460, 'HD': 370,
+        'COST': 730, 'ABBV': 170, 'MRK': 125, 'CRM': 270, 'PEP': 175,
+        'KO': 60, 'LLY': 780, 'AVGO': 1350, 'TMO': 560, 'ACN': 340,
+        'MCD': 280, 'CSCO': 50, 'ABT': 110, 'DHR': 250, 'TXN': 170,
+        'NEE': 75, 'PM': 95, 'WMT': 170, 'DIS': 110, 'NKE': 95,
+        'INTC': 30, 'AMD': 160, 'QCOM': 170, 'BA': 190, 'GS': 380,
+        'SPY': 510, 'QQQ': 440, 'IWM': 205, 'VTI': 260,
+    }
+    return APPROX.get(ticker.upper(), 100)  # Default $100 for unknowns
+
+
+def _gift_bot_subscribers(user_id, count):
+    """Gift subscribers to a bot during batch creation."""
+    from models import db, AdminSubscription, UserPortfolioStats
+    
+    try:
+        admin_sub = AdminSubscription.query.filter_by(user_id=user_id).first()
+        if not admin_sub:
+            admin_sub = AdminSubscription(user_id=user_id, bonus_subscriber_count=0)
+            db.session.add(admin_sub)
+        
+        admin_sub.bonus_subscriber_count = (admin_sub.bonus_subscriber_count or 0) + count
+        
+        # Update stats
+        stats = UserPortfolioStats.query.filter_by(user_id=user_id).first()
+        if not stats:
+            stats = UserPortfolioStats(user_id=user_id, subscriber_count=0)
+            db.session.add(stats)
+        stats.subscriber_count = (stats.subscriber_count or 0) + count
+        
+        return count
+    except Exception as e:
+        logger.error(f"Gift subscribers error for user {user_id}: {e}")
+        return 0
+
+
+@mobile_api.route('/admin/bot/auto-create-settings', methods=['GET'])
+@require_admin_key
+def bot_auto_create_settings_get():
+    """Get the current auto-creation settings."""
+    from models import db
+    
+    try:
+        # Store settings in a simple key-value approach using the database
+        # We'll use a settings row in a lightweight way
+        settings = _get_auto_create_settings()
+        return jsonify({'success': True, **settings})
+    except Exception as e:
+        logger.error(f"Get auto-create settings error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@mobile_api.route('/admin/bot/auto-create-settings', methods=['POST'])
+@require_admin_key
+def bot_auto_create_settings_set():
+    """
+    Update auto-creation settings.
+    
+    Request body:
+    {
+        "enabled": true,
+        "daily_count": 3,
+        "strategy": "random",     // or specific archetype name
+        "industry": "random"      // or specific industry
+    }
+    """
+    from models import db
+    
+    data = request.get_json() or {}
+    
+    try:
+        settings = _get_auto_create_settings()
+        
+        if 'enabled' in data:
+            settings['enabled'] = bool(data['enabled'])
+        if 'daily_count' in data:
+            settings['daily_count'] = max(0, min(10, int(data['daily_count'])))
+        if 'strategy' in data:
+            settings['strategy'] = data['strategy'] if data['strategy'] != 'random' else None
+        if 'industry' in data:
+            settings['industry'] = data['industry'] if data['industry'] != 'random' else None
+        
+        _save_auto_create_settings(settings)
+        
+        return jsonify({'success': True, **settings})
+    except Exception as e:
+        logger.error(f"Save auto-create settings error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@mobile_api.route('/admin/bot/auto-create-run', methods=['POST'])
+@require_admin_key
+def bot_auto_create_run():
+    """
+    Cron-triggered endpoint: create bots according to auto-creation settings.
+    Called daily by an external scheduler (e.g., Vercel cron, GAS timer).
+    Only creates bots if auto-creation is enabled.
+    """
+    settings = _get_auto_create_settings()
+    
+    if not settings.get('enabled'):
+        return jsonify({'success': True, 'message': 'Auto-creation is disabled', 'created': 0})
+    
+    count = settings.get('daily_count', 0)
+    if count <= 0:
+        return jsonify({'success': True, 'message': 'daily_count is 0', 'created': 0})
+    
+    from models import db, User
+    try:
+        from bot_personas import generate_bot_batch
+        from bot_strategies import STRATEGY_TEMPLATES
+    except ImportError as ie:
+        return jsonify({'error': 'bot_modules_unavailable', 'detail': str(ie)}), 500
+    
+    strategy = settings.get('strategy')
+    industry = settings.get('industry')
+    
+    if strategy and strategy not in STRATEGY_TEMPLATES:
+        strategy = None
+    
+    personas = generate_bot_batch(count, industry=industry, strategy=strategy)
+    created = []
+    
+    for persona in personas:
+        username = persona['username']
+        email = persona['email']
+        ind = persona['industry']
+        strat = persona['strategy_name']
+        profile = persona['strategy_profile']
+        sub_count = persona.get('subscriber_count', 0)
+        
+        try:
+            existing = User.query.filter(
+                (User.username == username) | (User.email == email)
+            ).first()
+            if existing:
+                import random as _rnd
+                username = username + str(_rnd.randint(100, 999))
+                email = f"{username.replace('-', '.').replace('_', '.')}@apestogether.ai"
+            
+            user = User(
+                username=username, email=email,
+                portfolio_slug=_generate_portfolio_slug(),
+                role='agent', created_by='system', subscription_price=9.00,
+                extra_data={
+                    'industry': ind, 'bot_active': True,
+                    'bot_created_at': datetime.utcnow().isoformat(),
+                    'trading_style': strat, 'strategy_profile': profile,
+                }
+            )
+            db.session.add(user)
+            db.session.flush()
+            
+            stock_count = 0
+            attention = profile.get('attention_universe', [])
+            if attention:
+                stock_count = _seed_bot_portfolio(user.id, profile, attention)
+            
+            gifted = _gift_bot_subscribers(user.id, sub_count) if sub_count > 0 else 0
+            
+            created.append({
+                'user_id': user.id, 'username': username,
+                'strategy': strat, 'industry': ind,
+            })
+        except Exception as e:
+            logger.error(f"Auto-create error for {username}: {e}")
+    
+    db.session.commit()
+    
+    # Log the auto-creation event
+    _save_auto_create_settings({**settings, 'last_run': datetime.utcnow().isoformat(), 'last_created': len(created)})
+    
+    return jsonify({
+        'success': True,
+        'created': len(created),
+        'bots': created,
+    })
+
+
+# ── Auto-creation settings helpers (stored in environment/DB) ────────────────
+
+_AUTO_CREATE_CACHE = {}
+
+def _get_auto_create_settings():
+    """Load auto-creation settings. Uses in-memory cache backed by User extra_data on admin account."""
+    global _AUTO_CREATE_CACHE
+    if _AUTO_CREATE_CACHE:
+        return dict(_AUTO_CREATE_CACHE)
+    
+    try:
+        from models import User
+        admin_email = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
+        admin = User.query.filter_by(email=admin_email).first()
+        if admin and admin.extra_data and 'auto_create_bots' in admin.extra_data:
+            _AUTO_CREATE_CACHE = admin.extra_data['auto_create_bots']
+            return dict(_AUTO_CREATE_CACHE)
+    except Exception:
+        pass
+    
+    return {
+        'enabled': False,
+        'daily_count': 2,
+        'strategy': None,
+        'industry': None,
+        'last_run': None,
+        'last_created': 0,
+    }
+
+
+def _save_auto_create_settings(settings):
+    """Persist auto-creation settings to the admin user's extra_data."""
+    global _AUTO_CREATE_CACHE
+    _AUTO_CREATE_CACHE = dict(settings)
+    
+    try:
+        from models import db, User
+        admin_email = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
+        admin = User.query.filter_by(email=admin_email).first()
+        if admin:
+            extra = admin.extra_data or {}
+            extra['auto_create_bots'] = settings
+            admin.extra_data = extra
+            db.session.commit()
+    except Exception as e:
+        logger.error(f"Save auto-create settings error: {e}")

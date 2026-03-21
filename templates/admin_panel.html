@@ -381,32 +381,63 @@ const CommandCenter = ({ api }) => {
 };
 
 // ─── Page: Bot Management ───────────────────────────────────────────────────
+const STRATEGIES = [
+  { value: '', label: 'Random (diverse)' },
+  { value: 'momentum', label: 'Momentum' }, { value: 'value', label: 'Value' },
+  { value: 'news_reactor', label: 'News Reactor' }, { value: 'swing', label: 'Swing' },
+  { value: 'earnings', label: 'Earnings' }, { value: 'sector_rotation', label: 'Sector Rotation' },
+  { value: 'insider_follower', label: 'Insider Follower' }, { value: 'dividend_growth', label: 'Dividend Growth' },
+  { value: 'social_momentum', label: 'Social Momentum' }, { value: 'balanced', label: 'Balanced' },
+];
+const INDUSTRIES = [
+  { value: '', label: 'Random (diverse)' },
+  { value: 'Technology', label: 'Technology' }, { value: 'Healthcare', label: 'Healthcare' },
+  { value: 'Energy', label: 'Energy' }, { value: 'Finance', label: 'Finance' },
+  { value: 'Consumer', label: 'Consumer' }, { value: 'Industrial', label: 'Industrial' },
+  { value: 'Real Estate', label: 'Real Estate' }, { value: 'ETF', label: 'ETF' },
+  { value: 'General', label: 'General' },
+];
+
 const BotManagement = ({ api }) => {
   const [bots, setBots] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
-  const [showOtp, setShowOtp] = useState(null); // { action, botId, ... }
-  const [createForm, setCreateForm] = useState({ username: '', industry: 'Technology', trading_style: 'balanced', trade_frequency: 'daily', max_stocks: 8 });
+  const [showOtp, setShowOtp] = useState(null);
+  const [batchForm, setBatchForm] = useState({ count: 3, strategy: '', industry: '' });
+  const [batchResult, setBatchResult] = useState(null);
+  const [batchLoading, setBatchLoading] = useState(false);
+
+  // Auto-creation state
+  const [autoSettings, setAutoSettings] = useState(null);
+  const [autoSaving, setAutoSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api('/admin/bot/list-users?role=agent');
-      setBots(data.users || []);
+      const [botData, settings] = await Promise.all([
+        api('/admin/bot/list-users?role=agent'),
+        api('/admin/bot/auto-create-settings').catch(() => null),
+      ]);
+      setBots(botData.users || []);
+      if (settings) setAutoSettings(settings);
     } catch (e) { console.error(e); }
     setLoading(false);
   }, [api]);
 
   useEffect(() => { load(); }, [load]);
 
-  const handleCreate = async () => {
+  const handleBatchCreate = async () => {
+    setBatchLoading(true);
+    setBatchResult(null);
     try {
-      const username = createForm.username || `${createForm.industry.toLowerCase()}-${Math.random().toString(36).slice(2,6)}`;
-      const email = `${username.replace(/[^a-z0-9]/g, '.')}@apestogether.ai`;
-      await api('/admin/bot/create-user', { method: 'POST', body: { username, email, industry: createForm.industry } });
-      setShowCreate(false);
+      const body = { count: batchForm.count };
+      if (batchForm.strategy) body.strategy = batchForm.strategy;
+      if (batchForm.industry) body.industry = batchForm.industry;
+      const res = await api('/admin/bot/batch-seed', { method: 'POST', body });
+      setBatchResult(res);
       load();
-    } catch (e) { alert('Create failed: ' + e.message); }
+    } catch (e) { setBatchResult({ error: e.message }); }
+    setBatchLoading(false);
   };
 
   const handleOtpAction = async (otp) => {
@@ -417,16 +448,24 @@ const BotManagement = ({ api }) => {
         await api('/admin/bot/deactivate', { method: 'POST', body: { user_id: userId }, otp });
       } else if (action === 'reactivate') {
         await api('/admin/bot/reactivate', { method: 'POST', body: { user_id: userId }, otp });
-      } else if (action === 'scale') {
-        await api('/admin/bot/scale-holdings', { method: 'POST', body: { user_id: userId, multiplier: showOtp.multiplier || 1 }, otp });
       }
       setShowOtp(null);
       load();
     } catch (e) { alert('Action failed: ' + e.message); }
   };
 
+  const saveAutoSettings = async (patch) => {
+    setAutoSaving(true);
+    try {
+      const res = await api('/admin/bot/auto-create-settings', { method: 'POST', body: patch });
+      setAutoSettings(res);
+    } catch (e) { alert('Save failed: ' + e.message); }
+    setAutoSaving(false);
+  };
+
   const cols = [
     { key: 'username', label: 'Username' },
+    { key: 'strategy', label: 'Strategy', render: (v) => <Badge text={v || '—'} color="var(--accent-dim)" /> },
     { key: 'industry', label: 'Industry', render: (v) => <Badge text={v || 'General'} color="var(--blue)" /> },
     { key: 'stock_count', label: 'Stocks' },
     { key: 'subscriber_count', label: 'Subs' },
@@ -444,6 +483,7 @@ const BotManagement = ({ api }) => {
   const botData = bots.map(b => ({
     ...b,
     industry: b.extra_data?.industry || b.industry || 'General',
+    strategy: b.extra_data?.trading_style || '—',
     stock_count: b.stock_count || 0,
     subscriber_count: b.subscriber_count || 0,
     bot_active: b.bot_active !== false,
@@ -458,30 +498,111 @@ const BotManagement = ({ api }) => {
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn variant="secondary" small onClick={load}>{Icons.refresh}</Btn>
-          <Btn onClick={() => setShowCreate(true)}>{Icons.plus} Create Bot</Btn>
+          <Btn onClick={() => setShowCreate(true)}>{Icons.plus} Batch Create</Btn>
         </div>
       </div>
+
+      {/* Auto-Creation Settings Card */}
+      {autoSettings && (
+        <Card>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>Daily Auto-Creation</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                Automatically create bots each day via cron
+                {autoSettings.last_run && <span> &middot; Last run: {new Date(autoSettings.last_run).toLocaleDateString()}</span>}
+                {autoSettings.last_created > 0 && <span> ({autoSettings.last_created} created)</span>}
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {autoSaving && <Spinner />}
+              <button
+                onClick={() => saveAutoSettings({ enabled: !autoSettings.enabled })}
+                style={{
+                  width: 48, height: 26, borderRadius: 13, border: 'none', cursor: 'pointer',
+                  background: autoSettings.enabled ? 'var(--accent)' : 'var(--border-light)',
+                  position: 'relative', transition: 'background .2s',
+                }}>
+                <div style={{
+                  width: 20, height: 20, borderRadius: '50%', background: '#fff',
+                  position: 'absolute', top: 3,
+                  left: autoSettings.enabled ? 25 : 3,
+                  transition: 'left .2s', boxShadow: '0 1px 3px rgba(0,0,0,.3)',
+                }} />
+              </button>
+            </div>
+          </div>
+          {autoSettings.enabled && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4, fontWeight: 500 }}>Bots Per Day</label>
+                <select value={autoSettings.daily_count || 2} onChange={e => saveAutoSettings({ daily_count: parseInt(e.target.value) })}
+                  style={{ width: '100%', padding: '8px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-light)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 13 }}>
+                  {[1,2,3,4,5,6,7,8,9,10].map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4, fontWeight: 500 }}>Strategy</label>
+                <select value={autoSettings.strategy || ''} onChange={e => saveAutoSettings({ strategy: e.target.value || 'random' })}
+                  style={{ width: '100%', padding: '8px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-light)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 13 }}>
+                  {STRATEGIES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4, fontWeight: 500 }}>Industry</label>
+                <select value={autoSettings.industry || ''} onChange={e => saveAutoSettings({ industry: e.target.value || 'random' })}
+                  style={{ width: '100%', padding: '8px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-light)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 13 }}>
+                  {INDUSTRIES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
 
       <Card style={{ padding: 0 }}>
         {loading ? <div style={{ padding: 40, textAlign: 'center' }}><Spinner /></div> : <Table columns={cols} data={botData} />}
       </Card>
 
-      {/* Create Bot Modal */}
-      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create New Bot">
-        <Input label="Username (auto-generated if blank)" value={createForm.username} onChange={e => setCreateForm(p => ({ ...p, username: e.target.value }))} placeholder="tech-falcon" />
-        <Select label="Industry" value={createForm.industry} onChange={e => setCreateForm(p => ({ ...p, industry: e.target.value }))} options={[
-          { value: 'Technology', label: 'Technology' }, { value: 'Healthcare', label: 'Healthcare' },
-          { value: 'Energy', label: 'Energy' }, { value: 'Finance', label: 'Finance' },
-          { value: 'Consumer', label: 'Consumer' }, { value: 'Industrial', label: 'Industrial' },
-          { value: 'Crypto', label: 'Crypto' }, { value: 'General', label: 'General' },
-        ]} />
-        <Select label="Trading Style" value={createForm.trading_style} onChange={e => setCreateForm(p => ({ ...p, trading_style: e.target.value }))} options={[
-          { value: 'balanced', label: 'Balanced' }, { value: 'momentum', label: 'Momentum' },
-          { value: 'value', label: 'Value' }, { value: 'swing', label: 'Swing' },
-        ]} />
+      {/* Batch Create Modal */}
+      <Modal open={showCreate} onClose={() => { setShowCreate(false); setBatchResult(null); }} title="Batch Create Bots">
+        <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr', gap: 12, marginBottom: 14 }}>
+          <div>
+            <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4, fontWeight: 500 }}>Count</label>
+            <input type="number" min="1" max="20" value={batchForm.count}
+              onChange={e => setBatchForm(p => ({ ...p, count: Math.max(1, Math.min(20, parseInt(e.target.value) || 1)) }))}
+              style={{ width: '100%', padding: '10px 14px', background: 'var(--bg-elevated)', border: '1px solid var(--border-light)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 14, outline: 'none' }} />
+          </div>
+          <Select label="Strategy" value={batchForm.strategy} onChange={e => setBatchForm(p => ({ ...p, strategy: e.target.value }))} options={STRATEGIES} />
+        </div>
+        <Select label="Industry" value={batchForm.industry} onChange={e => setBatchForm(p => ({ ...p, industry: e.target.value }))} options={INDUSTRIES} />
+
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '10px 0', padding: '10px 14px', background: 'var(--bg-elevated)', borderRadius: 8, lineHeight: 1.6 }}>
+          Each bot gets a unique persona, Dirichlet-sampled strategy weights, initial portfolio (4-10 stocks with real-ish prices), and gifted subscribers.
+        </div>
+
+        {batchResult && (
+          <div style={{ margin: '10px 0', padding: '12px 14px', borderRadius: 8, background: batchResult.error ? 'var(--red-dim)' : 'rgba(45,212,168,0.1)', border: `1px solid ${batchResult.error ? 'var(--red)' : 'var(--accent)'}` }}>
+            {batchResult.error ? (
+              <div style={{ color: 'var(--red)', fontSize: 13 }}>Error: {batchResult.error}</div>
+            ) : (
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)', marginBottom: 6 }}>Created {batchResult.created}/{batchResult.requested} bots</div>
+                {(batchResult.bots || []).map((b, i) => (
+                  <div key={i} style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                    {b.username} &middot; {b.strategy} &middot; {b.industry} &middot; {b.stocks_seeded} stocks &middot; {b.subscribers_gifted} subs
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
-          <Btn variant="secondary" onClick={() => setShowCreate(false)}>Cancel</Btn>
-          <Btn onClick={handleCreate}>Create & Seed</Btn>
+          <Btn variant="secondary" onClick={() => { setShowCreate(false); setBatchResult(null); }}>Close</Btn>
+          <Btn onClick={handleBatchCreate} disabled={batchLoading}>
+            {batchLoading ? <><Spinner /> Creating...</> : <>{Icons.plus} Create {batchForm.count} Bot{batchForm.count > 1 ? 's' : ''}</>}
+          </Btn>
         </div>
       </Modal>
 
