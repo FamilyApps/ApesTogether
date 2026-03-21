@@ -1459,7 +1459,7 @@ def admin_panel():
     # Must verify TOTP every session
     if not session.get('admin_2fa_verified'):
         return render_template('admin_2fa_gate.html')
-    return render_template('admin_panel.html')
+    return render_template('admin_panel.html', admin_api_key=os.environ.get('ADMIN_API_KEY', ''))
 
 @app.route('/admin-panel/verify-2fa', methods=['POST'])
 def admin_panel_verify_2fa():

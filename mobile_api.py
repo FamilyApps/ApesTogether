@@ -3398,16 +3398,28 @@ def bot_revenue_summary():
         for uid, cnt in users_with_real:
             if uid not in existing_ids:
                 user = User.query.get(uid)
+                is_bot = user and user.role == 'agent'
                 influencers.append({
                     'user_id': uid,
                     'username': user.username if user else f'user_{uid}',
+                    'is_company_bot': is_bot,
                     'real_subs': cnt,
                     'gifted_subs': 0,
                     'total_subs': cnt,
-                    'real_payout': round(cnt * influencer_pay, 2),
+                    'real_payout': 0.0 if is_bot else round(cnt * influencer_pay, 2),
                     'gifted_payout': 0,
-                    'total_payout': round(cnt * influencer_pay, 2),
+                    'total_payout': 0.0 if is_bot else round(cnt * influencer_pay, 2),
                 })
+        
+        # Mark bot-owned influencers in existing list too
+        for inf in influencers:
+            if 'is_company_bot' not in inf:
+                user = User.query.get(inf['user_id'])
+                inf['is_company_bot'] = user and user.role == 'agent'
+                if inf['is_company_bot']:
+                    inf['real_payout'] = 0.0
+                    inf['gifted_payout'] = 0.0
+                    inf['total_payout'] = 0.0
         
         return jsonify({
             'real_subscriptions': real_subs,

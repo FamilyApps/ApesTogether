@@ -36,6 +36,7 @@ input,select,textarea,button{font-family:inherit}
 </head>
 <body>
 <div id="root"></div>
+<script>window.__ADMIN_KEY__ = "{{ admin_api_key }}";</script>
 {% raw %}<script type="text/babel">
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
 const { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area, CartesianGrid } = Recharts;
@@ -49,6 +50,7 @@ const API_BASE = '/api/mobile';
 function useApi() {
   const api = useCallback(async (endpoint, opts = {}) => {
     const headers = { 'Content-Type': 'application/json' };
+    if (window.__ADMIN_KEY__) headers['X-Admin-Key'] = window.__ADMIN_KEY__;
     if (opts.otp) headers['X-Admin-OTP'] = opts.otp;
     const url = `${API_BASE}${endpoint}`;
     const res = await fetch(url, {

@@ -461,6 +461,15 @@ async def validate_and_save_purchase(
         db.session.commit()
         return True, {'purchase_id': existing.id, 'updated': True, **result}
     
+    # Check if the portfolio owner is a company-owned bot — if so, the
+    # influencer share stays with the company (no payout needed).
+    from models import User
+    portfolio_owner = User.query.get(subscribed_to_id)
+    is_company_bot = portfolio_owner and portfolio_owner.role == 'agent'
+    
+    inf_payout = 0.0 if is_company_bot else result['influencer_payout']
+    plat_rev = (result['platform_revenue'] + result['influencer_payout']) if is_company_bot else result['platform_revenue']
+    
     # Create new purchase record
     purchase = InAppPurchase(
         subscriber_id=subscriber_id,
@@ -474,8 +483,8 @@ async def validate_and_save_purchase(
         purchase_date=result['purchase_date'],
         expires_date=result.get('expires_date'),
         price=result['price'],
-        influencer_payout=result['influencer_payout'],
-        platform_revenue=result['platform_revenue'],
+        influencer_payout=inf_payout,
+        platform_revenue=plat_rev,
         store_fee=result['store_fee'],
     )
     db.session.add(purchase)
