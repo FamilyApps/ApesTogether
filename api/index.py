@@ -21835,6 +21835,122 @@ def cleanup_intraday_data_cron():
         logger.error(f"Automated cleanup error: {str(e)}")
         return jsonify({'error': f'Cleanup error: {str(e)}'}), 500
 
+@app.route('/api/cron/auto-create-bots', methods=['POST', 'GET'])
+def auto_create_bots_cron():
+    """Daily cron endpoint to auto-create bot accounts per admin settings."""
+    try:
+        # Vercel cron sends requests without auth headers, but we verify via CRON_SECRET
+        # or accept Vercel's built-in cron verification
+        auth_header = request.headers.get('Authorization', '')
+        expected_token = os.environ.get('CRON_SECRET', '')
+        admin_key = os.environ.get('ADMIN_API_KEY', '')
+        
+        # Accept: Bearer CRON_SECRET, or X-Admin-Key, or Vercel cron (no auth but from Vercel)
+        is_cron_auth = expected_token and auth_header.startswith('Bearer ') and auth_header[7:] == expected_token
+        is_admin_key = request.headers.get('X-Admin-Key') == admin_key and admin_key
+        is_vercel_cron = request.headers.get('x-vercel-cron') == '1'
+        
+        if not (is_cron_auth or is_admin_key or is_vercel_cron):
+            logger.warning("Unauthorized auto-create-bots attempt")
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        # Import and call the auto-create logic from mobile_api
+        from mobile_api import _get_auto_create_settings, _save_auto_create_settings
+        from mobile_api import _seed_bot_portfolio, _gift_bot_subscribers, _generate_portfolio_slug
+        from models import db, User
+        
+        settings = _get_auto_create_settings()
+        
+        if not settings.get('enabled'):
+            return jsonify({'success': True, 'message': 'Auto-creation is disabled', 'created': 0})
+        
+        count = settings.get('daily_count', 0)
+        if count <= 0:
+            return jsonify({'success': True, 'message': 'daily_count is 0', 'created': 0})
+        
+        try:
+            from bot_personas import generate_bot_batch
+            from bot_strategies import STRATEGY_TEMPLATES
+        except ImportError as ie:
+            logger.error(f"Bot modules not available for auto-create: {ie}")
+            return jsonify({'error': 'bot_modules_unavailable', 'detail': str(ie)}), 500
+        
+        strategy = settings.get('strategy')
+        industry = settings.get('industry')
+        if strategy and strategy not in STRATEGY_TEMPLATES:
+            strategy = None
+        
+        personas = generate_bot_batch(count, industry=industry, strategy=strategy)
+        created = []
+        
+        for persona in personas:
+            username = persona['username']
+            email = persona['email']
+            ind = persona['industry']
+            strat = persona['strategy_name']
+            profile = persona['strategy_profile']
+            sub_count = persona.get('subscriber_count', 0)
+            
+            try:
+                existing = User.query.filter(
+                    (User.username == username) | (User.email == email)
+                ).first()
+                if existing:
+                    import random as _rnd
+                    username = username + str(_rnd.randint(100, 999))
+                    email = f"{username.replace('-', '.').replace('_', '.')}@apestogether.ai"
+                
+                user = User(
+                    username=username, email=email,
+                    portfolio_slug=_generate_portfolio_slug(),
+                    role='agent', created_by='system', subscription_price=9.00,
+                    extra_data={
+                        'industry': ind, 'bot_active': True,
+                        'bot_created_at': datetime.utcnow().isoformat(),
+                        'trading_style': strat, 'strategy_profile': profile,
+                    }
+                )
+                db.session.add(user)
+                db.session.flush()
+                
+                stock_count = 0
+                attention = profile.get('attention_universe', [])
+                if attention:
+                    stock_count = _seed_bot_portfolio(user.id, profile, attention)
+                
+                gifted = _gift_bot_subscribers(user.id, sub_count) if sub_count > 0 else 0
+                
+                created.append({
+                    'user_id': user.id, 'username': username,
+                    'strategy': strat, 'industry': ind,
+                    'stocks': stock_count, 'subs': gifted,
+                })
+            except Exception as e:
+                logger.error(f"Auto-create bot error for {username}: {e}")
+        
+        db.session.commit()
+        
+        # Update last_run timestamp
+        _save_auto_create_settings({
+            **settings,
+            'last_run': datetime.utcnow().isoformat(),
+            'last_created': len(created),
+        })
+        
+        logger.info(f"Auto-create bots cron: created {len(created)}/{count} bots")
+        return jsonify({
+            'success': True,
+            'created': len(created),
+            'requested': count,
+            'bots': created,
+        })
+        
+    except Exception as e:
+        logger.error(f"Auto-create bots cron error: {e}")
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
 @app.route('/api/cron/update-leaderboard', methods=['POST'])
 def update_leaderboard_cron():
     """Automated cron endpoint to update leaderboard cache - legacy endpoint for backward compatibility"""

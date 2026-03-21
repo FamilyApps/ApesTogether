@@ -407,8 +407,8 @@ const BotManagement = ({ api }) => {
   const [batchResult, setBatchResult] = useState(null);
   const [batchLoading, setBatchLoading] = useState(false);
 
-  // Auto-creation state
-  const [autoSettings, setAutoSettings] = useState(null);
+  // Auto-creation state — always show card with defaults
+  const [autoSettings, setAutoSettings] = useState({ enabled: false, daily_count: 2, strategy: null, industry: null, last_run: null, last_created: 0 });
   const [autoSaving, setAutoSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -416,10 +416,10 @@ const BotManagement = ({ api }) => {
     try {
       const [botData, settings] = await Promise.all([
         api('/admin/bot/list-users?role=agent'),
-        api('/admin/bot/auto-create-settings').catch(() => null),
+        api('/admin/bot/auto-create-settings').catch(() => ({})),
       ]);
       setBots(botData.users || []);
-      if (settings) setAutoSettings(settings);
+      if (settings && settings.success !== undefined) setAutoSettings(prev => ({ ...prev, ...settings }));
     } catch (e) { console.error(e); }
     setLoading(false);
   }, [api]);
@@ -503,62 +503,60 @@ const BotManagement = ({ api }) => {
       </div>
 
       {/* Auto-Creation Settings Card */}
-      {autoSettings && (
-        <Card>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 600 }}>Daily Auto-Creation</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-                Automatically create bots each day via cron
-                {autoSettings.last_run && <span> &middot; Last run: {new Date(autoSettings.last_run).toLocaleDateString()}</span>}
-                {autoSettings.last_created > 0 && <span> ({autoSettings.last_created} created)</span>}
-              </div>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {autoSaving && <Spinner />}
-              <button
-                onClick={() => saveAutoSettings({ enabled: !autoSettings.enabled })}
-                style={{
-                  width: 48, height: 26, borderRadius: 13, border: 'none', cursor: 'pointer',
-                  background: autoSettings.enabled ? 'var(--accent)' : 'var(--border-light)',
-                  position: 'relative', transition: 'background .2s',
-                }}>
-                <div style={{
-                  width: 20, height: 20, borderRadius: '50%', background: '#fff',
-                  position: 'absolute', top: 3,
-                  left: autoSettings.enabled ? 25 : 3,
-                  transition: 'left .2s', boxShadow: '0 1px 3px rgba(0,0,0,.3)',
-                }} />
-              </button>
+      <Card>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 600 }}>Daily Auto-Creation</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+              Automatically create bots each day via cron
+              {autoSettings.last_run && <span> &middot; Last run: {new Date(autoSettings.last_run).toLocaleDateString()}</span>}
+              {autoSettings.last_created > 0 && <span> ({autoSettings.last_created} created)</span>}
             </div>
           </div>
-          {autoSettings.enabled && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-              <div>
-                <label style={{ display: 'block', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4, fontWeight: 500 }}>Bots Per Day</label>
-                <select value={autoSettings.daily_count || 2} onChange={e => saveAutoSettings({ daily_count: parseInt(e.target.value) })}
-                  style={{ width: '100%', padding: '8px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-light)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 13 }}>
-                  {[1,2,3,4,5,6,7,8,9,10].map(n => <option key={n} value={n}>{n}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4, fontWeight: 500 }}>Strategy</label>
-                <select value={autoSettings.strategy || ''} onChange={e => saveAutoSettings({ strategy: e.target.value || 'random' })}
-                  style={{ width: '100%', padding: '8px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-light)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 13 }}>
-                  {STRATEGIES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4, fontWeight: 500 }}>Industry</label>
-                <select value={autoSettings.industry || ''} onChange={e => saveAutoSettings({ industry: e.target.value || 'random' })}
-                  style={{ width: '100%', padding: '8px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-light)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 13 }}>
-                  {INDUSTRIES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-                </select>
-              </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {autoSaving && <Spinner />}
+            <button
+              onClick={() => saveAutoSettings({ enabled: !autoSettings.enabled })}
+              style={{
+                width: 48, height: 26, borderRadius: 13, border: 'none', cursor: 'pointer',
+                background: autoSettings.enabled ? 'var(--accent)' : 'var(--border-light)',
+                position: 'relative', transition: 'background .2s',
+              }}>
+              <div style={{
+                width: 20, height: 20, borderRadius: '50%', background: '#fff',
+                position: 'absolute', top: 3,
+                left: autoSettings.enabled ? 25 : 3,
+                transition: 'left .2s', boxShadow: '0 1px 3px rgba(0,0,0,.3)',
+              }} />
+            </button>
+          </div>
+        </div>
+        {autoSettings.enabled && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4, fontWeight: 500 }}>Bots Per Day</label>
+              <select value={autoSettings.daily_count || 2} onChange={e => saveAutoSettings({ daily_count: parseInt(e.target.value) })}
+                style={{ width: '100%', padding: '8px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-light)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 13 }}>
+                {[1,2,3,5,10,15,20,25,30,50,75,100].map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
             </div>
-          )}
-        </Card>
-      )}
+            <div>
+              <label style={{ display: 'block', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4, fontWeight: 500 }}>Strategy</label>
+              <select value={autoSettings.strategy || ''} onChange={e => saveAutoSettings({ strategy: e.target.value || 'random' })}
+                style={{ width: '100%', padding: '8px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-light)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 13 }}>
+                {STRATEGIES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4, fontWeight: 500 }}>Industry</label>
+              <select value={autoSettings.industry || ''} onChange={e => saveAutoSettings({ industry: e.target.value || 'random' })}
+                style={{ width: '100%', padding: '8px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-light)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 13 }}>
+                {INDUSTRIES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+            </div>
+          </div>
+        )}
+      </Card>
 
       <Card style={{ padding: 0 }}>
         {loading ? <div style={{ padding: 40, textAlign: 'center' }}><Spinner /></div> : <Table columns={cols} data={botData} />}
@@ -569,8 +567,8 @@ const BotManagement = ({ api }) => {
         <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr', gap: 12, marginBottom: 14 }}>
           <div>
             <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4, fontWeight: 500 }}>Count</label>
-            <input type="number" min="1" max="20" value={batchForm.count}
-              onChange={e => setBatchForm(p => ({ ...p, count: Math.max(1, Math.min(20, parseInt(e.target.value) || 1)) }))}
+            <input type="number" min="1" max="100" value={batchForm.count}
+              onChange={e => setBatchForm(p => ({ ...p, count: Math.max(1, Math.min(100, parseInt(e.target.value) || 1)) }))}
               style={{ width: '100%', padding: '10px 14px', background: 'var(--bg-elevated)', border: '1px solid var(--border-light)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 14, outline: 'none' }} />
           </div>
           <Select label="Strategy" value={batchForm.strategy} onChange={e => setBatchForm(p => ({ ...p, strategy: e.target.value }))} options={STRATEGIES} />

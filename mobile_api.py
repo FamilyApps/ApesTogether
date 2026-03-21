@@ -3562,7 +3562,7 @@ def bot_batch_seed():
     from models import db, User
     
     data = request.get_json() or {}
-    count = min(data.get('count', 1), 20)  # Cap at 20 per request
+    count = min(data.get('count', 1), 100)  # Cap at 100 per request
     strategy = data.get('strategy')
     industry = data.get('industry')
     
@@ -3797,7 +3797,7 @@ def bot_auto_create_settings_set():
         if 'enabled' in data:
             settings['enabled'] = bool(data['enabled'])
         if 'daily_count' in data:
-            settings['daily_count'] = max(0, min(10, int(data['daily_count'])))
+            settings['daily_count'] = max(0, min(100, int(data['daily_count'])))
         if 'strategy' in data:
             settings['strategy'] = data['strategy'] if data['strategy'] != 'random' else None
         if 'industry' in data:
