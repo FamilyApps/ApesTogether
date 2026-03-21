@@ -408,6 +408,7 @@ const BotManagement = ({ api }) => {
   const [batchForm, setBatchForm] = useState({ count: 3, strategy: '', industry: '' });
   const [batchResult, setBatchResult] = useState(null);
   const [batchLoading, setBatchLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   // Auto-creation state — always show card with defaults
   const [autoSettings, setAutoSettings] = useState({ enabled: false, daily_count: 2, strategy: null, industry: null, last_run: null, last_created: 0 });
@@ -415,6 +416,7 @@ const BotManagement = ({ api }) => {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const [botData, settings] = await Promise.all([
         api('/admin/bot/list-users?role=agent'),
@@ -422,7 +424,7 @@ const BotManagement = ({ api }) => {
       ]);
       setBots(botData.users || []);
       if (settings && settings.success !== undefined) setAutoSettings(prev => ({ ...prev, ...settings }));
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); setError(e.message); }
     setLoading(false);
   }, [api]);
 
@@ -493,6 +495,11 @@ const BotManagement = ({ api }) => {
 
   return (
     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {error && <Card style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid var(--red)' }}>
+        <div style={{ color: 'var(--red)', fontSize: 13, fontWeight: 600 }}>API Error: {error}</div>
+        <div style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 4 }}>Admin key present: {window.__ADMIN_KEY__ ? 'Yes (' + window.__ADMIN_KEY__.slice(0,4) + '...)' : 'NO — check ADMIN_API_KEY env var in Vercel'}</div>
+        <Btn small variant="secondary" onClick={load} style={{ marginTop: 8 }}>{Icons.refresh} Retry</Btn>
+      </Card>}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h2 style={{ fontSize: 20, fontWeight: 700 }}>Bot Fleet</h2>
@@ -723,13 +730,15 @@ const UsersPage = ({ api }) => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [error, setError] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const data = await api('/admin/bot/list-users');
       setUsers(data.users || []);
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); setError(e.message); }
     setLoading(false);
   }, [api]);
 
@@ -751,6 +760,11 @@ const UsersPage = ({ api }) => {
             placeholder="Search users..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
         </div>
       </div>
+      {error && <Card style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid var(--red)' }}>
+        <div style={{ color: 'var(--red)', fontSize: 13, fontWeight: 600 }}>API Error: {error}</div>
+        <div style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 4 }}>Admin key present: {window.__ADMIN_KEY__ ? 'Yes (' + window.__ADMIN_KEY__.slice(0,4) + '...)' : 'NO — check ADMIN_API_KEY env var in Vercel'}</div>
+        <Btn small variant="secondary" onClick={load} style={{ marginTop: 8 }}>{Icons.refresh} Retry</Btn>
+      </Card>}
       <Card style={{ padding: 0 }}>
         {loading ? <div style={{ padding: 40, textAlign: 'center' }}><Spinner /></div> : (
           <Table columns={[

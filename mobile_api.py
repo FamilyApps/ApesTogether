@@ -1804,50 +1804,46 @@ def bot_execute_trade():
 @require_admin_key
 def bot_list_users():
     """List all users with their portfolio info, filterable by role"""
-    from models import User, Stock, Transaction
-    from sqlalchemy import func
+    from models import User
     
     try:
         role_filter = request.args.get('role')  # 'agent', 'user', or None for all
         
-        # Simple two-join query: users + stock counts + trade counts
-        # Skip MobileSubscription join (table may not exist, and adds complexity)
-        stock_sq = db.session.query(
-            Stock.user_id, func.count(Stock.id).label('cnt')
-        ).group_by(Stock.user_id).subquery()
-        
-        trade_sq = db.session.query(
-            Transaction.user_id, func.count(Transaction.id).label('cnt')
-        ).group_by(Transaction.user_id).subquery()
-        
-        query = db.session.query(
-            User,
-            func.coalesce(stock_sq.c.cnt, 0).label('stock_count'),
-            func.coalesce(trade_sq.c.cnt, 0).label('trade_count'),
-        ).outerjoin(stock_sq, User.id == stock_sq.c.user_id
-        ).outerjoin(trade_sq, User.id == trade_sq.c.user_id)
-        
+        # Simple query — no joins, no subqueries
+        query = User.query
         if role_filter:
             query = query.filter(User.role == role_filter)
         
-        rows = query.order_by(User.created_at.desc()).all()
+        users = query.order_by(User.created_at.desc()).all()
         
-        # Get subscriber counts separately (table may not exist)
+        # Batch-fetch stock and trade counts in simple separate queries
+        stock_counts = {}
+        trade_counts = {}
         sub_counts = {}
         try:
-            from models import MobileSubscription
-            sub_rows = db.session.query(
-                MobileSubscription.subscribed_to_id,
-                func.count(MobileSubscription.id)
-            ).filter(MobileSubscription.status == 'active').group_by(
-                MobileSubscription.subscribed_to_id
-            ).all()
-            sub_counts = {uid: cnt for uid, cnt in sub_rows}
+            from models import Stock
+            from sqlalchemy import func
+            for uid, cnt in db.session.query(Stock.user_id, func.count(Stock.id)).group_by(Stock.user_id).all():
+                stock_counts[uid] = cnt
         except Exception:
-            pass  # Table doesn't exist yet — that's fine
+            pass
+        try:
+            from models import Transaction
+            from sqlalchemy import func
+            for uid, cnt in db.session.query(Transaction.user_id, func.count(Transaction.id)).group_by(Transaction.user_id).all():
+                trade_counts[uid] = cnt
+        except Exception:
+            pass
+        try:
+            from models import MobileSubscription
+            from sqlalchemy import func
+            for uid, cnt in db.session.query(MobileSubscription.subscribed_to_id, func.count(MobileSubscription.id)).filter(MobileSubscription.status == 'active').group_by(MobileSubscription.subscribed_to_id).all():
+                sub_counts[uid] = cnt
+        except Exception:
+            pass
         
         user_list = []
-        for u, stock_count, trade_count in rows:
+        for u in users:
             extra = u.extra_data or {}
             industry = extra.get('industry', 'General')
             bot_active = extra.get('bot_active', True) if u.role == 'agent' else None
@@ -1857,15 +1853,15 @@ def bot_list_users():
                 'id': u.id,
                 'username': u.username,
                 'email': u.email,
-                'portfolio_slug': u.portfolio_slug,
+                'portfolio_slug': getattr(u, 'portfolio_slug', None),
                 'role': u.role or 'user',
-                'created_by': u.created_by or 'human',
+                'created_by': getattr(u, 'created_by', 'human') or 'human',
                 'created_at': u.created_at.isoformat() if u.created_at else None,
                 'industry': industry,
                 'strategy': strategy,
                 'bot_active': bot_active,
-                'stock_count': stock_count,
-                'trade_count': trade_count,
+                'stock_count': stock_counts.get(u.id, 0),
+                'trade_count': trade_counts.get(u.id, 0),
                 'subscriber_count': sub_counts.get(u.id, 0)
             })
         return jsonify({'users': user_list, 'total': len(user_list)})
