@@ -484,36 +484,22 @@ try:
     # Flask-Session is NOT used — just Flask's default session mechanism.
     logger.info("Using Flask built-in signed cookie sessions (no DB dependency)")
     
-    # Ensure pending_trade table exists (non-blocking — app works even if this fails)
-    try:
-        with app.app_context():
-            db.session.execute(text("""
-            CREATE TABLE IF NOT EXISTS pending_trade (
-                id SERIAL PRIMARY KEY,
-                email_batch_id VARCHAR(255),
-                ticker VARCHAR(20) NOT NULL,
-                action VARCHAR(10) NOT NULL,
-                quantity FLOAT NOT NULL,
-                price FLOAT,
-                status VARCHAR(20) NOT NULL DEFAULT 'pending',
-                assigned_bot_id INTEGER REFERENCES "user"(id),
-                routed_at TIMESTAMP,
-                source_email_subject TEXT,
-                raw_email_snippet TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                expires_at TIMESTAMP
-            )
-            """))
-            db.session.commit()
-            logger.info("pending_trade table verified/created")
-    except Exception as e:
-        logger.warning(f"Could not create pending_trade table (will retry on first use): {e}")
+    # IMPORTANT: Do NOT run any DB queries at startup (module load time).
+    # On Vercel serverless, the cold-start DB connection may fail (SSL drops,
+    # IPv4/IPv6 mismatch, etc.) and poison the SQLAlchemy session, causing
+    # ALL subsequent requests to fail with "invalid transaction" errors.
+    # Tables like pending_trade should be created via Supabase SQL Editor.
+    
+    # Teardown: ensure every request gets a clean DB session
+    @app.teardown_appcontext
+    def shutdown_session(exception=None):
         try:
-            db.session.rollback()
-            db.session.remove()          # Reset scoped session completely
-            db.engine.dispose()          # Dispose engine to drop any broken connections
+            if exception:
+                db.session.rollback()
+            db.session.remove()
         except Exception:
             pass
+
     logger.info("Database and migrations initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize database: {str(e)}")
