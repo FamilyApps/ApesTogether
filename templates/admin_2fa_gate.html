@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ApesTogether Admin — Verify Identity</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:'Inter',sans-serif;
+  background:#0a0a0f;
+  color:#f0f0f5;
+  height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.card{
+  width:400px;
+  padding:40px;
+  background:#12121a;
+  border:1px solid #1e1e2e;
+  border-radius:20px;
+  animation:fadeIn .3s ease;
+}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.logo{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  margin-bottom:16px;
+}
+.logo-icon{
+  width:40px;height:40px;border-radius:10px;
+  background:linear-gradient(135deg,#2dd4a8,#1a8a6e);
+  display:flex;align-items:center;justify-content:center;
+  font-size:20px;
+}
+.logo-text{font-size:22px;font-weight:700;letter-spacing:-0.5px}
+.subtitle{font-size:14px;color:#8888a0;text-align:center;margin-bottom:8px}
+.desc{font-size:13px;color:#55556a;text-align:center;margin-bottom:28px;line-height:1.6}
+.label{display:block;font-size:12px;color:#8888a0;margin-bottom:6px;font-weight:500}
+.otp-input{
+  width:100%;
+  padding:14px 18px;
+  background:#181822;
+  border:1px solid #2a2a3a;
+  border-radius:10px;
+  color:#f0f0f5;
+  font-size:28px;
+  font-weight:600;
+  text-align:center;
+  letter-spacing:12px;
+  outline:none;
+  transition:border-color .2s;
+}
+.otp-input:focus{border-color:#2dd4a8}
+.otp-input::placeholder{color:#55556a;font-size:16px;letter-spacing:4px;font-weight:400}
+.btn{
+  width:100%;
+  padding:12px 20px;
+  border-radius:10px;
+  border:none;
+  background:#2dd4a8;
+  color:#000;
+  font-size:15px;
+  font-weight:600;
+  cursor:pointer;
+  margin-top:16px;
+  transition:all .2s;
+}
+.btn:hover{background:#25b894;transform:translateY(-1px)}
+.btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.error{
+  color:#ef4444;
+  font-size:13px;
+  text-align:center;
+  margin-top:12px;
+  padding:8px 12px;
+  background:rgba(127,29,29,.3);
+  border:1px solid rgba(239,68,68,.2);
+  border-radius:8px;
+}
+.footer{text-align:center;margin-top:20px;font-size:11px;color:#55556a}
+.footer a{color:#2dd4a8;text-decoration:none}
+.footer a:hover{text-decoration:underline}
+.shield{
+  display:flex;align-items:center;justify-content:center;
+  margin-bottom:24px;
+}
+.shield svg{color:#2dd4a8;opacity:.7}
+</style>
+</head>
+<body>
+<form class="card" method="POST" action="/admin-panel/verify-2fa" id="otpForm">
+  <div class="logo">
+    <div class="logo-icon">🦍</div>
+    <span class="logo-text">ApesTogether</span>
+  </div>
+  <div class="subtitle">Admin Command Center</div>
+  <div class="shield">
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      <path d="M9 12l2 2 4-4"/>
+    </svg>
+  </div>
+  <div class="desc">
+    Enter the 6-digit code from your<br>Google Authenticator app.
+  </div>
+  <label class="label" for="otp">Verification Code</label>
+  <input 
+    class="otp-input" 
+    type="text" 
+    name="otp" 
+    id="otp"
+    maxlength="6" 
+    pattern="[0-9]{6}" 
+    inputmode="numeric"
+    autocomplete="one-time-code"
+    placeholder="••••••"
+    autofocus
+    required
+  />
+  <button class="btn" type="submit" id="submitBtn" disabled>Verify & Enter</button>
+  {% if error %}
+  <div class="error">{{ error }}</div>
+  {% endif %}
+  <div class="footer">
+    <a href="/logout">Sign out</a> · Secured with Google OAuth + TOTP
+  </div>
+</form>
+<script>
+const input = document.getElementById('otp');
+const btn = document.getElementById('submitBtn');
+// Only allow digits, enable button when 6 digits entered
+input.addEventListener('input', function() {
+  this.value = this.value.replace(/\D/g, '').slice(0, 6);
+  btn.disabled = this.value.length !== 6;
+});
+// Auto-submit when 6 digits entered
+input.addEventListener('keyup', function() {
+  if (this.value.length === 6) {
+    // Small delay so user sees the last digit appear
+    setTimeout(() => document.getElementById('otpForm').submit(), 150);
+  }
+});
+</script>
+</body>
+</html>

@@ -1443,8 +1443,49 @@ def profile(username):
 
 @app.route('/admin-panel')
 def admin_panel():
-    """Serve the standalone admin dashboard SPA (auth via API key, not session)."""
+    """Serve the admin dashboard. Requires Google OAuth + TOTP verification."""
+    email = session.get('email', '')
+    if email != ADMIN_EMAIL:
+        # Not logged in as admin — redirect to Google OAuth
+        session['admin_panel_redirect'] = True
+        return redirect(url_for('login_google'))
+    # Must verify TOTP every session
+    if not session.get('admin_2fa_verified'):
+        return render_template('admin_2fa_gate.html')
     return render_template('admin_panel.html')
+
+@app.route('/admin-panel/verify-2fa', methods=['POST'])
+def admin_panel_verify_2fa():
+    """Verify TOTP code for admin panel access."""
+    from mobile_api import _verify_totp
+    email = session.get('email', '')
+    if email != ADMIN_EMAIL:
+        return jsonify({'error': 'not_admin'}), 403
+    
+    otp_code = request.form.get('otp') or (request.json or {}).get('otp')
+    if not otp_code:
+        return jsonify({'error': 'otp_required'}), 400
+    
+    totp_secret = os.environ.get('ADMIN_TOTP_SECRET')
+    if not totp_secret:
+        # If TOTP isn't configured yet, let them through with a warning
+        logger.warning("ADMIN_TOTP_SECRET not set — skipping 2FA for admin panel")
+        session['admin_2fa_verified'] = True
+        return redirect(url_for('admin_panel'))
+    
+    if _verify_totp(otp_code):
+        session['admin_2fa_verified'] = True
+        return redirect(url_for('admin_panel'))
+    else:
+        return render_template('admin_2fa_gate.html', error='Invalid or expired code. Try again.')
+
+@app.route('/api/admin-panel/auth-status')
+def admin_panel_auth_status():
+    """Check if the current session is a fully authenticated admin (OAuth + 2FA). Used by SPA."""
+    email = session.get('email', '')
+    if email == ADMIN_EMAIL and session.get('admin_2fa_verified'):
+        return jsonify({'authenticated': True, 'email': email})
+    return jsonify({'authenticated': False}), 401
 
 
 @app.route('/admin/subscription-analytics')
@@ -2685,6 +2726,8 @@ def logout():
     session.pop('user_id', None)
     session.pop('email', None)
     session.pop('username', None)
+    session.pop('admin_2fa_verified', None)
+    session.pop('admin_panel_redirect', None)
     
     flash('You have been logged out', 'success')
     return redirect(url_for('index'))
@@ -3109,8 +3152,12 @@ def authorize_google():
             logger.error(f"Error checking user's stocks: {str(stock_check_error)}")
             flash('Login successful!', 'success')
             
-        # Step 6: Final redirect - check if user is admin
-        if user.is_admin:
+        # Step 6: Final redirect
+        # If admin was trying to access /admin-panel, redirect back there
+        if session.pop('admin_panel_redirect', None) and user.is_admin:
+            logger.info(f"Admin user {user.email} logged in, redirecting to admin panel")
+            return redirect(url_for('admin_panel'))
+        elif user.is_admin:
             logger.info(f"Admin user {user.email} logged in, redirecting to admin dashboard")
             return redirect(url_for('admin_dashboard'))
         else:

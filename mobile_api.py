@@ -1313,20 +1313,35 @@ def execute_trade():
 # Admin Bot Backdoor API
 # =============================================================================
 
+def _is_admin_session():
+    """Check if the current Flask session belongs to the admin user AND has passed 2FA."""
+    from flask import session as flask_session
+    admin_email = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
+    session_email = flask_session.get('email', '')
+    has_2fa = flask_session.get('admin_2fa_verified', False)
+    return session_email == admin_email and has_2fa
+
+
 def require_admin_key(f):
-    """Decorator to require admin API key for bot endpoints"""
+    """Decorator to require admin API key OR valid admin session for bot endpoints"""
     @wraps(f)
     def decorated(*args, **kwargs):
+        # Path 1: API key auth (for bot scripts, cron jobs)
         admin_key = request.headers.get('X-Admin-Key')
         expected_key = os.environ.get('ADMIN_API_KEY')
         
+        if admin_key and expected_key and admin_key == expected_key:
+            return f(*args, **kwargs)
+        
+        # Path 2: Flask session auth (for admin dashboard SPA)
+        if _is_admin_session():
+            return f(*args, **kwargs)
+        
+        # Neither auth method succeeded
         if not expected_key:
             return jsonify({'error': 'admin_api_not_configured'}), 503
         
-        if not admin_key or admin_key != expected_key:
-            return jsonify({'error': 'invalid_admin_key'}), 403
-        
-        return f(*args, **kwargs)
+        return jsonify({'error': 'invalid_admin_key'}), 403
     return decorated
 
 
@@ -1363,27 +1378,27 @@ def _verify_totp(otp_code):
 
 
 def require_admin_2fa(f):
-    """Decorator requiring admin API key + TOTP for sensitive endpoints.
+    """Decorator requiring admin identity + TOTP for sensitive endpoints.
     
-    Headers required:
-        X-Admin-Key: the admin API key
-        X-Admin-OTP: 6-digit TOTP code from authenticator app
+    Accepts either:
+      - X-Admin-Key header (for bot scripts) + X-Admin-OTP header
+      - Valid admin Flask session (for dashboard) + X-Admin-OTP header
     
-    If ADMIN_TOTP_SECRET is not set, falls back to key-only auth with a warning.
+    If ADMIN_TOTP_SECRET is not set, falls back to identity-only auth with a warning.
     """
     @wraps(f)
     def decorated(*args, **kwargs):
-        # First check admin key
+        # Check identity via API key OR session
         admin_key = request.headers.get('X-Admin-Key')
         expected_key = os.environ.get('ADMIN_API_KEY')
         
-        if not expected_key:
-            return jsonify({'error': 'admin_api_not_configured'}), 503
+        has_key_auth = admin_key and expected_key and admin_key == expected_key
+        has_session_auth = _is_admin_session()
         
-        if not admin_key or admin_key != expected_key:
+        if not has_key_auth and not has_session_auth:
             return jsonify({'error': 'invalid_admin_key'}), 403
         
-        # Then check TOTP
+        # Then check TOTP (required for both auth paths)
         totp_secret = os.environ.get('ADMIN_TOTP_SECRET')
         if totp_secret:
             otp_code = request.headers.get('X-Admin-OTP')
@@ -1392,7 +1407,7 @@ def require_admin_2fa(f):
             if not _verify_totp(otp_code):
                 return jsonify({'error': 'invalid_otp', 'message': 'Invalid or expired TOTP code'}), 403
         else:
-            logger.warning(f"2FA not configured (ADMIN_TOTP_SECRET missing) — allowing key-only access to {f.__name__}")
+            logger.warning(f"2FA not configured (ADMIN_TOTP_SECRET missing) — allowing identity-only access to {f.__name__}")
         
         return f(*args, **kwargs)
     return decorated
