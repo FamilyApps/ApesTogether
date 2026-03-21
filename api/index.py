@@ -1459,7 +1459,10 @@ def admin_panel():
     # Must verify TOTP every session
     if not session.get('admin_2fa_verified'):
         return render_template('admin_2fa_gate.html')
-    return render_template('admin_panel.html')
+    # Serve as raw HTML — NOT render_template — because React JSX uses {{ }}
+    # which conflicts with Jinja2's template syntax
+    template_dir = app.template_folder or os.path.join(app.root_path, 'templates')
+    return send_from_directory(template_dir, 'admin_panel.html')
 
 @app.route('/admin-panel/verify-2fa', methods=['POST'])
 def admin_panel_verify_2fa():

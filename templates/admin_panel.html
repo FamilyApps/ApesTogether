@@ -210,8 +210,8 @@ const AuthScreen = () => {
       <div className="fade-in" style={{ width: 400, padding: 40, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 20 }}>
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-            <div style={{ width: 40, height: 40, borderRadius: 10, background: 'linear-gradient(135deg, var(--accent), var(--accent-dim))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <span style={{ fontSize: 20 }}>🦍</span>
+            <div style={{ width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <img src="/static/img/logo.png" alt="ApesTogether" width="40" height="40" style={{ objectFit: 'contain' }} />
             </div>
             <span style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.5px' }}>ApesTogether</span>
           </div>
@@ -758,7 +758,7 @@ const Sidebar = ({ active, onNav, onLogout }) => (
   }}>
     {/* Logo */}
     <div style={{ padding: '20px 16px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid var(--border)' }}>
-      <div style={{ width: 34, height: 34, borderRadius: 8, background: 'linear-gradient(135deg, var(--accent), var(--accent-dim))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>🦍</div>
+      <div style={{ width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><img src="/static/img/logo.png" alt="" width="34" height="34" style={{ objectFit: 'contain' }} /></div>
       <div>
         <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.3px' }}>ApesTogether</div>
         <div style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 600, letterSpacing: '.5px' }}>ADMIN</div>
