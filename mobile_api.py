@@ -30,6 +30,111 @@ logger = logging.getLogger(__name__)
 mobile_api = Blueprint('mobile_api', __name__, url_prefix='/api/mobile')
 
 
+# ---------------------------------------------------------------------------
+# DB session hygiene for serverless (Vercel)
+# NullPool gives us a fresh connection per DB call, but if that call fails
+# (SSL drop, PgBouncer kill, etc.) the SQLAlchemy session is left in an
+# invalid state. These handlers ensure every request starts and ends clean.
+# ---------------------------------------------------------------------------
+
+@mobile_api.before_request
+def _clean_db_session():
+    """Remove any leftover session state from a previous invocation."""
+    try:
+        from models import db
+        db.session.remove()
+    except Exception:
+        pass
+
+
+@mobile_api.teardown_request
+def _teardown_db_session(exc=None):
+    """Rollback on error, then remove session so connections are returned."""
+    try:
+        from models import db
+        if exc:
+            db.session.rollback()
+        db.session.remove()
+    except Exception:
+        pass
+
+
+def _is_transient_db_error(e):
+    """Return True if the exception looks like a recoverable DB/SSL error."""
+    err_str = str(e).lower()
+    return (
+        'ssl connection has been closed' in err_str or
+        'connection has been closed' in err_str or
+        'invalid transaction' in err_str or
+        'could not connect' in err_str or
+        'connection refused' in err_str or
+        'server closed the connection' in err_str or
+        'closed the connection unexpectedly' in err_str or
+        'connection timed out' in err_str or
+        'queuepool limit' in err_str
+    )
+
+
+def _reset_db_session():
+    """Roll back, remove session, and dispose engine for a completely fresh start."""
+    from models import db
+    try:
+        db.session.rollback()
+    except Exception:
+        pass
+    try:
+        db.session.remove()
+    except Exception:
+        pass
+    try:
+        db.engine.dispose()
+    except Exception:
+        pass
+
+
+def db_retry(fn, max_retries=2):
+    """Execute fn(), retrying on transient DB/SSL errors with a fresh session."""
+    last_error = None
+    for attempt in range(max_retries + 1):
+        try:
+            return fn()
+        except Exception as e:
+            last_error = e
+            if _is_transient_db_error(e) and attempt < max_retries:
+                logger.warning(f"DB transient error (attempt {attempt+1}/{max_retries+1}): {e}")
+                _reset_db_session()
+                continue
+            raise last_error
+
+
+def with_db_retry(f):
+    """Decorator: wrap an entire Flask endpoint in db_retry.
+
+    Usage::
+
+        @mobile_api.route('/admin/bot/dashboard')
+        @require_admin_key
+        @with_db_retry
+        def bot_dashboard():
+            ...
+    """
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        last_error = None
+        for attempt in range(3):  # up to 3 attempts (initial + 2 retries)
+            try:
+                return f(*args, **kwargs)
+            except Exception as e:
+                last_error = e
+                if _is_transient_db_error(e) and attempt < 2:
+                    logger.warning(f"DB retry on {f.__name__} (attempt {attempt+1}/3): {e}")
+                    _reset_db_session()
+                    continue
+                raise
+        raise last_error
+    return wrapper
+
+
 # In-memory sliding window rate limiter (serverless-safe, resets on cold start)
 _rate_limit_store = defaultdict(list)
 
@@ -1415,6 +1520,7 @@ def require_admin_2fa(f):
 
 @mobile_api.route('/admin/bot/create-user', methods=['POST'])
 @require_admin_key
+@with_db_retry
 def bot_create_user():
     """
     Create a bot user account.
@@ -1487,6 +1593,7 @@ def bot_create_user():
 
 @mobile_api.route('/admin/bot/add-stocks', methods=['POST'])
 @require_admin_key
+@with_db_retry
 def bot_add_stocks():
     """
     Add stocks to a bot user's portfolio.
@@ -1550,6 +1657,7 @@ def bot_add_stocks():
 
 @mobile_api.route('/admin/bot/set-cash', methods=['POST'])
 @require_admin_key
+@with_db_retry
 def bot_set_cash():
     """
     Set cash tracking values for a bot user (used during portfolio seeding).
@@ -1602,6 +1710,7 @@ def bot_set_cash():
 
 @mobile_api.route('/admin/bot/scale-holdings', methods=['POST'])
 @require_admin_2fa
+@with_db_retry
 def bot_scale_holdings():
     """
     Scale all holdings and cash values for a bot user by a multiplier.
@@ -1677,6 +1786,7 @@ def bot_scale_holdings():
 
 @mobile_api.route('/admin/bot/subscribe', methods=['POST'])
 @require_admin_key
+@with_db_retry
 def bot_subscribe():
     """
     Create a subscription from one user to another.
@@ -1733,6 +1843,7 @@ def bot_subscribe():
 @mobile_api.route('/admin/bot/execute-trade', methods=['POST'])
 @require_admin_key
 @rate_limit(30)
+@with_db_retry
 def bot_execute_trade():
     """
     Execute a trade for a bot user.
@@ -1802,9 +1913,10 @@ def bot_execute_trade():
 
 @mobile_api.route('/admin/bot/list-users', methods=['GET'])
 @require_admin_key
+@with_db_retry
 def bot_list_users():
     """List all users with their portfolio info, filterable by role"""
-    from models import User
+    from models import db, User
     
     try:
         role_filter = request.args.get('role')  # 'agent', 'user', or None for all
@@ -1874,9 +1986,10 @@ def bot_list_users():
 
 @mobile_api.route('/admin/bot/dashboard', methods=['GET'])
 @require_admin_key
+@with_db_retry
 def bot_dashboard():
     """Get summary stats for the admin dashboard"""
-    from models import User, Stock, Transaction
+    from models import db, User, Stock, Transaction
     from sqlalchemy import func
     
     try:
@@ -1937,6 +2050,7 @@ def bot_dashboard():
 
 @mobile_api.route('/admin/bot/trade', methods=['POST'])
 @require_admin_key
+@with_db_retry
 def bot_trade_cron():
     """
     Trigger bot trading for a specific wave. Designed to be called by an external
@@ -2112,6 +2226,7 @@ def bot_trade_cron():
 
 @mobile_api.route('/admin/dividend', methods=['POST'])
 @require_admin_key
+@with_db_retry
 def admin_record_dividend():
     """
     Record a dividend payment for a user.
@@ -2203,6 +2318,7 @@ def admin_record_dividend():
 @mobile_api.route('/admin/bot/email-trade', methods=['POST'])
 @require_admin_key
 @rate_limit(30)
+@with_db_retry
 def bot_email_trade():
     """
     Process a trade notification forwarded from Public.com email.
@@ -2467,6 +2583,7 @@ def bot_email_trade():
 @mobile_api.route('/admin/bot/process-pending-trades', methods=['POST'])
 @require_admin_key
 @rate_limit(10)
+@with_db_retry
 def bot_process_pending_trades():
     """
     Retry routing pending trades. Called periodically (e.g. by GAS every 5 min).
@@ -2589,6 +2706,7 @@ def bot_process_pending_trades():
 
 @mobile_api.route('/admin/bot/pending-trades', methods=['GET'])
 @require_admin_key
+@with_db_retry
 def bot_pending_trades():
     """List all pending/unroutable trades for admin review."""
     from models import PendingTrade
@@ -2621,6 +2739,7 @@ def bot_pending_trades():
 
 @mobile_api.route('/admin/bot/assign-pending-trades', methods=['POST'])
 @require_admin_2fa
+@with_db_retry
 def bot_assign_pending_trades():
     """
     Manually assign pending/unroutable trades to a specific bot.
@@ -2778,6 +2897,7 @@ POST /admin/bot/assign-pending-trades
 
 @mobile_api.route('/admin/bot/sp500-backfill', methods=['POST'])
 @require_admin_key
+@with_db_retry
 def bot_sp500_backfill():
     """
     Backfill S&P 500 historical data from AlphaVantage SPY daily prices.
@@ -2866,6 +2986,7 @@ def bot_sp500_backfill():
 
 @mobile_api.route('/admin/bot/sp500-check', methods=['GET'])
 @require_admin_key
+@with_db_retry
 def bot_sp500_check():
     """Check S&P 500 data coverage in the database for diagnostics."""
     from models import MarketData
@@ -2923,6 +3044,7 @@ def bot_sp500_check():
 
 @mobile_api.route('/admin/bot/holdings', methods=['GET'])
 @require_admin_key
+@with_db_retry
 def bot_holdings():
     """
     Get a user's current stock holdings.
@@ -2950,6 +3072,7 @@ def bot_holdings():
 
 @mobile_api.route('/admin/bot/gift-subscribers', methods=['POST'])
 @require_admin_2fa
+@with_db_retry
 def bot_gift_subscribers():
     """
     Gift promotional subscribers to a user (influencer).
@@ -3034,6 +3157,7 @@ def bot_gift_subscribers():
 
 @mobile_api.route('/admin/bot/deactivate', methods=['POST'])
 @require_admin_2fa
+@with_db_retry
 def bot_deactivate():
     """
     Deactivate a bot user (hide from leaderboards, stop trading).
@@ -3072,6 +3196,7 @@ def bot_deactivate():
 
 @mobile_api.route('/admin/bot/reactivate', methods=['POST'])
 @require_admin_2fa
+@with_db_retry
 def bot_reactivate():
     """
     Reactivate a previously deactivated bot user.
@@ -3110,6 +3235,7 @@ def bot_reactivate():
 
 @mobile_api.route('/admin/bot/update-config', methods=['POST'])
 @require_admin_key
+@with_db_retry
 def bot_update_config():
     """
     Update bot configuration (industry, trading style, etc.)
@@ -3160,6 +3286,7 @@ def bot_update_config():
 
 @mobile_api.route('/admin/bot/remove-subscribers', methods=['POST'])
 @require_admin_2fa
+@with_db_retry
 def bot_remove_subscribers():
     """
     Remove gifted/promotional subscribers from a user.
@@ -3216,6 +3343,7 @@ def bot_remove_subscribers():
 
 @mobile_api.route('/admin/bot/activity-feed', methods=['GET'])
 @require_admin_key
+@with_db_retry
 def bot_activity_feed():
     """Recent activity across the platform for the admin dashboard."""
     from models import db, User, Transaction
@@ -3269,6 +3397,7 @@ def bot_activity_feed():
 
 @mobile_api.route('/admin/bot/alert-summary', methods=['GET'])
 @require_admin_key
+@with_db_retry
 def bot_alert_summary():
     """Get alert counts and health status for the admin dashboard."""
     from models import db, User, Transaction, PortfolioSnapshot
@@ -3364,6 +3493,7 @@ def bot_alert_summary():
 
 @mobile_api.route('/admin/bot/revenue-summary', methods=['GET'])
 @require_admin_key
+@with_db_retry
 def bot_revenue_summary():
     """Revenue breakdown for the admin dashboard."""
     from models import db, User
@@ -3506,6 +3636,7 @@ def bot_revenue_summary():
 
 @mobile_api.route('/admin/bot/cron-health', methods=['GET'])
 @require_admin_key
+@with_db_retry
 def bot_cron_health():
     """Check health of cron jobs based on data freshness."""
     from models import db, PortfolioSnapshot, PortfolioSnapshotIntraday, Transaction, User
@@ -3589,6 +3720,7 @@ def bot_cron_health():
 
 @mobile_api.route('/admin/bot/trade-history', methods=['GET'])
 @require_admin_key
+@with_db_retry
 def bot_trade_history():
     """Paginated trade history with filtering for the admin dashboard."""
     from models import db, User, Transaction
@@ -3648,6 +3780,7 @@ def bot_trade_history():
 
 @mobile_api.route('/admin/bot/batch-seed', methods=['POST'])
 @require_admin_key
+@with_db_retry
 def bot_batch_seed():
     """
     Create multiple bots at once with strategy profiles and initial portfolios.
@@ -3860,6 +3993,7 @@ def _gift_bot_subscribers(user_id, count):
 
 @mobile_api.route('/admin/bot/auto-create-settings', methods=['GET'])
 @require_admin_key
+@with_db_retry
 def bot_auto_create_settings_get():
     """Get the current auto-creation settings."""
     from models import db
@@ -3876,6 +4010,7 @@ def bot_auto_create_settings_get():
 
 @mobile_api.route('/admin/bot/auto-create-settings', methods=['POST'])
 @require_admin_key
+@with_db_retry
 def bot_auto_create_settings_set():
     """
     Update auto-creation settings.
@@ -3914,6 +4049,7 @@ def bot_auto_create_settings_set():
 
 @mobile_api.route('/admin/bot/auto-create-run', methods=['POST'])
 @require_admin_key
+@with_db_retry
 def bot_auto_create_run():
     """
     Cron-triggered endpoint: create bots according to auto-creation settings.
