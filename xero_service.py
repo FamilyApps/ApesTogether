@@ -41,9 +41,7 @@ XERO_SCOPES = ' '.join([
     'profile',
     'email',
     'offline_access',
-    'accounting.invoices',        # NEW granular: Invoices, Bills, CreditNotes, PurchaseOrders
-    'accounting.contacts',        # Unchanged: Contacts, ContactGroups
-    'accounting.settings.read',   # Unchanged: Accounts, TaxRates (read-only)
+    'accounting.contacts',        # Testing: just one accounting scope
 ])
 
 
