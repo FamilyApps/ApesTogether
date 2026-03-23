@@ -33,21 +33,19 @@ XERO_API_BASE = 'https://api.xero.com/api.xro/2.0'
 
 # Xero OAuth2 scopes — granular (required for apps created after March 2, 2026)
 # Ref: https://developer.xero.com/documentation/guides/oauth2/scopes/
-# NOTE: If accounting.invoices causes "Something went wrong", the granular scope
-# may not be fully enabled yet. Fall back to accounting.transactions in that case.
+# DEBUG: Using minimal scopes to isolate auth error. Will add accounting scopes
+# back once the OAuth flow works.
 XERO_SCOPES = ' '.join([
     'openid',
     'profile',
     'email',
     'offline_access',
-    'accounting.transactions',    # Broad scope — fall back if accounting.invoices fails
-    'accounting.contacts',        # Unchanged: Contacts, ContactGroups
-    'accounting.settings.read',   # Unchanged: Accounts, TaxRates, etc. (read-only)
 ])
 
 
 def _get_client_id():
-    return os.environ.get('XERO_CLIENT_ID', '')
+    # Xero client IDs are UUIDs — ensure lowercase for compatibility
+    return os.environ.get('XERO_CLIENT_ID', '').lower()
 
 
 def _get_client_secret():
