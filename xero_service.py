@@ -44,8 +44,7 @@ XERO_SCOPES = ' '.join([
 
 
 def _get_client_id():
-    # Xero client IDs are UUIDs — ensure lowercase for compatibility
-    return os.environ.get('XERO_CLIENT_ID', '').lower()
+    return os.environ.get('XERO_CLIENT_ID', '')
 
 
 def _get_client_secret():
