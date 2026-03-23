@@ -31,20 +31,18 @@ XERO_TOKEN_URL = 'https://identity.xero.com/connect/token'
 XERO_CONNECTIONS_URL = 'https://api.xero.com/connections'
 XERO_API_BASE = 'https://api.xero.com/api.xro/2.0'
 
-# Xero OAuth2 scopes
+# Xero OAuth2 scopes (broad — app created before March 2, 2026)
 # Ref: https://developer.xero.com/documentation/guides/oauth2/scopes/
 # PKCE (code_challenge + code_verifier) is required.
-# NOTE: accounting.transactions must be enabled in Xero Developer Portal → My Apps → Scopes
-# before it can be requested here. Currently only contacts + settings.read are confirmed working.
-# TODO: Add 'accounting.transactions' once enabled in portal, then re-authorize.
+# Broad scopes available until September 2027 per Xero developer portal.
 XERO_SCOPES = ' '.join([
     'openid',
     'profile',
     'email',
     'offline_access',
-    'accounting.contacts',        # Contacts, ContactGroups (confirmed working)
+    'accounting.transactions',    # Bills, Invoices, CreditNotes, Payments
+    'accounting.contacts',        # Contacts, ContactGroups
     'accounting.settings.read',   # Accounts, TaxRates (read-only)
-    # 'accounting.transactions',  # Bills, Invoices — BLOCKED until enabled in Xero dev portal
 ])
 
 
