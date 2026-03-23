@@ -21,6 +21,7 @@ from collections import defaultdict
 import logging
 import jwt
 import os
+import requests
 import secrets
 import string
 import time as _time
@@ -2554,24 +2555,19 @@ def bot_email_trade():
                 results.append({'error': 'ticker required'})
                 continue
             
-            # Fetch current price if not provided (via AlphaVantage GLOBAL_QUOTE)
+            # Fetch current price if not provided — uses AlphaVantage with 90s cache
+            # NEVER use fake/simulated prices (user requirement)
             if not price:
                 try:
-                    import os as _os
-                    av_key = _os.environ.get('ALPHA_VANTAGE_API_KEY', '')
-                    if not av_key:
-                        results.append({'ticker': ticker, 'error': 'ALPHA_VANTAGE_API_KEY not set'})
-                        continue
-                    av_url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={av_key}"
-                    av_resp = requests.get(av_url, timeout=10)
-                    av_data = av_resp.json()
-                    av_price = float(av_data.get('Global Quote', {}).get('05. price', 0))
-                    if av_price > 0:
-                        price = av_price
+                    from portfolio_performance import PortfolioPerformanceCalculator
+                    calc = PortfolioPerformanceCalculator()
+                    price_data = calc.get_stock_data(ticker)
+                    if price_data and price_data.get('price'):
+                        price = price_data['price']
                         logger.info(f"Fetched price for {ticker}: ${price:.2f}")
                     else:
-                        logger.warning(f"AlphaVantage returned no price for {ticker}: {av_data}")
-                        results.append({'ticker': ticker, 'error': f'Could not fetch price from AlphaVantage'})
+                        logger.warning(f"No price available for {ticker} from AlphaVantage")
+                        results.append({'ticker': ticker, 'error': 'Could not fetch price from AlphaVantage'})
                         continue
                 except Exception as e:
                     logger.error(f"Price fetch failed for {ticker}: {e}")
