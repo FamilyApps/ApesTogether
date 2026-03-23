@@ -465,6 +465,29 @@ class XeroSyncLog(db.Model):
     def __repr__(self):
         return f"<XeroSyncLog {self.sync_type} ${self.amount} status={self.status}>"
 
+class XeroOAuthToken(db.Model):
+    """Store Xero OAuth2 tokens (single-row table — only one Xero org connected)"""
+    __tablename__ = 'xero_oauth_token'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    access_token = db.Column(db.Text, nullable=False)
+    refresh_token = db.Column(db.Text, nullable=False)
+    token_type = db.Column(db.String(20), default='Bearer')
+    expires_at = db.Column(db.DateTime, nullable=False)  # When access_token expires
+    tenant_id = db.Column(db.String(100), nullable=True)  # Xero organisation ID
+    scopes = db.Column(db.Text, nullable=True)  # Space-separated scopes granted
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    @property
+    def is_expired(self):
+        return datetime.utcnow() >= self.expires_at
+    
+    def __repr__(self):
+        status = 'expired' if self.is_expired else 'valid'
+        return f"<XeroOAuthToken tenant={self.tenant_id} {status}>"
+
+
 class AgentConfig(db.Model):
     """Configuration and state for automated trading agents"""
     __tablename__ = 'agent_config'

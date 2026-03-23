@@ -16,7 +16,7 @@ Endpoints:
 
 from flask import Blueprint, request, jsonify, g
 from functools import wraps
-from datetime import datetime
+from datetime import datetime, date
 from collections import defaultdict
 import logging
 import jwt
@@ -196,7 +196,9 @@ def require_auth(f):
                 return jsonify({'error': 'invalid_authorization_format'}), 401
             
             token = parts[1]
-            secret = os.environ.get('JWT_SECRET', os.environ.get('SECRET_KEY', 'dev-secret'))
+            secret = os.environ.get('JWT_SECRET') or os.environ.get('SECRET_KEY')
+            if not secret:
+                return jsonify({'error': 'server_misconfigured'}), 500
             
             payload = jwt.decode(token, secret, algorithms=['HS256'])
             g.user_id = payload.get('user_id')
@@ -219,7 +221,9 @@ def generate_jwt_token(user_id: int, email: str, expires_hours: int = 24 * 7) ->
     """Generate JWT token for mobile authentication"""
     from datetime import timedelta
     
-    secret = os.environ.get('JWT_SECRET', os.environ.get('SECRET_KEY', 'dev-secret'))
+    secret = os.environ.get('JWT_SECRET') or os.environ.get('SECRET_KEY')
+    if not secret:
+        raise RuntimeError('JWT_SECRET or SECRET_KEY must be set')
     payload = {
         'user_id': user_id,
         'email': email,
@@ -937,7 +941,7 @@ def get_auth_token():
         import traceback
         logger.error(f"Auth token error: {e}")
         logger.error(f"Auth token traceback: {traceback.format_exc()}")
-        return jsonify({'error': f'authentication_failed: {str(e)}'}), 500
+        return jsonify({'error': 'authentication_failed'}), 500
 
 
 @mobile_api.route('/auth/user', methods=['GET'])
@@ -2522,14 +2526,16 @@ def bot_email_trade():
             price = float(price)
             
             try:
+                # Get current position for sell notification percentage
+                stock = Stock.query.filter_by(user_id=bot.id, ticker=ticker).first()
+                pos_before = stock.quantity if stock and action == 'sell' else None
+                
                 # Process transaction through cash tracking
                 tx_result = process_transaction(
                     db, bot.id, ticker, quantity, price, action,
-                    timestamp=datetime.utcnow()
+                    timestamp=datetime.utcnow(),
+                    position_before_qty=pos_before
                 )
-                
-                # Update Stock table
-                stock = Stock.query.filter_by(user_id=bot.id, ticker=ticker).first()
                 if action == 'buy':
                     if stock:
                         # Weighted average purchase price
@@ -2661,8 +2667,9 @@ def bot_process_pending_trades():
                     
                     if price:
                         try:
-                            process_transaction(db, matched_bot.id, pt.ticker, qty, float(price), pt.action, timestamp=now)
                             stock = Stock.query.filter_by(user_id=matched_bot.id, ticker=pt.ticker).first()
+                            pos_before = stock.quantity if stock and pt.action == 'sell' else None
+                            process_transaction(db, matched_bot.id, pt.ticker, qty, float(price), pt.action, timestamp=now, position_before_qty=pos_before)
                             if pt.action == 'buy':
                                 if stock:
                                     total_cost = (stock.quantity * stock.purchase_price) + (qty * float(price))
@@ -2809,8 +2816,9 @@ def bot_assign_pending_trades():
             
             if price:
                 try:
-                    process_transaction(db, bot.id, pt.ticker, qty, float(price), pt.action, timestamp=now)
                     stock = Stock.query.filter_by(user_id=bot.id, ticker=pt.ticker).first()
+                    pos_before = stock.quantity if stock and pt.action == 'sell' else None
+                    process_transaction(db, bot.id, pt.ticker, qty, float(price), pt.action, timestamp=now, position_before_qty=pos_before)
                     if pt.action == 'buy':
                         if stock:
                             total_cost = (stock.quantity * stock.purchase_price) + (qty * float(price))
@@ -3632,6 +3640,353 @@ def bot_revenue_summary():
     except Exception as e:
         logger.error(f"Revenue summary error: {e}")
         return jsonify({'error': 'revenue_summary_failed'}), 500
+
+
+@mobile_api.route('/admin/bot/generate-payout-records', methods=['POST'])
+@require_admin_2fa
+@with_db_retry
+def bot_generate_payout_records():
+    """
+    Generate month-end XeroPayoutRecord entries for all influencers.
+    
+    Creates one record per influencer with real + gifted subscriber counts,
+    revenue split, and payout amounts. Idempotent — won't create duplicates
+    for the same period.
+    
+    Request body:
+    {
+        "period_year": 2026,   (optional — defaults to current month)
+        "period_month": 3      (optional — defaults to current month)
+    }
+    """
+    from models import db, User, AdminSubscription, XeroPayoutRecord, MobileSubscription
+    from sqlalchemy import func
+    from calendar import monthrange
+    
+    data = request.get_json() or {}
+    now = datetime.utcnow()
+    year = data.get('period_year', now.year)
+    month = data.get('period_month', now.month)
+    
+    period_start = date(year, month, 1)
+    period_end = date(year, month, monthrange(year, month)[1])
+    
+    try:
+        # Check for existing records this period (idempotent)
+        existing = XeroPayoutRecord.query.filter_by(
+            period_start=period_start,
+            period_end=period_end
+        ).count()
+        
+        if existing > 0:
+            return jsonify({
+                'error': 'payout_records_already_exist',
+                'period': f'{period_start} to {period_end}',
+                'existing_count': existing,
+                'hint': 'Delete existing records first if you want to regenerate'
+            }), 409
+        
+        records_created = []
+        
+        # Gather all users who have real or gifted subscribers
+        # 1. Users with gifted subs
+        gifted_map = {}
+        gifted_rows = AdminSubscription.query.filter(
+            AdminSubscription.bonus_subscriber_count > 0
+        ).all()
+        for row in gifted_rows:
+            gifted_map[row.portfolio_user_id] = row.bonus_subscriber_count or 0
+        
+        # 2. Users with real subs
+        real_map = {}
+        try:
+            real_counts = db.session.query(
+                MobileSubscription.subscribed_to_id,
+                func.count(MobileSubscription.id)
+            ).filter_by(status='active').group_by(
+                MobileSubscription.subscribed_to_id
+            ).all()
+            for uid, cnt in real_counts:
+                real_map[uid] = cnt
+        except Exception:
+            pass
+        
+        # Combine all user IDs
+        all_user_ids = set(gifted_map.keys()) | set(real_map.keys())
+        
+        for uid in all_user_ids:
+            user = User.query.get(uid)
+            if not user:
+                continue
+            
+            # Skip company bots — they don't get paid
+            is_bot = hasattr(user, 'role') and user.role == 'agent'
+            if is_bot:
+                continue
+            
+            real_count = real_map.get(uid, 0)
+            bonus_count = gifted_map.get(uid, 0)
+            
+            if real_count == 0 and bonus_count == 0:
+                continue
+            
+            record = XeroPayoutRecord(
+                portfolio_user_id=uid,
+                period_start=period_start,
+                period_end=period_end,
+                real_subscriber_count=real_count,
+                bonus_subscriber_count=bonus_count,
+            )
+            record.calculate_totals()
+            db.session.add(record)
+            
+            records_created.append({
+                'user_id': uid,
+                'username': user.username,
+                'real_subs': real_count,
+                'bonus_subs': bonus_count,
+                'total_subs': record.total_subscriber_count,
+                'influencer_payout': record.influencer_payout,
+                'bonus_payout': record.bonus_payout,
+                'total_payout': record.total_payout,
+            })
+        
+        db.session.commit()
+        
+        total_obligation = sum(r['total_payout'] for r in records_created)
+        
+        return jsonify({
+            'success': True,
+            'period': f'{period_start} to {period_end}',
+            'records_created': len(records_created),
+            'total_payout_obligation': round(total_obligation, 2),
+            'records': sorted(records_created, key=lambda x: x['total_payout'], reverse=True),
+        })
+        
+    except Exception as e:
+        logger.error(f"Generate payout records error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({'error': 'generate_payout_failed'}), 500
+
+
+@mobile_api.route('/admin/bot/payout-records', methods=['GET'])
+@require_admin_key
+@with_db_retry
+def bot_list_payout_records():
+    """
+    List payout records, optionally filtered by period or payment status.
+    
+    Query params:
+        year: filter by year (e.g., 2026)
+        month: filter by month (e.g., 3)
+        status: filter by payment_status ('pending', 'paid', 'held')
+    """
+    from models import db, User, XeroPayoutRecord
+    
+    year = request.args.get('year', type=int)
+    month = request.args.get('month', type=int)
+    status = request.args.get('status')
+    
+    try:
+        query = XeroPayoutRecord.query
+        
+        if year and month:
+            period_start = date(year, month, 1)
+            query = query.filter_by(period_start=period_start)
+        elif year:
+            from sqlalchemy import extract
+            query = query.filter(
+                extract('year', XeroPayoutRecord.period_start) == year
+            )
+        
+        if status:
+            query = query.filter_by(payment_status=status)
+        
+        records = query.order_by(XeroPayoutRecord.period_start.desc()).all()
+        
+        result = []
+        for r in records:
+            user = User.query.get(r.portfolio_user_id)
+            result.append({
+                'id': r.id,
+                'user_id': r.portfolio_user_id,
+                'username': user.username if user else f'user_{r.portfolio_user_id}',
+                'period': f'{r.period_start} to {r.period_end}',
+                'real_subs': r.real_subscriber_count,
+                'bonus_subs': r.bonus_subscriber_count,
+                'total_subs': r.total_subscriber_count,
+                'gross_revenue': r.gross_revenue,
+                'store_fees': r.store_fees,
+                'platform_revenue': r.platform_revenue,
+                'influencer_payout': r.influencer_payout,
+                'bonus_payout': r.bonus_payout,
+                'total_payout': r.total_payout,
+                'payment_status': r.payment_status,
+                'paid_at': r.paid_at.isoformat() if r.paid_at else None,
+                'xero_sync_status': r.xero_sync_status,
+            })
+        
+        return jsonify({
+            'records': result,
+            'total_count': len(result),
+            'total_obligation': round(sum(r['total_payout'] for r in result), 2),
+        })
+    except Exception as e:
+        logger.error(f"List payout records error: {e}")
+        return jsonify({'error': 'list_payout_records_failed'}), 500
+
+
+@mobile_api.route('/admin/bot/payout-records/<int:record_id>/mark-paid', methods=['POST'])
+@require_admin_2fa
+@with_db_retry
+def bot_mark_payout_paid(record_id):
+    """Mark a payout record as paid (after writing the check)."""
+    from models import db, XeroPayoutRecord
+    
+    try:
+        record = XeroPayoutRecord.query.get(record_id)
+        if not record:
+            return jsonify({'error': 'record_not_found'}), 404
+        
+        record.payment_status = 'paid'
+        record.paid_at = datetime.utcnow()
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'record_id': record.id,
+            'payment_status': 'paid',
+            'paid_at': record.paid_at.isoformat(),
+        })
+    except Exception as e:
+        logger.error(f"Mark payout paid error: {e}")
+        return jsonify({'error': 'mark_paid_failed'}), 500
+
+
+# ── Xero OAuth + Sync Routes ───────────────────────────────────────────────
+
+@mobile_api.route('/admin/xero/connect', methods=['GET'])
+def xero_connect():
+    """Start Xero OAuth2 flow — redirects admin to Xero login.
+    
+    Auth: Flask admin session only (browser redirect — can't use API key headers).
+    """
+    from flask import session, redirect
+    import xero_service
+    
+    if not _is_admin_session():
+        return jsonify({'error': 'admin_session_required', 'message': 'Log in as admin first'}), 403
+    
+    url, state = xero_service.get_authorization_url()
+    session['xero_oauth_state'] = state
+    return redirect(url)
+
+
+@mobile_api.route('/admin/xero/callback', methods=['GET'])
+def xero_callback():
+    """Handle Xero OAuth2 callback after admin authorizes.
+    
+    Auth: CSRF state token (set during /connect, verified here).
+    No decorator — Xero redirects the browser here directly.
+    """
+    from flask import session, redirect
+    import xero_service
+    
+    # Verify CSRF state (proves this callback was initiated by our /connect route)
+    state = request.args.get('state')
+    stored_state = session.pop('xero_oauth_state', None)
+    if not state or not stored_state or state != stored_state:
+        return jsonify({'error': 'invalid_state', 'message': 'CSRF state mismatch — try connecting again'}), 400
+    
+    # Check for errors from Xero
+    error = request.args.get('error')
+    if error:
+        error_desc = request.args.get('error_description', 'Unknown error')
+        return jsonify({'error': error, 'message': error_desc}), 400
+    
+    code = request.args.get('code')
+    if not code:
+        return jsonify({'error': 'missing_code'}), 400
+    
+    token = xero_service.exchange_code_for_token(code)
+    if not token:
+        return jsonify({'error': 'token_exchange_failed', 'message': 'Failed to exchange code for token — check logs'}), 500
+    
+    return jsonify({
+        'success': True,
+        'message': 'Xero connected successfully',
+        'tenant_id': token.tenant_id,
+        'expires_at': token.expires_at.isoformat(),
+    })
+
+
+@mobile_api.route('/admin/xero/status', methods=['GET'])
+@require_admin_key
+def xero_status():
+    """Check current Xero connection status."""
+    import xero_service
+    return jsonify(xero_service.get_xero_status())
+
+
+@mobile_api.route('/admin/xero/sync-payouts', methods=['POST'])
+@require_admin_key
+@with_db_retry
+def xero_sync_payouts():
+    """Sync pending XeroPayoutRecord entries as bills in Xero.
+    
+    Request body (optional):
+    {
+        "period_year": 2026,
+        "period_month": 3
+    }
+    If omitted, syncs ALL pending records.
+    """
+    import xero_service
+    from calendar import monthrange
+    
+    data = request.get_json() or {}
+    year = data.get('period_year')
+    month = data.get('period_month')
+    
+    period_start = None
+    period_end = None
+    if year and month:
+        period_start = date(year, month, 1)
+        period_end = date(year, month, monthrange(year, month)[1])
+    
+    result = xero_service.sync_payout_records_to_xero(
+        period_start=period_start,
+        period_end=period_end,
+    )
+    
+    if 'error' in result:
+        return jsonify(result), 400
+    
+    return jsonify({
+        'success': True,
+        'synced_count': len(result['synced']),
+        'failed_count': len(result['failed']),
+        'skipped_count': result['skipped'],
+        'total_amount': round(result['total_amount'], 2),
+        'synced': result['synced'],
+        'failed': result['failed'],
+    })
+
+
+@mobile_api.route('/admin/xero/disconnect', methods=['POST'])
+@require_admin_key
+def xero_disconnect():
+    """Remove stored Xero tokens (disconnect)."""
+    from models import db, XeroOAuthToken
+    
+    token = XeroOAuthToken.query.first()
+    if token:
+        db.session.delete(token)
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'Xero disconnected'})
+    
+    return jsonify({'success': True, 'message': 'No Xero connection to disconnect'})
 
 
 @mobile_api.route('/admin/bot/cron-health', methods=['GET'])

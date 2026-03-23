@@ -305,11 +305,30 @@ def custom_login_required(f):
 # For backward compatibility, keep the original name
 login_required = custom_login_required
 
+def admin_required(f):
+    """Decorator: requires the user to be logged in AND be the admin."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not current_user.is_authenticated:
+            flash('Please log in to access this page', 'danger')
+            return redirect(url_for('login', next=request.url))
+        if getattr(current_user, 'email', None) != ADMIN_EMAIL:
+            return jsonify({'error': 'Admin access required'}), 403
+        return f(*args, **kwargs)
+    return decorated_function
+
 # Get environment variables with fallbacks
 # Check for DATABASE_URL first, then fall back to POSTGRES_PRISMA_URL if available
 DATABASE_URL = os.environ.get('DATABASE_URL') or os.environ.get('POSTGRES_PRISMA_URL')
-SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-key-for-testing')
 VERCEL_ENV = os.environ.get('VERCEL_ENV')
+
+# SECRET_KEY: required in production — no hardcoded fallback
+SECRET_KEY = os.environ.get('SECRET_KEY')
+if not SECRET_KEY:
+    if VERCEL_ENV:
+        raise RuntimeError("SECRET_KEY environment variable is required in production")
+    SECRET_KEY = 'dev-key-for-local-testing-only'
+    logger.warning("SECRET_KEY not set — using insecure default (local dev only)")
 
 # Log environment information
 logger.info(f"Starting app with VERCEL_ENV: {VERCEL_ENV}")
@@ -347,7 +366,7 @@ try:
     logger.info(f"Using database type: {DATABASE_URL.split('://')[0]}")
 
     # Configure Flask app
-    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-for-testing')
+    app.config['SECRET_KEY'] = SECRET_KEY
     app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024  # 1 MB max request body
@@ -706,13 +725,15 @@ app.config['MESSAGE_CATEGORIES'] = ['success', 'info', 'warning', 'danger']
 
 # Admin authentication check
 def admin_required(f):
-    """Decorator to check if user is an admin"""
+    """Decorator to check if user is an admin (login + email check)"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # Check if user is authenticated via session
+        # Check both Flask-Login and session-based auth
         email = session.get('email', '')
+        if not email and current_user.is_authenticated:
+            email = getattr(current_user, 'email', '')
         
-        # Allow access for fordutilityapps@gmail.com
+        # Allow access only for admin email
         if email == ADMIN_EMAIL:
             return f(*args, **kwargs)
             
@@ -1552,17 +1573,12 @@ def admin_panel_auth_status():
 
 
 @app.route('/admin/subscription-analytics')
-@login_required
+@admin_required
 def admin_subscription_analytics():
     """Admin dashboard for subscription analytics"""
     # Check if user is admin
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
-    
-    # Only allow access to the admin (fordutilityapps@gmail.com or witty-raven)
-    if current_user.email != ADMIN_EMAIL and current_user.username != ADMIN_USERNAME:
-        flash('You do not have permission to access this page', 'danger')
-        return redirect(url_for('dashboard'))
     
     try:
         # Get subscription analytics data
@@ -1653,217 +1669,13 @@ def admin_subscription_analytics():
         revenue_amounts=revenue_amounts
     )
 
-@app.route('/admin/debug')
-def admin_debug():
-    """Return debug information about the environment"""
-    import sys
-    
-@app.route('/admin/debug/users')
-def admin_debug_users():
-    """Debug endpoint to check user credentials"""
-    try:
-        # Only allow access from localhost or if user is admin
-        if request.remote_addr != '127.0.0.1' and not (current_user.is_authenticated and current_user.is_admin()):
-            return jsonify({'error': 'Unauthorized'}), 403
-            
-        admin_user = User.query.filter_by(email=ADMIN_EMAIL).first()
-        if admin_user:
-            # Don't return the actual password hash for security reasons
-            return jsonify({
-                'admin_user_exists': True,
-                'username': admin_user.username,
-                'has_password_hash': bool(admin_user.password_hash),
-                'password_hash_length': len(admin_user.password_hash) if admin_user.password_hash else 0
-            })
-        else:
-            return jsonify({'admin_user_exists': False})
-    except Exception as e:
-        logger.error(f"Error in debug users endpoint: {str(e)}")
-        logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/admin/debug/oauth')
-def admin_debug_oauth():
-    """Debug endpoint to check OAuth configuration"""
-    try:
-        # Only show if environment variables are set, not their actual values
-        oauth_config = {
-            'google_client_id_set': bool(os.environ.get('GOOGLE_CLIENT_ID')),
-            'google_client_secret_set': bool(os.environ.get('GOOGLE_CLIENT_SECRET')),
-            'apple_client_id_set': bool(os.environ.get('APPLE_CLIENT_ID')),
-            'apple_client_secret_set': bool(os.environ.get('APPLE_CLIENT_SECRET')),
-            'redirect_uri': url_for('authorize_google', _external=True),
-            'base_url': request.host_url,
-            'is_https': request.is_secure
-        }
-        return jsonify(oauth_config)
-    except Exception as e:
-        logger.error(f"Error in debug OAuth endpoint: {str(e)}")
-        logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
-        
-@app.route('/admin/debug/database')
-def admin_debug_database():
-    """Debug endpoint to check database connection"""
-    try:
-        # Check database connection
-        db_config = {
-            'database_url_exists': bool(os.environ.get('DATABASE_URL')),
-            'postgres_prisma_url_exists': bool(os.environ.get('POSTGRES_PRISMA_URL')),
-            'effective_database_url_exists': bool(DATABASE_URL),
-            'sqlalchemy_database_uri_set': bool(app.config.get('SQLALCHEMY_DATABASE_URI')),
-            'db_initialized': bool(db),
-            'db_engine_initialized': bool(db.engine)
-        }
-        
-        # Test database connection
-        try:
-            # Try to execute a simple query
-            test_result = db.session.execute("SELECT 1").scalar()
-            db_config['connection_test'] = 'Success' if test_result == 1 else f'Failed: {test_result}'
-            
-            # Count users in database
-            user_count = User.query.count()
-            db_config['user_count'] = user_count
-            
-            # Check if admin user exists
-            admin_exists = User.query.filter_by(email=ADMIN_EMAIL).first() is not None
-            db_config['admin_user_exists'] = admin_exists
-            
-        except Exception as db_test_error:
-            db_config['connection_test'] = f'Error: {str(db_test_error)}'
-            logger.error(f"Database connection test failed: {str(db_test_error)}")
-            logger.error(traceback.format_exc())
-        
-        return jsonify(db_config)
-    except Exception as e:
-        logger.error(f"Error in debug database endpoint: {str(e)}")
-        logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
-        
-@app.route('/admin/debug/models')
-def admin_debug_models():
-    """Debug endpoint to check SQLAlchemy model relationships"""
-    try:
-        # Get model information
-        model_info = {
-            'user_model': {
-                'attributes': [attr for attr in dir(User) if not attr.startswith('_')],
-                'relationships': [
-                    {'name': 'stocks', 'target': 'Stock', 'type': 'one-to-many'},
-                    {'name': 'transactions', 'target': 'Transaction', 'type': 'one-to-many'},
-                    {'name': 'subscriptions_made', 'target': 'Subscription', 'type': 'one-to-many'},
-                    {'name': 'subscribers', 'target': 'Subscription', 'type': 'one-to-many'}
-                ]
-            },
-            'subscription_model': {
-                'attributes': [attr for attr in dir(Subscription) if not attr.startswith('_')],
-                'relationships': [
-                    {'name': 'subscriber', 'target': 'User', 'type': 'many-to-one'},
-                    {'name': 'subscribed_to', 'target': 'User', 'type': 'many-to-one'}
-                ],
-                'foreign_keys': [
-                    {'name': 'subscriber_id', 'references': 'user.id'},
-                    {'name': 'subscribed_to_id', 'references': 'user.id'}
-                ]
-            }
-        }
-        
-        return jsonify(model_info)
-    except Exception as e:
-        logger.error(f"Error in debug models endpoint: {str(e)}")
-        logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
-        
-@app.route('/admin/debug/oauth-login')
-def admin_debug_oauth_login():
-    """Debug endpoint to test Google OAuth login without going through the full flow"""
-    try:
-        # Create a mock user for testing
-        test_email = 'test@example.com'
-        
-        # Check if test user exists
-        test_user = User.query.filter_by(email=test_email).first()
-        
-        if not test_user:
-            # Create test user
-            test_user = User(
-                email=test_email,
-                username='test-user',
-                oauth_provider='google',
-                oauth_id='test123',
-                stripe_price_id='price_1RbX0yQWUhVa3vgDB8vGzoFN',
-                subscription_price=4.00
-            )
-            test_user.set_password('')  # Empty password for OAuth users
-            
-            # Make sure we have a valid database session
-            if not db.session.is_active:
-                logger.warning("Database session is not active during test user creation, creating new session")
-                db.session = db.create_scoped_session()
-                
-            db.session.add(test_user)
-            db.session.commit()
-            logger.info(f"Created test user with ID: {test_user.id}")
-        
-        # Try to log in the test user
-        try:
-            # Make sure the user object is attached to the current session
-            if hasattr(test_user, '_sa_instance_state') and test_user._sa_instance_state.session is not db.session:
-                logger.warning("Test user object is not attached to the current session, merging")
-                test_user = db.session.merge(test_user)
-                
-            # Try to log in the user
-            login_success = login_user(test_user)
-            logger.info(f"Test user login_user result: {login_success}")
-            
-            if login_success:
-                # For backward compatibility, also set session variables
-                session['user_id'] = test_user.id
-                session['email'] = test_user.email
-                session['username'] = test_user.username
-                
-                return jsonify({
-                    'success': True,
-                    'message': 'Test user logged in successfully',
-                    'user_id': test_user.id,
-                    'email': test_user.email,
-                    'username': test_user.username,
-                    'session_variables': {
-                        'user_id': session.get('user_id'),
-                        'email': session.get('email'),
-                        'username': session.get('username')
-                    }
-                })
-            else:
-                return jsonify({
-                    'success': False,
-                    'message': 'login_user() returned False',
-                    'user_details': {
-                        'id': test_user.id,
-                        'email': test_user.email,
-                        'username': test_user.username
-                    }
-                }), 500
-        except Exception as login_error:
-            logger.error(f"Error during test user login: {str(login_error)}")
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'success': False,
-                'message': f'Error during login: {str(login_error)}',
-                'traceback': traceback.format_exc()
-            }), 500
-    except Exception as e:
-        logger.error(f"Error in debug OAuth login endpoint: {str(e)}")
-        logger.error(traceback.format_exc())
-        return jsonify({
-            'success': False,
-            'message': f'Error: {str(e)}',
-            'traceback': traceback.format_exc()
-        }), 500
+# ── Removed: /admin/debug, /admin/debug/users, /admin/debug/oauth,
+# /admin/debug/database, /admin/debug/models, /admin/debug/oauth-login
+# These unprotected debug endpoints exposed internal state to the public internet.
+# Use the admin panel dashboard or Vercel logs for diagnostics instead.
 
 @app.route('/admin/fix-leaderboard-period-length')
-@login_required
+@admin_required
 def admin_fix_leaderboard_period_length():
     """Widen leaderboard_cache.period column to support keys like '1D_large_cap'.
 
@@ -1872,9 +1684,6 @@ def admin_fix_leaderboard_period_length():
     VARCHAR(50) to safely store period_category keys.
     """
     try:
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
 
         from sqlalchemy import text
 
@@ -1900,132 +1709,11 @@ def admin_fix_leaderboard_period_length():
 
     except Exception as e:
         db.session.rollback()
-        import traceback
-        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
+        logger.error(f"Fix leaderboard period error: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/admin/debug/oauth-session')
-def admin_debug_oauth_session():
-    """Debug endpoint to check Flask-Login session state"""
-    try:
-        # Get current user info
-        current_user_info = {
-            'is_authenticated': current_user.is_authenticated if hasattr(current_user, 'is_authenticated') else False,
-            'session_vars': {
-                'user_id': session.get('user_id'),
-                'email': session.get('email'),
-                'username': session.get('username')
-            },
-            'flask_login_user': str(current_user) if hasattr(current_user, 'id') else 'No current_user',
-            'request_cookies': dict(request.cookies)
-        }
-        
-        # Check if session is working
-        test_key = str(uuid.uuid4())
-        session['test_key'] = test_key
-        session_test = {'set': test_key, 'retrieved': session.get('test_key')}
-        
-        return jsonify({
-            'success': True,
-            'current_user': current_user_info,
-            'session_test': session_test,
-            'app_config': {
-                'secret_key_set': app.secret_key is not None,
-                'session_cookie_name': app.config.get('SESSION_COOKIE_NAME'),
-                'session_cookie_secure': app.config.get('SESSION_COOKIE_SECURE'),
-                'session_cookie_domain': app.config.get('SESSION_COOKIE_DOMAIN'),
-                'session_cookie_path': app.config.get('SESSION_COOKIE_PATH'),
-                'remember_cookie_duration': str(app.config.get('REMEMBER_COOKIE_DURATION')),
-                'login_view': login_manager._login_view if hasattr(login_manager, '_login_view') else None
-            }
-        })
-    except Exception as e:
-        logger.error(f"Error in debug OAuth session endpoint: {str(e)}")
-        logger.error(traceback.format_exc())
-        return jsonify({
-            'success': False,
-            'message': f'Error: {str(e)}',
-            'traceback': traceback.format_exc()
-        }), 500
-
-@app.route('/admin/debug/admin-check')
-def admin_debug_admin_check():
-    """Debug endpoint to check if admin user exists"""
-    try:
-        admin_user = User.query.filter_by(email=ADMIN_EMAIL).first()
-        if admin_user:
-            # Don't return the actual password hash for security reasons
-            return jsonify({
-                'admin_user_exists': True,
-                'username': admin_user.username,
-                'has_password_hash': bool(admin_user.password_hash),
-                'password_hash_length': len(admin_user.password_hash) if admin_user.password_hash else 0
-            })
-        else:
-            return jsonify({'admin_user_exists': False})
-    except Exception as e:
-        logger.error(f"Error in debug users endpoint: {str(e)}")
-        logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
-        
-@app.route('/admin/reset-admin-password')
-def reset_admin_password():
-    """Reset the admin password - only accessible from localhost"""
-    try:
-        # Only allow access from localhost for security
-        if request.remote_addr != '127.0.0.1':
-            return jsonify({'error': 'This endpoint can only be accessed from localhost'}), 403
-            
-        # Find admin user or create if doesn't exist
-        admin_user = User.query.filter_by(email=ADMIN_EMAIL).first()
-        
-        if not admin_user:
-            # Create admin user if it doesn't exist
-            admin_user = User(username=ADMIN_USERNAME, email=ADMIN_EMAIL)
-            db.session.add(admin_user)
-            
-        # Set a new password
-        new_password = 'admin123'
-        admin_user.set_password(new_password)
-        
-        db.session.commit()
-        
-        return jsonify({
-            'success': True,
-            'message': f"Admin password reset successfully. Username: witty-raven, Password: {new_password}"
-        })
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Error resetting admin password: {str(e)}")
-        logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
-    try:
-        # Collect environment information
-        debug_info = {
-            'vercel_env': os.environ.get('VERCEL_ENV', 'Not set'),
-            'database_url_exists': bool(os.environ.get('DATABASE_URL')),
-            'postgres_prisma_url_exists': bool(os.environ.get('POSTGRES_PRISMA_URL')),
-            'effective_database_url_exists': bool(DATABASE_URL),
-            'secret_key_exists': bool(os.environ.get('SECRET_KEY')),
-            'python_version': sys.version,
-            'current_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        }
-        
-        # Test database connection
-        try:
-            # Try to query the database
-            user_count = User.query.count()
-            debug_info['database_connection'] = 'Success'
-            debug_info['user_count'] = user_count
-        except Exception as e:
-            debug_info['database_connection'] = 'Failed'
-            debug_info['database_error'] = str(e)
-        
-        return jsonify(debug_info)
-    except Exception as e:
-        return jsonify({
-            'error': str(e),
-            'type': str(type(e))
-        }), 500
+# ── Removed: /admin/debug/oauth-session, /admin/debug/admin-check,
+# /admin/reset-admin-password — all were publicly accessible.
 
 # Migration endpoint has been removed for security reasons after successful database schema update
 # The migration added the following columns to the User table:
@@ -2435,21 +2123,23 @@ def health_check():
         logger.error(f"Health check failed: {str(e)}")
         return jsonify({'status': 'error', 'message': 'Health check failed'}), 500
 
-@app.route('/api/init-db')
+@app.route('/api/init-db', methods=['POST'])
 def init_database():
-    """Initialize database tables for fresh Supabase instance - NO AUTH REQUIRED
-    Protected by SECRET_KEY query parameter instead of login (chicken-and-egg problem)
-    Usage: /api/init-db?key=YOUR_SECRET_KEY
-    Add &force=true to drop and recreate all tables (WARNING: destroys data)
+    """Initialize database tables for fresh Supabase instance.
+    Protected by SECRET_KEY in Authorization header (not URL).
+    Usage: POST /api/init-db  with header  Authorization: Bearer <SECRET_KEY>
+    NOTE: force-drop is permanently disabled to prevent accidental data loss.
     """
     try:
-        # Verify secret key (use existing SECRET_KEY env var)
-        provided_key = request.args.get('key', '')
+        # Verify secret key from Authorization header (never from URL query string)
+        auth_header = request.headers.get('Authorization', '')
+        provided_key = ''
+        if auth_header.startswith('Bearer '):
+            provided_key = auth_header[7:]
         expected_key = os.environ.get('SECRET_KEY', '')
-        force_recreate = request.args.get('force', '').lower() == 'true'
         
         if not provided_key or provided_key != expected_key:
-            return jsonify({'error': 'Invalid or missing key parameter'}), 403
+            return jsonify({'error': 'Unauthorized'}), 403
         
         # Import all models
         from models import (db, User, Stock, Transaction, PortfolioSnapshot, StockInfo, 
@@ -2460,20 +2150,7 @@ def init_database():
         
         results = []
         
-        # Force drop all tables if requested - use raw SQL for speed
-        if force_recreate:
-            try:
-                db.session.execute(text('DROP SCHEMA public CASCADE'))
-                db.session.execute(text('CREATE SCHEMA public'))
-                db.session.execute(text('GRANT ALL ON SCHEMA public TO postgres'))
-                db.session.execute(text('GRANT ALL ON SCHEMA public TO public'))
-                db.session.commit()
-                results.append('Schema dropped and recreated successfully')
-            except Exception as e:
-                db.session.rollback()
-                results.append(f'Schema drop error: {str(e)}')
-        
-        # Create all tables
+        # Create all tables (additive only — never drops existing data)
         try:
             db.create_all()
             results.append('All database tables created successfully')
@@ -2504,7 +2181,7 @@ def init_database():
         
     except Exception as e:
         logger.error(f"Database init failed: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal error'}), 500
 
 # SMS/Email Trading Endpoints
 # DISABLED (Feb 2026): Twilio SMS trading disabled, mobile app uses push notifications
@@ -2560,7 +2237,7 @@ def root_health_check():
         return jsonify({'status': 'error', 'message': 'Health check failed'}), 500
 
 @app.route('/admin/test-sendgrid')
-@login_required
+@admin_required
 def test_sendgrid():
     """Test SendGrid email sending"""
     try:
@@ -2583,7 +2260,7 @@ def test_sendgrid():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/admin/migrate-user-notification-fields')
-@login_required
+@admin_required
 def migrate_user_notification_fields():
     """Add phone_number and default_notification_method to User table"""
     try:
@@ -2637,10 +2314,10 @@ def migrate_user_notification_fields():
         db.session.rollback()
         logger.error(f"User migration error: {str(e)}")
         logger.error(traceback.format_exc())
-        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/admin/debug-notification-fields')
-@login_required
+@admin_required
 def debug_notification_fields():
     """Debug endpoint to check current user's notification fields"""
     try:
@@ -2656,7 +2333,7 @@ def debug_notification_fields():
             'has_method_attr': hasattr(current_user, 'default_notification_method')
         })
     except Exception as e:
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/')
 def index():
@@ -2900,7 +2577,7 @@ def update_contact():
     except Exception as e:
         db.session.rollback()
         logger.error(f"Error updating contact: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'An internal error occurred'}), 500
 
 @app.route('/api/notifications/preferences/<int:subscription_id>', methods=['PUT'])
 @login_required
@@ -2945,7 +2622,7 @@ def update_notification_preference(subscription_id):
     except Exception as e:
         db.session.rollback()
         logger.error(f"Error updating preference: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'An internal error occurred'}), 500
 
 @app.route('/login/google')
 def login_google():
@@ -2961,76 +2638,7 @@ def login_google():
         flash('Error connecting to Google. Please try again.', 'danger')
         return redirect(url_for('login'))
 
-@app.route('/admin/debug/flask-login')
-def admin_debug_flask_login():
-    """Debug endpoint to check Flask-Login configuration"""
-    try:
-        # Test database connection
-        db_test_result = {}
-        try:
-            # Check if we can query users
-            user_count = User.query.count()
-            db_test_result['user_count'] = user_count
-            db_test_result['connection'] = 'Success'
-            
-            # Check if load_user works
-            if user_count > 0:
-                first_user = User.query.first()
-                if first_user:
-                    test_user = load_user(first_user.id)
-                    db_test_result['load_user'] = {
-                        'success': test_user is not None,
-                        'user_id': test_user.id if test_user else None
-                    }
-        except Exception as db_error:
-            db_test_result['connection'] = 'Failed'
-            db_test_result['error'] = str(db_error)
-        
-        # Check Flask-Login configuration
-        login_config = {
-            'login_manager': {
-                'login_view': login_manager._login_view if hasattr(login_manager, '_login_view') else None,
-                'login_message': login_manager._login_message if hasattr(login_manager, '_login_message') else None,
-                'session_protection': login_manager.session_protection,
-                'anonymous_user': str(login_manager.anonymous_user),
-                'user_callback': login_manager._user_callback.__name__ if login_manager._user_callback else None
-            },
-            'current_user': {
-                'is_authenticated': current_user.is_authenticated if hasattr(current_user, 'is_authenticated') else False,
-                'is_active': current_user.is_active if hasattr(current_user, 'is_active') else False,
-                'is_anonymous': current_user.is_anonymous if hasattr(current_user, 'is_anonymous') else True,
-                'get_id': current_user.get_id() if hasattr(current_user, 'get_id') else None
-            },
-            'session': {
-                'keys': list(session.keys()) if session else [],
-                'user_id': session.get('user_id'),
-                'email': session.get('email'),
-                'username': session.get('username'),
-                '_user_id': session.get('_user_id'),  # Flask-Login session key
-                '_id': session.get('_id'),  # Session ID
-                '_fresh': session.get('_fresh')  # Flask-Login session freshness
-            }
-        }
-        
-        return jsonify({
-            'success': True,
-            'db_test': db_test_result,
-            'flask_login_config': login_config,
-            'request_info': {
-                'cookies': dict(request.cookies),
-                'headers': dict(request.headers),
-                'is_secure': request.is_secure,
-                'host': request.host
-            }
-        })
-    except Exception as e:
-        logger.error(f"Error in debug Flask-Login endpoint: {str(e)}")
-        logger.error(traceback.format_exc())
-        return jsonify({
-            'success': False,
-            'message': f'Error: {str(e)}',
-            'traceback': traceback.format_exc()
-        }), 500
+# ── Removed: /admin/debug/flask-login — was publicly accessible, leaked session/cookie data.
 
 @app.route('/login/google/authorize')
 def authorize_google():
@@ -3544,7 +3152,8 @@ def sell_stock():
             quantity=quantity,
             price=sale_price,
             transaction_type=transaction_type,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.utcnow(),
+            position_before_qty=stock.quantity
         )
         
         # Update or remove stock
@@ -3618,15 +3227,12 @@ def sell_stock():
     return redirect(url_for('dashboard'))
 
 @app.route('/admin/merge-duplicate-stocks')
-@login_required
+@admin_required
 def merge_duplicate_stocks():
     """
     Merge duplicate stock entries for a user with weighted average cost basis.
     Usage: /admin/merge-duplicate-stocks?user_id=5&ticker=TSLA
     """
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     user_id = request.args.get('user_id', type=int)
     ticker = request.args.get('ticker', '').upper()
     
@@ -3678,7 +3284,7 @@ def merge_duplicate_stocks():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/delete_stock/<int:stock_id>', methods=['POST'])
@@ -3704,13 +3310,9 @@ def delete_stock(stock_id):
         return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/cleanup-intraday-data')
-@login_required
+@admin_required
 def cleanup_intraday_data():
     """Admin endpoint to clean up old intraday snapshots while preserving 4PM market close data"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        flash('Admin access required', 'danger')
-        return redirect(url_for('login'))
-    
     try:
         from api.cleanup_intraday import cleanup_old_intraday_data
         
@@ -3734,13 +3336,9 @@ def cleanup_intraday_data():
         return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/diagnose-missing-today/<username>')
-@login_required
+@admin_required
 def diagnose_missing_today(username):
     """Comprehensive diagnostic for why today's snapshot isn't appearing in charts"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        flash('Admin access required', 'danger')
-        return redirect(url_for('login'))
-    
     try:
         from models import User, PortfolioSnapshot, MarketData, UserPortfolioChartCache
         from portfolio_performance import PortfolioPerformanceCalculator
@@ -3854,17 +3452,13 @@ def diagnose_missing_today(username):
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/cleanup-bogus-snapshots')
-@login_required
+@admin_required
 def cleanup_bogus_snapshots():
     """Admin endpoint to delete bogus $0 snapshots before user's first transaction (GROK FIX: Raw SQL + explicit conn)"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        flash('Admin access required', 'danger')
-        return redirect(url_for('login'))
-    
     try:
         from models import User, Transaction
         from sqlalchemy import text
@@ -3960,17 +3554,13 @@ def cleanup_bogus_snapshots():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/diagnose-missing-recent/<username>/<period>')
-@login_required
+@admin_required
 def diagnose_missing_recent(username, period):
     """COMPREHENSIVE diagnostic: Why are recent snapshots missing from charts?"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        flash('Admin access required', 'danger')
-        return redirect(url_for('login'))
-    
     try:
         from models import User, PortfolioSnapshot, MarketData
         from datetime import date, timedelta
@@ -4072,17 +3662,13 @@ def diagnose_missing_recent(username, period):
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/trace-chart-sampling/<username>/<period>')
-@login_required
+@admin_required
 def trace_chart_sampling(username, period):
     """COMPREHENSIVE diagnostic: Trace EXACT sampling logic to find where 6/19 gets filtered"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        flash('Admin access required', 'danger')
-        return redirect(url_for('login'))
-    
     try:
         from models import User, PortfolioSnapshot, MarketData
         from portfolio_performance import PortfolioPerformanceCalculator
@@ -4194,17 +3780,13 @@ def trace_chart_sampling(username, period):
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/debug-live-calculation/<username>/<period>')
-@login_required
+@admin_required
 def debug_live_calculation(username, period):
     """Admin endpoint to see what live calculation produces vs cached data"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        flash('Admin access required', 'danger')
-        return redirect(url_for('login'))
-    
     try:
         from models import User, UserPortfolioChartCache, PortfolioSnapshot
         from portfolio_performance import PortfolioPerformanceCalculator
@@ -4277,17 +3859,13 @@ def debug_live_calculation(username, period):
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/inspect-chart-cache/<username>/<period>')
-@login_required
+@admin_required
 def inspect_chart_cache(username, period):
     """Admin endpoint to inspect what's in the chart cache"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        flash('Admin access required', 'danger')
-        return redirect(url_for('login'))
-    
     try:
         from models import User, UserPortfolioChartCache
         from sqlalchemy import text
@@ -4363,16 +3941,13 @@ def inspect_chart_cache(username, period):
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/diagnose-atomic-persistence/<username>/<period>')
-@login_required
+@admin_required
 def diagnose_atomic_persistence(username, period):
     """DEEP DIAGNOSTIC: Test transaction atomicity, replica lag, constraints, and code version"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     from models import User, UserPortfolioChartCache
     from sqlalchemy import text, inspect
     import json
@@ -4644,17 +4219,13 @@ def diagnose_atomic_persistence(username, period):
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc(),
             'partial_diagnostics': diagnostics
         }), 500
 
 @app.route('/admin/diagnose-full-chart-flow/<username>/<period>')
-@login_required
+@admin_required
 def diagnose_full_chart_flow(username, period):
     """COMPREHENSIVE: Trace entire data flow from raw data to API response"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     from models import User, PortfolioSnapshot, MarketData, UserPortfolioChartCache
     from leaderboard_utils import generate_chart_from_snapshots
     from performance_calculator import get_period_dates
@@ -4836,16 +4407,15 @@ def diagnose_full_chart_flow(username, period):
         
     except Exception as e:
         import traceback
-        logger.error(f"Diagnostic error: {str(e)}")
+        logger.error(f"Full chart flow diagnostic error: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc(),
-            'partial_results': results
+            'partial_diagnostics': diagnostics
         }), 500
 
 @app.route('/admin/check-chart-cache-raw/<username>/<period>')
-@login_required
+@admin_required
 def check_chart_cache_raw(username, period):
     """Query UserPortfolioChartCache directly to see what's actually in the database"""
     try:
@@ -4942,16 +4512,13 @@ def check_chart_cache_raw(username, period):
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/fix-chart-cache-constraint')
-@login_required
+@admin_required
 def fix_chart_cache_constraint():
     """Check and add missing unique constraint for chart cache UPSERT"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     from sqlalchemy import text
     
     results = {
@@ -5011,12 +4578,11 @@ def fix_chart_cache_constraint():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc(),
             'partial_results': results
         }), 500
 
 @app.route('/admin/check-chart-cache-schema')
-@login_required
+@admin_required
 def check_chart_cache_schema():
     """Check if user_portfolio_chart_cache table has all required columns"""
     try:
@@ -5069,16 +4635,13 @@ def check_chart_cache_schema():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/migrate-historical-charts')
-@login_required
+@admin_required
 def migrate_historical_charts():
     """Regenerate all chart cache data using Modified Dietz calculation"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import User
         from leaderboard_utils import generate_chart_from_snapshots
@@ -5204,16 +4767,13 @@ def migrate_historical_charts():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/show-deployed-code')
-@login_required
+@admin_required
 def show_deployed_code():
     """Show what code is ACTUALLY running on Vercel right now - returns plain text for easy copy/paste"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return "Admin access required", 403
-    
     import inspect
     import os
     from flask import Response
@@ -5305,13 +4865,10 @@ def show_deployed_code():
     return Response('\n'.join(output), mimetype='text/plain')
 
 @app.route('/admin/backfill-sp500-data', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def backfill_sp500_data():
     """Backfill missing S&P 500 data for specific dates"""
     try:
-        if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import date, timedelta
         from models import MarketData
         from portfolio_performance import PortfolioPerformanceCalculator
@@ -5472,13 +5029,10 @@ def backfill_sp500_data():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/check-spy-intraday', methods=['GET'])
-@login_required
+@admin_required
 def check_spy_intraday():
     """Diagnostic endpoint to check SPY_INTRADAY data and identify gaps"""
     try:
-        if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import date, datetime, timedelta
         from models import MarketData, PortfolioSnapshotIntraday
         from sqlalchemy import and_
@@ -5626,17 +5180,14 @@ def check_spy_intraday():
         import traceback
         return jsonify({
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/diagnose-spy-intraday-gap', methods=['GET'])
-@login_required
+@admin_required
 def diagnose_spy_intraday_gap():
     """Find the gap in SPY_INTRADAY data"""
     try:
-        if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import date, timedelta
         from models import MarketData
         from sqlalchemy import and_
@@ -5724,17 +5275,14 @@ def diagnose_spy_intraday_gap():
         import traceback
         return jsonify({
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/clear-spy-intraday-date', methods=['POST'])
-@login_required
+@admin_required
 def clear_spy_intraday_date():
     """Delete SPY_INTRADAY records for a specific date (to redo backfill)"""
     try:
-        if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import date as date_type
         from models import MarketData
         from sqlalchemy import and_
@@ -5791,17 +5339,14 @@ def clear_spy_intraday_date():
         import traceback
         return jsonify({
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/force-delete-spy-intraday', methods=['POST'])
-@login_required
+@admin_required
 def force_delete_spy_intraday():
     """Force delete using raw SQL to bypass any ORM caching"""
     try:
-        if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import date as date_type
         from sqlalchemy import text
         
@@ -5851,17 +5396,14 @@ def force_delete_spy_intraday():
         import traceback
         return jsonify({
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/backfill-spy-intraday', methods=['POST', 'GET'])
-@login_required
+@admin_required
 def backfill_spy_intraday():
     """Backfill missing SPY_INTRADAY data by fetching SPY price and creating MarketData records"""
     try:
-        if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import date, datetime, timedelta, time, timezone as dt_timezone
         from models import MarketData
         from portfolio_performance import PortfolioPerformanceCalculator
@@ -6060,17 +5602,13 @@ def backfill_spy_intraday():
         import traceback
         return jsonify({
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/command-center', methods=['GET'])
-@login_required
+@admin_required
 def admin_command_center():
     """One-time use admin command center with buttons for common operations"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        flash('Admin access required', 'danger')
-        return redirect(url_for('login'))
-    
     return '''
     <!DOCTYPE html>
     <html>
@@ -6266,13 +5804,10 @@ def admin_command_center():
     '''
 
 @app.route('/admin/check-historical-stock-data')
-@login_required
+@admin_required
 def check_historical_stock_data():
     """Check if stock price data exists for users' holdings during Oct 7-17"""
     try:
-        if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import User, Transaction, MarketData, UserPortfolioChartCache
         from datetime import date, datetime, timedelta
         from sqlalchemy import and_
@@ -6362,17 +5897,14 @@ def check_historical_stock_data():
         import traceback
         return jsonify({
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/diagnose-portfolio-calculations')
-@login_required
+@admin_required
 def diagnose_portfolio_calculations():
     """Diagnose why portfolio calculations are failing for specific users"""
     try:
-        if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import User, Transaction
         from cash_tracking import calculate_portfolio_value_with_cash
         from portfolio_performance import PortfolioPerformanceCalculator
@@ -6439,7 +5971,7 @@ def diagnose_portfolio_calculations():
                     'status': 'FAILED'
                 }
                 import traceback
-                user_diag['traceback'] = traceback.format_exc()
+                logger.error(f"User diag calculation error: {traceback.format_exc()}")
             
             results['users'].append(user_diag)
         
@@ -6453,17 +5985,14 @@ def diagnose_portfolio_calculations():
         import traceback
         return jsonify({
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/check-recent-snapshots')
-@login_required
+@admin_required
 def check_recent_snapshots():
     """Check last 5 days of market close snapshots for all users to diagnose 0% performance"""
     try:
-        if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import date, timedelta
         from models import PortfolioSnapshot, User, MarketData
         from sqlalchemy import func
@@ -6536,16 +6065,13 @@ def check_recent_snapshots():
         import traceback
         return jsonify({
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/clear-leaderboard-html', methods=['POST'])
-@login_required
+@admin_required
 def clear_leaderboard_html():
     """Clear pre-rendered HTML from leaderboard cache to force regeneration"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import LeaderboardCache
         from sqlalchemy import update
@@ -6573,7 +6099,7 @@ def clear_leaderboard_html():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/clear-leaderboard-cache', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def clear_leaderboard_cache():
     """
     DELETE old leaderboard cache entries to force use of new calculate_leaderboard_data() code
@@ -6581,9 +6107,6 @@ def clear_leaderboard_cache():
     This will make get_leaderboard_data() fall back to calculate_leaderboard_data(),
     which now uses UserPortfolioChartCache (correct source)
     """
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import LeaderboardCache
         
@@ -6610,12 +6133,9 @@ def clear_leaderboard_cache():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/generate-chart-cache-only')
-@login_required
+@admin_required
 def generate_chart_cache_only():
     """Generate ONLY UserPortfolioChartCache without leaderboard calculation - fixes chicken-egg problem"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import User, UserPortfolioChartCache
         from leaderboard_utils import generate_chart_from_snapshots
@@ -6684,16 +6204,13 @@ def generate_chart_cache_only():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/check-intraday-dates')
-@login_required
+@admin_required
 def check_intraday_dates():
     """Check what dates have intraday snapshots - debug weekend data loss"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import PortfolioSnapshotIntraday
         from sqlalchemy import func, cast, Date
@@ -6753,16 +6270,13 @@ def check_intraday_dates():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/force-regenerate-all-caches')
-@login_required
+@admin_required
 def force_regenerate_all_caches():
     """Force regenerate both chart cache AND leaderboard cache in correct order"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import User, UserPortfolioChartCache, LeaderboardCache
         from leaderboard_utils import generate_chart_from_snapshots, calculate_leaderboard_data
@@ -6880,7 +6394,7 @@ def force_regenerate_all_caches():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 # ============================================================================
@@ -6888,16 +6402,13 @@ def force_regenerate_all_caches():
 # ============================================================================
 
 @app.route('/admin/test-unified-calculator')
-@login_required
+@admin_required
 def test_unified_calculator():
     """
     Test the new unified performance calculator with real user data.
     
     Usage: /admin/test-unified-calculator?username=witty-raven&period=YTD
     """
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from performance_calculator import calculate_portfolio_performance, get_period_dates
         from models import UserPortfolioChartCache
@@ -6982,21 +6493,18 @@ def test_unified_calculator():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 
 @app.route('/admin/compare-all-users-ytd')
-@login_required
+@admin_required
 def compare_all_users_ytd():
     """
     Compare YTD performance for all users using new calculator vs cached values.
     
     Usage: /admin/compare-all-users-ytd
     """
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from performance_calculator import calculate_portfolio_performance, get_period_dates
         from models import UserPortfolioChartCache
@@ -7078,21 +6586,18 @@ def compare_all_users_ytd():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 
 @app.route('/admin/update-single-user-cache')
-@login_required
+@admin_required
 def update_single_user_cache():
     """
     Update performance cache for a single user using new calculator.
     
     Usage: /admin/update-single-user-cache?username=witty-raven&period=YTD
     """
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from performance_calculator import calculate_portfolio_performance, get_period_dates
         from models import UserPortfolioChartCache
@@ -7154,12 +6659,12 @@ def update_single_user_cache():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 
 @app.route('/admin/regenerate-all-performance-caches')
-@login_required
+@admin_required
 def regenerate_all_performance_caches():
     """
     Regenerate ALL performance caches using new unified calculator.
@@ -7168,9 +6673,6 @@ def regenerate_all_performance_caches():
     
     WARNING: Updates all 40 UserPortfolioChartCache entries. Takes 1-2 minutes.
     """
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from performance_calculator import calculate_portfolio_performance, get_period_dates
         from models import UserPortfolioChartCache
@@ -7257,21 +6759,18 @@ def regenerate_all_performance_caches():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 
 @app.route('/admin/verify-calculator-consistency')
-@login_required
+@admin_required
 def verify_calculator_consistency():
     """
     Verify dashboard, leaderboard, and new calculator show consistent values.
     
     Usage: /admin/verify-calculator-consistency?username=witty-raven
     """
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from performance_calculator import calculate_portfolio_performance, get_period_dates
         from models import UserPortfolioChartCache, LeaderboardCache
@@ -7373,12 +6872,12 @@ def verify_calculator_consistency():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 
 @app.route('/admin/update-leaderboard-cache')
-@login_required
+@admin_required
 def update_leaderboard_cache():
     """
     Update leaderboard cache for a single period.
@@ -7387,9 +6886,6 @@ def update_leaderboard_cache():
     Updates all 3 categories (all, small_cap, large_cap) × 2 versions (auth, anon) = 6 entries
     Takes ~5 seconds per period.
     """
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from leaderboard_utils import calculate_leaderboard_data
         from models import LeaderboardCache
@@ -7463,12 +6959,12 @@ def update_leaderboard_cache():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 
 @app.route('/admin/update-user-caches')
-@login_required
+@admin_required
 def update_user_caches():
     """
     Update all chart caches for a single user.
@@ -7477,9 +6973,6 @@ def update_user_caches():
     Updates: 5D, 1M, 3M, YTD, 1Y, MAX (skips 1D - no intraday data)
     Takes ~10 seconds per user.
     """
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from leaderboard_utils import generate_chart_from_snapshots
         import json
@@ -7556,20 +7049,17 @@ def update_user_caches():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 
 @app.route('/admin/fix-api-log-column')
-@login_required
+@admin_required
 def fix_api_log_column():
     """
     Fix the alpha_vantage_api_log.symbol column size (VARCHAR(10) -> VARCHAR(50))
     Usage: /admin/fix-api-log-column
     """
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         # Use raw connection to avoid session issues
         connection = db.engine.raw_connection()
@@ -7592,20 +7082,17 @@ def fix_api_log_column():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 
 @app.route('/admin/check-api-status')
-@login_required
+@admin_required
 def check_api_status():
     """
     Check recent Alpha Vantage API calls and their success/failure status.
     Usage: /admin/check-api-status
     """
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import AlphaVantageAPILog
         from datetime import datetime, timedelta
@@ -7662,20 +7149,17 @@ def check_api_status():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 
 @app.route('/admin/check-todays-snapshot')
-@login_required
+@admin_required
 def check_todays_snapshot():
     """
     Check if today's market close snapshot exists for all users.
     Usage: /admin/check-todays-snapshot
     """
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import PortfolioSnapshot
         
@@ -7715,20 +7199,17 @@ def check_todays_snapshot():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 
 @app.route('/admin/test-chart-generation')
-@login_required
+@admin_required
 def test_chart_generation():
     """
     Test chart generation with new unified calculator.
     Usage: /admin/test-chart-generation?username=witty-raven&period=YTD
     """
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from leaderboard_utils import generate_chart_from_snapshots
         import json
@@ -7770,12 +7251,12 @@ def test_chart_generation():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 
 @app.route('/admin/rebuild-cash-tracking')
-@login_required
+@admin_required
 def rebuild_cash_tracking():
     """
     Rebuild max_cash_deployed and cash_proceeds for all users.
@@ -7786,9 +7267,6 @@ def rebuild_cash_tracking():
     Usage: /admin/rebuild-cash-tracking?user_id=5 (single user)
            /admin/rebuild-cash-tracking (all users)
     """
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from rebuild_cash_tracking import rebuild_user_cash_tracking, rebuild_all_users_cash_tracking
         
@@ -7830,12 +7308,12 @@ def rebuild_cash_tracking():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 
 @app.route('/admin/diagnose-user-after-trade')
-@login_required
+@admin_required
 def diagnose_user_after_trade():
     """
     Detailed diagnostic for a single user after buy/sell trade.
@@ -7843,9 +7321,6 @@ def diagnose_user_after_trade():
     
     Usage: /admin/diagnose-user-after-trade?user_id=5
     """
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import Transaction, PortfolioSnapshot
         from portfolio_performance import PortfolioPerformanceCalculator
@@ -7984,21 +7459,18 @@ def diagnose_user_after_trade():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 
 @app.route('/admin/diagnose-all-users-cash-tracking')
-@login_required
+@admin_required
 def diagnose_all_users_cash_tracking():
     """
     Check max_cash_deployed tracking and transaction history for ALL users.
     
     Shows which users have transactions that should have changed max_cash_deployed.
     """
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import Transaction, PortfolioSnapshot
         from datetime import date
@@ -8083,21 +7555,18 @@ def diagnose_all_users_cash_tracking():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 
 @app.route('/admin/diagnose-max-cash-deployed')
-@login_required
+@admin_required
 def diagnose_max_cash_deployed():
     """
     Check if max_cash_deployed is being properly tracked in snapshots.
     
     Usage: /admin/diagnose-max-cash-deployed?username=witty-raven
     """
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import PortfolioSnapshot
         from datetime import date
@@ -8184,19 +7653,16 @@ def diagnose_max_cash_deployed():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 # End of unified calculator test routes
 # ============================================================================
 
 @app.route('/admin/test-database-persistence')
-@login_required
+@admin_required
 def test_database_persistence():
     """Test if database changes actually persist - debugging cache resurrection"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import LeaderboardCache, UserPortfolioChartCache
         
@@ -8257,16 +7723,13 @@ def test_database_persistence():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/compare-chart-vs-live/<username>/<period>')
-@login_required
+@admin_required
 def compare_chart_vs_live(username, period):
     """Compare cached chart data vs live calculation for debugging mismatches"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import User, UserPortfolioChartCache
         from portfolio_performance import PortfolioPerformanceCalculator
@@ -8323,16 +7786,13 @@ def compare_chart_vs_live(username, period):
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/check-all-caches')
-@login_required
+@admin_required
 def check_all_caches():
     """Check ALL cache tables to see what's actually stored"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import LeaderboardCache, UserPortfolioChartCache
         import json
@@ -8394,11 +7854,11 @@ def check_all_caches():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/trace-leaderboard-value/<username>/<period>')
-@login_required
+@admin_required
 def trace_leaderboard_value(username, period):
     """
     Trace EXACTLY where a leaderboard value comes from
@@ -8406,9 +7866,6 @@ def trace_leaderboard_value(username, period):
     Example: /admin/trace-leaderboard-value/witty-raven/YTD
     This will show where the 6.69% value originates
     """
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import User, LeaderboardCache, UserPortfolioChartCache
         import json
@@ -8515,17 +7972,14 @@ def trace_leaderboard_value(username, period):
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/check-snapshot-data')
-@login_required
+@admin_required
 def check_snapshot_data():
     """Check if both portfolio snapshots AND S&P 500 data exist for recent dates"""
     try:
-        if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import date, timedelta
         from models import PortfolioSnapshot, MarketData, User
         from sqlalchemy import func
@@ -8601,13 +8055,9 @@ def check_snapshot_data():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/regenerate-chart-cache')
-@login_required
+@admin_required
 def regenerate_chart_cache():
     """Admin endpoint to force regenerate chart cache for all users"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        flash('Admin access required', 'danger')
-        return redirect(url_for('login'))
-    
     try:
         from leaderboard_utils import update_leaderboard_cache
         
@@ -8638,16 +8088,13 @@ def regenerate_chart_cache():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/check-cron-health')
-@login_required
+@admin_required
 def check_cron_health():
     """Check if market-close cron is running and collecting S&P 500 data"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import MarketData, PortfolioSnapshot, User
         from datetime import timedelta
@@ -8714,16 +8161,13 @@ def check_cron_health():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/backfill-sp500/<date_str>')
-@login_required
+@admin_required
 def backfill_sp500_for_date(date_str):
     """Backfill S&P 500 data for a specific date (format: YYYY-MM-DD)"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from datetime import datetime
         from models import MarketData
@@ -8782,17 +8226,13 @@ def backfill_sp500_for_date(date_str):
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/collect-sp500-manual')
-@login_required
+@admin_required
 def collect_sp500_manual():
     """Admin endpoint to manually collect S&P 500 data for today"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        flash('Admin access required', 'danger')
-        return redirect(url_for('login'))
-    
     try:
         from models import MarketData
         from portfolio_performance import PortfolioPerformanceCalculator
@@ -8857,17 +8297,13 @@ def collect_sp500_manual():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/add-intraday-cash-fields')
-@login_required
+@admin_required
 def add_intraday_cash_fields():
     """Admin endpoint to add cash tracking fields to portfolio_snapshot_intraday table"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        flash('Admin access required', 'danger')
-        return redirect(url_for('login'))
-    
     try:
         from sqlalchemy import text
         
@@ -8944,17 +8380,13 @@ def add_intraday_cash_fields():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/verify-snapshot-data-flow')
-@login_required
+@admin_required
 def verify_snapshot_data_flow():
     """Admin endpoint to verify entire data flow: snapshots → cache → charts"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        flash('Admin access required', 'danger')
-        return redirect(url_for('login'))
-    
     try:
         from datetime import date, timedelta
         from models import PortfolioSnapshot, User, UserPortfolioChartCache, MarketData
@@ -9082,17 +8514,13 @@ def verify_snapshot_data_flow():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/check-intraday-retention')
-@login_required
+@admin_required
 def check_intraday_retention():
     """Admin endpoint to check intraday data retention and verify purging is working"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        flash('Admin access required', 'danger')
-        return redirect(url_for('login'))
-    
     try:
         from datetime import timedelta, date
         from models import PortfolioSnapshotIntraday, User
@@ -9177,16 +8605,13 @@ def check_intraday_retention():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/intraday-diagnostics')
-@login_required
+@admin_required
 def admin_intraday_diagnostics():
     """Comprehensive intraday data collection diagnostics"""
-    if not current_user.is_admin:
-        return redirect(url_for('index'))
-    
     try:
         from datetime import datetime, date, timedelta
         from models import db, User, PortfolioSnapshotIntraday, PortfolioSnapshot, MarketData
@@ -9449,12 +8874,9 @@ def admin_intraday_diagnostics():
         """
 
 @app.route('/admin/snapshot-uniqueness-report')
-@login_required
+@admin_required
 def admin_snapshot_uniqueness_report():
     """Detailed report on snapshot uniqueness and stock diversity"""
-    if not current_user.is_admin:
-        return redirect(url_for('index'))
-    
     try:
         from datetime import datetime, date, timedelta
         from models import db, User, PortfolioSnapshotIntraday, Stock, Transaction
@@ -9611,12 +9033,9 @@ def admin_snapshot_uniqueness_report():
         """
 
 @app.route('/admin/detailed-intraday-debug')
-@login_required
+@admin_required
 def admin_detailed_intraday_debug():
     """Comprehensive step-by-step debugging of intraday collection process"""
-    if not current_user.is_admin:
-        return redirect(url_for('index'))
-    
     try:
         from datetime import datetime
         from models import db, User, PortfolioSnapshotIntraday, Stock, MarketData, AlphaVantageAPILog, UserPortfolioChartCache
@@ -10022,12 +9441,9 @@ def admin_detailed_intraday_debug():
         """
 
 @app.route('/admin/intraday-collection-logs')
-@login_required
+@admin_required
 def admin_intraday_collection_logs():
     """View recent intraday collection logs with detailed analysis"""
-    if not current_user.is_admin:
-        return redirect(url_for('index'))
-    
     try:
         from datetime import datetime, date, timedelta
         from models import db, AlphaVantageAPILog, PortfolioSnapshotIntraday
@@ -10226,12 +9642,9 @@ RECENT COLLECTIONS:"""
         """
 
 @app.route('/admin/test-intraday-collection')
-@login_required
+@admin_required
 def admin_test_intraday_collection():
     """Manually test intraday collection with detailed logging"""
-    if not current_user.is_admin:
-        return redirect(url_for('index'))
-    
     try:
         from datetime import datetime
         from models import db, User, PortfolioSnapshotIntraday, MarketData
@@ -10357,12 +9770,9 @@ def admin_test_intraday_collection():
         """
 
 @app.route('/admin/clear-chart-cache')
-@login_required
+@admin_required
 def admin_clear_chart_cache():
     """Clear chart cache to force regeneration with weekend filter"""
-    if not current_user.is_admin:
-        return redirect(url_for('index'))
-    
     try:
         from models import db, UserPortfolioChartCache
         
@@ -10388,15 +9798,12 @@ def admin_clear_chart_cache():
         """
 
 @app.route('/admin/regenerate-leaderboard-html', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def admin_regenerate_leaderboard_html():
     """
     Pre-render leaderboard HTML for all periods/categories
     Optimized for 10k+ concurrent users with CDN edge caching
     """
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     if request.method == 'GET':
         return '''
         <!DOCTYPE html>
@@ -10505,15 +9912,12 @@ def admin_regenerate_leaderboard_html():
         }), 500
 
 @app.route('/admin/invalidate-leaderboard', methods=['POST'])
-@login_required
+@admin_required
 def admin_invalidate_leaderboard():
     """
     Invalidate specific leaderboard cache entry and trigger regeneration
     Emergency endpoint for fixing stale/incorrect leaderboard data
     """
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import LeaderboardCache
         from leaderboard_utils import prerender_leaderboard_html
@@ -10563,20 +9967,9 @@ def admin_invalidate_leaderboard():
         }), 500
 
 @app.route('/admin')
-@login_required
+@admin_required
 def admin_dashboard():
     """Enhanced admin dashboard with platform metrics and API status"""
-    # Verify user is authenticated
-    if not current_user.is_authenticated:
-        flash('You must be logged in to access the admin dashboard.', 'warning')
-    # ... (rest of the code remains the same)
-        return redirect(url_for('login'))
-    
-    # Check if user is admin using the secure is_admin property
-    if not current_user.is_admin:
-        flash('You do not have permission to access the admin dashboard.', 'danger')
-        return redirect(url_for('dashboard'))
-    
     try:
         # Get basic counts
         user_count = User.query.count()
@@ -10613,12 +10006,9 @@ def admin_dashboard():
     )
 
 @app.route('/admin/db-debug')
-@login_required
+@admin_required
 def debug_database():
     """Temporary diagnostic endpoint to check database connectivity and schema"""
-    if not current_user.is_admin:
-        return "Access denied", 403
-    
     results = []
     
     # Test database connection
@@ -10680,11 +10070,8 @@ def debug_database():
 
 
 @app.route('/admin/test-cron-execution')
-@login_required
+@admin_required
 def test_cron_execution():
-    if not current_user.is_admin:
-        return redirect(url_for('index'))
-    
     try:
         from datetime import datetime, timedelta, time
         from sqlalchemy import distinct
@@ -10843,12 +10230,8 @@ def test_cron_execution():
         """
         
     except Exception as e:
-        import traceback
-        error_details = {
-            'error': str(e),
-            'traceback': traceback.format_exc()
-        }
-        return f"<h1>Cron Test Error</h1><pre>{error_details}</pre><br><a href='/admin'>Back to Admin</a>"
+        logger.error(f"Cron test error: {e}", exc_info=True)
+        return f"<h1>Cron Test Error</h1><pre>{str(e)}</pre><br><a href='/admin'>Back to Admin</a>"
 
 @app.route('/admin/transactions')
 @admin_required
@@ -11294,20 +10677,7 @@ def admin_stocks():
 # Error handler
 @app.errorhandler(500)
 def internal_error(error):
-    error_details = {
-        'error': str(error),
-        'traceback': traceback.format_exc(),
-        'request_path': request.path,
-        'request_method': request.method,
-        'request_args': dict(request.args),
-        'template_folder': app.template_folder,
-        'static_folder': app.static_folder,
-        'template_exists': os.path.exists(app.template_folder),
-        'template_files': os.listdir(app.template_folder) if os.path.exists(app.template_folder) else [],
-        'static_exists': os.path.exists(app.static_folder),
-        'static_files': os.listdir(app.static_folder) if os.path.exists(app.static_folder) else []
-    }
-    logger.error(f"500 error: {str(error)}", extra=error_details)
+    logger.error(f"500 error on {request.method} {request.path}: {str(error)}", exc_info=True)
     
     # Check if this is an API request
     if request.path.startswith('/api/'):
@@ -11315,12 +10685,10 @@ def internal_error(error):
             'error': 'Internal Server Error',
             'status': 500,
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'path': request.path,
-            'environment': os.environ.get('VERCEL_ENV', 'development'),
-            'request_id': os.environ.get('AWS_LAMBDA_REQUEST_ID', 'local')
+            'path': request.path
         }), 500
     
-    # Return a custom error page with details for HTML requests
+    # Return a generic error page for HTML requests
     return render_template_string("""
 <!DOCTYPE html>
 <html>
@@ -11330,29 +10698,20 @@ def internal_error(error):
         body { font-family: Arial, sans-serif; margin: 40px; }
         .container { max-width: 800px; margin: 0 auto; }
         .error { background: #f8d7da; padding: 15px; border-radius: 5px; }
-        .details { margin-top: 20px; background: #f5f5f5; padding: 15px; border-radius: 5px; }
-        pre { background: #eee; padding: 10px; overflow: auto; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Server Error</h1>
-        
         <div class="error">
             <h2>500 - Internal Server Error</h2>
             <p>The server encountered an unexpected condition that prevented it from fulfilling the request.</p>
         </div>
-        
-        <div class="details">
-            <h3>Error Details</h3>
-            <pre>{{ error_details | tojson(indent=2) }}</pre>
-        </div>
-        
         <p><a href="/">Return to Home</a></p>
     </div>
 </body>
 </html>
-    """, error_details=error_details), 500
+    """), 500
 
 @app.route('/admin/transactions/<int:transaction_id>/edit', methods=['GET', 'POST'])
 @admin_required
@@ -11686,6 +11045,7 @@ def admin_edit_stock(stock_id):
 
 # Debug endpoint to check environment and configuration
 @app.route('/debug')
+@admin_required
 def debug_info():
     try:
         # Check template and static directories
@@ -11740,17 +11100,13 @@ def debug_info():
         
         return jsonify(env_info)
     except Exception as e:
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()})
+        return jsonify({'error': str(e)})
 
 @app.route('/admin/run-migration')
+@admin_required
 def run_migration():
     """One-time migration endpoint - remove after use"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         # Create the new tables manually since we don't have Flask-Migrate in Vercel
         with app.app_context():
             # Create portfolio_snapshot table
@@ -11854,18 +11210,13 @@ def run_migration():
         
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()})
+        return jsonify({'error': str(e)})
 
 @app.route('/admin/fix-all-columns')
-@login_required
+@admin_required
 def fix_all_columns():
     """Fix all missing columns in one go"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         results = []
         
         # Create all cache and metrics tables if they don't exist
@@ -11922,13 +11273,10 @@ def fix_all_columns():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/verify-cache-migration')
-@login_required
+@admin_required
 def admin_verify_cache_migration():
     """Verify that new _auth/_anon cache format is working and old format can be cleaned up"""
     try:
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import LeaderboardCache
         
         # Count cache entries by format
@@ -11969,16 +11317,13 @@ def admin_verify_cache_migration():
         
     except Exception as e:
         logger.error(f"Error verifying cache migration: {str(e)}")
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/delete-old-cache-format')
-@login_required
+@admin_required
 def admin_delete_old_cache_format():
     """Delete old cache entries without _auth/_anon suffix after migration is complete"""
     try:
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import LeaderboardCache
         
         # Safety check: Only delete if new format exists
@@ -12012,16 +11357,13 @@ def admin_delete_old_cache_format():
     except Exception as e:
         db.session.rollback()
         logger.error(f"Error deleting old cache format: {str(e)}")
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/investigate-sept-snapshots')
-@login_required
+@admin_required
 def admin_investigate_sept_snapshots():
     """Investigate witty-raven's snapshots from Sept 2-10, 2025"""
     try:
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import date
         from models import PortfolioSnapshot, Transaction, Stock, MarketData, User
         from sqlalchemy import and_
@@ -12164,16 +11506,13 @@ def admin_investigate_sept_snapshots():
     except Exception as e:
         logger.error(f"Error investigating Sept snapshots: {str(e)}")
         logger.error(traceback.format_exc())
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/investigate-sept-deep-dive')
-@login_required
+@admin_required
 def admin_investigate_sept_deep_dive():
     """Deep investigation: Was the Sept 3 6.87% drop real or data corruption?"""
     try:
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import date
         from models import User, PortfolioSnapshot, Stock, MarketData
         import json as json_module
@@ -12363,16 +11702,13 @@ def admin_investigate_sept_deep_dive():
         
     except Exception as e:
         logger.error(f"Error in Sept deep dive: {str(e)}")
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/backfill-sept-data', methods=['POST'])
-@login_required
+@admin_required
 def admin_backfill_sept_data():
     """Backfill Sept 2-11 market data using Alpha Vantage and recalculate everything"""
     try:
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         import requests
         from datetime import date, datetime, timedelta
         from models import MarketData, PortfolioSnapshot, User, Stock, UserPortfolioChartCache, LeaderboardCache
@@ -12745,17 +12081,14 @@ def admin_backfill_sept_data():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/run-sept-backfill')
-@login_required
+@admin_required
 def admin_run_sept_backfill():
     """GET wrapper for backfill - just visit this URL to trigger the backfill"""
     try:
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         # Call the POST endpoint internally
         return admin_backfill_sept_data()
         
@@ -12764,17 +12097,14 @@ def admin_run_sept_backfill():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/verify-sept-backfill')
-@login_required
+@admin_required
 def admin_verify_sept_backfill():
     """Comprehensive verification: Check ALL users' holdings and validate backfill completeness"""
     try:
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import date
         from models import User, PortfolioSnapshot, Stock, MarketData
         import json as json_module
@@ -12981,17 +12311,14 @@ def admin_verify_sept_backfill():
         logger.error(f"Error in backfill verification: {str(e)}")
         return jsonify({
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/complete-sept-backfill')
-@login_required
+@admin_required
 def admin_complete_sept_backfill_page():
     """Interface page for completing Sept backfill in batches (no timeout)"""
     try:
-        if not current_user.is_admin:
-            return "Admin access required", 403
-        
         html = '''
 <!DOCTYPE html>
 <html>
@@ -13430,13 +12757,10 @@ def admin_complete_sept_backfill_page():
         return f"Error: {str(e)}", 500
 
 @app.route('/admin/backfill-batch', methods=['POST'])
-@login_required
+@admin_required
 def admin_backfill_batch():
     """Backfill a batch of tickers (called from button interface)"""
     try:
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         import requests
         from datetime import date, timedelta
         from models import MarketData
@@ -13520,13 +12844,10 @@ def admin_backfill_batch():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/admin/recalculate-sept-snapshots', methods=['POST'])
-@login_required
+@admin_required
 def admin_recalculate_sept_snapshots():
     """Recalculate ALL users' portfolio snapshots for Sept 2-11"""
     try:
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import date, timedelta
         from models import User, PortfolioSnapshot, Stock, MarketData, UserPortfolioChartCache, LeaderboardCache
         
@@ -13609,16 +12930,13 @@ def admin_recalculate_sept_snapshots():
         
     except Exception as e:
         logger.error(f"Error recalculating snapshots: {str(e)}")
-        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/admin/recalculate-user', methods=['POST'])
-@login_required
+@admin_required
 def admin_recalculate_user():
     """Recalculate a SINGLE user's snapshots using RAW SQL for speed"""
     try:
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import date, timedelta
         from models import User, Stock, MarketData, PortfolioSnapshot
         
@@ -13723,16 +13041,13 @@ def admin_recalculate_user():
     except Exception as e:
         logger.error(f"Error recalculating user: {str(e)}")
         db.session.rollback()
-        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/admin/recalculate-user-bulk', methods=['POST'])
-@login_required
+@admin_required
 def admin_recalculate_user_bulk():
     """Recalculate using BULK UPDATE - pre-fetch ALL snapshots at once"""
     try:
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import date, timedelta
         from models import User, Stock, MarketData, PortfolioSnapshot
         
@@ -13826,16 +13141,13 @@ def admin_recalculate_user_bulk():
     except Exception as e:
         logger.error(f"Error in bulk recalculation: {str(e)}")
         db.session.rollback()
-        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/admin/db-health-check', methods=['GET'])
-@login_required
+@admin_required
 def admin_db_health_check():
     """Ultra-simple DB health check - just count queries"""
     try:
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         import time
         from datetime import date
         from models import User, Stock, MarketData, PortfolioSnapshot
@@ -13954,19 +13266,16 @@ def admin_db_health_check():
         
     except Exception as e:
         logger.error(f"Health check error: {str(e)}")
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/debug-portfolio-timeline', methods=['GET'])
-@login_required
+@admin_required
 def admin_debug_portfolio_timeline():
     """
     Detailed portfolio breakdown across specific dates
     Shows: holdings, stock prices, calculated values, snapshots
     """
     try:
-        if not current_user.is_admin:
-            return "Admin access required", 403
-        
         from datetime import date, datetime, timedelta
         from models import User, Stock, MarketData, PortfolioSnapshot, Transaction
         
@@ -14314,16 +13623,14 @@ def admin_debug_portfolio_timeline():
         
     except Exception as e:
         logger.error(f"Portfolio timeline debug error: {str(e)}")
-        return f"<html><body><h1>Error</h1><pre>{str(e)}\n\n{traceback.format_exc()}</pre></body></html>", 500
+        logger.error(traceback.format_exc())
+        return f"<html><body><h1>Error</h1><pre>{str(e)}</pre></body></html>", 500
 
 @app.route('/admin/investigate-first-assets')
-@login_required
+@admin_required
 def admin_investigate_first_assets():
     """Investigate when user first added assets and intraday trading patterns"""
     try:
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import date, datetime
         from models import User, Stock, MarketData, PortfolioSnapshot, Transaction
         from collections import defaultdict
@@ -14447,16 +13754,13 @@ def admin_investigate_first_assets():
     except Exception as e:
         logger.error(f"Investigate first assets error: {str(e)}")
         import traceback
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/profile-recalculation', methods=['POST'])
-@login_required
+@admin_required
 def admin_profile_recalculation():
     """Profile the recalculation to see WHERE it's slow"""
     try:
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         import time
         from datetime import date, timedelta
         from models import User, Stock, MarketData, PortfolioSnapshot
@@ -14599,16 +13903,13 @@ def admin_profile_recalculation():
     except Exception as e:
         logger.error(f"Error profiling: {str(e)}")
         db.session.rollback()
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/clear-caches', methods=['POST'])
-@login_required
+@admin_required
 def admin_clear_caches():
     """Clear chart and leaderboard caches"""
     try:
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import UserPortfolioChartCache, LeaderboardCache, SP500ChartCache
         
         chart_cache = UserPortfolioChartCache.query.delete()
@@ -14633,13 +13934,10 @@ def admin_clear_caches():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/admin/debug-recalculation')
-@login_required
+@admin_required
 def admin_debug_recalculation():
     """Debug version: Shows EXACTLY what happens during recalculation"""
     try:
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import date, timedelta
         from models import User, PortfolioSnapshot, Stock, MarketData
         
@@ -14777,18 +14075,13 @@ def admin_debug_recalculation():
         
     except Exception as e:
         logger.error(f"Error in debug recalculation: {str(e)}")
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/metrics')
-@login_required
+@admin_required
 def admin_metrics():
     """Get platform health metrics for admin dashboard"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from admin_metrics import get_admin_dashboard_metrics
         metrics = get_admin_dashboard_metrics()
         
@@ -14801,15 +14094,10 @@ def admin_metrics():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/update-metrics')
-@login_required
+@admin_required
 def admin_update_metrics():
     """Manually update platform metrics"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from admin_metrics import update_daily_metrics
         
         # Actually call the update function
@@ -14831,11 +14119,11 @@ def admin_update_metrics():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/fix-stock-info-symbol')
-@login_required
+@admin_required
 def admin_fix_stock_info_symbol():
     """Normalize legacy 'symbol' column on stock_info to avoid NOT NULL violations.
 
@@ -14846,10 +14134,6 @@ def admin_fix_stock_info_symbol():
       - Drops the NOT NULL constraint on symbol so future inserts (which only set ticker) succeed
     """
     try:
-        # Admin check aligned with other admin endpoints
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
 
         from sqlalchemy import text
 
@@ -14898,19 +14182,14 @@ def admin_fix_stock_info_symbol():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/fix-stock-info-schema')
-@login_required
+@admin_required
 def admin_fix_stock_info_schema():
     """Fix stock_info table schema - add all missing columns"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from sqlalchemy import text
         
         try:
@@ -14981,19 +14260,14 @@ def admin_fix_stock_info_schema():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/validate-schema')
-@login_required
+@admin_required
 def admin_validate_schema():
     """Comprehensive schema validation - compare all model columns against production database"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from sqlalchemy import text, inspect
         from models import (User, Stock, Subscription, SubscriptionTier, Transaction, 
                           PortfolioSnapshot, MarketData, PortfolioSnapshotIntraday, 
@@ -15071,7 +14345,7 @@ def admin_validate_schema():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 def _types_compatible(model_type, prod_type):
@@ -15093,15 +14367,10 @@ def _types_compatible(model_type, prod_type):
     return model_type == prod_type
 
 @app.route('/admin/diagnose-portfolio-data')
-@login_required
+@admin_required
 def admin_diagnose_portfolio_data():
     """Diagnose why portfolio values are showing as $0 and 0% performance"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime, date, timedelta
         from models import db, PortfolioSnapshot, User, Stock
         from portfolio_performance import PortfolioPerformanceCalculator
@@ -15225,19 +14494,14 @@ def admin_diagnose_portfolio_data():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/fix-portfolio-snapshots')
-@login_required
+@admin_required
 def admin_fix_portfolio_snapshots():
     """Fix all portfolio snapshots to use real calculated values instead of zeros"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime, date, timedelta
         from models import db, PortfolioSnapshot, User, Stock
         from portfolio_performance import PortfolioPerformanceCalculator
@@ -15376,19 +14640,14 @@ def admin_fix_portfolio_snapshots():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/debug-performance-calculation')
-@login_required
+@admin_required
 def admin_debug_performance_calculation():
     """Debug why performance calculations show 0.0% despite real snapshots"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime, date, timedelta
         from models import db, PortfolioSnapshot, User, Stock
         
@@ -15470,19 +14729,14 @@ def admin_debug_performance_calculation():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/check-snapshot-history')
-@login_required
+@admin_required
 def admin_check_snapshot_history():
     """Check actual snapshot history to see if we have varying daily values"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime, date, timedelta
         from models import db, PortfolioSnapshot, User, Stock
         
@@ -15553,19 +14807,14 @@ def admin_check_snapshot_history():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/clean-historical-snapshots')
-@login_required
+@admin_required
 def admin_clean_historical_snapshots():
     """Remove incorrect historical snapshots and keep only recent real ones"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime, date, timedelta
         from models import db, PortfolioSnapshot, User, Stock
         
@@ -15616,19 +14865,14 @@ def admin_clean_historical_snapshots():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/diagnose-snapshot-creation')
-@login_required
+@admin_required
 def admin_diagnose_snapshot_creation():
     """Diagnose why snapshots are identical - check API calls, caching, calculation logic"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime, date, timedelta
         from models import db, PortfolioSnapshot, User, Stock
         import os
@@ -15748,19 +14992,14 @@ def admin_diagnose_snapshot_creation():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/test-api-response')
-@login_required
+@admin_required
 def admin_test_api_response():
     """Test actual Alpha Vantage API response format"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         import requests
         import os
         
@@ -15802,19 +15041,14 @@ def admin_test_api_response():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/populate-leaderboard')
-@login_required
+@admin_required
 def admin_populate_leaderboard():
     """Manually populate leaderboard cache - immediate fix for missing data"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime, date, timedelta
         from models import db, PortfolioSnapshot, User, Stock, LeaderboardCache
         
@@ -15896,19 +15130,14 @@ def admin_populate_leaderboard():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/diagnose-leaderboard-population')
-@login_required
+@admin_required
 def admin_diagnose_leaderboard_population():
     """Diagnose why leaderboard population is timing out with only 5 users"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime
         from models import User, PortfolioSnapshot, UserPortfolioChartCache, LeaderboardCache
         import json
@@ -16016,16 +15245,13 @@ def admin_diagnose_leaderboard_population():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/run-stock-info-migration')
-@login_required
+@admin_required
 def admin_run_stock_info_migration():
     """Run the StockInfo metadata enhancement migration"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         # Add missing columns to stock_info table
         with app.app_context():
@@ -16077,16 +15303,13 @@ def admin_run_stock_info_migration():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/populate-stock-metadata')
-@login_required
+@admin_required
 def admin_populate_stock_metadata():
     """Populate comprehensive stock metadata for all user-held stocks"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         # Import dependencies before first use to avoid UnboundLocalError
         from models import StockInfo, Stock
@@ -16239,11 +15462,11 @@ def admin_populate_stock_metadata():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/upsert-stock-info-manual')
-@login_required
+@admin_required
 def admin_upsert_stock_info_manual():
     """Manually upsert minimal StockInfo metadata for specific tickers.
 
@@ -16255,9 +15478,6 @@ def admin_upsert_stock_info_manual():
       - exchange: default 'NYSEARCA'
       - country: default 'USA'
     """
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-
     try:
         tickers_param = request.args.get('tickers', '').strip()
         if not tickers_param:
@@ -16322,19 +15542,14 @@ def admin_upsert_stock_info_manual():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/debug-leaderboard')
-@login_required
+@admin_required
 def admin_debug_leaderboard():
     """Debug leaderboard data availability"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime, date, timedelta
         from models import db, PortfolioSnapshot, User, Stock, LeaderboardCache
         import json
@@ -16409,18 +15624,14 @@ def admin_debug_leaderboard():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/populate-tiers')
+@admin_required
 def populate_tiers():
     """Populate subscription tiers with Stripe price IDs"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-            
         # Define the 5 tiers with real Stripe price IDs
         tiers = [
             {
@@ -16473,14 +15684,10 @@ def populate_tiers():
         return jsonify({"success": False, "message": f"Error: {str(e)}"})
 
 @app.route('/admin/populate-stock-info')
+@admin_required
 def populate_stock_info():
     """Populate stock_info table with company data from Alpha Vantage"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-            
         import requests
         
         # Get Alpha Vantage API key
@@ -16717,7 +15924,7 @@ def get_portfolio_performance(period):
         
     except Exception as e:
         logger.error(f"Performance calculation error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Performance calculation failed'}), 500
 
 @app.route('/api/portfolio/<int:user_id>/performance/<period>')
 def get_public_portfolio_performance(user_id, period):
@@ -16779,7 +15986,7 @@ def get_public_portfolio_performance(user_id, period):
         
     except Exception as e:
         logger.error(f"Public performance calculation error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Performance calculation failed'}), 500
 
 @app.route('/api/portfolio/snapshot')
 @login_required
@@ -16798,17 +16005,13 @@ def create_portfolio_snapshot():
         return jsonify({'success': True})
     except Exception as e:
         logger.error(f"Snapshot creation error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Snapshot creation failed'}), 500
 
 @app.route('/admin/create-todays-snapshots')
+@admin_required
 def create_todays_snapshots():
     """Admin endpoint to create today's portfolio snapshots for all users (no historical data)"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         # Import here to avoid circular imports
         import sys
         import os
@@ -16845,12 +16048,9 @@ def create_todays_snapshots():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/populate-sp500-data', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def populate_sp500_data():
     """Admin endpoint to populate S&P 500 data - synchronous version for debugging"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from portfolio_performance import PortfolioPerformanceCalculator
         from models import MarketData
@@ -16901,12 +16101,9 @@ def populate_sp500_data():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/debug-env', methods=['GET'])
-@login_required
+@admin_required
 def debug_env():
     """Debug environment variables"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     import os
     
     # Check for AlphaVantage API key in different ways
@@ -16927,12 +16124,9 @@ def debug_env():
     })
 
 @app.route('/admin/test-alphavantage', methods=['GET'])
-@login_required
+@admin_required
 def test_alphavantage():
     """Test AlphaVantage API connection with minimal request"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from portfolio_performance import PortfolioPerformanceCalculator
         import requests
@@ -16982,12 +16176,9 @@ def test_alphavantage():
         })
 
 @app.route('/admin/populate-sp500-tiny', methods=['GET'])
-@login_required
+@admin_required
 def populate_sp500_tiny():
     """Populate S&P 500 data in tiny batches to avoid timeout"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from portfolio_performance import PortfolioPerformanceCalculator
         from models import MarketData
@@ -17059,12 +16250,9 @@ def populate_sp500_tiny():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/test-sp500-accuracy', methods=['GET'])
-@login_required
+@admin_required
 def test_sp500_accuracy():
     """Compare our S&P 500 data with actual index data from AlphaVantage"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from portfolio_performance import PortfolioPerformanceCalculator
         from models import MarketData
@@ -17129,12 +16317,9 @@ def test_sp500_accuracy():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/check-sp500-anomalies', methods=['GET'])
-@login_required
+@admin_required
 def check_sp500_anomalies():
     """Check for anomalous data points in S&P 500 dataset"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import MarketData
         from datetime import datetime
@@ -17209,12 +16394,9 @@ def check_sp500_anomalies():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/investigate-alphavantage-spikes', methods=['GET'])
-@login_required
+@admin_required
 def investigate_alphavantage_spikes():
     """Investigate raw AlphaVantage data around spike dates"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from portfolio_performance import PortfolioPerformanceCalculator
         from models import MarketData
@@ -17324,12 +16506,9 @@ def investigate_alphavantage_spikes():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/debug-chart-data/<period>', methods=['GET'])
-@login_required
+@admin_required
 def debug_chart_data(period):
     """Debug chart data generation to find spike sources"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from portfolio_performance import PortfolioPerformanceCalculator
         from models import MarketData
@@ -17432,12 +16611,9 @@ def debug_chart_data(period):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/find-duplicate-sp500-values', methods=['GET'])
-@login_required
+@admin_required
 def find_duplicate_sp500_values():
     """Find duplicate S&P 500 values that create chart spikes"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import MarketData
         from collections import defaultdict
@@ -17498,12 +16674,9 @@ def find_duplicate_sp500_values():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/fix-duplicate-sp500-values', methods=['GET'])
-@login_required
+@admin_required
 def fix_duplicate_sp500_values():
     """Fix duplicate S&P 500 values by interpolating between neighbors"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import MarketData, db
         from collections import defaultdict
@@ -17594,12 +16767,9 @@ def fix_duplicate_sp500_values():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/fix-duplicates-with-alphavantage', methods=['GET'])
-@login_required
+@admin_required
 def fix_duplicates_with_alphavantage():
     """Replace duplicate S&P 500 values with correct AlphaVantage data"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from portfolio_performance import PortfolioPerformanceCalculator
         from models import MarketData, db
@@ -17707,12 +16877,9 @@ def fix_duplicates_with_alphavantage():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/debug-1d-5d-charts', methods=['GET'])
-@login_required
+@admin_required
 def debug_1d_5d_charts():
     """Debug 1D and 5D chart data to understand limitations"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from portfolio_performance import PortfolioPerformanceCalculator
         from models import MarketData, PortfolioSnapshot
@@ -17777,12 +16944,9 @@ def debug_1d_5d_charts():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/implement-intraday-solution', methods=['GET'])
-@login_required
+@admin_required
 def implement_intraday_solution():
     """Implement intraday data solution for 1D charts"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         import requests
         import os
@@ -17849,12 +17013,9 @@ def implement_intraday_solution():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/optimize-5d-charts', methods=['GET'])
-@login_required
+@admin_required
 def optimize_5d_charts():
     """Optimize 5D charts by extending to 10 trading days"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from portfolio_performance import PortfolioPerformanceCalculator
         from datetime import date, timedelta
@@ -17887,12 +17048,9 @@ def optimize_5d_charts():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/implement-1d-chart-alternatives', methods=['GET'])
-@login_required
+@admin_required
 def implement_1d_chart_alternatives():
     """Implement practical 1D chart alternatives without real-time intraday data"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from datetime import datetime, time
         try:
@@ -17955,12 +17113,9 @@ def implement_1d_chart_alternatives():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/test-premium-intraday', methods=['GET'])
-@login_required
+@admin_required
 def test_premium_intraday():
     """Test if current AlphaVantage API key has premium access for real-time intraday data"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         import requests
         import os
@@ -18013,12 +17168,9 @@ def test_premium_intraday():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/implement-realtime-1d-charts', methods=['GET'])
-@login_required
+@admin_required
 def implement_realtime_1d_charts():
     """Implement real-time 1D intraday charts using entitlement=realtime"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         import requests
         import os
@@ -18101,12 +17253,9 @@ def implement_realtime_1d_charts():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/run-intraday-migration', methods=['GET'])
-@login_required
+@admin_required
 def run_intraday_migration():
     """Run the intraday migration to add timestamp column"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import db
         
@@ -18167,12 +17316,9 @@ def run_intraday_migration():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/debug-performance-api', methods=['GET'])
-@login_required
+@admin_required
 def debug_performance_api():
     """Debug portfolio performance API endpoint issues"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from portfolio_performance import PortfolioPerformanceCalculator
         import time
@@ -18232,12 +17378,9 @@ def debug_performance_api():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/test-single-period', methods=['GET'])
-@login_required
+@admin_required
 def test_single_period():
     """Test a single period quickly for debugging"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     period = request.args.get('period', '1D')
     
     try:
@@ -18260,12 +17403,9 @@ def test_single_period():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/fix-sp500-anomalies', methods=['GET'])
-@login_required
+@admin_required
 def fix_sp500_anomalies():
     """Fix anomalous data points in S&P 500 dataset by smoothing"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import MarketData, db
         from datetime import datetime, timedelta
@@ -18351,12 +17491,9 @@ def fix_sp500_anomalies():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/sp500-data-status', methods=['GET'])
-@login_required
+@admin_required
 def sp500_data_status():
     """Check status of S&P 500 data population"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import MarketData
         
@@ -18391,12 +17528,9 @@ def sp500_data_status():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/verify-sp500-data', methods=['GET'])
-@login_required
+@admin_required
 def verify_sp500_data():
     """Show sample S&P 500 data points to verify they're real"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import MarketData
         
@@ -18462,14 +17596,10 @@ def verify_sp500_data():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/check-cached-data')
+@admin_required
 def check_cached_data():
     """Admin endpoint to verify S&P 500 and portfolio snapshots coverage"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import MarketData, PortfolioSnapshot
         from datetime import datetime, timedelta
         
@@ -18534,14 +17664,10 @@ def check_cached_data():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/test-performance-api')
+@admin_required
 def test_performance_api():
     """Admin endpoint to test performance API response"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         # Import here to avoid circular imports
         import sys
         import os
@@ -18574,8 +17700,9 @@ def test_performance_api():
 def cron_daily_snapshots():
     """Cron endpoint for automated daily snapshot creation (call this daily at market close)"""
     try:
-        # This endpoint can be called by external cron services or Vercel cron
-        # No auth required for cron endpoints, but you could add a secret token
+        auth_error = verify_cron_request()
+        if auth_error:
+            return auth_error
         
         # Import here to avoid circular imports
         import sys
@@ -18618,15 +17745,10 @@ def cron_daily_snapshots():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/create-tables')
-@login_required
+@admin_required
 def create_tables():
     """Create all database tables"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         # Create the new tables
         from models import db, User, Stock, Transaction, PortfolioSnapshot, StockInfo, SubscriptionTier, Subscription, SMSNotification, LeaderboardCache, UserPortfolioChartCache, AlphaVantageAPILog, PlatformMetrics, UserActivity
         
@@ -18751,19 +17873,18 @@ def create_tables():
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
 @app.route('/admin/test-market-close')
-@login_required  
+@admin_required  
 def test_market_close():
     """Admin endpoint to manually trigger market close for testing"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        flash('Admin access required', 'danger')
-        return redirect(url_for('login'))
-    
     try:
         # Call the market close endpoint internally
         import requests
         import os
         
-        token = os.environ.get('MARKET_CLOSE_TOKEN', 'test-token')
+        token = os.environ.get('CRON_SECRET')
+        if not token:
+            flash('CRON_SECRET not configured', 'danger')
+            return redirect(url_for('admin_dashboard'))
         url = "https://apestogether.ai/api/cron/market-close"
         headers = {
             'Authorization': f'Bearer {token}',
@@ -18783,12 +17904,9 @@ def test_market_close():
     return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/manual-intraday-collection')
-@login_required  
+@admin_required  
 def manual_intraday_collection():
     """Admin endpoint to manually trigger intraday collection"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        flash('Admin access required', 'danger')
-        return redirect(url_for('login'))
     
     try:
         from datetime import datetime
@@ -18842,12 +17960,9 @@ def manual_intraday_collection():
         return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/test-intraday-collection')
-@login_required
+@admin_required
 def test_intraday_collection():
     """Admin endpoint to manually test intraday data collection"""
-    if not current_user.is_admin:
-        return redirect(url_for('index'))
-    
     try:
         from datetime import datetime
         from models import User, PortfolioSnapshotIntraday
@@ -18910,12 +18025,9 @@ def test_intraday_collection():
 
 
 @app.route('/admin/test-cron-endpoints')
-@login_required
+@admin_required
 def test_cron_endpoints():
     """Admin endpoint to test if cron endpoints are accessible"""
-    if not current_user.is_admin:
-        return redirect(url_for('index'))
-    
     import requests
     from datetime import datetime
     
@@ -18927,9 +18039,10 @@ def test_cron_endpoints():
     
     # Test intraday endpoint
     try:
-        # Get the token from environment (if available)
         import os
-        intraday_token = os.getenv('INTRADAY_CRON_TOKEN', 'test-token')
+        intraday_token = os.getenv('INTRADAY_CRON_TOKEN')
+        if not intraday_token:
+            raise ValueError('INTRADAY_CRON_TOKEN not configured')
         
         response = requests.post(
             'https://apestogether.ai/api/cron/collect-intraday-data',
@@ -18950,7 +18063,9 @@ def test_cron_endpoints():
     
     # Test market close endpoint
     try:
-        cron_secret = os.getenv('CRON_SECRET', 'test-secret')
+        cron_secret = os.getenv('CRON_SECRET')
+        if not cron_secret:
+            raise ValueError('CRON_SECRET not configured')
         
         response = requests.post(
             'https://apestogether.ai/api/cron/market-close',
@@ -18994,26 +18109,45 @@ def test_cron_endpoints():
     <p><a href="/admin">Back to Admin</a></p>
     """
 
+def verify_cron_request(secret_env_var='CRON_SECRET'):
+    """Verify that a cron request is authorized.
+    
+    GET requests: must have x-vercel-cron: 1 header (set by Vercel cron scheduler)
+    POST requests: must have Authorization: Bearer <secret> header
+    
+    Returns None if authorized, or a (jsonify response, status_code) tuple if not.
+    """
+    if request.method == 'GET':
+        if request.headers.get('x-vercel-cron') == '1':
+            return None  # Authorized — Vercel cron
+        logger.warning(f"Unauthorized GET cron attempt on {request.path} (missing x-vercel-cron header)")
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    # POST: require Bearer token
+    expected_token = os.environ.get(secret_env_var)
+    if not expected_token:
+        logger.error(f"{secret_env_var} not configured")
+        return jsonify({'error': 'Server configuration error'}), 500
+    
+    auth_header = request.headers.get('Authorization', '')
+    admin_key = os.environ.get('ADMIN_API_KEY', '')
+    
+    is_bearer = auth_header.startswith('Bearer ') and auth_header[7:] == expected_token
+    is_admin_key = admin_key and request.headers.get('X-Admin-Key') == admin_key
+    
+    if not (is_bearer or is_admin_key):
+        logger.warning(f"Unauthorized POST cron attempt on {request.path}")
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    return None  # Authorized
+
 @app.route('/api/cron/market-open', methods=['POST', 'GET'])
 def market_open_cron():
     """Market open cron job endpoint - initializes daily tracking"""
     try:
-        # Verify authorization token
-        auth_header = request.headers.get('Authorization', '')
-        expected_token = os.environ.get('CRON_SECRET')
-        
-        if not expected_token:
-            logger.error("CRON_SECRET not configured")
-            return jsonify({'error': 'Server configuration error'}), 500
-        
-        # Allow GET requests for Vercel cron (bypass auth for cron jobs)
-        if request.method == 'GET':
-            logger.info("Market open cron triggered via GET from Vercel")
-        else:
-            # POST requests require proper authentication
-            if not auth_header.startswith('Bearer ') or auth_header[7:] != expected_token:
-                logger.warning(f"Unauthorized market open attempt")
-                return jsonify({'error': 'Unauthorized'}), 401
+        auth_error = verify_cron_request()
+        if auth_error:
+            return auth_error
         
         # Use Eastern Time for market operations
         current_time = get_market_time()
@@ -19053,29 +18187,11 @@ def market_close_cron():
     logger.info(f"🔄 Deployment ID: {_rebuild_marker}")
     
     try:
-        # Verify authorization token
-        auth_header = request.headers.get('Authorization', '')
-        expected_token = os.environ.get('CRON_SECRET')
+        auth_error = verify_cron_request()
+        if auth_error:
+            return auth_error
         
-        if not expected_token:
-            logger.error("CRON_SECRET not configured")
-            return jsonify({'error': 'Server configuration error'}), 500
-        
-        # Allow GET requests for Vercel cron (bypass auth for cron jobs)
-        if request.method == 'GET':
-            logger.info("Market close cron triggered via GET from Vercel")
-        else:
-            # FIX #4: Enhanced logging for POST triggers to investigate manual executions
-            # POST requests require proper authentication
-            user_agent = request.headers.get('User-Agent', 'Unknown')
-            source_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
-            logger.info(f"Market close triggered via POST - User-Agent: {user_agent}, Source IP: {source_ip}")
-            
-            if not auth_header.startswith('Bearer ') or auth_header[7:] != expected_token:
-                logger.warning(f"Unauthorized market close attempt from {source_ip}")
-                return jsonify({'error': 'Unauthorized'}), 401
-            
-            logger.info("POST authentication successful - proceeding with market close")
+        logger.info(f"Market close cron triggered via {request.method}")
         
         from models import User, PortfolioSnapshot
         from portfolio_performance import PortfolioPerformanceCalculator
@@ -19688,15 +18804,10 @@ def market_close_cron():
         return error_response, 500
 
 @app.route('/admin/trigger-market-close-backfill', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def admin_trigger_market_close_backfill():
     """Admin endpoint to manually trigger market close pipeline for specific date (backfill missing snapshots)"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         # Handle GET request - show form
         if request.method == 'GET':
             return '''
@@ -19999,17 +19110,14 @@ def admin_trigger_market_close_backfill():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/test-spy-historical-price')
-@login_required
+@admin_required
 def test_spy_historical_price():
     """Test endpoint to diagnose SPY historical price fetching for specific date"""
     try:
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime, date
         from portfolio_performance import PortfolioPerformanceCalculator
         from models import MarketData
@@ -20045,19 +19153,14 @@ def test_spy_historical_price():
         import traceback
         return jsonify({
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/cache-health-monitor')
-@login_required
+@admin_required
 def admin_cache_health_monitor():
     """Admin endpoint to monitor cache health and staleness across all systems"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime, timedelta
         from models import LeaderboardCache, UserPortfolioChartCache, SP500ChartCache
         
@@ -20206,19 +19309,14 @@ def admin_cache_health_monitor():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/invalidate-stale-caches', methods=['POST'])
-@login_required
+@admin_required
 def admin_invalidate_stale_caches():
     """Admin endpoint to invalidate stale caches and trigger regeneration"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime, timedelta
         from models import LeaderboardCache, UserPortfolioChartCache
         from leaderboard_utils import update_leaderboard_cache
@@ -20285,19 +19383,14 @@ def admin_invalidate_stale_caches():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/force-chart-cache-regeneration', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def admin_force_chart_cache_regeneration():
     """Admin endpoint to force regeneration of all chart caches"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         # Handle GET request - show form
         if request.method == 'GET':
             return '''
@@ -20498,19 +19591,14 @@ def admin_force_chart_cache_regeneration():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/investigate-snapshot-data', methods=['GET'])
-@login_required
+@admin_required
 def admin_investigate_snapshot_data():
     """Admin endpoint to investigate what happened to 9/25 and 9/26 snapshot data"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import date
         from models import PortfolioSnapshot, UserPortfolioChartCache, LeaderboardCache
         import json
@@ -20771,19 +19859,14 @@ def admin_investigate_snapshot_data():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/historical-price-backfill', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def admin_historical_price_backfill():
     """Admin endpoint to backfill historical prices and fix corrupted snapshot data"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         # Handle GET request - show form
         if request.method == 'GET':
             return '''
@@ -21114,19 +20197,14 @@ def admin_historical_price_backfill():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/debug-api-auth', methods=['GET'])
-@login_required
+@admin_required
 def admin_debug_api_auth():
     """Debug API authentication issues"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         try:
             from flask_login import current_user
             flask_login_available = True
@@ -21274,19 +20352,14 @@ def admin_debug_api_auth():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/historical-price-backfill-batch', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def admin_historical_price_backfill_batch():
     """Admin endpoint to backfill historical prices in small batches to avoid Vercel timeout"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         # Handle GET request - show batch interface
         if request.method == 'GET':
             from models import Stock
@@ -21606,19 +20679,14 @@ def admin_historical_price_backfill_batch():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/fix-weekend-data-issues', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def admin_fix_weekend_data_issues():
     """Fix specific issues: wrong dates, corrupted S&P 500 data, performance problems"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         if request.method == 'GET':
             return f'''
             <!DOCTYPE html>
@@ -21851,24 +20919,16 @@ def admin_fix_weekend_data_issues():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
-@app.route('/api/cron/cleanup-intraday-data', methods=['POST'])
+@app.route('/api/cron/cleanup-intraday-data', methods=['POST', 'GET'])
 def cleanup_intraday_data_cron():
     """Automated cron endpoint to clean up old intraday snapshots while preserving 4PM market close data"""
     try:
-        # Verify authorization token
-        auth_header = request.headers.get('Authorization', '')
-        expected_token = os.environ.get('CRON_SECRET')
-        
-        if not expected_token:
-            logger.error("CRON_SECRET not configured")
-            return jsonify({'error': 'Server configuration error'}), 500
-        
-        if not auth_header.startswith('Bearer ') or auth_header[7:] != expected_token:
-            logger.warning(f"Unauthorized cleanup attempt")
-            return jsonify({'error': 'Unauthorized'}), 401
+        auth_error = verify_cron_request()
+        if auth_error:
+            return auth_error
         
         from api.cleanup_intraday import cleanup_old_intraday_data
         
@@ -21891,20 +20951,9 @@ def cleanup_intraday_data_cron():
 def auto_create_bots_cron():
     """Daily cron endpoint to auto-create bot accounts per admin settings."""
     try:
-        # Vercel cron sends requests without auth headers, but we verify via CRON_SECRET
-        # or accept Vercel's built-in cron verification
-        auth_header = request.headers.get('Authorization', '')
-        expected_token = os.environ.get('CRON_SECRET', '')
-        admin_key = os.environ.get('ADMIN_API_KEY', '')
-        
-        # Accept: Bearer CRON_SECRET, or X-Admin-Key, or Vercel cron (no auth but from Vercel)
-        is_cron_auth = expected_token and auth_header.startswith('Bearer ') and auth_header[7:] == expected_token
-        is_admin_key = request.headers.get('X-Admin-Key') == admin_key and admin_key
-        is_vercel_cron = request.headers.get('x-vercel-cron') == '1'
-        
-        if not (is_cron_auth or is_admin_key or is_vercel_cron):
-            logger.warning("Unauthorized auto-create-bots attempt")
-            return jsonify({'error': 'Unauthorized'}), 401
+        auth_error = verify_cron_request()
+        if auth_error:
+            return auth_error
         
         # Import and call the auto-create logic from mobile_api
         from mobile_api import _get_auto_create_settings, _save_auto_create_settings
@@ -22000,24 +21049,16 @@ def auto_create_bots_cron():
     except Exception as e:
         logger.error(f"Auto-create bots cron error: {e}")
         import traceback
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/cron/update-leaderboard', methods=['POST'])
+@app.route('/api/cron/update-leaderboard', methods=['POST', 'GET'])
 def update_leaderboard_cron():
     """Automated cron endpoint to update leaderboard cache - legacy endpoint for backward compatibility"""
     try:
-        # Verify authorization token
-        auth_header = request.headers.get('Authorization', '')
-        expected_token = os.environ.get('CRON_SECRET')
-        
-        if not expected_token:
-            logger.error("CRON_SECRET not configured")
-            return jsonify({'error': 'Server configuration error'}), 500
-        
-        if not auth_header.startswith('Bearer ') or auth_header[7:] != expected_token:
-            logger.warning(f"Unauthorized leaderboard update attempt")
-            return jsonify({'error': 'Unauthorized'}), 401
+        auth_error = verify_cron_request()
+        if auth_error:
+            return auth_error
         
         from leaderboard_utils import update_leaderboard_cache
         
@@ -22038,21 +21079,13 @@ def update_leaderboard_cron():
         db.session.rollback()  # Rollback on error
         return jsonify({'error': f'Leaderboard update error: {str(e)}'}), 500
 
-@app.route('/api/cron/update-leaderboard-chunk', methods=['POST'])
+@app.route('/api/cron/update-leaderboard-chunk', methods=['POST', 'GET'])
 def update_leaderboard_chunk_cron():
     """Chunked cron endpoint to update specific leaderboard periods for better reliability"""
     try:
-        # Verify authorization token
-        auth_header = request.headers.get('Authorization', '')
-        expected_token = os.environ.get('CRON_SECRET')
-        
-        if not expected_token:
-            logger.error("CRON_SECRET not configured")
-            return jsonify({'error': 'Server configuration error'}), 500
-        
-        if not auth_header.startswith('Bearer ') or auth_header[7:] != expected_token:
-            logger.warning(f"Unauthorized leaderboard chunk update attempt")
-            return jsonify({'error': 'Unauthorized'}), 401
+        auth_error = verify_cron_request()
+        if auth_error:
+            return auth_error
         
         # Get periods from query parameter
         periods_param = request.args.get('periods', '')
@@ -22088,12 +21121,9 @@ def update_leaderboard_chunk_cron():
         return jsonify({'error': f'Leaderboard chunk update error: {str(e)}'}), 500
 
 @app.route('/admin/add-html-cache-column', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def admin_add_html_cache_column():
     """Add rendered_html column to leaderboard_cache table for Phase 5 HTML pre-rendering"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import db
         from sqlalchemy import text
@@ -22134,12 +21164,9 @@ def admin_add_html_cache_column():
         return jsonify({'error': f'Migration error: {str(e)}'}), 500
 
 @app.route('/admin/market-close-status')
-@login_required
+@admin_required
 def admin_market_close_status():
     """Monitor the status of market close pipeline processes"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from datetime import datetime, date, timedelta
         from models import db, PortfolioSnapshot, LeaderboardCache, UserPortfolioChartCache
@@ -22248,12 +21275,9 @@ def admin_market_close_status():
         }), 500
 
 @app.route('/admin/trigger-market-close-test', methods=['GET', 'POST'])
-@login_required  
+@admin_required  
 def admin_trigger_market_close_test():
     """Manually trigger market close pipeline for testing"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         results = {
             "test_started": datetime.now().isoformat(),
@@ -22374,12 +21398,9 @@ def admin_trigger_market_close_test():
         }), 500
 
 @app.route('/admin/debug-performance-data')
-@login_required
+@admin_required
 def admin_debug_performance_data():
     """Debug portfolio performance and chart data issues"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from datetime import datetime, date, timedelta
         from models import db, User, PortfolioSnapshot, LeaderboardCache, UserPortfolioChartCache, MarketData
@@ -22540,12 +21561,9 @@ def admin_debug_performance_data():
         }), 500
 
 @app.route('/admin/force-refresh-leaderboard', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def admin_force_refresh_leaderboard():
     """Force refresh leaderboard cache with new weekend logic and populate missing data"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from datetime import datetime, date, timedelta
         from models import db, LeaderboardCache, MarketData
@@ -22694,20 +21712,18 @@ def get_public_portfolio_chart(username, period):
         
     except Exception as e:
         logger.error(f"Public portfolio chart error for {username}: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Chart data unavailable'}), 500
 
 @app.route('/admin/bot-dashboard')
+@admin_required
 def admin_bot_dashboard():
     """Serve the bot admin dashboard (protected by API key in the JS)"""
     return render_template('admin_bot_dashboard.html')
 
 @app.route('/admin/debug-dashboard-apis')
-@login_required
+@admin_required
 def admin_debug_dashboard_apis():
     """Debug the specific API endpoints that dashboard calls"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from datetime import datetime
         import requests
@@ -22810,13 +21826,9 @@ def admin_debug_dashboard_apis():
         }), 500
 
 @app.route('/admin/debug-user-data/<username>')
-@login_required
+@admin_required
 def debug_user_data(username):
     """Debug endpoint to check user data availability"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        flash('Admin access required', 'danger')
-        return redirect(url_for('login'))
-    
     try:
         from models import User, Stock, PortfolioSnapshot, UserActivity, UserPortfolioChartCache
         from admin_metrics import get_active_users_count
@@ -22907,13 +21919,9 @@ def debug_user_data(username):
         return f"<h1>Error: {str(e)}</h1><p><a href='/admin'>Back to Admin</a></p>"
 
 @app.route('/admin/test-performance-api-user/<username>')
-@login_required
+@admin_required
 def test_performance_api_for_user(username):
     """Test portfolio performance API endpoints for a specific user"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        flash('Admin access required', 'danger')
-        return redirect(url_for('login'))
-    
     try:
         from models import User
         
@@ -22971,13 +21979,9 @@ def test_performance_api_for_user(username):
         return f"<h1>Error: {str(e)}</h1><p><a href='/admin'>Back to Admin</a></p>"
 
 @app.route('/admin/test-api-logging')
-@login_required
+@admin_required
 def test_api_logging():
     """Admin endpoint to test Alpha Vantage API logging"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        flash('Admin access required', 'danger')
-        return redirect(url_for('login'))
-    
     try:
         from portfolio_performance import PortfolioPerformanceCalculator
         
@@ -22998,12 +22002,9 @@ def test_api_logging():
         return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/snapshot-diagnostics')
-@login_required
+@admin_required
 def snapshot_diagnostics():
     """Comprehensive snapshot diagnostics for database tables, counts, and model validation"""
-    if not current_user.is_admin:
-        return redirect(url_for('index'))
-    
     try:
         from datetime import datetime, date, timedelta
         from models import User, PortfolioSnapshotIntraday, PortfolioSnapshot, LeaderboardEntry
@@ -23164,6 +22165,7 @@ def snapshot_diagnostics():
         """
 
 @app.route('/api/debug/intraday-snapshots')
+@admin_required
 def debug_intraday_snapshots():
     """Debug endpoint to check actual intraday snapshot data"""
     try:
@@ -23459,18 +22461,13 @@ def portfolio_performance_intraday(period):
     
     except Exception as e:
         logger.error(f"Error in performance-intraday API: {str(e)}")
-        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/admin/test-imports')
-@login_required
+@admin_required
 def admin_test_imports():
     """Test that all imports work correctly"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime as dt
         
         results = {
@@ -23515,15 +22512,10 @@ def admin_test_imports():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/debug-chart-data')
-@login_required
+@admin_required
 def admin_debug_chart_data():
     """Debug chart data format to understand timestamp issue"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime
         from portfolio_performance import PortfolioPerformanceCalculator
         
@@ -23590,15 +22582,10 @@ def admin_debug_chart_data():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/debug-snapshot-dates')
-@login_required
+@admin_required
 def admin_debug_snapshot_dates():
     """Debug missing Friday snapshot issue"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime, date, timedelta
         from models import db, PortfolioSnapshot, PortfolioSnapshotIntraday
         from sqlalchemy import func, desc
@@ -23689,7 +22676,7 @@ def admin_debug_snapshot_dates():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/debug-leaderboard-calculations')
-@login_required
+@admin_required
 def admin_debug_leaderboard_calculations():
     """Debug leaderboard calculation issues - why only 1 user on 1D, wrong percentages on 5D"""
     from datetime import datetime, date, timedelta
@@ -23701,11 +22688,6 @@ def admin_debug_leaderboard_calculations():
     try:
         # Rollback any failed transaction first
         db.session.rollback()
-        
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
         
         calculator = PortfolioPerformanceCalculator()
         
@@ -23869,7 +22851,7 @@ def admin_debug_leaderboard_calculations():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/check-leaderboard-schema')
-@login_required
+@admin_required
 def admin_check_leaderboard_schema():
     """Check actual database schema for leaderboard tables"""
     from sqlalchemy import inspect
@@ -23877,11 +22859,6 @@ def admin_check_leaderboard_schema():
     
     try:
         db.session.rollback()
-        
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
         
         inspector = inspect(db.engine)
         
@@ -23922,18 +22899,13 @@ def admin_check_leaderboard_schema():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/fix-leaderboard-schema')
-@login_required
+@admin_required
 def admin_fix_leaderboard_schema():
     """Fix the leaderboard_entry table schema by adding missing columns"""
     from models import db
     
     try:
         db.session.rollback()
-        
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
         
         logger.info("Starting fast leaderboard schema fix...")
         
@@ -24010,18 +22982,13 @@ def admin_fix_leaderboard_schema():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/force-calculated-at-column')
-@login_required
+@admin_required
 def admin_force_calculated_at_column():
     """Force add calculated_at column with direct SQL and immediate verification"""
     from models import db
     
     try:
         db.session.rollback()
-        
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
         
         logger.info("Starting FORCE calculated_at column addition...")
         
@@ -24082,15 +23049,10 @@ def admin_force_calculated_at_column():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/test-weekend-protection')
-@login_required
+@admin_required
 def admin_test_weekend_protection():
     """Test weekend protection by attempting an API call"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime
         from portfolio_performance import PortfolioPerformanceCalculator
         
@@ -24113,15 +23075,10 @@ def admin_test_weekend_protection():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/debug-ytd-sp500')
-@login_required
+@admin_required
 def admin_debug_ytd_sp500():
     """Debug YTD S&P 500 calculation vs other periods"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime, date, timedelta
         from models import db, MarketData
         from sqlalchemy import and_
@@ -24259,6 +23216,7 @@ def admin_debug_ytd_sp500():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/debug/routes')
+@admin_required
 def debug_routes():
     """Debug endpoint to list all registered routes"""
     routes = []
@@ -24276,15 +23234,10 @@ def debug_routes():
     })
 
 @app.route('/admin/simulate-intraday-data')
-@login_required
+@admin_required
 def simulate_intraday_data():
     """Create sample intraday data for testing charts"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime, timedelta
         from models import User, PortfolioSnapshotIntraday
         from portfolio_performance import PortfolioPerformanceCalculator
@@ -24347,22 +23300,9 @@ def simulate_intraday_data():
 def collect_intraday_data():
     """Collect intraday data for all users (called by GitHub Actions)"""
     try:
-        # Verify authorization token
-        auth_header = request.headers.get('Authorization', '')
-        expected_token = os.environ.get('INTRADAY_CRON_TOKEN')
-        
-        if not expected_token:
-            logger.error("INTRADAY_CRON_TOKEN not configured")
-            return jsonify({'error': 'Server configuration error'}), 500
-        
-        # Allow GET requests for manual testing (bypass auth for debugging)
-        if request.method == 'GET':
-            logger.warning("Manual intraday collection triggered via GET (bypassing auth)")
-        else:
-            # POST requests require proper authentication
-            if not auth_header.startswith('Bearer ') or auth_header[7:] != expected_token:
-                logger.warning(f"Unauthorized intraday collection attempt")
-                return jsonify({'error': 'Unauthorized'}), 401
+        auth_error = verify_cron_request('INTRADAY_CRON_TOKEN')
+        if auth_error:
+            return auth_error
         
         from models import User, PortfolioSnapshotIntraday
         from portfolio_performance import PortfolioPerformanceCalculator
@@ -24597,15 +23537,10 @@ def collect_intraday_data():
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
 @app.route('/admin/check-intraday-data')
-@login_required
+@admin_required
 def check_intraday_data():
     """Check intraday data for last 7 trading days - shows ALL snapshots and missing intervals"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime, date, timedelta
         from models import PortfolioSnapshotIntraday, User
         from sqlalchemy import cast, Date
@@ -24705,19 +23640,14 @@ def check_intraday_data():
         import traceback
         return jsonify({
             'error': f'Unexpected error: {str(e)}',
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/backfill-intraday-data', methods=['POST'])
-@login_required
+@admin_required
 def admin_backfill_intraday_data():
     """Backfill missing intraday portfolio snapshots and S&P 500 data for a specific date"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime, time, timedelta
         from models import User, Stock, PortfolioSnapshotIntraday, MarketData
         import requests
@@ -24932,19 +23862,14 @@ def admin_backfill_intraday_data():
         import traceback
         return jsonify({
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/fix-ticker', methods=['POST'])
-@login_required
+@admin_required
 def admin_fix_ticker():
     """Fix incorrect ticker symbol for a user's stock"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import User, Stock
         
         username = request.json.get('username')
@@ -24984,19 +23909,14 @@ def admin_fix_ticker():
         import traceback
         return jsonify({
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/delete-user-intraday-snapshots', methods=['POST'])
-@login_required
+@admin_required
 def admin_delete_user_intraday_snapshots():
     """Delete intraday snapshots for a specific user and date range"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime
         from models import User, PortfolioSnapshotIntraday
         
@@ -25065,19 +23985,14 @@ def admin_delete_user_intraday_snapshots():
         import traceback
         return jsonify({
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/delete-spy-intraday-data', methods=['POST'])
-@login_required
+@admin_required
 def admin_delete_spy_intraday_data():
     """Delete SPY_INTRADAY records to force backfill recreation"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime
         from models import MarketData
         from zoneinfo import ZoneInfo
@@ -25139,19 +24054,14 @@ def admin_delete_spy_intraday_data():
         import traceback
         return jsonify({
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/verify-snapshot-counts', methods=['POST'])
-@login_required
+@admin_required
 def admin_verify_snapshot_counts():
     """Verify actual snapshot counts in database for debugging deletion issues"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime
         from models import User, PortfolioSnapshotIntraday
         from sqlalchemy import cast, Date, func
@@ -25202,19 +24112,14 @@ def admin_verify_snapshot_counts():
         import traceback
         return jsonify({
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/debug-intraday-calculation')
-@login_required
+@admin_required
 def debug_intraday_calculation():
     """Debug why intraday portfolio values aren't changing"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime, date
         from models import User, Stock, PortfolioSnapshotIntraday, MarketData
         from portfolio_performance import PortfolioPerformanceCalculator
@@ -25292,15 +24197,10 @@ def debug_intraday_calculation():
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
 @app.route('/admin/create-admin-snapshot')
-@login_required
+@admin_required
 def create_admin_snapshot():
     """Create an intraday snapshot for the admin user manually"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime
         from models import User, PortfolioSnapshotIntraday
         from portfolio_performance import PortfolioPerformanceCalculator
@@ -25340,15 +24240,10 @@ def create_admin_snapshot():
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
 @app.route('/admin/debug-all-users-portfolios')
-@login_required
+@admin_required
 def debug_all_users_portfolios():
     """Debug portfolio calculations for all users to find $0 issue"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import User, Stock
         from portfolio_performance import PortfolioPerformanceCalculator
         
@@ -25409,15 +24304,10 @@ def debug_all_users_portfolios():
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
 @app.route('/admin/debug-sp500-data')
-@login_required
+@admin_required
 def debug_sp500_data():
     """Debug S&P 500 data availability for intraday charts"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime, date, timedelta
         from models import MarketData
         from sqlalchemy import func
@@ -25488,15 +24378,10 @@ def debug_sp500_data():
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
 @app.route('/admin/create-sample-spy-intraday')
-@login_required
+@admin_required
 def create_sample_spy_intraday():
     """Create sample SPY_INTRADAY data for testing charts"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import datetime, timedelta
         from models import MarketData
         
@@ -25547,15 +24432,10 @@ def create_sample_spy_intraday():
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
 @app.route('/admin/test-spy-fetch')
-@login_required
+@admin_required
 def test_spy_fetch():
     """Test SPY data fetching to debug why intraday collection failed"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from portfolio_performance import PortfolioPerformanceCalculator
         from datetime import datetime
         
@@ -25618,15 +24498,10 @@ def test_spy_fetch():
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
 @app.route('/admin/test-spy-intraday-collection')
-@login_required
+@admin_required
 def test_spy_intraday_collection():
     """Test SPY intraday data collection manually to debug GitHub Actions issue"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from portfolio_performance import PortfolioPerformanceCalculator
         from models import MarketData
         from datetime import datetime
@@ -25686,6 +24561,7 @@ def test_spy_intraday_collection():
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
 @app.route('/admin/check-spy-collection')
+@admin_required
 def check_spy_collection():
     """Check SPY_INTRADAY data collection (public endpoint for verification)"""
     try:
@@ -25731,15 +24607,10 @@ def check_spy_collection():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/test-github-actions-endpoint')
-@login_required
+@admin_required
 def test_github_actions_endpoint():
     """Test the exact GitHub Actions cron endpoint to see what's failing"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         import requests
         import os
         
@@ -25781,15 +24652,10 @@ def test_github_actions_endpoint():
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
 @app.route('/admin/test-cron-endpoint')
-@login_required
+@admin_required
 def test_cron_endpoint():
     """Test the intraday collection endpoint manually"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         import requests
         
         # Test the cron endpoint
@@ -25820,15 +24686,10 @@ def test_cron_endpoint():
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
 @app.route('/admin/populate-sp500-data')
-@login_required
+@admin_required
 def admin_populate_sp500_data():
     """Admin endpoint to populate S&P 500 data in all caches"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         # Import and run the S&P 500 population script
         from populate_sp500_data import populate_all_sp500_caches
         
@@ -25848,19 +24709,14 @@ def admin_populate_sp500_data():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/run-data-flow-diagnostic')
-@login_required
+@admin_required
 def admin_run_data_flow_diagnostic():
     """Admin endpoint to run comprehensive data flow diagnostic"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         # Import and run the diagnostic script
         import sys
         import os
@@ -25884,19 +24740,14 @@ def admin_run_data_flow_diagnostic():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/fix-sp500-charts')
-@login_required
+@admin_required
 def admin_fix_sp500_charts():
     """Admin endpoint to run both S&P 500 population and trigger cache updates"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         results = {
             'step1_sp500_population': {},
             'step2_cache_update': {},
@@ -25966,19 +24817,14 @@ def admin_fix_sp500_charts():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/audit-sp500-data')
-@login_required
+@admin_required
 def admin_audit_sp500_data():
     """Admin endpoint to audit existing S&P 500 data before making changes"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import db, MarketData
         from datetime import date, timedelta
         
@@ -26086,11 +24932,12 @@ def admin_audit_sp500_data():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 # For local testing
 @app.route('/api/debug/routing-test', methods=['GET'])
+@admin_required
 def debug_routing_test():
     """Test endpoint to verify API routing is working"""
     return jsonify({
@@ -26103,6 +24950,7 @@ def debug_routing_test():
     })
 
 @app.route('/api/debug/1Y-endpoint', methods=['GET'])
+@admin_required
 def debug_1Y_endpoint():
     """Specific diagnostic for the problematic 1Y endpoint"""
     try:
@@ -26159,15 +25007,15 @@ def debug_1Y_endpoint():
         return jsonify(diagnostic_info)
         
     except Exception as e:
-        import traceback
+        logger.error(f"Diagnostic error: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc(),
             'timestamp': datetime.now().isoformat()
         })
 
 @app.route('/api/debug/all-routes', methods=['GET'])
+@admin_required
 def debug_all_routes():
     """Comprehensive route diagnostic"""
     all_routes = []
@@ -26209,15 +25057,9 @@ def debug_all_routes():
 # =============================================================================
 
 @app.route('/admin/run-portfolio-slug-migration')
+@admin_required
 def run_portfolio_slug_migration():
-    """Run migration to add portfolio_slug and deleted_at to User model (auth bypassed for emergency)"""
-    # Emergency bypass - check for secret token OR admin email
-    secret_token = request.args.get('token')
-    if secret_token != os.environ.get('SECRET_KEY'):
-        # Fall back to normal admin check
-        if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required - use ?token=SECRET_KEY parameter'}), 403
-    
+    """Run migration to add portfolio_slug and deleted_at to User model"""
     try:
         import sys
         # Add migrations directory to path (os is already imported at module level)
@@ -26246,7 +25088,7 @@ def run_portfolio_slug_migration():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/.well-known/apple-app-site-association')
@@ -26519,16 +25361,13 @@ def public_portfolio_performance(slug, period):
     
     except Exception as e:
         logger.error(f"Public portfolio performance error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Performance calculation failed'}), 500
 
 @app.route('/admin/diagnose-chart-issues', methods=['GET'])
-@login_required
+@admin_required
 def admin_diagnose_chart_issues():
     """Diagnose 1D/5D chart datapoint issues and 1Y Network Error"""
     try:
-        if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import PortfolioSnapshot, PortfolioSnapshotIntraday, MarketData
         from performance_calculator import get_period_dates
         from datetime import date, timedelta
@@ -26640,17 +25479,14 @@ def admin_diagnose_chart_issues():
         import traceback
         return jsonify({
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/diagnose-leaderboard-staleness', methods=['GET'])
-@login_required
+@admin_required
 def admin_diagnose_leaderboard_staleness():
     """Diagnose why leaderboard shows stale data - compare cache vs live calculations"""
     try:
-        if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import User, UserPortfolioChartCache, LeaderboardCache, PortfolioSnapshot
         from performance_calculator import calculate_portfolio_performance, get_period_dates
         import json
@@ -26764,7 +25600,7 @@ def admin_diagnose_leaderboard_staleness():
         import traceback
         return jsonify({
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 if __name__ == '__main__':
@@ -26869,15 +25705,10 @@ except Exception as e:
     logger.error(f"Error registering mobile API blueprint: {e}")
 
 @app.route('/admin/nuclear-data-fix', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def admin_nuclear_data_fix():
     """NUCLEAR OPTION: Complete portfolio data rebuild with portfolio creation date safety"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         if request.method == 'GET':
             return '''
             <!DOCTYPE html>
@@ -27160,19 +25991,14 @@ def admin_nuclear_data_fix():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/rebuild-user-cache/<int:user_id>', methods=['GET'])
-@login_required
+@admin_required
 def admin_rebuild_user_cache(user_id):
     """Rebuild chart caches for a single user (avoids timeout)"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import date, datetime, timedelta
         import json
         from models import User, Stock, PortfolioSnapshot, MarketData, UserPortfolioChartCache
@@ -27331,19 +26157,14 @@ def admin_rebuild_user_cache(user_id):
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/rebuild-all-caches', methods=['GET'])
-@login_required
+@admin_required
 def admin_rebuild_all_caches():
     """UI page to rebuild caches for all users sequentially"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return "Admin access required", 403
-        
         # Get all users with stocks
         users_with_stocks = db.session.query(User.id, User.username).join(Stock).distinct().all()
         
@@ -27442,15 +26263,10 @@ def admin_rebuild_all_caches():
         return f"Error: {str(e)}", 500
 
 @app.route('/admin/clean-zero-snapshots', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def admin_clean_zero_snapshots():
     """Clean corrupted zero-value snapshots"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import date, timedelta
         from models import PortfolioSnapshot, Stock
         
@@ -27510,19 +26326,14 @@ def admin_clean_zero_snapshots():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/check-sept30-snapshots', methods=['GET'])
-@login_required
+@admin_required
 def admin_check_sept30_snapshots():
     """Check if Sept 30, 2025 snapshots exist - diagnostic endpoint"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import date
         from models import User, PortfolioSnapshot, Stock, UserPortfolioChartCache
         
@@ -27642,19 +26453,14 @@ def admin_check_sept30_snapshots():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/comprehensive-data-flow', methods=['GET'])
-@login_required
+@admin_required
 def admin_comprehensive_data_flow():
     """Run comprehensive data flow analysis (updated for Sept 30)"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         # Import and run the comprehensive debug
         from comprehensive_data_flow_debug import run_comprehensive_debug
         
@@ -27667,19 +26473,14 @@ def admin_comprehensive_data_flow():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/cache-consistency-analysis', methods=['GET'])
-@login_required
+@admin_required
 def admin_cache_consistency_analysis():
     """Comprehensive analysis of all cache layers and their consistency"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from datetime import date, datetime, timedelta
         from models import (PortfolioSnapshot, UserPortfolioChartCache, LeaderboardCache, 
                           MarketData, User, Stock)
@@ -27894,19 +26695,14 @@ def admin_cache_consistency_analysis():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/emergency-cache-rebuild', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def admin_emergency_cache_rebuild():
     """EMERGENCY: Force rebuild all caches with direct data population"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         if request.method == 'GET':
             return '''
             <!DOCTYPE html>
@@ -28188,10 +26984,11 @@ def admin_emergency_cache_rebuild():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/api/test-chart-cache-version', methods=['GET'])
+@admin_required
 def test_chart_cache_version():
     """Test endpoint to verify deployment and manually test cache generation"""
     try:
@@ -28239,7 +27036,7 @@ def test_chart_cache_version():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/test-leaderboard-badges', methods=['GET'])
-@login_required
+@admin_required
 def test_leaderboard_badges():
     """Test endpoint to debug why leaderboard badges aren't showing"""
     try:
@@ -28272,11 +27069,11 @@ def test_leaderboard_badges():
         import traceback
         return jsonify({
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/test-portfolio-stats', methods=['GET'])
-@login_required
+@admin_required
 def admin_test_portfolio_stats():
     """
     Diagnostic endpoint to test portfolio stats calculation
@@ -28363,11 +27160,11 @@ def admin_test_portfolio_stats():
         import traceback
         return jsonify({
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/populate-portfolio-stats', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def admin_populate_portfolio_stats():
     """
     One-time population of portfolio stats for all users
@@ -28450,18 +27247,13 @@ def admin_populate_portfolio_stats():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/replace-sp500-with-real-data', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def admin_replace_sp500_with_real_data():
     """Replace ALL S&P 500 historical data with REAL data from Alpha Vantage"""
-    # Check if user is admin
-    email = session.get('email', '')
-    if email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     # GET: Show preview with button to execute
     if request.method == 'GET':
         from models import MarketData
@@ -28731,19 +27523,14 @@ def admin_replace_sp500_with_real_data():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/fix-sp500-data', methods=['POST'])
-@login_required
+@admin_required
 def admin_fix_sp500_data():
     """Fix S&P 500 data points that are too low (missing × 10 multiplier)"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import MarketData
         
         # Find all S&P 500 data points that are suspiciously low
@@ -28788,18 +27575,14 @@ def admin_fix_sp500_data():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/diagnose-chart-sp500-mismatch', methods=['GET'])
-@login_required
+@admin_required
 def admin_diagnose_chart_sp500_mismatch():
     """Diagnose EXACTLY what S&P 500 data each source has for specific dates"""
     try:
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import UserPortfolioChartCache, MarketData, SP500ChartCache, PortfolioSnapshot
         from datetime import datetime
         import json
@@ -29020,18 +27803,14 @@ def admin_diagnose_chart_sp500_mismatch():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/inspect-chart-cache-raw', methods=['GET'])
-@login_required
+@admin_required
 def admin_inspect_chart_cache_raw():
     """Inspect the RAW chart cache data to see exactly what's stored"""
     try:
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import UserPortfolioChartCache
         import json
         
@@ -29087,18 +27866,14 @@ def admin_inspect_chart_cache_raw():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/verify-batch-api-optimization', methods=['GET'])
-@login_required
+@admin_required
 def admin_verify_batch_api_optimization():
     """Verify that batch API optimization is working correctly"""
     try:
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import User, Stock
         from portfolio_performance import PortfolioPerformanceCalculator
         import time
@@ -29179,18 +27954,14 @@ def admin_verify_batch_api_optimization():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/check-api-efficiency', methods=['GET'])
-@login_required
+@admin_required
 def admin_check_api_efficiency():
     """Check today's API efficiency and batch optimization status"""
     try:
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import AlphaVantageAPILog
         from sqlalchemy import func
         
@@ -29260,11 +28031,11 @@ def admin_check_api_efficiency():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/debug-collection-times-simple', methods=['GET'])
-@login_required
+@admin_required
 def admin_debug_collection_times_simple():
     """Simplified version to debug the 500 error"""
     try:
@@ -29302,22 +28073,17 @@ def admin_debug_collection_times_simple():
             'admin_user_found': admin_user is not None
         })
     except Exception as e:
-        import traceback
+        logger.error(f"Error in debug-intraday-data: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
-            'error': str(e),
-            'traceback': traceback.format_exc()
-        }), 200  # Return 200 so we can see the error
+            'error': str(e)
+        }), 200
 
 @app.route('/admin/debug-collection-times', methods=['GET'])
-@login_required
+@admin_required
 def admin_debug_collection_times():
     """Debug what times data should be collected vs what times actually have data"""
     try:
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import MarketData, PortfolioSnapshotIntraday, User
         from datetime import datetime, time as dt_time, timezone, timedelta
         
@@ -29447,24 +28213,17 @@ def admin_debug_collection_times():
         })
         
     except Exception as e:
-        import traceback
-        logger.error(f"Error in debug-collection-times: {str(e)}")
-        logger.error(traceback.format_exc())
+        logger.error(f"Error in debug-collection-times: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
-            'error': str(e),
-            'traceback': traceback.format_exc()
-        }), 200  # Return 200 so browser can see the error
+            'error': str(e)
+        }), 200
 
 @app.route('/admin/debug-portfolio-jump', methods=['GET'])
-@login_required
+@admin_required
 def admin_debug_portfolio_jump():
     """Debug portfolio value jump between Oct 31 and Nov 3"""
     try:
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import User, PortfolioSnapshotIntraday, PortfolioSnapshot, Stock
         from datetime import datetime, timedelta
         
@@ -29570,24 +28329,17 @@ def admin_debug_portfolio_jump():
         return jsonify(result)
         
     except Exception as e:
-        import traceback
-        logger.error(f"Error in debug-portfolio-jump: {str(e)}")
-        logger.error(traceback.format_exc())
+        logger.error(f"Error in debug-portfolio-jump: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
-            'error': str(e),
-            'traceback': traceback.format_exc()
+            'error': str(e)
         }), 200
 
 @app.route('/admin/debug-spy-intraday', methods=['GET'])
-@login_required
+@admin_required
 def admin_debug_spy_intraday():
     """Debug SPY_INTRADAY data to diagnose 900% gain issue"""
     try:
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import MarketData
         from sqlalchemy import func
         from datetime import timedelta
@@ -29710,18 +28462,14 @@ def admin_debug_spy_intraday():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/delete-spy-intraday-today', methods=['POST'])
-@login_required
+@admin_required
 def admin_delete_spy_intraday_today():
     """Delete today's SPY_INTRADAY data (if doubled) so it can be recollected correctly"""
     try:
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import MarketData
         
         today = get_market_date()
@@ -29747,18 +28495,14 @@ def admin_delete_spy_intraday_today():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/fix-spy-unmultiplied-data', methods=['POST'])
-@login_required
+@admin_required
 def admin_fix_spy_unmultiplied_data():
     """Multiply unmultiplied SPY_INTRADAY data by 10 for Oct 27-31 to fix 900% gain bug"""
     try:
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import MarketData
         from datetime import date
         
@@ -29819,18 +28563,14 @@ def admin_fix_spy_unmultiplied_data():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/find-user-id', methods=['GET'])
-@login_required
+@admin_required
 def admin_find_user_id():
     """Find user_id by username or email"""
     try:
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import User
         
         username = request.args.get('username', '')
@@ -29871,14 +28611,10 @@ def admin_find_user_id():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/check-sp500-duplicates', methods=['GET'])
-@login_required
+@admin_required
 def admin_check_sp500_duplicates():
     """Check if there are duplicate SPY_SP500 records for the same date"""
     try:
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import MarketData
         from sqlalchemy import func
         
@@ -29922,17 +28658,13 @@ def admin_check_sp500_duplicates():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/delete-all-sp500-data', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def admin_delete_all_sp500_data():
     """DELETE ALL S&P 500 data and start completely fresh"""
-    email = session.get('email', '')
-    if email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import MarketData, db
         
@@ -30026,17 +28758,13 @@ def admin_delete_all_sp500_data():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/find-corrupted-sp500-dates', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def admin_find_corrupted_sp500_dates():
     """Find and optionally DELETE corrupted S&P 500 values"""
-    email = session.get('email', '')
-    if email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from models import MarketData, db
         from datetime import date
@@ -30145,19 +28873,14 @@ def admin_find_corrupted_sp500_dates():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/check-sp500-data', methods=['GET'])
-@login_required
+@admin_required
 def admin_check_sp500_data():
     """Diagnose S&P 500 historical data quality"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import MarketData
         from datetime import date, timedelta
         
@@ -30244,19 +28967,14 @@ def admin_check_sp500_data():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/test-batch-api', methods=['GET'])
-@login_required
+@admin_required
 def admin_test_batch_api():
     """Test batch API to verify it works correctly"""
     try:
-        # Check if user is admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from models import Stock, User
         from portfolio_performance import PortfolioPerformanceCalculator
         import json
@@ -30317,11 +29035,11 @@ def admin_test_batch_api():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/trigger-chart-cache-generation', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def admin_trigger_chart_cache_generation():
     """
     Manually trigger chart cache generation for all users
@@ -30400,11 +29118,11 @@ def admin_trigger_chart_cache_generation():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/check-chart-caches', methods=['GET'])
-@login_required
+@admin_required
 def admin_check_chart_caches():
     """
     Check if chart caches exist and when they were generated
@@ -30446,11 +29164,11 @@ def admin_check_chart_caches():
         import traceback
         return jsonify({
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/view-all-portfolio-stats', methods=['GET'])
-@login_required
+@admin_required
 def admin_view_all_portfolio_stats():
     """
     View portfolio stats for all users (for verification)
@@ -30496,25 +29214,21 @@ def admin_view_all_portfolio_stats():
         import traceback
         return jsonify({
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/create-mobile-tables', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def admin_create_mobile_tables():
     """
     Create mobile app tables for Phase 1 (January 2026)
     Tables: device_token, in_app_purchase, push_notification_log, xero_payout_record, mobile_subscription
     """
     try:
-        from models import db, DeviceToken, InAppPurchase, PushNotificationLog, XeroPayoutRecord, MobileSubscription
+        from models import db, DeviceToken, InAppPurchase, PushNotificationLog, XeroPayoutRecord, MobileSubscription, XeroOAuthToken
         from sqlalchemy import inspect, text
         
         # Check admin
-        email = session.get('email', '')
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         inspector = inspect(db.engine)
         existing_tables = inspector.get_table_names()
         
@@ -30523,7 +29237,8 @@ def admin_create_mobile_tables():
             'in_app_purchase': InAppPurchase,
             'push_notification_log': PushNotificationLog,
             'xero_payout_record': XeroPayoutRecord,
-            'mobile_subscription': MobileSubscription
+            'mobile_subscription': MobileSubscription,
+            'xero_oauth_token': XeroOAuthToken,
         }
         
         created = []
@@ -30573,11 +29288,11 @@ def admin_create_mobile_tables():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 @app.route('/admin/create-portfolio-stats-table', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def admin_create_portfolio_stats_table():
     """
     Create the user_portfolio_stats table in production database
@@ -30614,7 +29329,7 @@ def admin_create_portfolio_stats_table():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs'
         }), 500
 
 # Export the Flask app for Vercel serverless function
