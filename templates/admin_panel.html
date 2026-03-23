@@ -409,6 +409,7 @@ const BotManagement = ({ api }) => {
   const [batchResult, setBatchResult] = useState(null);
   const [batchLoading, setBatchLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [selectedUserId, setSelectedUserId] = useState(null);
 
   // Auto-creation state — always show card with defaults
   const [autoSettings, setAutoSettings] = useState({ enabled: false, daily_count: 2, strategy: null, industry: null, last_run: null, last_created: 0 });
@@ -568,7 +569,7 @@ const BotManagement = ({ api }) => {
       </Card>
 
       <Card style={{ padding: 0 }}>
-        {loading ? <div style={{ padding: 40, textAlign: 'center' }}><Spinner /></div> : <Table columns={cols} data={botData} />}
+        {loading ? <div style={{ padding: 40, textAlign: 'center' }}><Spinner /></div> : <Table columns={cols} data={botData} onRowClick={row => setSelectedUserId(row.id)} />}
       </Card>
 
       {/* Batch Create Modal */}
@@ -614,6 +615,7 @@ const BotManagement = ({ api }) => {
       </Modal>
 
       <OtpModal open={!!showOtp} onClose={() => setShowOtp(null)} onConfirm={handleOtpAction} title={showOtp ? `Confirm ${showOtp.action}` : ''} />
+      <UserDetailDrawer api={api} userId={selectedUserId} onClose={() => setSelectedUserId(null)} />
     </div>
   );
 };
@@ -725,12 +727,77 @@ const RevenuePage = ({ api }) => {
   );
 };
 
+// ─── Shared: User Detail Drawer ─────────────────────────────────────────────
+const UserDetailDrawer = ({ api, userId, onClose }) => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!userId) return;
+    setLoading(true);
+    api(`/admin/user/${userId}`).then(d => { setData(d); setLoading(false); }).catch(() => setLoading(false));
+  }, [api, userId]);
+
+  if (!userId) return null;
+  const u = data?.user;
+  const holdings = data?.holdings || [];
+  const txns = data?.transactions || [];
+
+  return (
+    <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 520, maxWidth: '90vw', background: 'var(--bg-primary)', borderLeft: '1px solid var(--border)', zIndex: 1000, overflowY: 'auto', boxShadow: '-4px 0 24px rgba(0,0,0,.3)' }}>
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'sticky', top: 0, background: 'var(--bg-primary)', zIndex: 1 }}>
+        <div style={{ fontSize: 16, fontWeight: 700 }}>{loading ? 'Loading...' : u?.username || 'User'}</div>
+        <Btn small variant="secondary" onClick={onClose}>{Icons.close || 'X'} Close</Btn>
+      </div>
+      {loading ? <div style={{ padding: 40, textAlign: 'center' }}><Spinner /></div> : data ? (
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <Card>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: 13 }}>
+              <div><span style={{ color: 'var(--text-muted)' }}>ID:</span> {u.id}</div>
+              <div><span style={{ color: 'var(--text-muted)' }}>Role:</span> <Badge text={u.role} color={u.role === 'agent' ? 'var(--blue)' : u.role === 'admin' ? 'var(--red)' : 'var(--accent)'} /></div>
+              <div><span style={{ color: 'var(--text-muted)' }}>Email:</span> {u.email}</div>
+              <div><span style={{ color: 'var(--text-muted)' }}>Created:</span> {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}</div>
+              {u.strategy && <div><span style={{ color: 'var(--text-muted)' }}>Strategy:</span> {u.strategy}</div>}
+              {u.industry && <div><span style={{ color: 'var(--text-muted)' }}>Industry:</span> {u.industry}</div>}
+            </div>
+          </Card>
+
+          <Card>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>Holdings ({holdings.length})</div>
+            {holdings.length === 0 ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No holdings</div> : (
+              <Table columns={[
+                { key: 'ticker', label: 'Ticker', render: v => <span style={{ fontWeight: 600 }}>{v}</span> },
+                { key: 'quantity', label: 'Qty', render: v => v?.toFixed?.(2) || v },
+                { key: 'purchase_price', label: 'Avg Price', render: v => v ? `$${Number(v).toFixed(2)}` : '—' },
+              ]} data={holdings} />
+            )}
+          </Card>
+
+          <Card>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>Recent Transactions ({txns.length})</div>
+            {txns.length === 0 ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No transactions</div> : (
+              <Table columns={[
+                { key: 'timestamp', label: 'Time', render: v => v ? new Date(v).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—' },
+                { key: 'transaction_type', label: 'Action', render: v => <Badge text={v?.toUpperCase()} color={v === 'buy' ? 'var(--green)' : 'var(--red)'} /> },
+                { key: 'ticker', label: 'Ticker', render: v => <span style={{ fontWeight: 600 }}>{v}</span> },
+                { key: 'quantity', label: 'Qty', render: v => v?.toFixed?.(2) || v },
+                { key: 'price', label: 'Price', render: v => v ? `$${Number(v).toFixed(2)}` : '—' },
+              ]} data={txns} />
+            )}
+          </Card>
+        </div>
+      ) : <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>Failed to load user data</div>}
+    </div>
+  );
+};
+
 // ─── Page: Users ────────────────────────────────────────────────────────────
 const UsersPage = ({ api }) => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [error, setError] = useState(null);
+  const [selectedUserId, setSelectedUserId] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -774,9 +841,10 @@ const UsersPage = ({ api }) => {
             { key: 'role', label: 'Role', render: v => <Badge text={v || 'user'} color={v === 'agent' ? 'var(--blue)' : v === 'admin' ? 'var(--red)' : 'var(--accent)'} /> },
             { key: 'stock_count', label: 'Stocks' },
             { key: 'subscriber_count', label: 'Subs' },
-          ]} data={filtered} />
+          ]} data={filtered} onRowClick={row => setSelectedUserId(row.id)} />
         )}
       </Card>
+      <UserDetailDrawer api={api} userId={selectedUserId} onClose={() => setSelectedUserId(null)} />
     </div>
   );
 };

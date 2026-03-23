@@ -1988,6 +1988,52 @@ def bot_list_users():
         return jsonify({'error': 'list_failed', 'detail': str(e)}), 500
 
 
+@mobile_api.route('/admin/user/<int:user_id>', methods=['GET'])
+@require_admin_key
+@with_db_retry
+def admin_user_detail(user_id):
+    """Get a single user's portfolio holdings and recent transactions."""
+    from models import db, User, Stock, Transaction
+    
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': 'user_not_found'}), 404
+    
+    stocks = Stock.query.filter_by(user_id=user.id).all()
+    transactions = Transaction.query.filter_by(user_id=user.id).order_by(
+        Transaction.timestamp.desc()
+    ).limit(50).all()
+    
+    extra = user.extra_data or {}
+    
+    return jsonify({
+        'user': {
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'role': user.role or 'user',
+            'created_at': user.created_at.isoformat() if user.created_at else None,
+            'bot_active': extra.get('bot_active', True) if user.role == 'agent' else None,
+            'strategy': extra.get('trading_style', extra.get('strategy_name', None)),
+            'industry': extra.get('industry', 'General'),
+        },
+        'holdings': [{
+            'ticker': s.ticker,
+            'quantity': s.quantity,
+            'purchase_price': s.purchase_price,
+        } for s in stocks if s.quantity > 0],
+        'transactions': [{
+            'id': t.id,
+            'ticker': t.ticker,
+            'quantity': t.quantity,
+            'price': t.price,
+            'transaction_type': t.transaction_type,
+            'timestamp': t.timestamp.isoformat() if t.timestamp else None,
+            'notes': getattr(t, 'notes', None),
+        } for t in transactions],
+    })
+
+
 @mobile_api.route('/admin/bot/dashboard', methods=['GET'])
 @require_admin_key
 @with_db_retry

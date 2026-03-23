@@ -39,15 +39,17 @@ function checkForTradeEmails() {
   }
 
   // Search for unread Public.com trade notification emails
+  // Primary subject is "Your trade executed" — that's the actual email subject from Public.com
   // Broad queries — the API auto-detects which bot portfolio each email belongs to
   // by matching traded tickers against each bot's current holdings
   const queries = [
-    'from:notifications@public.com subject:"rebalanced" is:unread',
+    'from:notifications@public.com subject:"Your trade executed" is:unread',
     'from:notifications@public.com subject:"trade" is:unread',
     'from:notifications@public.com subject:"bought" is:unread',
     'from:notifications@public.com subject:"sold" is:unread',
     'from:notifications@public.com subject:"executed" is:unread',
     'from:notifications@public.com subject:"order" is:unread',
+    'from:notifications@public.com subject:"rebalanced" is:unread',
   ];
 
   let processedCount = 0;
@@ -105,6 +107,12 @@ function processTradeEmail(message, config) {
   const subject = message.getSubject();
   const body = message.getPlainBody();
   const htmlBody = message.getBody();
+
+  // Skip dividend emails — dividends are tracked automatically via AlphaVantage API
+  if (/dividend/i.test(subject)) {
+    Logger.log(`Skipping dividend email: "${subject}"`);
+    return null;
+  }
 
   // Parse trades from the email body
   const trades = parseTradesFromEmail(body, htmlBody);
