@@ -2554,27 +2554,47 @@ def bot_email_trade():
                 results.append({'error': 'ticker required'})
                 continue
             
-            # Fetch current price if not provided
+            # Fetch current price if not provided (via AlphaVantage GLOBAL_QUOTE)
             if not price:
                 try:
-                    from portfolio_performance import PortfolioPerformanceCalculator
-                    calc = PortfolioPerformanceCalculator()
-                    price_data = calc.get_stock_data(ticker)
-                    if price_data and price_data.get('price'):
-                        price = price_data['price']
+                    import os as _os
+                    av_key = _os.environ.get('ALPHA_VANTAGE_API_KEY', '')
+                    if not av_key:
+                        results.append({'ticker': ticker, 'error': 'ALPHA_VANTAGE_API_KEY not set'})
+                        continue
+                    av_url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={av_key}"
+                    av_resp = requests.get(av_url, timeout=10)
+                    av_data = av_resp.json()
+                    av_price = float(av_data.get('Global Quote', {}).get('05. price', 0))
+                    if av_price > 0:
+                        price = av_price
+                        logger.info(f"Fetched price for {ticker}: ${price:.2f}")
                     else:
-                        results.append({'ticker': ticker, 'error': 'Could not fetch price'})
+                        logger.warning(f"AlphaVantage returned no price for {ticker}: {av_data}")
+                        results.append({'ticker': ticker, 'error': f'Could not fetch price from AlphaVantage'})
                         continue
                 except Exception as e:
+                    logger.error(f"Price fetch failed for {ticker}: {e}")
                     results.append({'ticker': ticker, 'error': f'Price fetch failed: {e}'})
                     continue
             
             price = float(price)
             
             try:
-                # Get current position for sell notification percentage
+                # Get current position
                 stock = Stock.query.filter_by(user_id=bot.id, ticker=ticker).first()
                 pos_before = stock.quantity if stock and action == 'sell' else None
+                
+                # For sells: adjust quantity to match bot's actual position
+                if action == 'sell':
+                    if not stock or stock.quantity <= 0:
+                        logger.warning(f"Bot {bot_username} has no {ticker} to sell — skipping")
+                        results.append({'ticker': ticker, 'error': f'Bot does not hold {ticker}'})
+                        continue
+                    if quantity == 0 or quantity > stock.quantity:
+                        # qty=0 means "sell all" (Public.com emails), or qty exceeds holdings
+                        logger.info(f"Adjusting {ticker} sell qty: requested {quantity} -> actual {stock.quantity}")
+                        quantity = stock.quantity
                 
                 # Process transaction through cash tracking
                 tx_result = process_transaction(
@@ -2592,11 +2612,7 @@ def bot_email_trade():
                         stock = Stock(user_id=bot.id, ticker=ticker, quantity=quantity, purchase_price=price)
                         db.session.add(stock)
                 elif action == 'sell':
-                    if stock and stock.quantity >= quantity:
-                        stock.quantity -= quantity
-                    else:
-                        results.append({'ticker': ticker, 'error': 'Insufficient shares'})
-                        continue
+                    stock.quantity -= quantity
                 
                 results.append({
                     'ticker': ticker,

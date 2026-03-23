@@ -280,7 +280,13 @@ function submitTrades(config, botUsername, trades, source, rawEmail, emailSubjec
     if (body.status === 'deferred') {
       Logger.log(`API Deferred: ${body.message} (batch=${body.batch_id})`);
     } else {
-      Logger.log(`API Success: ${body.trades_executed} trades executed for ${body.bot_username}`);
+      Logger.log(`API Success: ${body.trades_executed}/${body.trades_submitted} trades executed for ${body.bot_username}`);
+      if (body.results) {
+        for (const r of body.results) {
+          if (r.error) Logger.log(`  ERROR ${r.ticker}: ${r.error}`);
+          else Logger.log(`  OK ${r.ticker}: ${r.action} ${r.quantity} @ $${r.price}`);
+        }
+      }
     }
     return body;
   } else {
