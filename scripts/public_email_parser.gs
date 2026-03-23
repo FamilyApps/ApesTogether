@@ -42,14 +42,15 @@ function checkForTradeEmails() {
   // Primary subject is "Your trade executed" — that's the actual email subject from Public.com
   // Broad queries — the API auto-detects which bot portfolio each email belongs to
   // by matching traded tickers against each bot's current holdings
+  // Actual sender is replies@mail.public.com — match any @public.com or @mail.public.com
   const queries = [
-    'from:notifications@public.com subject:"Your trade executed" is:unread',
-    'from:notifications@public.com subject:"trade" is:unread',
-    'from:notifications@public.com subject:"bought" is:unread',
-    'from:notifications@public.com subject:"sold" is:unread',
-    'from:notifications@public.com subject:"executed" is:unread',
-    'from:notifications@public.com subject:"order" is:unread',
-    'from:notifications@public.com subject:"rebalanced" is:unread',
+    'from:mail.public.com subject:"Your trade executed" is:unread',
+    'from:mail.public.com subject:"trade" is:unread',
+    'from:mail.public.com subject:"bought" is:unread',
+    'from:mail.public.com subject:"sold" is:unread',
+    'from:mail.public.com subject:"executed" is:unread',
+    'from:mail.public.com subject:"order" is:unread',
+    'from:mail.public.com subject:"rebalanced" is:unread',
   ];
 
   let processedCount = 0;
@@ -290,15 +291,37 @@ function setupTrigger() {
  */
 function testParseLatestEmail() {
   const config = getConfig();
-  const threads = GmailApp.search('from:notifications@public.com', 0, 1);
+  const threads = GmailApp.search('from:mail.public.com subject:"Your trade executed"', 0, 3);
   if (threads.length > 0) {
-    const message = threads[0].getMessages()[0];
-    Logger.log(`Subject: ${message.getSubject()}`);
-    Logger.log(`Body preview: ${message.getPlainBody().substring(0, 500)}`);
-
-    const trades = parseTradesFromEmail(message.getPlainBody(), message.getBody());
-    Logger.log(`Parsed trades: ${JSON.stringify(trades, null, 2)}`);
+    for (const thread of threads) {
+      const message = thread.getMessages()[0];
+      Logger.log(`--- Email ---`);
+      Logger.log(`From: ${message.getFrom()}`);
+      Logger.log(`Subject: ${message.getSubject()}`);
+      Logger.log(`Body preview: ${message.getPlainBody().substring(0, 500)}`);
+      const trades = parseTradesFromEmail(message.getPlainBody(), message.getBody());
+      Logger.log(`Parsed trades: ${JSON.stringify(trades, null, 2)}`);
+    }
   } else {
-    Logger.log('No matching emails found');
+    Logger.log('No matching emails found — check from:mail.public.com');
   }
+}
+
+/**
+ * Re-process today's trade emails (even already-read ones) for debugging.
+ * Marks them unread first so the main function can pick them up.
+ */
+function reprocessTodaysTrades() {
+  const threads = GmailApp.search('from:mail.public.com subject:"Your trade executed" newer_than:1d', 0, 20);
+  Logger.log(`Found ${threads.length} threads from today`);
+  let unmarked = 0;
+  for (const thread of threads) {
+    for (const msg of thread.getMessages()) {
+      if (!msg.isUnread()) {
+        msg.markUnread();
+        unmarked++;
+      }
+    }
+  }
+  Logger.log(`Marked ${unmarked} messages as unread — run checkForTradeEmails() next`);
 }
