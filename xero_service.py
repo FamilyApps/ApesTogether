@@ -33,12 +33,14 @@ XERO_API_BASE = 'https://api.xero.com/api.xro/2.0'
 
 # Xero OAuth2 scopes — granular (required for apps created after March 2, 2026)
 # Ref: https://developer.xero.com/documentation/guides/oauth2/scopes/
+# NOTE: If accounting.invoices causes "Something went wrong", the granular scope
+# may not be fully enabled yet. Fall back to accounting.transactions in that case.
 XERO_SCOPES = ' '.join([
     'openid',
     'profile',
     'email',
     'offline_access',
-    'accounting.invoices',        # NEW granular: Invoices, CreditNotes, Bills, PurchaseOrders
+    'accounting.transactions',    # Broad scope — fall back if accounting.invoices fails
     'accounting.contacts',        # Unchanged: Contacts, ContactGroups
     'accounting.settings.read',   # Unchanged: Accounts, TaxRates, etc. (read-only)
 ])
