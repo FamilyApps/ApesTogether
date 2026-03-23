@@ -33,15 +33,18 @@ XERO_API_BASE = 'https://api.xero.com/api.xro/2.0'
 
 # Xero OAuth2 scopes
 # Ref: https://developer.xero.com/documentation/guides/oauth2/scopes/
-# PKCE is required for apps created after March 2, 2026.
-# Post-March-2026 apps MUST use granular scopes (broad scopes are rejected).
-# accounting.transactions → replaced by accounting.invoices, accounting.payments, etc.
+# PKCE (code_challenge + code_verifier) is required.
+# NOTE: accounting.transactions must be enabled in Xero Developer Portal → My Apps → Scopes
+# before it can be requested here. Currently only contacts + settings.read are confirmed working.
+# TODO: Add 'accounting.transactions' once enabled in portal, then re-authorize.
 XERO_SCOPES = ' '.join([
     'openid',
     'profile',
     'email',
     'offline_access',
-    'accounting.contacts',        # Testing: just one accounting scope
+    'accounting.contacts',        # Contacts, ContactGroups (confirmed working)
+    'accounting.settings.read',   # Accounts, TaxRates (read-only)
+    # 'accounting.transactions',  # Bills, Invoices — BLOCKED until enabled in Xero dev portal
 ])
 
 
