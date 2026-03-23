@@ -139,9 +139,36 @@ function parseTradesFromEmail(plainBody, htmlBody) {
   const trades = [];
   const text = plainBody || htmlBody || '';
 
+  let match;
+
+  // Pattern 0a: Public.com HTML/rich format — "You sold $132.99 of GRAB" + "Quantity: 36.0398 shares"
+  // Price is NOT sent — the API will fetch current price from AlphaVantage.
+  const summaryPattern = /You\s+(bought|sold)\s+\$[\d,.]+\s+of\s+([A-Z]{1,5})/gi;
+  while ((match = summaryPattern.exec(text)) !== null) {
+    const action = match[1].toLowerCase() === 'bought' ? 'buy' : 'sell';
+    const ticker = match[2].toUpperCase();
+    const qtyMatch = text.substring(match.index).match(/Quantity:\s*([\d,.]+)\s*shares?/i);
+    const quantity = qtyMatch ? parseFloat(qtyMatch[1].replace(',', '')) : 1;
+    if (!trades.some(t => t.ticker === ticker && t.action === action)) {
+      trades.push({ action, ticker, quantity });
+    }
+  }
+
+  // Pattern 0b: Public.com plain text format — "You\nsold\nGRAB at\n$3.69 per share"
+  // getPlainBody() strips HTML and produces this multiline format
+  const plainPublicPattern = /You\s+(bought|sold)\s+([A-Z]{1,5})\s+at\s+\$?[\d,.]+\s+per\s+share/gi;
+  while ((match = plainPublicPattern.exec(text)) !== null) {
+    const action = match[1].toLowerCase() === 'bought' ? 'buy' : 'sell';
+    const ticker = match[2].toUpperCase();
+    if (!trades.some(t => t.ticker === ticker && t.action === action)) {
+      const qtyMatch = text.substring(match.index).match(/Quantity:\s*([\d,.]+)\s*shares?/i);
+      const quantity = qtyMatch ? parseFloat(qtyMatch[1].replace(',', '')) : 1;
+      trades.push({ action, ticker, quantity });
+    }
+  }
+
   // Pattern 1: "Bought 10 shares of AAPL at $150.00"
   const boughtPattern = /(?:bought|purchased)\s+(\d+(?:\.\d+)?)\s+shares?\s+(?:of\s+)?([A-Z]{1,5})\s+(?:at\s+)?\$?([\d,.]+)/gi;
-  let match;
   while ((match = boughtPattern.exec(text)) !== null) {
     trades.push({
       action: 'buy',
