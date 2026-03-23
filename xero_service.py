@@ -31,15 +31,18 @@ XERO_TOKEN_URL = 'https://identity.xero.com/connect/token'
 XERO_CONNECTIONS_URL = 'https://api.xero.com/connections'
 XERO_API_BASE = 'https://api.xero.com/api.xro/2.0'
 
-# Xero OAuth2 scopes — granular (required for apps created after March 2, 2026)
+# Xero OAuth2 scopes
 # Ref: https://developer.xero.com/documentation/guides/oauth2/scopes/
-# DEBUG: Using minimal scopes to isolate auth error. Will add accounting scopes
-# back once the OAuth flow works.
+# PKCE is required for apps created after March 2, 2026.
+# Scopes are additive — start with what we need for payout bills.
 XERO_SCOPES = ' '.join([
     'openid',
     'profile',
     'email',
     'offline_access',
+    'accounting.transactions',    # Invoices, Bills, CreditNotes, Payments
+    'accounting.contacts',        # Contacts, ContactGroups
+    'accounting.settings.read',   # Accounts, TaxRates (read-only)
 ])
 
 
