@@ -31,18 +31,20 @@ XERO_TOKEN_URL = 'https://identity.xero.com/connect/token'
 XERO_CONNECTIONS_URL = 'https://api.xero.com/connections'
 XERO_API_BASE = 'https://api.xero.com/api.xro/2.0'
 
-# Xero OAuth2 scopes (broad — app created before March 2, 2026)
+# Xero OAuth2 scopes (granular — app created after March 2, 2026)
 # Ref: https://developer.xero.com/documentation/guides/oauth2/scopes/
 # PKCE (code_challenge + code_verifier) is required.
-# Broad scopes available until September 2027 per Xero developer portal.
+# Broad scope accounting.transactions is replaced by granular scopes:
+#   accounting.invoices  → Invoices, Bills, CreditNotes, PurchaseOrders
+#   accounting.payments  → Payments, Overpayments, Prepayments
 XERO_SCOPES = ' '.join([
     'openid',
     'profile',
     'email',
     'offline_access',
-    'accounting.transactions',    # Bills, Invoices, CreditNotes, Payments
-    'accounting.contacts',        # Contacts, ContactGroups
-    'accounting.settings.read',   # Accounts, TaxRates (read-only)
+    'accounting.invoices',        # Granular: Bills, Invoices, CreditNotes
+    'accounting.contacts',        # Unchanged: Contacts, ContactGroups
+    'accounting.settings.read',   # Unchanged: Accounts, TaxRates (read-only)
 ])
 
 
