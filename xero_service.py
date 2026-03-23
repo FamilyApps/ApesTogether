@@ -31,18 +31,16 @@ XERO_TOKEN_URL = 'https://identity.xero.com/connect/token'
 XERO_CONNECTIONS_URL = 'https://api.xero.com/connections'
 XERO_API_BASE = 'https://api.xero.com/api.xro/2.0'
 
-# Granular scopes for apps created after March 2, 2026
-# See: https://developer.xero.com/documentation/guides/oauth2/scopes/
-# Old broad scopes (accounting.transactions, accounting.contacts) are replaced
-# by granular equivalents (accounting.invoices, accounting.contacts, etc.)
+# Xero OAuth2 scopes — granular (required for apps created after March 2, 2026)
+# Ref: https://developer.xero.com/documentation/guides/oauth2/scopes/
 XERO_SCOPES = ' '.join([
     'openid',
     'profile',
     'email',
-    'accounting.invoices',        # Create/read bills (ACCPAY) and invoices
-    'accounting.contacts',        # Create/read contacts (influencers)
-    'accounting.settings.read',   # Read chart of accounts
-    'offline_access',             # Refresh tokens (60-day lifetime)
+    'offline_access',
+    'accounting.invoices',        # NEW granular: Invoices, CreditNotes, Bills, PurchaseOrders
+    'accounting.contacts',        # Unchanged: Contacts, ContactGroups
+    'accounting.settings.read',   # Unchanged: Accounts, TaxRates, etc. (read-only)
 ])
 
 
@@ -177,6 +175,7 @@ def get_authorization_url(state=None):
     }
     
     url = f"{XERO_AUTH_URL}?{urlencode(params)}"
+    logger.info(f"Xero auth URL: redirect_uri={params['redirect_uri']} scopes={params['scope']} client_id={params['client_id'][:8]}...")
     return url, state
 
 
