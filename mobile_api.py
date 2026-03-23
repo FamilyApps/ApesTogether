@@ -2579,7 +2579,6 @@ def bot_email_trade():
             try:
                 # Get current position
                 stock = Stock.query.filter_by(user_id=bot.id, ticker=ticker).first()
-                pos_before = stock.quantity if stock and action == 'sell' else None
                 
                 # For sells: adjust quantity to match bot's actual position
                 if action == 'sell':
@@ -2595,8 +2594,7 @@ def bot_email_trade():
                 # Process transaction through cash tracking
                 tx_result = process_transaction(
                     db, bot.id, ticker, quantity, price, action,
-                    timestamp=datetime.utcnow(),
-                    position_before_qty=pos_before
+                    timestamp=datetime.utcnow()
                 )
                 if action == 'buy':
                     if stock:
