@@ -34,15 +34,16 @@ XERO_API_BASE = 'https://api.xero.com/api.xro/2.0'
 # Xero OAuth2 scopes
 # Ref: https://developer.xero.com/documentation/guides/oauth2/scopes/
 # PKCE is required for apps created after March 2, 2026.
-# Scopes are additive — start with what we need for payout bills.
+# Post-March-2026 apps MUST use granular scopes (broad scopes are rejected).
+# accounting.transactions → replaced by accounting.invoices, accounting.payments, etc.
 XERO_SCOPES = ' '.join([
     'openid',
     'profile',
     'email',
     'offline_access',
-    'accounting.transactions',    # Invoices, Bills, CreditNotes, Payments
-    'accounting.contacts',        # Contacts, ContactGroups
-    'accounting.settings.read',   # Accounts, TaxRates (read-only)
+    'accounting.invoices',        # NEW granular: Invoices, Bills, CreditNotes, PurchaseOrders
+    'accounting.contacts',        # Unchanged: Contacts, ContactGroups
+    'accounting.settings.read',   # Unchanged: Accounts, TaxRates (read-only)
 ])
 
 
