@@ -157,16 +157,21 @@ def refresh_access_token(token):
 # ── OAuth2 Authorization Flow ─────────────────────────────────────────────
 
 def get_authorization_url(state=None):
-    """Build the Xero OAuth2 authorization URL.
+    """Build the Xero OAuth2 authorization URL with PKCE.
     
     Args:
         state: CSRF token (stored in session for verification)
     
     Returns:
-        (url, state) tuple
+        (url, state, code_verifier) tuple — caller must store code_verifier in session
     """
     if not state:
         state = secrets.token_urlsafe(32)
+    
+    # PKCE: generate code_verifier and derive code_challenge (S256)
+    code_verifier = secrets.token_urlsafe(64)  # 43-128 chars per RFC 7636
+    challenge_digest = hashlib.sha256(code_verifier.encode('ascii')).digest()
+    code_challenge = base64.urlsafe_b64encode(challenge_digest).rstrip(b'=').decode('ascii')
     
     params = {
         'response_type': 'code',
@@ -174,33 +179,40 @@ def get_authorization_url(state=None):
         'redirect_uri': _get_redirect_uri(),
         'scope': XERO_SCOPES,
         'state': state,
+        'code_challenge': code_challenge,
+        'code_challenge_method': 'S256',
     }
     
     url = f"{XERO_AUTH_URL}?{urlencode(params)}"
-    logger.info(f"Xero auth URL: redirect_uri={params['redirect_uri']} scopes={params['scope']} client_id={params['client_id'][:8]}...")
-    return url, state
+    logger.info(f"Xero auth URL (PKCE): redirect_uri={params['redirect_uri']} scopes={params['scope']} client_id={params['client_id'][:8]}...")
+    return url, state, code_verifier
 
 
-def exchange_code_for_token(code):
+def exchange_code_for_token(code, code_verifier=None):
     """Exchange the authorization code for access + refresh tokens.
     
     Args:
         code: Authorization code from Xero callback
+        code_verifier: PKCE code verifier (stored in session during /connect)
     
     Returns:
         XeroOAuthToken on success, None on failure
     """
+    data = {
+        'grant_type': 'authorization_code',
+        'code': code,
+        'redirect_uri': _get_redirect_uri(),
+    }
+    if code_verifier:
+        data['code_verifier'] = code_verifier
+    
     resp = requests.post(
         XERO_TOKEN_URL,
         headers={
             'Authorization': _basic_auth_header(),
             'Content-Type': 'application/x-www-form-urlencoded',
         },
-        data={
-            'grant_type': 'authorization_code',
-            'code': code,
-            'redirect_uri': _get_redirect_uri(),
-        },
+        data=data,
         timeout=15,
     )
     

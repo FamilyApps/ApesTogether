@@ -3878,8 +3878,9 @@ def xero_connect():
     if not _is_admin_session():
         return jsonify({'error': 'admin_session_required', 'message': 'Log in as admin first'}), 403
     
-    url, state = xero_service.get_authorization_url()
+    url, state, code_verifier = xero_service.get_authorization_url()
     session['xero_oauth_state'] = state
+    session['xero_code_verifier'] = code_verifier
     return redirect(url)
 
 
@@ -3909,7 +3910,8 @@ def xero_callback():
     if not code:
         return jsonify({'error': 'missing_code'}), 400
     
-    token = xero_service.exchange_code_for_token(code)
+    code_verifier = session.pop('xero_code_verifier', None)
+    token = xero_service.exchange_code_for_token(code, code_verifier=code_verifier)
     if not token:
         return jsonify({'error': 'token_exchange_failed', 'message': 'Failed to exchange code for token — check logs'}), 500
     
