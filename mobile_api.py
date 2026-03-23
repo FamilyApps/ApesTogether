@@ -16,7 +16,7 @@ Endpoints:
 
 from flask import Blueprint, request, jsonify, g
 from functools import wraps
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from collections import defaultdict
 import logging
 import jwt
@@ -2097,6 +2097,97 @@ def bot_dashboard():
     except Exception as e:
         logger.error(f"Bot dashboard error: {e}")
         return jsonify({'error': 'dashboard_failed'}), 500
+
+
+@mobile_api.route('/admin/alphavantage/usage', methods=['GET'])
+@require_admin_key
+@with_db_retry
+def alphavantage_usage():
+    """Get AlphaVantage API usage stats for the admin dashboard.
+    Premium tier ($99.99/mo): 75 req/min, no daily limit."""
+    from models import db, AlphaVantageAPILog
+    from sqlalchemy import func
+
+    try:
+        now = datetime.utcnow()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        one_min_ago = now - timedelta(minutes=1)
+        one_hour_ago = now - timedelta(hours=1)
+        seven_days_ago = now - timedelta(days=7)
+
+        # Calls in the last minute (vs 75/min cap)
+        last_min = AlphaVantageAPILog.query.filter(
+            AlphaVantageAPILog.timestamp >= one_min_ago
+        ).count()
+
+        # Calls today
+        today_total = AlphaVantageAPILog.query.filter(
+            AlphaVantageAPILog.timestamp >= today_start
+        ).count()
+        today_success = AlphaVantageAPILog.query.filter(
+            AlphaVantageAPILog.timestamp >= today_start,
+            AlphaVantageAPILog.response_status == 'success'
+        ).count()
+        today_errors = AlphaVantageAPILog.query.filter(
+            AlphaVantageAPILog.timestamp >= today_start,
+            AlphaVantageAPILog.response_status != 'success'
+        ).count()
+
+        # Calls in the last hour
+        last_hour = AlphaVantageAPILog.query.filter(
+            AlphaVantageAPILog.timestamp >= one_hour_ago
+        ).count()
+
+        # Daily breakdown for last 7 days
+        daily_rows = db.session.query(
+            func.date(AlphaVantageAPILog.timestamp).label('day'),
+            func.count().label('total'),
+            func.sum(db.case(
+                (AlphaVantageAPILog.response_status == 'success', 1),
+                else_=0
+            )).label('success'),
+        ).filter(
+            AlphaVantageAPILog.timestamp >= seven_days_ago
+        ).group_by(func.date(AlphaVantageAPILog.timestamp)).order_by(
+            func.date(AlphaVantageAPILog.timestamp).desc()
+        ).all()
+
+        daily = [{'date': str(r.day), 'total': r.total, 'success': int(r.success or 0)} for r in daily_rows]
+
+        # Top endpoints today
+        endpoint_rows = db.session.query(
+            AlphaVantageAPILog.endpoint,
+            func.count().label('count')
+        ).filter(
+            AlphaVantageAPILog.timestamp >= today_start
+        ).group_by(AlphaVantageAPILog.endpoint).order_by(func.count().desc()).limit(10).all()
+
+        endpoints = [{'endpoint': r.endpoint, 'count': r.count} for r in endpoint_rows]
+
+        # Top tickers today
+        ticker_rows = db.session.query(
+            AlphaVantageAPILog.symbol,
+            func.count().label('count')
+        ).filter(
+            AlphaVantageAPILog.timestamp >= today_start,
+            AlphaVantageAPILog.symbol.isnot(None)
+        ).group_by(AlphaVantageAPILog.symbol).order_by(func.count().desc()).limit(15).all()
+
+        tickers = [{'symbol': r.symbol, 'count': r.count} for r in ticker_rows]
+
+        return jsonify({
+            'plan': 'Premium ($99.99/mo)',
+            'rate_limit': {'per_minute': 75, 'daily': 'unlimited'},
+            'current_minute': {'calls': last_min, 'limit': 75, 'pct': round(last_min / 75 * 100, 1)},
+            'last_hour': last_hour,
+            'today': {'total': today_total, 'success': today_success, 'errors': today_errors},
+            'daily_history': daily,
+            'top_endpoints': endpoints,
+            'top_tickers': tickers,
+        })
+    except Exception as e:
+        logger.error(f"AlphaVantage usage error: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 @mobile_api.route('/admin/bot/trade', methods=['POST'])
