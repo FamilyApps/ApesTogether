@@ -2104,7 +2104,7 @@ def bot_dashboard():
 @with_db_retry
 def alphavantage_usage():
     """Get AlphaVantage API usage stats for the admin dashboard.
-    Premium tier ($99.99/mo): 75 req/min, no daily limit."""
+    Premium tier ($99.99/mo): 150 req/min, no daily limit."""
     from models import db, AlphaVantageAPILog
     from sqlalchemy import func
 
@@ -2138,6 +2138,25 @@ def alphavantage_usage():
             AlphaVantageAPILog.timestamp >= one_hour_ago
         ).count()
 
+        # Peak requests per minute over last 7 days
+        # Group by truncated-to-minute timestamp, find the max count
+        peak_rows = db.session.query(
+            func.date(AlphaVantageAPILog.timestamp).label('day'),
+            func.count().label('calls_in_min'),
+        ).filter(
+            AlphaVantageAPILog.timestamp >= seven_days_ago
+        ).group_by(
+            func.strftime('%Y-%m-%d %H:%M', AlphaVantageAPILog.timestamp)
+        ).order_by(func.count().desc()).limit(20).all()
+
+        # Build peak-per-day from the grouped results
+        peak_by_day = {}
+        for r in peak_rows:
+            day_str = str(r.day)
+            if day_str not in peak_by_day or r.calls_in_min > peak_by_day[day_str]:
+                peak_by_day[day_str] = r.calls_in_min
+        overall_peak = max((r.calls_in_min for r in peak_rows), default=0)
+
         # Daily breakdown for last 7 days
         daily_rows = db.session.query(
             func.date(AlphaVantageAPILog.timestamp).label('day'),
@@ -2152,7 +2171,7 @@ def alphavantage_usage():
             func.date(AlphaVantageAPILog.timestamp).desc()
         ).all()
 
-        daily = [{'date': str(r.day), 'total': r.total, 'success': int(r.success or 0)} for r in daily_rows]
+        daily = [{'date': str(r.day), 'total': r.total, 'success': int(r.success or 0), 'peak_per_min': peak_by_day.get(str(r.day), 0)} for r in daily_rows]
 
         # Top endpoints today
         endpoint_rows = db.session.query(
@@ -2177,8 +2196,9 @@ def alphavantage_usage():
 
         return jsonify({
             'plan': 'Premium ($99.99/mo)',
-            'rate_limit': {'per_minute': 75, 'daily': 'unlimited'},
-            'current_minute': {'calls': last_min, 'limit': 75, 'pct': round(last_min / 75 * 100, 1)},
+            'rate_limit': {'per_minute': 150, 'daily': 'unlimited'},
+            'current_minute': {'calls': last_min, 'limit': 150, 'pct': round(last_min / 150 * 100, 1)},
+            'peak_per_minute': {'value': overall_peak, 'limit': 150, 'pct': round(overall_peak / 150 * 100, 1)},
             'last_hour': last_hour,
             'today': {'total': today_total, 'success': today_success, 'errors': today_errors},
             'daily_history': daily,

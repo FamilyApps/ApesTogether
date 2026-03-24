@@ -867,18 +867,21 @@ const AlphaVantageUsage = ({ api }) => {
 
   const d = data || {};
   const cm = d.current_minute || {};
+  const pk = d.peak_per_minute || {};
   const today = d.today || {};
   const daily = d.daily_history || [];
   const maxDaily = Math.max(...daily.map(r => r.total), 1);
+  const LIMIT = d.rate_limit?.per_minute || 150;
 
   const gaugeColor = cm.pct > 80 ? 'var(--red)' : cm.pct > 50 ? 'var(--yellow, #f59e0b)' : 'var(--green)';
+  const peakColor = pk.pct > 80 ? 'var(--red)' : pk.pct > 50 ? 'var(--yellow, #f59e0b)' : 'var(--accent)';
 
   return (
     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h2 style={{ fontSize: 20, fontWeight: 700 }}>AlphaVantage API Usage</h2>
-          <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{d.plan || 'Premium'} — {d.rate_limit?.per_minute || 75} req/min, {d.rate_limit?.daily || 'unlimited'} daily</p>
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{d.plan || 'Premium'} — {LIMIT} req/min, {d.rate_limit?.daily || 'unlimited'} daily</p>
         </div>
         <Btn small variant="secondary" onClick={load}>{Icons.refresh} Refresh</Btn>
       </div>
@@ -887,11 +890,19 @@ const AlphaVantageUsage = ({ api }) => {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
         <Card>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>Current Minute</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: gaugeColor }}>{cm.calls || 0}<span style={{ fontSize: 14, fontWeight: 400, color: 'var(--text-muted)' }}> / 75</span></div>
+          <div style={{ fontSize: 28, fontWeight: 700, color: gaugeColor }}>{cm.calls || 0}<span style={{ fontSize: 14, fontWeight: 400, color: 'var(--text-muted)' }}> / {LIMIT}</span></div>
           <div style={{ height: 6, background: 'var(--bg-hover)', borderRadius: 3, marginTop: 8, overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${Math.min(cm.pct || 0, 100)}%`, background: gaugeColor, borderRadius: 3, transition: 'width .3s' }} />
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{cm.pct || 0}% of rate limit</div>
+        </Card>
+        <Card>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>Peak (7 days)</div>
+          <div style={{ fontSize: 28, fontWeight: 700, color: peakColor }}>{pk.value || 0}<span style={{ fontSize: 14, fontWeight: 400, color: 'var(--text-muted)' }}> / {LIMIT}</span></div>
+          <div style={{ height: 6, background: 'var(--bg-hover)', borderRadius: 3, marginTop: 8, overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${Math.min(pk.pct || 0, 100)}%`, background: peakColor, borderRadius: 3, transition: 'width .3s' }} />
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{pk.pct || 0}% of rate limit</div>
         </Card>
         <MetricCard label="Last Hour" value={d.last_hour || 0} color="var(--blue)" />
         <MetricCard label="Today Total" value={today.total || 0} sub={`${today.success || 0} OK / ${today.errors || 0} errors`} color="var(--accent)" />
@@ -914,6 +925,7 @@ const AlphaVantageUsage = ({ api }) => {
                     {errPct > 0 && <div style={{ position: 'absolute', top: 0, width: '100%', height: `${errPct}%`, background: 'var(--red)', borderRadius: '4px 4px 0 0' }} />}
                   </div>
                   <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{row.date?.slice(5)}</div>
+                  {row.peak_per_min > 0 && <div style={{ fontSize: 9, color: peakColor }}>pk:{row.peak_per_min}/m</div>}
                 </div>
               );
             })}
