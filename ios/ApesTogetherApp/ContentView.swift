@@ -126,15 +126,7 @@ struct MainTabView: View {
             
             SubscriptionsView()
                 .tabItem {
-                    Label {
-                        Text("Subscriptions")
-                    } icon: {
-                        Image("SubscriptionsIcon")
-                            .renderingMode(.template)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 24, height: 24)
-                    }
+                    Label("Subscriptions", systemImage: "bell.badge.fill")
                 }
                 .tag(3)
         }

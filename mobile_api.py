@@ -578,11 +578,29 @@ def get_portfolio(slug):
         # If subscribed or owner, show full portfolio
         if is_owner or is_subscribed:
             stocks = Stock.query.filter_by(user_id=owner.id).all()
+            
+            # Fetch current market prices for all holdings
+            current_prices = {}
+            try:
+                from portfolio_utils import PortfolioPerformanceCalculator
+                calc = PortfolioPerformanceCalculator()
+                tickers = [s.ticker for s in stocks if s.ticker]
+                for ticker in tickers:
+                    try:
+                        data = calc.get_stock_data(ticker)
+                        if data and data.get('price'):
+                            current_prices[ticker] = round(float(data['price']), 2)
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.warning(f"Could not fetch current prices: {e}")
+            
             response['holdings'] = [
                 {
                     'ticker': stock.ticker,
                     'quantity': stock.quantity,
-                    'purchase_price': stock.purchase_price,
+                    'purchase_price': stock.purchase_price or 0,
+                    'current_price': current_prices.get(stock.ticker, stock.purchase_price or 0),
                     'purchase_date': stock.purchase_date.isoformat() if stock.purchase_date else None
                 }
                 for stock in stocks
@@ -698,7 +716,8 @@ def add_stocks():
 @rate_limit(60)
 def get_leaderboard():
     """
-    Get leaderboard for mobile app
+    Get leaderboard for mobile app.
+    Uses the same LeaderboardCache / calculate_leaderboard_data source as the web.
     
     Query params:
     - period: 1D, 5D, 7D, 1M, 3M, YTD, 1Y (default: 7D)
@@ -712,50 +731,32 @@ def get_leaderboard():
     limit = min(int(request.args.get('limit', 50)), 100)
     
     try:
-        from models import LeaderboardEntry, MobileSubscription
+        from leaderboard_utils import get_leaderboard_data, calculate_leaderboard_data
         
-        # Build query
-        query = LeaderboardEntry.query.filter_by(period=period)
+        # Use the cached leaderboard data (same source as web)
+        raw_data = get_leaderboard_data(period=period, limit=limit, category=category)
         
-        try:
-            if category == 'large_cap':
-                query = query.filter(LeaderboardEntry.large_cap_percent >= 70)
-            elif category == 'small_cap':
-                query = query.filter(LeaderboardEntry.small_cap_percent >= 50)
-            
-            entries = query.order_by(LeaderboardEntry.performance_percent.desc()).limit(limit).all()
-        except Exception:
-            # Fallback if cap columns don't exist in production
-            try:
-                entries = LeaderboardEntry.query.filter_by(period=period).order_by(
-                    LeaderboardEntry.performance_percent.desc()
-                ).limit(limit).all()
-            except Exception:
-                entries = []
+        # Fallback: compute on-the-fly if cache is empty
+        if not raw_data:
+            raw_data = calculate_leaderboard_data(period=period, limit=limit, category=category)
         
+        # Transform to mobile format
         leaderboard = []
-        for rank, entry in enumerate(entries, start=1):
-            user = User.query.get(entry.user_id)
-            if user:
-                try:
-                    sub_count = MobileSubscription.query.filter_by(
-                        subscribed_to_id=user.id,
-                        status='active'
-                    ).count()
-                except Exception:
-                    sub_count = 0
-                    
-                leaderboard.append({
-                    'rank': rank,
-                    'user': {
-                        'id': user.id,
-                        'username': user.username,
-                        'portfolio_slug': user.portfolio_slug
-                    },
-                    'return_percent': entry.performance_percent,
-                    'subscriber_count': sub_count,
-                    'subscription_price': 9.00
-                })
+        for rank, entry in enumerate(raw_data or [], start=1):
+            user_id = entry.get('user_id')
+            user = User.query.get(user_id) if user_id else None
+            
+            leaderboard.append({
+                'rank': rank,
+                'user': {
+                    'id': entry.get('user_id', 0),
+                    'username': entry.get('username', user.username if user else 'Unknown'),
+                    'portfolio_slug': user.portfolio_slug if user else None
+                },
+                'return_percent': entry.get('performance_percent', 0.0),
+                'subscriber_count': entry.get('subscriber_count', 0),
+                'subscription_price': entry.get('subscription_price', 9.00)
+            })
         
         return jsonify({
             'period': period,
@@ -765,7 +766,8 @@ def get_leaderboard():
         
     except Exception as e:
         logger.error(f"Get leaderboard error: {e}")
-        # Return empty leaderboard instead of 500
+        import traceback
+        logger.error(traceback.format_exc())
         return jsonify({
             'period': period,
             'category': category,
@@ -1183,6 +1185,35 @@ def get_top_influencers():
     except Exception as e:
         logger.error(f"Top influencers error: {e}")
         return jsonify({'entries': [], 'available_industries': [], 'total': 0})
+
+
+# =============================================================================
+# Stock Price Lookup
+# =============================================================================
+
+@mobile_api.route('/stock/price/<ticker>', methods=['GET'])
+@require_auth
+@rate_limit(60)
+def get_stock_price(ticker):
+    """Get current stock price for a ticker via AlphaVantage (cached)."""
+    ticker = ticker.upper().strip()
+    if not ticker or len(ticker) > 10:
+        return jsonify({'error': 'invalid_ticker'}), 400
+
+    try:
+        from portfolio_utils import PortfolioPerformanceCalculator
+        calc = PortfolioPerformanceCalculator()
+        data = calc.get_stock_data(ticker)
+        if data and data.get('price'):
+            return jsonify({
+                'ticker': ticker,
+                'price': round(float(data['price']), 2),
+                'source': 'alphavantage'
+            })
+        return jsonify({'error': 'price_not_available', 'ticker': ticker}), 404
+    except Exception as e:
+        logger.error(f"Stock price lookup error for {ticker}: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 # =============================================================================

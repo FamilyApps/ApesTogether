@@ -118,6 +118,12 @@ class APIService {
         return try await get("/portfolio/\(slug)/chart?period=\(period)")
     }
     
+    // MARK: - Stock Price
+    
+    func getStockPrice(ticker: String) async throws -> StockPriceResponse {
+        return try await get("/stock/price/\(ticker)")
+    }
+    
     // MARK: - Trading
     
     func executeTrade(ticker: String, quantity: Double, price: Double, type: String) async throws -> TradeResponse {

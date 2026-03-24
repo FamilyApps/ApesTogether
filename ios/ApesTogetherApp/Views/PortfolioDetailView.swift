@@ -444,12 +444,18 @@ struct HoldingRow: View {
             Spacer()
             
             VStack(alignment: .trailing, spacing: 4) {
-                Text("$\(String(format: "%.2f", holding.purchasePrice * holding.quantity))")
+                Text("$\(String(format: "%.2f", holding.totalValue))")
                     .font(.subheadline.bold())
                     .foregroundColor(.textPrimary)
-                Text("$\(String(format: "%.2f", holding.purchasePrice)) avg")
-                    .font(.caption)
-                    .foregroundColor(.textMuted)
+                if let gain = holding.gainPercent {
+                    Text(String(format: "%+.1f%%", gain))
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(gain >= 0 ? .gains : .losses)
+                } else {
+                    Text("$\(String(format: "%.2f", holding.displayPrice)) avg")
+                        .font(.caption)
+                        .foregroundColor(.textMuted)
+                }
             }
         }
         .padding(.horizontal, 14)

@@ -70,9 +70,23 @@ struct Holding: Codable, Identifiable {
     let ticker: String
     let quantity: Double
     let purchasePrice: Double
+    let currentPrice: Double?
     let purchaseDate: String?
     
     var id: String { ticker }
+    
+    var displayPrice: Double {
+        currentPrice ?? purchasePrice
+    }
+    
+    var totalValue: Double {
+        displayPrice * quantity
+    }
+    
+    var gainPercent: Double? {
+        guard purchasePrice > 0, let current = currentPrice, current > 0 else { return nil }
+        return ((current - purchasePrice) / purchasePrice) * 100
+    }
 }
 
 struct Trade: Codable, Identifiable {
@@ -145,6 +159,14 @@ struct ChartPoint: Codable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case date, portfolio, sp500
     }
+}
+
+// MARK: - Stock Price
+
+struct StockPriceResponse: Codable {
+    let ticker: String
+    let price: Double
+    let source: String?
 }
 
 // MARK: - Trade

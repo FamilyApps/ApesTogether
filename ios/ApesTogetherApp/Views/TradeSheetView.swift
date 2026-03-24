@@ -8,7 +8,8 @@ struct TradeSheetView: View {
     
     @Environment(\.dismiss) private var dismiss
     @State private var quantity: String = ""
-    @State private var price: String = ""
+    @State private var price: Double = 0
+    @State private var isLoadingPrice = true
     @State private var isSubmitting = false
     @State private var errorMessage: String?
     @State private var showSuccess = false
@@ -70,6 +71,41 @@ struct TradeSheetView: View {
                     
                     // Input fields
                     VStack(spacing: 16) {
+                        // Current price (auto-fetched)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Market Price")
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.textMuted)
+                            
+                            HStack {
+                                if isLoadingPrice {
+                                    ProgressView()
+                                        .tint(.primaryAccent)
+                                        .scaleEffect(0.8)
+                                    Text("Fetching price...")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.textMuted)
+                                } else if price > 0 {
+                                    Text("$\(String(format: "%.2f", price))")
+                                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                                        .foregroundColor(.primaryAccent)
+                                } else {
+                                    Text("Price unavailable")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.losses)
+                                }
+                                Spacer()
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 14)
+                            .background(Color.cardBackground)
+                            .cornerRadius(12)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(price > 0 ? Color.primaryAccent.opacity(0.3) : Color.cardBorder, lineWidth: 1)
+                            )
+                        }
+                        
                         // Quantity
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Shares")
@@ -90,39 +126,14 @@ struct TradeSheetView: View {
                                 )
                         }
                         
-                        // Price
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Price per share")
-                                .font(.caption.weight(.semibold))
-                                .foregroundColor(.textMuted)
-                            
-                            HStack {
-                                Text("$")
-                                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                                    .foregroundColor(.textMuted)
-                                TextField("0.00", text: $price)
-                                    .keyboardType(.decimalPad)
-                                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                                    .foregroundColor(.textPrimary)
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 14)
-                            .background(Color.cardBackground)
-                            .cornerRadius(12)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(Color.cardBorder, lineWidth: 1)
-                            )
-                        }
-                        
                         // Estimated total
-                        if let qty = Double(quantity), let prc = Double(price), qty > 0, prc > 0 {
+                        if let qty = Double(quantity), qty > 0, price > 0 {
                             HStack {
                                 Text("Estimated total")
                                     .font(.subheadline)
                                     .foregroundColor(.textSecondary)
                                 Spacer()
-                                Text("$\(String(format: "%.2f", qty * prc))")
+                                Text("$\(String(format: "%.2f", qty * price))")
                                     .font(.subheadline.bold())
                                     .foregroundColor(.textPrimary)
                             }
@@ -210,6 +221,22 @@ struct TradeSheetView: View {
                     }
                 }
             }
+            .onAppear {
+                fetchPrice()
+            }
+        }
+    }
+    
+    private func fetchPrice() {
+        isLoadingPrice = true
+        Task {
+            do {
+                let response = try await APIService.shared.getStockPrice(ticker: ticker)
+                price = response.price
+            } catch {
+                price = 0
+            }
+            isLoadingPrice = false
         }
     }
     
@@ -218,8 +245,8 @@ struct TradeSheetView: View {
             errorMessage = "Enter a valid quantity"
             return
         }
-        guard let prc = Double(price), prc > 0 else {
-            errorMessage = "Enter a valid price"
+        guard price > 0 else {
+            errorMessage = "Price not available. Please try again."
             return
         }
         
@@ -236,7 +263,7 @@ struct TradeSheetView: View {
                 let response = try await APIService.shared.executeTrade(
                     ticker: ticker,
                     quantity: qty,
-                    price: prc,
+                    price: price,
                     type: tradeType.rawValue
                 )
                 

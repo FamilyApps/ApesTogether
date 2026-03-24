@@ -27,6 +27,24 @@ struct PerformanceChartView: View {
         portfolioReturn >= 0 ? .gains : .losses
     }
     
+    private var xAxisTickValues: [Int] {
+        let count = chartData.count
+        guard count > 1 else { return count == 1 ? [0] : [] }
+        let desiredLabels = xAxisLabelCount
+        let step = max(1, count / desiredLabels)
+        var ticks: [Int] = []
+        var i = 0
+        while i < count {
+            ticks.append(i)
+            i += step
+        }
+        // Always include the last point
+        if let last = ticks.last, last != count - 1 {
+            ticks.append(count - 1)
+        }
+        return ticks
+    }
+    
     private func formatYAxisLabel(_ val: Double) -> String {
         if abs(val) >= 100 {
             return String(format: "%.0f%%", val)
@@ -80,32 +98,28 @@ struct PerformanceChartView: View {
                 .frame(maxWidth: .infinity)
             } else {
                 Chart {
-                    ForEach(chartData) { point in
-                        if let portfolio = point.portfolio {
-                            LineMark(
-                                x: .value("Date", point.date),
-                                y: .value("Return", portfolio)
-                            )
-                            .foregroundStyle(portfolioColor)
-                            .lineStyle(StrokeStyle(lineWidth: 2.5))
-                            .interpolationMethod(.catmullRom)
-                            .symbol(.circle)
-                            .symbolSize(0)
-                        }
+                    // Portfolio line — use index for X to avoid overlapping string labels
+                    ForEach(Array(chartData.filter { $0.portfolio != nil }.enumerated()), id: \.offset) { idx, point in
+                        LineMark(
+                            x: .value("Index", point.index ?? idx),
+                            y: .value("Return", point.portfolio ?? 0),
+                            series: .value("Series", "Portfolio")
+                        )
+                        .foregroundStyle(portfolioColor)
+                        .lineStyle(StrokeStyle(lineWidth: 2.5))
+                        .interpolationMethod(.catmullRom)
                     }
                     
-                    ForEach(chartData) { point in
-                        if let sp500 = point.sp500 {
-                            LineMark(
-                                x: .value("Date", point.date),
-                                y: .value("Return", sp500)
-                            )
-                            .foregroundStyle(Color.textMuted.opacity(0.5))
-                            .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
-                            .interpolationMethod(.catmullRom)
-                            .symbol(.circle)
-                            .symbolSize(0)
-                        }
+                    // S&P 500 line
+                    ForEach(Array(chartData.filter { $0.sp500 != nil }.enumerated()), id: \.offset) { idx, point in
+                        LineMark(
+                            x: .value("Index", point.index ?? idx),
+                            y: .value("Return", point.sp500 ?? 0),
+                            series: .value("Series", "S&P 500")
+                        )
+                        .foregroundStyle(Color.textMuted.opacity(0.5))
+                        .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
+                        .interpolationMethod(.catmullRom)
                     }
                     
                     // Zero line
@@ -114,10 +128,14 @@ struct PerformanceChartView: View {
                         .lineStyle(StrokeStyle(lineWidth: 0.5))
                 }
                 .chartXAxis {
-                    AxisMarks(values: .automatic(desiredCount: xAxisLabelCount)) { value in
-                        AxisValueLabel()
-                            .foregroundStyle(Color.textMuted)
-                            .font(.system(size: 9))
+                    AxisMarks(values: xAxisTickValues) { value in
+                        if let idx = value.as(Int.self), idx < chartData.count {
+                            AxisValueLabel {
+                                Text(chartData[idx].date)
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.textMuted)
+                            }
+                        }
                     }
                 }
                 .chartYAxis {

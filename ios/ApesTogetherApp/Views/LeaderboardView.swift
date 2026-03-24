@@ -6,6 +6,7 @@ struct LeaderboardView: View {
     @StateObject private var viewModel = LeaderboardViewModel()
     @State private var selectedPeriod = "7D"
     @State private var selectedCategory = "all"
+    @State private var sortBySubscribers = false
     @State private var showFilters = false
     @State private var showSettings = false
     
@@ -28,7 +29,17 @@ struct LeaderboardView: View {
     }
     
     private var activeFilterCount: Int {
-        selectedCategory != "all" ? 1 : 0
+        var count = 0
+        if selectedCategory != "all" { count += 1 }
+        if sortBySubscribers { count += 1 }
+        return count
+    }
+    
+    private var sortedEntries: [LeaderboardEntry] {
+        if sortBySubscribers {
+            return viewModel.entries.sorted { $0.subscriberCount > $1.subscriberCount }
+        }
+        return viewModel.entries
     }
     
     var body: some View {
@@ -147,6 +158,47 @@ struct LeaderboardView: View {
                     // Expandable filter panel
                     if showFilters {
                         VStack(alignment: .leading, spacing: 14) {
+                            // Sort by
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("SORT BY")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundColor(.textMuted)
+                                    .tracking(0.5)
+                                
+                                HStack(spacing: 8) {
+                                    Button {
+                                        sortBySubscribers = false
+                                    } label: {
+                                        Text("Performance")
+                                            .font(.caption.weight(.semibold))
+                                            .padding(.horizontal, 14)
+                                            .padding(.vertical, 7)
+                                            .background(!sortBySubscribers ? Color.primaryAccent : Color.cardBackground)
+                                            .foregroundColor(!sortBySubscribers ? .appBackground : .textSecondary)
+                                            .cornerRadius(8)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 8)
+                                                    .stroke(!sortBySubscribers ? Color.clear : Color.cardBorder, lineWidth: 0.5)
+                                            )
+                                    }
+                                    Button {
+                                        sortBySubscribers = true
+                                    } label: {
+                                        Text("Most Subscribers")
+                                            .font(.caption.weight(.semibold))
+                                            .padding(.horizontal, 14)
+                                            .padding(.vertical, 7)
+                                            .background(sortBySubscribers ? Color.primaryAccent : Color.cardBackground)
+                                            .foregroundColor(sortBySubscribers ? .appBackground : .textSecondary)
+                                            .cornerRadius(8)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 8)
+                                                    .stroke(sortBySubscribers ? Color.clear : Color.cardBorder, lineWidth: 0.5)
+                                            )
+                                    }
+                                }
+                            }
+                            
                             // Category filter
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("PORTFOLIO TYPE")
@@ -193,6 +245,7 @@ struct LeaderboardView: View {
                             if activeFilterCount > 0 {
                                 Button {
                                     selectedCategory = "all"
+                                    sortBySubscribers = false
                                     Task {
                                         await viewModel.loadLeaderboard(period: selectedPeriod, category: "all")
                                     }
@@ -247,14 +300,20 @@ struct LeaderboardView: View {
                         Spacer()
                         EmptyStateView(
                             icon: "trophy",
-                            title: "Leaderboard Coming Soon",
-                            message: "As traders join and add their portfolios, the leaderboard will populate. Add your stocks to be among the first!"
+                            title: "No Rankings Yet",
+                            message: "Rankings are calculated during market hours. Check back soon!",
+                            action: {
+                                Task {
+                                    await viewModel.loadLeaderboard(period: selectedPeriod, category: selectedCategory)
+                                }
+                            },
+                            actionLabel: "Refresh"
                         )
                         Spacer()
                     } else {
                         ScrollView {
                             LazyVStack(spacing: 0) {
-                                ForEach(viewModel.entries) { entry in
+                                ForEach(sortedEntries) { entry in
                                     NavigationLink(destination: PortfolioDetailView(slug: entry.user.portfolioSlug ?? "")) {
                                         LeaderboardRow(entry: entry)
                                     }

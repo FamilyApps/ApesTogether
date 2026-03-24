@@ -234,16 +234,17 @@ struct AppNavBar: ViewModifier {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 8) {
                         Image("NavLogo")
                             .renderingMode(.original)
                             .resizable()
                             .scaledToFit()
-                            .frame(height: 26)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .frame(width: 28, height: 28)
                         Text("Apes Together")
-                            .font(.system(size: 17, weight: .bold))
+                            .font(.system(size: 16, weight: .bold))
                             .foregroundColor(.textPrimary)
+                            .lineLimit(1)
+                            .fixedSize()
                     }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
