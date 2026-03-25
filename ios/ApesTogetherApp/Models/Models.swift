@@ -28,6 +28,8 @@ struct AddStocksResponse: Codable {
 struct LeaderboardResponse: Codable {
     let period: String
     let category: String
+    let sp500Return: Double?
+    let availableIndustries: [String]?
     let entries: [LeaderboardEntry]
 }
 
@@ -37,6 +39,14 @@ struct LeaderboardEntry: Codable, Identifiable {
     let returnPercent: Double
     let subscriberCount: Int
     let subscriptionPrice: Double
+    let sparklineData: [Double]?
+    let sp500SparklineData: [Double]?
+    let avgTradesPerWeek: Double?
+    let uniqueStocks: Int?
+    let largeCapPct: Double?
+    let accountAgeDays: Int?
+    let industryMix: [String: Double]?
+    let lastTradeDate: String?
     
     var id: Int { user.id }
 }

@@ -240,12 +240,15 @@ struct AppNavBar: ViewModifier {
                             .resizable()
                             .scaledToFit()
                             .frame(width: 28, height: 28)
+                            .clipShape(Circle())
                         Text("Apes Together")
                             .font(.system(size: 16, weight: .bold))
                             .foregroundColor(.textPrimary)
                             .lineLimit(1)
                             .fixedSize()
                     }
+                    .padding(.vertical, 4)
+                    .background(Color.clear)
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {

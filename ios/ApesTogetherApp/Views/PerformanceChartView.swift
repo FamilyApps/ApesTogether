@@ -107,7 +107,7 @@ struct PerformanceChartView: View {
                         )
                         .foregroundStyle(portfolioColor)
                         .lineStyle(StrokeStyle(lineWidth: 2.5))
-                        .interpolationMethod(.catmullRom)
+                        .interpolationMethod(.linear)
                     }
                     
                     // S&P 500 line
@@ -119,7 +119,7 @@ struct PerformanceChartView: View {
                         )
                         .foregroundStyle(Color.textMuted.opacity(0.5))
                         .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
-                        .interpolationMethod(.catmullRom)
+                        .interpolationMethod(.linear)
                     }
                     
                     // Zero line
@@ -212,6 +212,7 @@ struct PerformanceChartView: View {
 
 struct SparklineView: View {
     let dataPoints: [Double]
+    var sp500Points: [Double] = []
     let isPositive: Bool
     
     var body: some View {
@@ -220,10 +221,24 @@ struct SparklineView: View {
                 ForEach(Array(dataPoints.enumerated()), id: \.offset) { index, value in
                     LineMark(
                         x: .value("Index", index),
-                        y: .value("Value", value)
+                        y: .value("Value", value),
+                        series: .value("S", "Portfolio")
                     )
                     .foregroundStyle(isPositive ? Color.gains : Color.losses)
-                    .interpolationMethod(.catmullRom)
+                    .lineStyle(StrokeStyle(lineWidth: 1.5))
+                    .interpolationMethod(.linear)
+                }
+                if sp500Points.count >= 2 {
+                    ForEach(Array(sp500Points.enumerated()), id: \.offset) { index, value in
+                        LineMark(
+                            x: .value("Index", index),
+                            y: .value("Value", value),
+                            series: .value("S", "SP500")
+                        )
+                        .foregroundStyle(Color.textMuted.opacity(0.4))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
+                        .interpolationMethod(.linear)
+                    }
                 }
             }
             .chartXAxis(.hidden)

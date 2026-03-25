@@ -7,7 +7,6 @@ struct MyPortfolioView: View {
     @State private var showSettings = false
     @State private var showShareSheet = false
     @State private var shareImage: UIImage?
-    @State private var showCopiedToast = false
     @StateObject private var shareViewModel = ShareDataViewModel()
     
     private var personalURL: String {
@@ -27,49 +26,23 @@ struct MyPortfolioView: View {
                         VStack(spacing: 0) {
                             PortfolioDetailView(slug: slug)
                             
-                            // Share buttons row
-                            HStack(spacing: 10) {
-                                // Share card button (primary)
-                                Button {
-                                    generateAndShare(slug: slug)
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "square.and.arrow.up")
-                                            .font(.system(size: 14))
-                                        Text("Share Performance")
-                                            .font(.subheadline.weight(.semibold))
-                                    }
-                                    .foregroundColor(.appBackground)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 12)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 10)
-                                            .fill(Color.primaryAccent)
-                                    )
+                            // Share button
+                            Button {
+                                generateAndShare(slug: slug)
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "square.and.arrow.up")
+                                        .font(.system(size: 14))
+                                    Text("Share Performance")
+                                        .font(.subheadline.weight(.semibold))
                                 }
-                                
-                                // Copy link button
-                                Button {
-                                    UIPasteboard.general.string = personalURL
-                                    withAnimation { showCopiedToast = true }
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                                        withAnimation { showCopiedToast = false }
-                                    }
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: showCopiedToast ? "checkmark" : "link")
-                                            .font(.system(size: 14))
-                                        Text(showCopiedToast ? "Copied!" : "Copy Link")
-                                            .font(.subheadline.weight(.semibold))
-                                    }
-                                    .foregroundColor(.primaryAccent)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 12)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 10)
-                                            .stroke(Color.primaryAccent.opacity(0.4), lineWidth: 1)
-                                    )
-                                }
+                                .foregroundColor(.appBackground)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .fill(Color.primaryAccent)
+                                )
                             }
                             .padding(.horizontal, 16)
                             .padding(.bottom, 8)

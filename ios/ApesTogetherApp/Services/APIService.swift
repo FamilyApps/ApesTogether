@@ -61,8 +61,10 @@ class APIService {
     
     // MARK: - Leaderboard
     
-    func getLeaderboard(period: String = "7D", category: String = "all", limit: Int = 50) async throws -> LeaderboardResponse {
-        return try await get("/leaderboard?period=\(period)&category=\(category)&limit=\(limit)", authenticated: false)
+    func getLeaderboard(period: String = "7D", category: String = "all", limit: Int = 50, activeEdge: Bool = true, industry: String = "all", frequency: String = "any") async throws -> LeaderboardResponse {
+        let ae = activeEdge ? "1" : "0"
+        let ind = industry.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? industry
+        return try await get("/leaderboard?period=\(period)&category=\(category)&limit=\(limit)&active_edge=\(ae)&industry=\(ind)&frequency=\(frequency)", authenticated: false)
     }
     
     // MARK: - Portfolio

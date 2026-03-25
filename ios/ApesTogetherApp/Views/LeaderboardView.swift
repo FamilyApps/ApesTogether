@@ -6,9 +6,13 @@ struct LeaderboardView: View {
     @StateObject private var viewModel = LeaderboardViewModel()
     @State private var selectedPeriod = "7D"
     @State private var selectedCategory = "all"
+    @State private var selectedIndustry = "all"
+    @State private var selectedFrequency = "any"
+    @State private var activeEdge = true
     @State private var sortBySubscribers = false
     @State private var showFilters = false
     @State private var showSettings = false
+    @State private var expandedEntryId: Int? = nil
     
     let periods = ["1D", "5D", "7D", "1M", "3M", "YTD", "1Y"]
     let categories: [(key: String, label: String)] = [
@@ -16,9 +20,13 @@ struct LeaderboardView: View {
         ("large_cap", "Large Cap"),
         ("small_cap", "Small Cap")
     ]
+    let frequencies: [(key: String, label: String)] = [
+        ("any", "Any"),
+        ("day_trader", "Day Traders"),
+        ("moderate", "Moderate")
+    ]
     
     init() {
-        // Configure navigation bar appearance
         let appearance = UINavigationBarAppearance()
         appearance.configureWithOpaqueBackground()
         appearance.backgroundColor = UIColor(Color.appBackground)
@@ -31,6 +39,9 @@ struct LeaderboardView: View {
     private var activeFilterCount: Int {
         var count = 0
         if selectedCategory != "all" { count += 1 }
+        if selectedIndustry != "all" { count += 1 }
+        if selectedFrequency != "any" { count += 1 }
+        if !activeEdge { count += 1 }
         if sortBySubscribers { count += 1 }
         return count
     }
@@ -42,54 +53,50 @@ struct LeaderboardView: View {
         return viewModel.entries
     }
     
+    private func reloadLeaderboard() {
+        Task {
+            await viewModel.loadLeaderboard(
+                period: selectedPeriod, category: selectedCategory,
+                activeEdge: activeEdge, industry: selectedIndustry,
+                frequency: selectedFrequency
+            )
+        }
+    }
+    
     var body: some View {
         NavigationView {
             ZStack {
                 Color.appBackground.ignoresSafeArea()
                 
                 VStack(spacing: 0) {
-                    // Time period segmented control
-                    VStack(spacing: 0) {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 6) {
-                                ForEach(periods, id: \.self) { period in
-                                    Button {
-                                        selectedPeriod = period
-                                        Task {
-                                            await viewModel.loadLeaderboard(period: period, category: selectedCategory)
-                                        }
-                                    } label: {
-                                        Text(period)
-                                            .font(.caption.weight(.bold))
-                                            .padding(.horizontal, 14)
-                                            .padding(.vertical, 7)
-                                            .background(
-                                                selectedPeriod == period
-                                                    ? Color.primaryAccent
-                                                    : Color.clear
-                                            )
-                                            .foregroundColor(
-                                                selectedPeriod == period
-                                                    ? .appBackground
-                                                    : .textSecondary
-                                            )
-                                            .cornerRadius(8)
-                                    }
+                    // Time period selector
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(periods, id: \.self) { period in
+                                Button {
+                                    selectedPeriod = period
+                                    reloadLeaderboard()
+                                } label: {
+                                    Text(period)
+                                        .font(.caption.weight(.bold))
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 7)
+                                        .background(selectedPeriod == period ? Color.primaryAccent : Color.clear)
+                                        .foregroundColor(selectedPeriod == period ? .appBackground : .textSecondary)
+                                        .cornerRadius(8)
                                 }
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
                         }
-                        .background(Color.cardBackground.opacity(0.5))
-                        
-                        // Thin separator
-                        Rectangle()
-                            .fill(Color.cardBorder.opacity(0.5))
-                            .frame(height: 0.5)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
                     }
+                    .background(Color.cardBackground.opacity(0.5))
                     
-                    // Filter bar — visually separated
+                    Rectangle().fill(Color.cardBorder.opacity(0.5)).frame(height: 0.5)
+                    
+                    // S&P 500 benchmark bar + filter button
                     HStack(spacing: 12) {
+                        // Filter button
                         Button {
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                                 showFilters.toggle()
@@ -124,313 +131,480 @@ struct LeaderboardView: View {
                             )
                         }
                         
-                        // Active filter chips (shown inline when filter is applied)
-                        if activeFilterCount > 0 && !showFilters {
-                            HStack(spacing: 6) {
-                                let label = categories.first(where: { $0.key == selectedCategory })?.label ?? ""
-                                HStack(spacing: 4) {
-                                    Text(label)
-                                        .font(.caption.weight(.medium))
-                                    Button {
-                                        selectedCategory = "all"
-                                        Task {
-                                            await viewModel.loadLeaderboard(period: selectedPeriod, category: "all")
-                                        }
-                                    } label: {
-                                        Image(systemName: "xmark")
-                                            .font(.system(size: 8, weight: .bold))
-                                    }
-                                }
-                                .foregroundColor(.primaryAccent)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(
-                                    Capsule().fill(Color.primaryAccent.opacity(0.1))
-                                )
-                            }
-                        }
-                        
                         Spacer()
+                        
+                        // S&P 500 benchmark
+                        HStack(spacing: 4) {
+                            Text("S&P 500")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.textMuted)
+                            Text(String(format: "%+.2f%%", viewModel.sp500Return))
+                                .font(.system(size: 11, weight: .bold, design: .rounded).monospacedDigit())
+                                .foregroundColor(viewModel.sp500Return >= 0 ? .gains.opacity(0.7) : .losses.opacity(0.7))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule().fill(Color.cardBackground)
+                        )
+                        .overlay(
+                            Capsule().stroke(Color.cardBorder, lineWidth: 0.5)
+                        )
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
                     
                     // Expandable filter panel
                     if showFilters {
-                        VStack(alignment: .leading, spacing: 14) {
-                            // Sort by
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("SORT BY")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundColor(.textMuted)
-                                    .tracking(0.5)
-                                
-                                HStack(spacing: 8) {
-                                    Button {
-                                        sortBySubscribers = false
-                                    } label: {
-                                        Text("Performance")
-                                            .font(.caption.weight(.semibold))
-                                            .padding(.horizontal, 14)
-                                            .padding(.vertical, 7)
-                                            .background(!sortBySubscribers ? Color.primaryAccent : Color.cardBackground)
-                                            .foregroundColor(!sortBySubscribers ? .appBackground : .textSecondary)
-                                            .cornerRadius(8)
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 8)
-                                                    .stroke(!sortBySubscribers ? Color.clear : Color.cardBorder, lineWidth: 0.5)
-                                            )
-                                    }
-                                    Button {
-                                        sortBySubscribers = true
-                                    } label: {
-                                        Text("Most Subscribers")
-                                            .font(.caption.weight(.semibold))
-                                            .padding(.horizontal, 14)
-                                            .padding(.vertical, 7)
-                                            .background(sortBySubscribers ? Color.primaryAccent : Color.cardBackground)
-                                            .foregroundColor(sortBySubscribers ? .appBackground : .textSecondary)
-                                            .cornerRadius(8)
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 8)
-                                                    .stroke(sortBySubscribers ? Color.clear : Color.cardBorder, lineWidth: 0.5)
-                                            )
-                                    }
-                                }
-                            }
-                            
-                            // Category filter
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("PORTFOLIO TYPE")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundColor(.textMuted)
-                                    .tracking(0.5)
-                                
-                                HStack(spacing: 8) {
-                                    ForEach(categories, id: \.key) { cat in
-                                        Button {
-                                            selectedCategory = cat.key
-                                            Task {
-                                                await viewModel.loadLeaderboard(period: selectedPeriod, category: selectedCategory)
-                                            }
-                                        } label: {
-                                            Text(cat.label)
-                                                .font(.caption.weight(.semibold))
-                                                .padding(.horizontal, 14)
-                                                .padding(.vertical, 7)
-                                                .background(
-                                                    selectedCategory == cat.key
-                                                        ? Color.primaryAccent
-                                                        : Color.cardBackground
-                                                )
-                                                .foregroundColor(
-                                                    selectedCategory == cat.key
-                                                        ? .appBackground
-                                                        : .textSecondary
-                                                )
-                                                .cornerRadius(8)
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 8)
-                                                        .stroke(
-                                                            selectedCategory == cat.key ? Color.clear : Color.cardBorder,
-                                                            lineWidth: 0.5
-                                                        )
-                                                )
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            // Reset button
-                            if activeFilterCount > 0 {
-                                Button {
-                                    selectedCategory = "all"
-                                    sortBySubscribers = false
-                                    Task {
-                                        await viewModel.loadLeaderboard(period: selectedPeriod, category: "all")
-                                    }
-                                } label: {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "arrow.counterclockwise")
-                                            .font(.system(size: 10))
-                                        Text("Reset filters")
-                                            .font(.caption)
-                                    }
-                                    .foregroundColor(.textMuted)
-                                }
-                            }
-                        }
-                        .padding(16)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Color.cardBackground)
-                                .shadow(color: .black.opacity(0.08), radius: 8, y: 4)
-                        )
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 8)
-                        .transition(.asymmetric(
-                            insertion: .opacity.combined(with: .scale(scale: 0.95, anchor: .top)),
-                            removal: .opacity
-                        ))
+                        filterPanel
                     }
                     
                     AccentDivider()
                     
+                    // Column headers
+                    HStack(spacing: 0) {
+                        Text("#")
+                            .frame(width: 28, alignment: .center)
+                        Text("Trader")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.leading, 4)
+                        Text("Chart")
+                            .frame(width: 56, alignment: .center)
+                        Text("Subs")
+                            .frame(width: 40, alignment: .trailing)
+                        Text("Gain")
+                            .frame(width: 68, alignment: .trailing)
+                    }
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(.textMuted)
+                    .tracking(0.3)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(Color.cardBackground.opacity(0.3))
+                    
                     // Leaderboard list
                     if viewModel.isLoading && viewModel.entries.isEmpty {
                         Spacer()
-                        ProgressView()
-                            .tint(.primaryAccent)
+                        ProgressView().tint(.primaryAccent)
                         Spacer()
                     } else if let error = viewModel.error {
                         Spacer()
                         EmptyStateView(
-                            icon: "exclamationmark.triangle",
-                            title: "Error",
-                            message: error,
-                            action: {
-                                Task {
-                                    await viewModel.loadLeaderboard(period: selectedPeriod, category: selectedCategory)
-                                }
-                            },
-                            actionLabel: "Retry"
+                            icon: "exclamationmark.triangle", title: "Error", message: error,
+                            action: { reloadLeaderboard() }, actionLabel: "Retry"
                         )
                         Spacer()
                     } else if viewModel.entries.isEmpty {
                         Spacer()
                         EmptyStateView(
-                            icon: "trophy",
-                            title: "No Rankings Yet",
+                            icon: "trophy", title: "No Rankings Yet",
                             message: "Rankings are calculated during market hours. Check back soon!",
-                            action: {
-                                Task {
-                                    await viewModel.loadLeaderboard(period: selectedPeriod, category: selectedCategory)
-                                }
-                            },
-                            actionLabel: "Refresh"
+                            action: { reloadLeaderboard() }, actionLabel: "Refresh"
                         )
                         Spacer()
                     } else {
                         ScrollView {
                             LazyVStack(spacing: 0) {
                                 ForEach(sortedEntries) { entry in
-                                    NavigationLink(destination: PortfolioDetailView(slug: entry.user.portfolioSlug ?? "")) {
-                                        LeaderboardRow(entry: entry)
-                                    }
-                                    .buttonStyle(PlainButtonStyle())
+                                    LeaderboardRow(
+                                        entry: entry,
+                                        isExpanded: expandedEntryId == entry.id,
+                                        onTap: {
+                                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                                expandedEntryId = expandedEntryId == entry.id ? nil : entry.id
+                                            }
+                                        }
+                                    )
                                     
-                                    if entry.id != viewModel.entries.last?.id {
-                                        AccentDivider()
-                                            .padding(.leading, 50)
+                                    if entry.id != sortedEntries.last?.id {
+                                        AccentDivider().padding(.leading, 42)
                                     }
                                 }
                             }
-                            .padding(.top, 8)
                         }
                         .refreshable {
-                            await viewModel.loadLeaderboard(period: selectedPeriod, category: selectedCategory)
+                            await viewModel.loadLeaderboard(
+                                period: selectedPeriod, category: selectedCategory,
+                                activeEdge: activeEdge, industry: selectedIndustry,
+                                frequency: selectedFrequency
+                            )
                         }
                     }
                 }
             }
             .appNavBar(showSettings: $showSettings)
             .onAppear {
-                if viewModel.entries.isEmpty {
-                    Task {
-                        await viewModel.loadLeaderboard(period: selectedPeriod, category: selectedCategory)
+                if viewModel.entries.isEmpty { reloadLeaderboard() }
+            }
+            .sheet(isPresented: $showSettings) { SettingsView() }
+        }
+    }
+    
+    // MARK: - Filter Panel
+    private var filterPanel: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            // Active Edge toggle
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("ACTIVE EDGE™")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.textMuted)
+                        .tracking(0.5)
+                    Text("Hide inactive and one-hit accounts")
+                        .font(.system(size: 9))
+                        .foregroundColor(.textMuted)
+                }
+                Spacer()
+                Toggle("", isOn: $activeEdge)
+                    .labelsHidden()
+                    .tint(.primaryAccent)
+                    .onChange(of: activeEdge) { _ in reloadLeaderboard() }
+            }
+            
+            AccentDivider()
+            
+            // Sort by
+            VStack(alignment: .leading, spacing: 8) {
+                Text("SORT BY")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.textMuted)
+                    .tracking(0.5)
+                HStack(spacing: 8) {
+                    FilterChip(label: "Performance", isSelected: !sortBySubscribers) {
+                        sortBySubscribers = false
+                    }
+                    FilterChip(label: "Most Subscribers", isSelected: sortBySubscribers) {
+                        sortBySubscribers = true
                     }
                 }
             }
-            .sheet(isPresented: $showSettings) {
-                SettingsView()
+            
+            // Category
+            VStack(alignment: .leading, spacing: 8) {
+                Text("MARKET CAP")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.textMuted)
+                    .tracking(0.5)
+                HStack(spacing: 8) {
+                    ForEach(categories, id: \.key) { cat in
+                        FilterChip(label: cat.label, isSelected: selectedCategory == cat.key) {
+                            selectedCategory = cat.key
+                            reloadLeaderboard()
+                        }
+                    }
+                }
             }
+            
+            // Frequency
+            VStack(alignment: .leading, spacing: 8) {
+                Text("TRADING FREQUENCY")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.textMuted)
+                    .tracking(0.5)
+                HStack(spacing: 8) {
+                    ForEach(frequencies, id: \.key) { freq in
+                        FilterChip(label: freq.label, isSelected: selectedFrequency == freq.key) {
+                            selectedFrequency = freq.key
+                            reloadLeaderboard()
+                        }
+                    }
+                }
+            }
+            
+            // Industry (if available)
+            if let industries = viewModel.availableIndustries, !industries.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("INDUSTRY")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.textMuted)
+                        .tracking(0.5)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            FilterChip(label: "All", isSelected: selectedIndustry == "all") {
+                                selectedIndustry = "all"
+                                reloadLeaderboard()
+                            }
+                            ForEach(industries, id: \.self) { ind in
+                                FilterChip(label: ind, isSelected: selectedIndustry == ind) {
+                                    selectedIndustry = ind
+                                    reloadLeaderboard()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Reset
+            if activeFilterCount > 0 {
+                Button {
+                    selectedCategory = "all"
+                    selectedIndustry = "all"
+                    selectedFrequency = "any"
+                    activeEdge = true
+                    sortBySubscribers = false
+                    reloadLeaderboard()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.counterclockwise").font(.system(size: 10))
+                        Text("Reset all filters").font(.caption)
+                    }
+                    .foregroundColor(.textMuted)
+                }
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.cardBackground)
+                .shadow(color: .black.opacity(0.08), radius: 8, y: 4)
+        )
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+        .transition(.asymmetric(
+            insertion: .opacity.combined(with: .scale(scale: 0.95, anchor: .top)),
+            removal: .opacity
+        ))
+    }
+}
+
+// MARK: - Filter Chip
+
+struct FilterChip: View {
+    let label: String
+    let isSelected: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(isSelected ? Color.primaryAccent : Color.cardBackground)
+                .foregroundColor(isSelected ? .appBackground : .textSecondary)
+                .cornerRadius(8)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(isSelected ? Color.clear : Color.cardBorder, lineWidth: 0.5)
+                )
         }
     }
 }
 
+// MARK: - Leaderboard Row
+
 struct LeaderboardRow: View {
     let entry: LeaderboardEntry
-    
-    // Generate synthetic sparkline data from return percent
-    private var sparklineData: [Double] {
-        let returnVal = entry.returnPercent
-        // Create a plausible trend line: start near 0, end at returnVal
-        let steps = 12
-        var points: [Double] = []
-        for i in 0..<steps {
-            let progress = Double(i) / Double(steps - 1)
-            // Add some variation to make it look realistic
-            let noise = sin(Double(i) * 1.5 + Double(entry.rank)) * abs(returnVal) * 0.15
-            points.append(returnVal * progress + noise)
-        }
-        return points
-    }
+    let isExpanded: Bool
+    let onTap: () -> Void
+    @EnvironmentObject var subscriptionManager: SubscriptionManager
     
     var body: some View {
-        HStack(spacing: 12) {
-            // Rank badge
-            ZStack {
-                Circle()
-                    .fill(entry.rank <= 3 ? Color.primaryAccent.opacity(0.15) : Color.cardBackground)
-                    .frame(width: 36, height: 36)
-                
-                if entry.rank <= 3 {
-                    Text(["\u{1F947}", "\u{1F948}", "\u{1F949}"][entry.rank - 1])
-                        .font(.system(size: 16))
-                } else {
-                    Text("\(entry.rank)")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundColor(.textSecondary)
-                }
-            }
-            
-            // User info
-            VStack(alignment: .leading, spacing: 4) {
-                Text(entry.user.username)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundColor(.textPrimary)
-                    .lineLimit(1)
-                
-                HStack(spacing: 4) {
-                    Image(systemName: "person.2.fill")
-                        .font(.system(size: 8))
+        VStack(spacing: 0) {
+            // Compact row (always visible)
+            Button(action: onTap) {
+                HStack(spacing: 0) {
+                    // Rank
+                    ZStack {
+                        if entry.rank <= 3 {
+                            Text(["\u{1F947}", "\u{1F948}", "\u{1F949}"][entry.rank - 1])
+                                .font(.system(size: 14))
+                        } else {
+                            Text("\(entry.rank)")
+                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                                .foregroundColor(.textSecondary)
+                        }
+                    }
+                    .frame(width: 28)
+                    
+                    // Username
+                    Text(entry.user.username)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.textPrimary)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, 4)
+                    
+                    // Sparkline
+                    SparklineView(
+                        dataPoints: entry.sparklineData ?? [],
+                        sp500Points: entry.sp500SparklineData ?? [],
+                        isPositive: entry.returnPercent >= 0
+                    )
+                    .frame(width: 56, height: 24)
+                    
+                    // Subscriber count
                     Text("\(entry.subscriberCount)")
-                        .font(.caption2)
+                        .font(.system(size: 11, weight: .medium, design: .rounded).monospacedDigit())
+                        .foregroundColor(.textSecondary)
+                        .frame(width: 40, alignment: .trailing)
+                    
+                    // Return percent
+                    Text(String(format: "%+.2f%%", entry.returnPercent))
+                        .font(.system(size: 13, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundColor(entry.returnPercent >= 0 ? .gains : .losses)
+                        .frame(width: 68, alignment: .trailing)
                 }
-                .foregroundColor(.textMuted)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PlainButtonStyle())
+            
+            // Expanded detail section
+            if isExpanded {
+                expandedContent
+            }
+        }
+        .background(isExpanded ? Color.cardBackground.opacity(0.5) : Color.clear)
+    }
+    
+    // MARK: - Expanded Detail
+    private var expandedContent: some View {
+        VStack(spacing: 12) {
+            // Stats grid
+            HStack(spacing: 0) {
+                statCell(title: "Trades/wk", value: String(format: "%.1f", entry.avgTradesPerWeek ?? 0))
+                statDivider
+                statCell(title: "Stocks", value: "\(entry.uniqueStocks ?? 0)")
+                statDivider
+                statCell(title: "Large Cap", value: String(format: "%.0f%%", entry.largeCapPct ?? 0))
+                statDivider
+                statCell(title: "Age", value: formatAge(entry.accountAgeDays ?? 0))
+            }
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.cardBackground)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.cardBorder, lineWidth: 0.5)
+                    )
+            )
+            
+            // Industry mix (if available)
+            if let mix = entry.industryMix, !mix.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("INDUSTRY MIX")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.textMuted)
+                        .tracking(0.5)
+                    
+                    HStack(spacing: 6) {
+                        ForEach(Array(mix.sorted(by: { $0.value > $1.value }).prefix(4)), id: \.key) { name, pct in
+                            HStack(spacing: 3) {
+                                Text(name)
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundColor(.textSecondary)
+                                Text(String(format: "%.0f%%", pct))
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundColor(.primaryAccent)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule().fill(Color.primaryAccent.opacity(0.08))
+                            )
+                        }
+                    }
+                }
             }
             
-            // Mini sparkline chart
-            SparklineView(
-                dataPoints: sparklineData,
-                isPositive: entry.returnPercent >= 0
-            )
-            .frame(width: 50, height: 28)
-            
-            // Return percentage
-            Text(String(format: "%+.2f%%", entry.returnPercent))
-                .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
-                .foregroundColor(entry.returnPercent >= 0 ? .gains : .losses)
-                .frame(width: 72, alignment: .trailing)
+            // Subscribe + View buttons
+            HStack(spacing: 10) {
+                NavigationLink(destination: PortfolioDetailView(slug: entry.user.portfolioSlug ?? "")) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chart.line.uptrend.xyaxis")
+                            .font(.system(size: 11))
+                        Text("View Portfolio")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundColor(.primaryAccent)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.primaryAccent.opacity(0.4), lineWidth: 1)
+                    )
+                }
+                
+                Button {
+                    Task {
+                        await subscriptionManager.subscribe(to: entry.user.id)
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "bell.fill")
+                            .font(.system(size: 11))
+                        Text("Subscribe $9/mo")
+                            .font(.caption.weight(.bold))
+                    }
+                    .foregroundColor(.appBackground)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.primaryAccent)
+                    )
+                }
+            }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 11)
+        .padding(.bottom, 12)
+        .transition(.opacity.combined(with: .move(edge: .top)))
+    }
+    
+    private var statDivider: some View {
+        Rectangle()
+            .fill(Color.cardBorder)
+            .frame(width: 0.5, height: 28)
+    }
+    
+    private func statCell(title: String, value: String) -> some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundColor(.textPrimary)
+            Text(title)
+                .font(.system(size: 8, weight: .medium))
+                .foregroundColor(.textMuted)
+                .tracking(0.3)
+        }
+        .frame(maxWidth: .infinity)
+    }
+    
+    private func formatAge(_ days: Int) -> String {
+        if days < 30 { return "\(days)d" }
+        if days < 365 { return "\(days / 30)mo" }
+        return "\(days / 365)y"
     }
 }
+
+// MARK: - View Model
 
 @MainActor
 class LeaderboardViewModel: ObservableObject {
     @Published var entries: [LeaderboardEntry] = []
+    @Published var sp500Return: Double = 0.0
+    @Published var availableIndustries: [String]?
     @Published var isLoading = false
     @Published var error: String?
     
-    func loadLeaderboard(period: String, category: String = "all") async {
+    func loadLeaderboard(period: String, category: String = "all",
+                         activeEdge: Bool = true, industry: String = "all",
+                         frequency: String = "any") async {
         isLoading = true
         error = nil
         
         do {
-            let response = try await APIService.shared.getLeaderboard(period: period, category: category)
+            let response = try await APIService.shared.getLeaderboard(
+                period: period, category: category,
+                activeEdge: activeEdge, industry: industry, frequency: frequency
+            )
             entries = response.entries
+            sp500Return = response.sp500Return ?? 0.0
+            availableIndustries = response.availableIndustries
         } catch {
             self.error = error.localizedDescription
         }
