@@ -2335,12 +2335,6 @@ def debug_notification_fields():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/')
-def index():
-    """Main landing page - redirect to 5D leaderboard for public access"""
-    # Direct URL redirect (leaderboard blueprint may not be loaded yet)
-    return redirect('/leaderboard/?period=5D&category=all')
-
 @app.route('/login', methods=['GET', 'POST'])
 @limiter.limit("10 per minute")
 def login():
