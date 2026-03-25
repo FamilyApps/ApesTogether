@@ -2404,6 +2404,11 @@ def login():
     
     return render_template_with_defaults('login.html')
 
+@app.route('/')
+def index():
+    """Marketing landing page"""
+    return render_template('landing.html')
+
 @app.route('/terms-of-service')
 def terms_of_service():
     """Terms of Service page"""
