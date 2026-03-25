@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 struct MyPortfolioView: View {
     @EnvironmentObject var authManager: AuthenticationManager
