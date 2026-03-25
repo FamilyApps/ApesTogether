@@ -31,6 +31,10 @@
 		D0679C7F2F50F29A009960CC /* StoreKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D0679C7E2F50F29A009960CC /* StoreKit.framework */; };
 		D0679C822F51381F009960CC /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = D0679C812F51381F009960CC /* GoogleService-Info.plist */; };
 		D0679C862F52A01B009960CC /* LegalText.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0679C852F52A01B009960CC /* LegalText.swift */; };
+		AA000001AAAA000100000001 /* TopInfluencersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000001AAAA000100000002 /* TopInfluencersView.swift */; };
+		AA000002AAAA000200000001 /* PortfolioShareCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000002AAAA000200000002 /* PortfolioShareCardView.swift */; };
+		AA000003AAAA000300000001 /* PerformanceChartView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000003AAAA000300000002 /* PerformanceChartView.swift */; };
+		AA000004AAAA000400000001 /* TradeSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000004AAAA000400000002 /* TradeSheetView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -60,6 +64,10 @@
 		D0679C812F51381F009960CC /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = "GoogleService-Info.plist"; path = "../ApesTogetherApp/GoogleService-Info.plist"; sourceTree = SOURCE_ROOT; };
 		D0679C842F514FAD009960CC /* ApesTogether.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ApesTogether.entitlements; sourceTree = "<group>"; };
 		D0679C852F52A01B009960CC /* LegalText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LegalText.swift; path = ../ApesTogetherApp/LegalText.swift; sourceTree = SOURCE_ROOT; };
+		AA000001AAAA000100000002 /* TopInfluencersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopInfluencersView.swift; sourceTree = "<group>"; };
+		AA000002AAAA000200000002 /* PortfolioShareCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioShareCardView.swift; sourceTree = "<group>"; };
+		AA000003AAAA000300000002 /* PerformanceChartView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceChartView.swift; sourceTree = "<group>"; };
+		AA000004AAAA000400000002 /* TradeSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradeSheetView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -123,6 +131,10 @@
 				D0679C5E2F50F075009960CC /* SettingsView.swift */,
 				D0679C5F2F50F075009960CC /* SubscriptionsView.swift */,
 				D0679C602F50F075009960CC /* WelcomeCarouselView.swift */,
+				AA000001AAAA000100000002 /* TopInfluencersView.swift */,
+				AA000002AAAA000200000002 /* PortfolioShareCardView.swift */,
+				AA000003AAAA000300000002 /* PerformanceChartView.swift */,
+				AA000004AAAA000400000002 /* TradeSheetView.swift */,
 			);
 			name = Views;
 			path = ../ApesTogetherApp/Views;
@@ -256,6 +268,10 @@
 				D0679C692F50F075009960CC /* EarnNudgeView.swift in Sources */,
 				D0679C6A2F50F075009960CC /* MyPortfolioView.swift in Sources */,
 				D0679C6B2F50F075009960CC /* SettingsView.swift in Sources */,
+				AA000001AAAA000100000001 /* TopInfluencersView.swift in Sources */,
+				AA000002AAAA000200000001 /* PortfolioShareCardView.swift in Sources */,
+				AA000003AAAA000300000001 /* PerformanceChartView.swift in Sources */,
+				AA000004AAAA000400000001 /* TradeSheetView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
