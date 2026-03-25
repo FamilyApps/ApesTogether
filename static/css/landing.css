@@ -36,10 +36,10 @@ sup.asterisk { color: var(--accent); font-size: 0.7em; }
 .nav-links a { color: var(--txt2); font-size: 0.88rem; font-weight: 500; transition: color 0.2s; }
 .nav-links a:hover { color: var(--txt); text-decoration: none; }
 .btn-sm {
-    background: var(--accent); color: var(--bg); padding: 8px 20px; border-radius: 8px;
-    font-weight: 600; font-size: 0.88rem; transition: all 0.2s;
+    background: var(--accent); color: #000; padding: 8px 20px; border-radius: 8px;
+    font-weight: 700; font-size: 0.88rem; transition: all 0.2s;
 }
-.btn-sm:hover { opacity: 0.9; text-decoration: none; color: var(--bg); }
+.btn-sm:hover { opacity: 0.9; text-decoration: none; color: #000; }
 .mobile-toggle { display: none; background: none; border: none; color: var(--txt); font-size: 1.5rem; cursor: pointer; padding: 4px; }
 
 /* ── HERO ── */
