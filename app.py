@@ -30,7 +30,12 @@ from datetime import datetime, date, timedelta
 # App configuration
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-for-testing')
+SECRET_KEY = os.environ.get('SECRET_KEY')
+if not SECRET_KEY:
+    if os.environ.get('VERCEL_ENV'):
+        raise RuntimeError('SECRET_KEY environment variable is required in production')
+    SECRET_KEY = 'dev-key-for-local-testing-only'
+app.config['SECRET_KEY'] = SECRET_KEY
 # Use DATABASE_URL from environment if available, otherwise fall back to SQLite
 database_url = os.environ.get('DATABASE_URL')
 if database_url:
@@ -128,7 +133,7 @@ def load_user(user_id):
 # Routes
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('landing.html')
 
 @app.route('/register')
 def register():
@@ -147,7 +152,8 @@ def privacy_policy():
 def admin_direct():
     """Super simple admin access route"""
     # Check if user is admin
-    if current_user.email != ADMIN_EMAIL:
+    email = getattr(current_user, 'email', '') or session.get('email', '')
+    if email != ADMIN_EMAIL:
         flash('You must be an admin to access this page.', 'danger')
         return redirect(url_for('index'))
     
