@@ -2,7 +2,8 @@
 Leaderboard routes for displaying performance rankings and subscription buttons
 """
 from flask import Blueprint, render_template, jsonify, request, current_app
-from flask_login import login_required, current_user
+from flask_login import current_user
+from admin_auth import admin_required
 from models import db, User, Subscription
 from leaderboard_utils import get_leaderboard_data, update_leaderboard_entry, update_all_user_leaderboards
 from subscription_utils import get_subscription_tier_info
@@ -13,41 +14,14 @@ leaderboard_bp = Blueprint('leaderboard', __name__, url_prefix='/leaderboard')
 @leaderboard_bp.route('/')
 def leaderboard_home():
     """
-    Main leaderboard page - optimized for 10,000+ concurrent users
-    
-    Strategy:
-    1. Serve pre-rendered HTML from cache (CDN edge cached, <100ms response)
-    2. Single HTML variant for all users (auth overlay done client-side)
-    3. Chart data embedded in HTML (no API calls, lazy-loaded client-side)
+    Main leaderboard page - dynamically rendered with cached chart data
+    Chart data embedded in HTML (no API calls, lazy-loaded client-side)
     """
     period = request.args.get('period', 'YTD')  # Default to YTD
     category = request.args.get('category', 'all')  # all, small_cap, large_cap
     
-    # ============================================
-    # STEP 1: Try to serve pre-rendered HTML from cache
-    # ============================================
-    from models import LeaderboardCache, UserPortfolioChartCache
-    from flask import Response, make_response
-    
-    # Single cache key (no auth suffix - client-side overlay handles auth)
-    cache_key = f"{period}_{category}"
-    cache_entry = LeaderboardCache.query.filter_by(period=cache_key).first()
-    
-    if cache_entry and cache_entry.rendered_html:
-        # Serve pre-rendered HTML with aggressive CDN caching
-        response = make_response(cache_entry.rendered_html)
-        
-        # CDN caching headers for 10k+ concurrent users
-        response.headers['Cache-Control'] = 'public, max-age=3600, s-maxage=3600'  # 1 hour
-        response.headers['CDN-Cache-Control'] = 'max-age=86400'  # 24h at CDN edge
-        response.headers['Vary'] = 'Accept-Encoding'  # Only vary on compression
-        response.headers['X-Cache-Source'] = 'pre-rendered'
-        
-        return response
-    
-    # ============================================
-    # STEP 2: Fallback - Dynamic rendering (should rarely happen)
-    # ============================================
+    from models import UserPortfolioChartCache
+    from flask import make_response
     from leaderboard_utils import calculate_leaderboard_data
     
     leaderboard_data = calculate_leaderboard_data(period, limit=20, category=category)
@@ -113,18 +87,9 @@ def api_leaderboard_data():
     })
 
 @leaderboard_bp.route('/update/<period>')
-@login_required
+@admin_required
 def update_period(period):
     """Update leaderboard for specific period (admin/debug use)"""
-    # Check if user is admin using the same logic as other admin routes
-    from flask import session
-    import os
-    ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
-    
-    email = session.get('email', '')
-    if email != ADMIN_EMAIL and current_user.email != ADMIN_EMAIL and current_user.username != 'admin':
-        return jsonify({'error': 'Admin access required'}), 403
-    
     users = User.query.all()
     updated_count = 0
     
@@ -139,7 +104,7 @@ def update_period(period):
     })
 
 @leaderboard_bp.route('/update-all')
-@login_required
+@admin_required
 def update_all():
     """No longer needed - leaderboard calculates directly from snapshots"""
     return jsonify({

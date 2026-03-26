@@ -6,7 +6,7 @@ Updated: 2025-09-22 - Fixed 5D chart distribution
 import json
 from datetime import datetime, timedelta, date
 from flask import request, jsonify
-from models import db, PortfolioSnapshotIntraday, SP500ChartCache, MarketData
+from models import db, PortfolioSnapshotIntraday, MarketData
 from portfolio_performance import PortfolioPerformanceCalculator
 import logging
 
@@ -42,7 +42,7 @@ def handler(request):
     
     except Exception as e:
         logger.error(f"Error in performance-intraday API: {str(e)}")
-        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 def get_intraday_performance_data(user_id: int, period: str):
@@ -57,11 +57,9 @@ def get_intraday_performance_data(user_id: int, period: str):
         logger.info(f"Attempting to get cached S&P 500 chart for period {period}")
         sp500_chart = get_cached_sp500_chart(period)
         if not sp500_chart:
-            # Fallback to generating chart on-demand
-            logger.warning(f"Cache miss for {period}, falling back to live generation (this will make Alpha Vantage API calls)")
-            sp500_chart = generate_sp500_chart_fallback(period)
+            logger.warning(f"No S&P 500 data available from MarketData for {period}")
         else:
-            logger.info(f"Successfully using cached S&P 500 data for {period} - no API calls needed")
+            logger.info(f"Successfully loaded S&P 500 data from MarketData for {period}")
         
         # Get user portfolio data
         portfolio_data = get_user_portfolio_data(user_id, period)
@@ -88,36 +86,54 @@ def get_intraday_performance_data(user_id: int, period: str):
 
 
 def get_cached_sp500_chart(period: str):
-    """Get pre-generated S&P 500 chart from cache"""
+    """Get S&P 500 chart data directly from MarketData table"""
     try:
-        cache_entry = SP500ChartCache.query.filter_by(period=period).first()
+        from datetime import date as date_type
         
-        if cache_entry:
-            logger.info(f"Found S&P 500 cache for {period}: generated={cache_entry.generated_at}, expires={cache_entry.expires_at}")
-            if cache_entry.expires_at > datetime.now():
-                logger.info(f"Using cached S&P 500 data for {period} (valid until {cache_entry.expires_at})")
-                return json.loads(cache_entry.chart_data)
-            else:
-                logger.warning(f"S&P 500 cache for {period} expired at {cache_entry.expires_at}")
-        else:
-            logger.warning(f"No S&P 500 cache found for period {period}")
+        # Determine date range based on period
+        today = date.today()
+        period_days = {
+            '1D': 1, '5D': 7, '1M': 30, '3M': 90,
+            'YTD': (today - date_type(today.year, 1, 1)).days,
+            '1Y': 365, '5Y': 1825
+        }
+        days_back = period_days.get(period, 30)
+        start_date = today - timedelta(days=days_back)
         
-        return None
+        # Query MarketData for SPY_SP500 daily closes
+        records = MarketData.query.filter(
+            MarketData.ticker == 'SPY_SP500',
+            MarketData.date >= start_date,
+            MarketData.date <= today,
+            MarketData.timestamp.is_(None)  # daily records only
+        ).order_by(MarketData.date.asc()).all()
+        
+        if not records:
+            logger.warning(f"No MarketData SPY_SP500 records found for period {period}")
+            return None
+        
+        # Build chart data structure
+        start_value = float(records[0].close_price)
+        data_points = []
+        for r in records:
+            value = float(r.close_price)
+            pct_change = ((value - start_value) / start_value) * 100 if start_value > 0 else 0
+            data_points.append({
+                'date': r.date.isoformat(),
+                'value': value,
+                'pct_change': round(pct_change, 2)
+            })
+        
+        logger.info(f"Built S&P 500 chart from MarketData for {period}: {len(data_points)} points")
+        return {
+            'period': period,
+            'data': data_points,
+            'start_date': records[0].date.isoformat(),
+            'end_date': records[-1].date.isoformat()
+        }
     
     except Exception as e:
-        logger.error(f"Error getting cached S&P 500 chart: {str(e)}")
-        return None
-
-
-def generate_sp500_chart_fallback(period: str):
-    """Generate S&P 500 chart on-demand as fallback"""
-    try:
-        from api.cron.collect_intraday_data import SP500ChartGenerator
-        generator = SP500ChartGenerator()
-        return generator.generate_sp500_chart(period)
-    
-    except Exception as e:
-        logger.error(f"Error generating S&P 500 chart fallback: {str(e)}")
+        logger.error(f"Error getting S&P 500 chart from MarketData: {str(e)}")
         return None
 
 

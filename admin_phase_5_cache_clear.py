@@ -8,19 +8,17 @@ After fixing historical snapshots, we need to:
 """
 
 from flask import jsonify, request
-from flask_login import login_required, current_user
+from flask_login import current_user
+from admin_auth import admin_required
 from sqlalchemy import text
 
 def register_phase_5_cache_routes(app, db):
     """Register Phase 5 cache clearing routes"""
     
     @app.route('/admin/phase5/clear-chart-caches')
-    @login_required
+    @admin_required
     def clear_chart_caches():
         """Clear all chart caches so they regenerate with new historical data"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         execute = request.args.get('execute') == 'true'
         
         try:
@@ -58,16 +56,13 @@ def register_phase_5_cache_routes(app, db):
             
         except Exception as e:
             db.session.rollback()
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Phase5 cache error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/phase5/verify-chart-data')
-    @login_required
+    @admin_required
     def verify_chart_data():
         """Verify chart data for a specific user and period"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         try:
             from models import PortfolioSnapshot
             from datetime import datetime, timedelta
@@ -163,16 +158,13 @@ def register_phase_5_cache_routes(app, db):
             })
             
         except Exception as e:
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Phase5 cache error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/phase5/check-recent-snapshots')
-    @login_required
+    @admin_required
     def phase5_check_recent_snapshots():
         """Check if recent snapshots exist for all users"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         try:
             from models import PortfolioSnapshot
             from datetime import datetime, timedelta
@@ -211,16 +203,13 @@ def register_phase_5_cache_routes(app, db):
             })
             
         except Exception as e:
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Phase5 cache error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/phase5/backfill-sp500')
-    @login_required
+    @admin_required
     def backfill_sp500():
         """Backfill missing recent S&P 500 data (last 7 days)"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         execute = request.args.get('execute') == 'true'
         
         try:
@@ -391,5 +380,5 @@ def register_phase_5_cache_routes(app, db):
             
         except Exception as e:
             db.session.rollback()
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Phase5 cache error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500

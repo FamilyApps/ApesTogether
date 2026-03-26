@@ -8,7 +8,12 @@ from datetime import datetime
 
 # Create a minimal Flask app
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'dev-key-for-testing')
+_secret = os.environ.get('SECRET_KEY')
+if not _secret:
+    if os.environ.get('VERCEL_ENV'):
+        raise RuntimeError('SECRET_KEY environment variable is required in production')
+    _secret = 'dev-key-for-local-testing-only'
+app.secret_key = _secret
 
 # Admin credentials from environment variables
 ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')

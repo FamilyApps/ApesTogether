@@ -863,7 +863,7 @@ def run_migration():
             return jsonify({'error': 'Admin access required'}), 403
         
         # Create the new tables
-        from models import db, User, Stock, Subscription, Transaction, PortfolioSnapshot, MarketData, SP500ChartCache, SubscriptionTier, TradeLimit, SMSNotification, StockInfo, LeaderboardEntry
+        from models import db, User, Stock, Subscription, Transaction, PortfolioSnapshot, MarketData, SubscriptionTier, TradeLimit, SMSNotification, StockInfo, LeaderboardEntry
         from subscription_utils import update_user_subscription_price, update_trade_limit_count, check_trade_limit_exceeded, get_subscription_tier_info
         db.create_all()
         

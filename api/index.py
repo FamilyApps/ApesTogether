@@ -6067,32 +6067,12 @@ def check_recent_snapshots():
 @app.route('/admin/clear-leaderboard-html', methods=['POST'])
 @admin_required
 def clear_leaderboard_html():
-    """Clear pre-rendered HTML from leaderboard cache to force regeneration"""
-    try:
-        from models import LeaderboardCache
-        from sqlalchemy import update
-        
-        # Clear all rendered_html fields
-        result = db.session.execute(
-            update(LeaderboardCache).values(rendered_html=None)
-        )
-        db.session.commit()
-        
-        cleared_count = result.rowcount
-        
-        logger.info(f"Cleared {cleared_count} pre-rendered HTML cache entries")
-        
-        return jsonify({
-            'success': True,
-            'message': f'Cleared {cleared_count} HTML cache entries',
-            'cleared_count': cleared_count,
-            'next_step': 'Visit /leaderboard to trigger fresh rendering with correct nav menu'
-        })
-    
-    except Exception as e:
-        logger.error(f"Error clearing HTML cache: {e}")
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+    """No-op: rendered_html has been removed from LeaderboardCache"""
+    return jsonify({
+        'success': True,
+        'message': 'HTML pre-rendering has been removed. Leaderboard is now rendered dynamically.',
+        'cleared_count': 0
+    })
 
 @app.route('/admin/clear-leaderboard-cache', methods=['GET', 'POST'])
 @admin_required
@@ -7806,7 +7786,6 @@ def check_all_caches():
             leaderboard_summary.append({
                 'period': cache.period,
                 'generated_at': cache.generated_at.isoformat() if cache.generated_at else None,
-                'has_rendered_html': cache.rendered_html is not None,
                 'entry_count': len(data) if isinstance(data, list) else 0,
                 'sample_performance': sample_entry.get('performance_percent') if sample_entry else None,
                 'sample_user': sample_entry.get('username') if sample_entry else None
@@ -9825,9 +9804,9 @@ def admin_regenerate_leaderboard_html():
             </div>
             
             <div class="info">
-                <strong>📊 Will generate:</strong> 24 HTML pages (8 periods × 3 categories)<br>
+                <strong>📊 Will generate:</strong> Leaderboard JSON cache for all periods<br>
                 <strong>⏱️ Estimated time:</strong> 30-60 seconds<br>
-                <strong>💾 Cache location:</strong> LeaderboardCache.rendered_html
+                <strong>💾 Cache location:</strong> LeaderboardCache.leaderboard_data
             </div>
             
             <button onclick="regenerate()">🔄 Regenerate All Leaderboard HTML</button>
@@ -9881,27 +9860,27 @@ def admin_regenerate_leaderboard_html():
         </html>
         '''
     
-    # POST request - do the regeneration
+    # POST request - do the regeneration (JSON-only, HTML pre-rendering removed)
     try:
         import time
-        from leaderboard_utils import update_leaderboard_cache_html
+        from leaderboard_utils import update_leaderboard_cache
         
         start_time = time.time()
         
-        # Regenerate all leaderboard HTML
-        stats = update_leaderboard_cache_html()
+        # Regenerate all leaderboard JSON cache
+        updated_count = update_leaderboard_cache()
         
         time_taken = round(time.time() - start_time, 2)
         
         return jsonify({
             'success': True,
-            'stats': stats,
+            'stats': {'updated': updated_count, 'total': updated_count, 'failed': 0},
             'time_taken': time_taken,
-            'message': f'Pre-rendered {stats["updated"]}/{stats["total"]} leaderboard pages'
+            'message': f'Regenerated {updated_count} leaderboard JSON cache entries'
         })
         
     except Exception as e:
-        logger.error(f"Error regenerating leaderboard HTML: {e}")
+        logger.error(f"Error regenerating leaderboard cache: {e}")
         return jsonify({
             'success': False,
             'error': str(e)
@@ -9916,7 +9895,7 @@ def admin_invalidate_leaderboard():
     """
     try:
         from models import LeaderboardCache
-        from leaderboard_utils import prerender_leaderboard_html
+        from leaderboard_utils import calculate_leaderboard_data
         import json
         
         period = request.json.get('period', 'YTD')
@@ -9929,16 +9908,15 @@ def admin_invalidate_leaderboard():
             db.session.delete(cache_entry)
             db.session.commit()
         
-        # Regenerate immediately
-        result = prerender_leaderboard_html(period, category)
+        # Regenerate immediately (JSON only)
+        leaderboard_data = calculate_leaderboard_data(period, limit=20, category=category)
         
-        if result:
+        if leaderboard_data is not None:
             # Store new cache
             new_cache = LeaderboardCache(
                 period=cache_key,
-                leaderboard_data=result['data'],
-                rendered_html=result['html'],
-                generated_at=result['generated_at']
+                leaderboard_data=json.dumps(leaderboard_data),
+                generated_at=datetime.now()
             )
             db.session.add(new_cache)
             db.session.commit()
@@ -9946,12 +9924,12 @@ def admin_invalidate_leaderboard():
             return jsonify({
                 'success': True,
                 'message': f'Invalidated and regenerated {cache_key}',
-                'html_size': len(result['html'])
+                'entries': len(leaderboard_data) if isinstance(leaderboard_data, list) else 0
             })
         else:
             return jsonify({
                 'success': False,
-                'error': 'Failed to regenerate HTML'
+                'error': 'Failed to regenerate leaderboard data'
             }), 500
             
     except Exception as e:
@@ -11285,13 +11263,11 @@ def admin_verify_cache_migration():
             if cache.period.endswith('_auth') or cache.period.endswith('_anon'):
                 new_format.append({
                     'period': cache.period,
-                    'has_html': bool(cache.rendered_html),
                     'generated_at': str(cache.generated_at)
                 })
             else:
                 old_format.append({
                     'period': cache.period,
-                    'has_html': bool(cache.rendered_html),
                     'generated_at': str(cache.generated_at)
                 })
         
@@ -11970,23 +11946,15 @@ def admin_backfill_sept_data():
         # Cache 2: LeaderboardCache
         leaderboard_cache_count = LeaderboardCache.query.delete()
         
-        # Cache 3: SP500ChartCache (if exists)
-        try:
-            from models import SP500ChartCache
-            sp500_cache_count = SP500ChartCache.query.delete()
-        except:
-            sp500_cache_count = 0
-        
         db.session.commit()
         
         results['phase_4_cache_invalidation'] = {
             'UserPortfolioChartCache_cleared': chart_cache_count,
             'LeaderboardCache_cleared': leaderboard_cache_count,
-            'SP500ChartCache_cleared': sp500_cache_count,
-            'total_cache_entries_cleared': chart_cache_count + leaderboard_cache_count + sp500_cache_count
+            'total_cache_entries_cleared': chart_cache_count + leaderboard_cache_count
         }
         
-        logger.info(f"  ✅ Cleared {chart_cache_count + leaderboard_cache_count + sp500_cache_count} cache entries")
+        logger.info(f"  ✅ Cleared {chart_cache_count + leaderboard_cache_count} cache entries")
         
         # ========================================================================
         # PHASE 5: VERIFICATION - DATA FLOW TRACE
@@ -13906,22 +13874,20 @@ def admin_profile_recalculation():
 def admin_clear_caches():
     """Clear chart and leaderboard caches"""
     try:
-        from models import UserPortfolioChartCache, LeaderboardCache, SP500ChartCache
+        from models import UserPortfolioChartCache, LeaderboardCache
         
         chart_cache = UserPortfolioChartCache.query.delete()
         leaderboard_cache = LeaderboardCache.query.delete()
-        sp500_cache = SP500ChartCache.query.delete()
         db.session.commit()
         
-        total = chart_cache + leaderboard_cache + sp500_cache
+        total = chart_cache + leaderboard_cache
         
         return jsonify({
             'success': True,
             'total_cleared': total,
             'details': {
                 'chart_cache': chart_cache,
-                'leaderboard_cache': leaderboard_cache,
-                'sp500_cache': sp500_cache
+                'leaderboard_cache': leaderboard_cache
             }
         }), 200
         
@@ -18424,284 +18390,85 @@ def market_close_cron():
                     pass
                 # Non-critical — continue with leaderboard updates
             
-            # PHASE 2: Update Leaderboard Cache (includes chart cache generation)
-            # Now in separate transaction - if this fails, core data is already safe
-            # Grok recommendation: Wrap in try-catch with rollback to prevent session corruption
+            # PHASE 2: Update Leaderboard JSON Cache + Portfolio Stats
+            # Charts are now generated ON-DEMAND (not pre-generated here)
+            # This dramatically reduces market-close cron execution time
             try:
-                logger.info("PHASE 2: Updating leaderboard and chart caches...")
+                logger.info("PHASE 2: Updating leaderboard JSON cache...")
                 results['pipeline_phases'].append('leaderboard_started')
                 
                 updated_count = update_leaderboard_cache()
                 results['leaderboard_updated'] = True
                 results['leaderboard_entries_updated'] = updated_count
-                results['chart_cache_updated'] = True  # update_leaderboard_cache also updates chart cache
                 
                 results['pipeline_phases'].append('leaderboard_completed')
-                logger.info(f"PHASE 2 Complete: {updated_count} leaderboard entries updated")
-                
-                # PHASE 2.2: Pre-render leaderboard HTML with optimized y-axes (for 10k+ concurrent users)
-                logger.info("PHASE 2.2: Pre-rendering leaderboard HTML with optimized y-axis ranges...")
-                results['pipeline_phases'].append('html_prerender_started')
-                
-                try:
-                    from leaderboard_utils import update_leaderboard_cache_html
-                    html_stats = update_leaderboard_cache_html()
-                    results['html_prerendered'] = html_stats['updated']
-                    results['html_prerender_failed'] = html_stats['failed']
-                    results['pipeline_phases'].append('html_prerender_completed')
-                    logger.info(f"PHASE 2.2 Complete: Pre-rendered {html_stats['updated']}/{html_stats['total']} leaderboard HTML pages with optimized y-axes")
-                except Exception as e:
-                    error_msg = f"HTML pre-rendering failed: {str(e)}"
-                    results['errors'].append(error_msg)
-                    logger.error(f"PHASE 2.2 ERROR: {error_msg}")
-                    results['html_prerendered'] = 0
-                    results['html_prerender_failed'] = 24  # Expected total
-                    # Continue - not critical, fallback rendering will work
-                
-                # === CRITICAL DEBUG: Entry point for Phase 2.25 ===
-                print("="*80)
-                print("🔍 REACHED LINE 18029 - ABOUT TO START PHASE 2.25")
-                print("="*80)
+                logger.info(f"PHASE 2 Complete: {updated_count} leaderboard entries updated (JSON only)")
                 
                 # PHASE 2.25: Update Portfolio Stats (unique stocks, trades/week, cap mix, industry mix, subscribers)
-                # DIAGNOSTIC: Set to False to skip Phase 2.25 and test if Phase 2.4 runs without it
-                ENABLE_PHASE_2_25 = True  # Change to False for testing
-                
-                if ENABLE_PHASE_2_25:
-                    print("📊 PHASE 2.25: Updating portfolio stats for all users...")
-                    print(f"Processing {len(users)} users for portfolio stats")
-                    results['pipeline_phases'].append('portfolio_stats_started')
-                    
-                    try:
-                        print("Importing calculate_user_portfolio_stats...")
-                        from leaderboard_utils import calculate_user_portfolio_stats
-                        from models import UserPortfolioStats
-                        print("Imports successful")
-                        
-                        stats_updated = 0
-                        for user in users:
-                            print(f"Calculating stats for user {user.id} ({user.username})...")
-                            try:
-                                # Calculate all stats for this user
-                                stats = calculate_user_portfolio_stats(user.id)
-                                
-                                # Find or create UserPortfolioStats entry
-                                user_stats = UserPortfolioStats.query.filter_by(user_id=user.id).first()
-                                if not user_stats:
-                                    user_stats = UserPortfolioStats(user_id=user.id)
-                                    db.session.add(user_stats)
-                                
-                                # Update all fields
-                                user_stats.unique_stocks_count = stats['unique_stocks_count']
-                                user_stats.avg_trades_per_week = stats['avg_trades_per_week']
-                                user_stats.total_trades = stats['total_trades']
-                                user_stats.large_cap_percent = stats['large_cap_percent']
-                                user_stats.small_cap_percent = stats['small_cap_percent']
-                                user_stats.industry_mix = stats['industry_mix']
-                                user_stats.subscriber_count = stats['subscriber_count']
-                                user_stats.last_updated = stats['last_updated']
-                                
-                                stats_updated += 1
-                                print(f"✅ Updated portfolio stats for user {user.id} ({user.username})")
-                                
-                            except Exception as e:
-                                error_msg = f"Error updating stats for user {user.id}: {str(e)}"
-                                results['errors'].append(error_msg)
-                                logger.error(error_msg)
-                                # Continue processing other users
-                        
-                        results['portfolio_stats_updated'] = stats_updated
-                        results['pipeline_phases'].append('portfolio_stats_completed')
-                        print(f"✅ PHASE 2.25 Complete: {stats_updated} user portfolio stats updated")
-                        print("Moving to Phase 2.4 commit...")
-                        
-                    except Exception as e:
-                        error_msg = f"Portfolio stats update error: {str(e)}"
-                        results['errors'].append(error_msg)
-                        logger.error(f"🚨 PHASE 2.25 CRASHED: {error_msg}")
-                        import traceback
-                        logger.error(f"Full traceback:\n{traceback.format_exc()}")
-                        # THIS IS THE BUG: If this crashes, outer except at line 18116 catches it
-                        # and skips Phase 2.4 entirely!
-                        logger.error("⚠️ Phase 2.25 failed but attempting to continue to Phase 2.4...")
-                        # Re-raise to see if outer except is catching this
-                        # raise  # TODO: Enable this to see full error propagation
-                else:
-                    print("⚠️ PHASE 2.25 DISABLED FOR TESTING - Skipping to Phase 2.4")
-                    results['portfolio_stats_updated'] = 0
-                    results['pipeline_phases'].append('portfolio_stats_skipped')
-                
-            except Exception as e:
-                # Cache update (Phase 2 or 2.25) failed but core data is safe (already committed in Phase 1.75)
-                error_msg = f"Cache update failed: {str(e)}"
-                results['errors'].append(error_msg)
-                logger.error(f"🚨 OUTER EXCEPT CAUGHT EXCEPTION (Phase 2 or 2.25): {error_msg}")
-                logger.error("Core data (snapshots + S&P 500) is safe")
-                import traceback
-                logger.error(f"Full traceback:\n{traceback.format_exc()}")
-                # DO NOT rollback here - Phase 2.4 will still run in finally block
-                
-            finally:
-                # PHASE 2.4: COMMIT CACHE UPDATES - ALWAYS RUNS even if Phase 2/2.25 failed
-                # CRITICAL: This must run even if chart generation partially failed
-                results['pipeline_phases'].append('cache_commit_started')
+                logger.info("PHASE 2.25: Updating portfolio stats for all users...")
+                results['pipeline_phases'].append('portfolio_stats_started')
                 
                 try:
-                    # Commit without any diagnostic logging that could crash
-                    db.session.commit()
-                    logger.info("✅ db.session.commit() returned successfully")
+                    from leaderboard_utils import calculate_user_portfolio_stats
+                    from models import UserPortfolioStats
                     
-                    # IMMEDIATE VERIFICATION: Query database to confirm commit persisted
-                    from sqlalchemy import text
-                    verification_results = {}
+                    stats_updated = 0
+                    for user in users:
+                        try:
+                            stats = calculate_user_portfolio_stats(user.id)
+                            
+                            user_stats = UserPortfolioStats.query.filter_by(user_id=user.id).first()
+                            if not user_stats:
+                                user_stats = UserPortfolioStats(user_id=user.id)
+                                db.session.add(user_stats)
+                            
+                            user_stats.unique_stocks_count = stats['unique_stocks_count']
+                            user_stats.avg_trades_per_week = stats['avg_trades_per_week']
+                            user_stats.total_trades = stats['total_trades']
+                            user_stats.large_cap_percent = stats['large_cap_percent']
+                            user_stats.small_cap_percent = stats['small_cap_percent']
+                            user_stats.industry_mix = stats['industry_mix']
+                            user_stats.subscriber_count = stats['subscriber_count']
+                            user_stats.last_updated = stats['last_updated']
+                            
+                            stats_updated += 1
+                            
+                        except Exception as e:
+                            error_msg = f"Error updating stats for user {user.id}: {str(e)}"
+                            results['errors'].append(error_msg)
+                            logger.error(error_msg)
                     
-                    try:
-                        # Verify user 5's 1M chart was committed
-                        verify_sql = text("""
-                            SELECT id, period, generated_at 
-                            FROM user_portfolio_chart_cache 
-                            WHERE user_id = 5 AND period = '1M'
-                        """)
-                        
-                        with db.engine.connect() as conn:
-                            verify_result = conn.execute(verify_sql).fetchone()
-                        
-                        if verify_result:
-                            verification_results['user_5_1M_exists'] = True
-                            verification_results['user_5_1M_id'] = verify_result[0]
-                            verification_results['user_5_1M_generated_at'] = verify_result[2].isoformat()
-                            logger.info(f"✅ VERIFICATION: User 5 1M chart exists in DB after commit: id={verify_result[0]}, generated_at={verify_result[2]}")
-                        else:
-                            verification_results['user_5_1M_exists'] = False
-                            logger.error("❌ VERIFICATION FAILED: User 5 1M chart NOT FOUND in database immediately after commit!")
-                        
-                        # Count all chart cache entries for user 5
-                        count_sql = text("""
-                            SELECT COUNT(*) FROM user_portfolio_chart_cache WHERE user_id = 5
-                        """)
-                        
-                        with db.engine.connect() as conn:
-                            count_result = conn.execute(count_sql).fetchone()
-                        
-                        verification_results['user_5_total_charts'] = count_result[0]
-                        logger.info(f"📊 VERIFICATION: User 5 has {count_result[0]} total chart cache entries")
-                        
-                        results['commit_verification'] = verification_results
-                        
-                    except Exception as verify_err:
-                        logger.error(f"⚠️ Verification query failed: {str(verify_err)}")
-                        results['commit_verification_error'] = str(verify_err)
+                    results['portfolio_stats_updated'] = stats_updated
+                    results['pipeline_phases'].append('portfolio_stats_completed')
+                    logger.info(f"PHASE 2.25 Complete: {stats_updated} user portfolio stats updated")
                     
-                    # FIX: Allow Vercel Postgres replicas to sync (50-500ms lag)
-                    import time
-                    time.sleep(0.5)
-                    
-                    # Success - mark as committed
-                    results['cache_committed'] = True
-                    results['pipeline_phases'].append('cache_commit_completed')
-                    logger.info("✅ PHASE 2.4: Cache commit succeeded")
-                    
-                except Exception as cache_commit_err:
-                    # Commit failed - log extensively
-                    import traceback
-                    error_msg = f"Cache commit failed: {str(cache_commit_err)}"
-                    full_trace = traceback.format_exc()
-                    
+                except Exception as e:
+                    error_msg = f"Portfolio stats update error: {str(e)}"
                     results['errors'].append(error_msg)
-                    results['cache_committed'] = False
-                    results['commit_error'] = error_msg
-                    results['commit_traceback'] = full_trace
-                    
-                    logger.error(f"❌ PHASE 2.4 FAILED: {error_msg}")
-                    logger.error(f"Full traceback:\n{full_trace}")
-                    
-                    # Try to rollback
-                    try:
-                        db.session.rollback()
-                        logger.error("Session rolled back after commit failure")
-                    except Exception as rollback_err:
-                        logger.error(f"Rollback also failed: {rollback_err}")
-            
-            # PHASE 2.5: Pre-render HTML for leaderboards (auth-aware caching)
-            # Separate try block - failures here won't affect chart cache (already committed)
-            logger.info("PHASE 2.5: Pre-rendering HTML for lightning-fast page loads...")
-            results['pipeline_phases'].append('html_prerender_started')
-            
-            try:
-                import json
-                from flask import render_template_string
-                from leaderboard_utils import get_leaderboard_data
-                from models import LeaderboardCache, Subscription
-                
-                periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']
-                categories = ['all', 'small_cap', 'large_cap']
-                html_generated = 0
-                
-                for period in periods:
-                    for category in categories:
-                        # Generate leaderboard data once
-                        leaderboard_data = get_leaderboard_data(period, limit=50)
-                        
-                        # Filter by category
-                        if category == 'small_cap':
-                            filtered_data = [e for e in leaderboard_data if e.get('small_cap_percent', 0) > 50]
-                        elif category == 'large_cap':
-                            filtered_data = [e for e in leaderboard_data if e.get('large_cap_percent', 0) > 50]
-                        else:
-                            filtered_data = leaderboard_data
-                        
-                        # Generate TWO versions: _anon and _auth
-                        for auth_state in ['anon', 'auth']:
-                            cache_key = f"{period}_{category}_{auth_state}"
-                            
-                            # Simulate user authentication state for template rendering
-                            # For _anon: nav shows Login/Sign Up
-                            # For _auth: nav shows Dashboard/Explore/etc
-                            context = {
-                                'leaderboard_data': filtered_data,
-                                'current_period': period,
-                                'current_category': category,
-                                'periods': periods,
-                                'categories': [
-                                    ('all', 'All Portfolios'),
-                                    ('small_cap', 'Small Cap Focus'),
-                                    ('large_cap', 'Large Cap Focus')
-                                ],
-                                'now': datetime.now(),
-                                'is_authenticated': (auth_state == 'auth')
-                            }
-                            
-                            # Render the HTML with appropriate auth context
-                            # NOTE: This would need actual template rendering
-                            # For now, just mark that we would do this
-                            
-                            # Find or create cache entry
-                            cache_entry = LeaderboardCache.query.filter_by(period=cache_key).first()
-                            if not cache_entry:
-                                cache_entry = LeaderboardCache(
-                                    period=cache_key,
-                                    leaderboard_data=json.dumps({})  # Must be JSON string, not dict
-                                )
-                                db.session.add(cache_entry)
-                            
-                            # TODO: Actually render the template
-                            # cache_entry.rendered_html = render_template('leaderboard.html', **context)
-                            # For now, just mark it as ready to be rendered on-demand
-                            cache_entry.generated_at = datetime.now()
-                            html_generated += 1
-                
-                results['html_prerendered'] = html_generated
-                logger.info(f"PHASE 2.5 Complete: Prepared {html_generated} HTML cache entries")
+                    logger.error(f"PHASE 2.25 FAILED: {error_msg}")
                 
             except Exception as e:
-                error_msg = f"HTML pre-rendering error: {str(e)}"
+                error_msg = f"Leaderboard cache update failed: {str(e)}"
                 results['errors'].append(error_msg)
-                logger.warning(error_msg)
-                # Phase 2.5 rollback is safe - chart caches already committed in Phase 2.4
-                db.session.rollback()
-                logger.info("Session rolled back due to Phase 2.5 error (chart cache safe)")
+                logger.error(f"PHASE 2 FAILED: {error_msg}")
+                logger.error("Core data (snapshots + S&P 500) is safe (committed in Phase 1.75)")
+                import traceback
+                logger.error(f"Full traceback:\n{traceback.format_exc()}")
             
-            results['pipeline_phases'].append('html_prerender_completed')
+            # PHASE 2.4: Commit leaderboard cache + portfolio stats
+            try:
+                db.session.commit()
+                results['cache_committed'] = True
+                results['pipeline_phases'].append('cache_commit_completed')
+                logger.info("PHASE 2.4: Leaderboard cache + stats committed")
+            except Exception as e:
+                results['cache_committed'] = False
+                results['errors'].append(f"Cache commit failed: {str(e)}")
+                logger.error(f"PHASE 2.4 FAILED: {str(e)}")
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
             
             # PHASE 3: Already committed in Phase 2.4 - HTML pre-rendering is non-critical
             logger.info("PHASE 3: Cache updates already committed in Phase 2.4")
@@ -19158,7 +18925,7 @@ def admin_cache_health_monitor():
     """Admin endpoint to monitor cache health and staleness across all systems"""
     try:
         from datetime import datetime, timedelta
-        from models import LeaderboardCache, UserPortfolioChartCache, SP500ChartCache
+        from models import LeaderboardCache, UserPortfolioChartCache
         
         current_time = datetime.now()
         
@@ -19190,7 +18957,6 @@ def admin_cache_health_monitor():
             'timestamp': current_time.isoformat(),
             'leaderboard_cache': {},
             'chart_cache': {},
-            'sp500_cache': {},
             'summary': {
                 'total_entries': 0,
                 'stale_entries': 0,
@@ -19265,20 +19031,6 @@ def admin_cache_health_monitor():
                     period_stats['missing_caches'] += 1
             
             cache_health['chart_cache'][period] = period_stats
-        
-        # Check S&P 500 Cache Health
-        sp500_entries = SP500ChartCache.query.all()
-        for entry in sp500_entries:
-            period = entry.period
-            cache_age = current_time - entry.generated_at
-            threshold = staleness_thresholds['chart'].get(period, timedelta(hours=1))
-            
-            cache_health['sp500_cache'][period] = {
-                'generated_at': entry.generated_at.isoformat(),
-                'age_minutes': int(cache_age.total_seconds() / 60),
-                'is_stale': cache_age > threshold,
-                'status': 'stale' if cache_age > threshold else 'fresh'
-            }
         
         # Calculate health score
         total = cache_health['summary']['total_entries']
@@ -19476,7 +19228,7 @@ def admin_force_chart_cache_regeneration():
         
         # Handle POST request - perform regeneration
         from datetime import datetime
-        from models import UserPortfolioChartCache, SP500ChartCache
+        from models import UserPortfolioChartCache
         from leaderboard_utils import generate_user_portfolio_chart, update_leaderboard_cache
         
         start_time = datetime.now()
@@ -19485,7 +19237,6 @@ def admin_force_chart_cache_regeneration():
             'timestamp': start_time.isoformat(),
             'caches_cleared': 0,
             'caches_regenerated': 0,
-            'sp500_caches': 0,
             'errors': []
         }
         
@@ -19496,10 +19247,6 @@ def admin_force_chart_cache_regeneration():
         user_cache_count = UserPortfolioChartCache.query.count()
         UserPortfolioChartCache.query.delete()
         results['caches_cleared'] += user_cache_count
-        
-        sp500_cache_count = SP500ChartCache.query.count()
-        SP500ChartCache.query.delete()
-        results['caches_cleared'] += sp500_cache_count
         
         db.session.commit()
         logger.info(f"Cleared {results['caches_cleared']} chart cache entries")
@@ -20009,7 +19756,7 @@ def admin_historical_price_backfill():
         import requests
         import time
         from datetime import date
-        from models import Stock, PortfolioSnapshot, MarketData, LeaderboardCache, UserPortfolioChartCache, SP500ChartCache
+        from models import Stock, PortfolioSnapshot, MarketData, LeaderboardCache, UserPortfolioChartCache
         
         start_time = datetime.now()
         
@@ -20161,7 +19908,6 @@ def admin_historical_price_backfill():
         # Clear all caches
         LeaderboardCache.query.delete()
         UserPortfolioChartCache.query.delete()
-        SP500ChartCache.query.delete()
         
         db.session.commit()
         
@@ -21119,45 +20865,12 @@ def update_leaderboard_chunk_cron():
 @app.route('/admin/add-html-cache-column', methods=['GET', 'POST'])
 @admin_required
 def admin_add_html_cache_column():
-    """Add rendered_html column to leaderboard_cache table for Phase 5 HTML pre-rendering"""
-    try:
-        from models import db
-        from sqlalchemy import text
-        
-        # Check if column already exists
-        result = db.session.execute(text("""
-            SELECT column_name 
-            FROM information_schema.columns 
-            WHERE table_name = 'leaderboard_cache' 
-            AND column_name = 'rendered_html'
-        """))
-        
-        if result.fetchone():
-            return jsonify({
-                'success': True,
-                'message': 'rendered_html column already exists',
-                'action': 'none'
-            }), 200
-        
-        # Add the column
-        db.session.execute(text("""
-            ALTER TABLE leaderboard_cache 
-            ADD COLUMN rendered_html TEXT
-        """))
-        db.session.commit()
-        
-        logger.info("Successfully added rendered_html column to leaderboard_cache table")
-        
-        return jsonify({
-            'success': True,
-            'message': 'rendered_html column added to leaderboard_cache table',
-            'action': 'column_added'
-        }), 200
-        
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Error adding rendered_html column: {str(e)}")
-        return jsonify({'error': f'Migration error: {str(e)}'}), 500
+    """No-op: rendered_html column is deprecated. HTML pre-rendering has been removed."""
+    return jsonify({
+        'success': True,
+        'message': 'rendered_html column is deprecated. HTML pre-rendering has been removed.',
+        'action': 'none'
+    }), 200
 
 @app.route('/admin/market-close-status')
 @admin_required
@@ -21187,16 +20900,8 @@ def admin_market_close_status():
             UserPortfolioChartCache.generated_at >= datetime.now() - timedelta(hours=24)
         ).count()
         
-        # Check for HTML pre-rendering
+        # HTML pre-rendering removed - leaderboard is now rendered dynamically
         html_prerendered = 0
-        try:
-            html_entries = LeaderboardCache.query.filter(
-                LeaderboardCache.rendered_html.isnot(None),
-                LeaderboardCache.generated_at >= datetime.now() - timedelta(hours=24)
-            ).count()
-            html_prerendered = html_entries
-        except Exception:
-            html_prerendered = 0
         
         # Check GitHub Actions workflow status (last run)
         workflow_status = "unknown"
@@ -21328,24 +21033,11 @@ def admin_trigger_market_close_test():
                 "error": str(e)
             }
         
-        # 3. Test HTML pre-rendering (check if it worked)
-        try:
-            from models import LeaderboardCache
-            html_count = LeaderboardCache.query.filter(
-                LeaderboardCache.rendered_html.isnot(None)
-            ).count()
-            
-            results["steps"]["html_prerendering"] = {
-                "status": "success" if html_count > 0 else "warning",
-                "html_entries": html_count,
-                "note": "HTML pre-rendering happens during leaderboard cache update"
-            }
-            
-        except Exception as e:
-            results["steps"]["html_prerendering"] = {
-                "status": "failed",
-                "error": str(e)
-            }
+        # 3. HTML pre-rendering removed - leaderboard is now rendered dynamically
+        results["steps"]["html_prerendering"] = {
+            "status": "skipped",
+            "note": "HTML pre-rendering has been removed. Leaderboard is rendered dynamically."
+        }
         
         # 4. Test AlphaVantage connectivity
         try:
@@ -27579,7 +27271,7 @@ def admin_fix_sp500_data():
 def admin_diagnose_chart_sp500_mismatch():
     """Diagnose EXACTLY what S&P 500 data each source has for specific dates"""
     try:
-        from models import UserPortfolioChartCache, MarketData, SP500ChartCache, PortfolioSnapshot
+        from models import UserPortfolioChartCache, MarketData, PortfolioSnapshot
         from datetime import datetime
         import json
         
@@ -27592,9 +27284,8 @@ def admin_diagnose_chart_sp500_mismatch():
         
         results = {
             'source_1_market_data': {},
-            'source_2_sp500_chart_cache': {},
-            'source_3_user_chart_cache': {},
-            'source_4_portfolio_snapshots': {},
+            'source_2_user_chart_cache': {},
+            'source_3_portfolio_snapshots': {},
             'mismatches': [],
             'data_flow_analysis': {}
         }
@@ -27614,45 +27305,8 @@ def admin_diagnose_chart_sp500_mismatch():
                 'record_id': sp500_record.id if sp500_record else None
             }
         
-        # SOURCE 2: SP500ChartCache (pre-generated S&P 500 charts)
-        logger.info("Checking SOURCE 2: SP500ChartCache")
-        for period in periods:
-            sp500_cache = SP500ChartCache.query.filter_by(period=period).first()
-            
-            if not sp500_cache:
-                if period not in results['source_2_sp500_chart_cache']:
-                    results['source_2_sp500_chart_cache'][period] = {}
-                results['source_2_sp500_chart_cache'][period]['error'] = 'No cache found'
-                continue
-            
-            cache_data = json.loads(sp500_cache.chart_data)
-            dates = cache_data.get('dates', [])
-            values = cache_data.get('values', [])
-            
-            if period not in results['source_2_sp500_chart_cache']:
-                results['source_2_sp500_chart_cache'][period] = {}
-            
-            results['source_2_sp500_chart_cache'][period]['total_points'] = len(dates)
-            results['source_2_sp500_chart_cache'][period]['date_range'] = f"{dates[0]} to {dates[-1]}" if dates else "Empty"
-            results['source_2_sp500_chart_cache'][period]['last_updated'] = sp500_cache.last_updated.isoformat() if sp500_cache.last_updated else None
-            results['source_2_sp500_chart_cache'][period]['test_dates'] = {}
-            
-            for test_date in test_dates:
-                if test_date in dates:
-                    idx = dates.index(test_date)
-                    cache_value = values[idx] if idx < len(values) else None
-                    results['source_2_sp500_chart_cache'][period]['test_dates'][test_date] = {
-                        'value': cache_value,
-                        'in_cache': True
-                    }
-                else:
-                    results['source_2_sp500_chart_cache'][period]['test_dates'][test_date] = {
-                        'value': None,
-                        'in_cache': False
-                    }
-        
-        # SOURCE 3: UserPortfolioChartCache (actual displayed charts)
-        logger.info("Checking SOURCE 3: UserPortfolioChartCache")
+        # SOURCE 2: UserPortfolioChartCache (actual displayed charts)
+        logger.info("Checking SOURCE 2: UserPortfolioChartCache")
         for period in periods:
             cache = UserPortfolioChartCache.query.filter_by(
                 user_id=user_id,
@@ -27660,46 +27314,46 @@ def admin_diagnose_chart_sp500_mismatch():
             ).first()
             
             if not cache:
-                if period not in results['source_3_user_chart_cache']:
-                    results['source_3_user_chart_cache'][period] = {}
-                results['source_3_user_chart_cache'][period]['error'] = 'No cache found'
+                if period not in results['source_2_user_chart_cache']:
+                    results['source_2_user_chart_cache'][period] = {}
+                results['source_2_user_chart_cache'][period]['error'] = 'No cache found'
                 continue
             
             chart_data = json.loads(cache.chart_data)
             sp500_data = chart_data.get('sp500_performance', {})
             
-            if period not in results['source_3_user_chart_cache']:
-                results['source_3_user_chart_cache'][period] = {}
+            if period not in results['source_2_user_chart_cache']:
+                results['source_2_user_chart_cache'][period] = {}
             
             if not sp500_data:
-                results['source_3_user_chart_cache'][period]['error'] = 'No sp500_performance in cache'
+                results['source_2_user_chart_cache'][period]['error'] = 'No sp500_performance in cache'
                 continue
             
             dates = sp500_data.get('dates', [])
             values = sp500_data.get('values', [])
             
-            results['source_3_user_chart_cache'][period]['total_points'] = len(dates)
-            results['source_3_user_chart_cache'][period]['date_range'] = f"{dates[0]} to {dates[-1]}" if dates else "Empty"
-            results['source_3_user_chart_cache'][period]['last_updated'] = cache.last_updated.isoformat() if cache.last_updated else None
-            results['source_3_user_chart_cache'][period]['test_dates'] = {}
+            results['source_2_user_chart_cache'][period]['total_points'] = len(dates)
+            results['source_2_user_chart_cache'][period]['date_range'] = f"{dates[0]} to {dates[-1]}" if dates else "Empty"
+            results['source_2_user_chart_cache'][period]['last_updated'] = cache.last_updated.isoformat() if cache.last_updated else None
+            results['source_2_user_chart_cache'][period]['test_dates'] = {}
             
             # Find our test dates in this chart
             for test_date in test_dates:
                 if test_date in dates:
                     idx = dates.index(test_date)
                     chart_value = values[idx] if idx < len(values) else None
-                    results['source_3_user_chart_cache'][period]['test_dates'][test_date] = {
+                    results['source_2_user_chart_cache'][period]['test_dates'][test_date] = {
                         'value': chart_value,
                         'in_cache': True
                     }
                 else:
-                    results['source_3_user_chart_cache'][period]['test_dates'][test_date] = {
+                    results['source_2_user_chart_cache'][period]['test_dates'][test_date] = {
                         'value': None,
                         'in_cache': False
                     }
         
-        # SOURCE 4: PortfolioSnapshot (daily snapshots - might have embedded S&P 500 data)
-        logger.info("Checking SOURCE 4: PortfolioSnapshot")
+        # SOURCE 3: PortfolioSnapshot (daily snapshots - might have embedded S&P 500 data)
+        logger.info("Checking SOURCE 3: PortfolioSnapshot")
         for date_str in test_dates:
             date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
             snapshot = PortfolioSnapshot.query.filter_by(
@@ -27707,7 +27361,7 @@ def admin_diagnose_chart_sp500_mismatch():
                 date=date_obj
             ).first()
             
-            results['source_4_portfolio_snapshots'][date_str] = {
+            results['source_3_portfolio_snapshots'][date_str] = {
                 'exists': snapshot is not None,
                 'total_value': float(snapshot.total_value) if snapshot else None,
                 'snapshot_id': snapshot.id if snapshot else None
@@ -27718,38 +27372,20 @@ def admin_diagnose_chart_sp500_mismatch():
         for test_date in test_dates:
             results['data_flow_analysis'][test_date] = {
                 'market_data': results['source_1_market_data'][test_date]['value'],
-                'sp500_chart_cache': {},
                 'user_chart_cache': {},
                 'all_sources_match': None,
                 'discrepancies': []
             }
             
-            # Get values from SP500ChartCache for this date across all periods
-            for period in periods:
-                if period in results['source_2_sp500_chart_cache']:
-                    period_data = results['source_2_sp500_chart_cache'][period]
-                    if 'test_dates' in period_data and test_date in period_data['test_dates']:
-                        results['data_flow_analysis'][test_date]['sp500_chart_cache'][period] = period_data['test_dates'][test_date]['value']
-            
             # Get values from UserPortfolioChartCache for this date across all periods
             for period in periods:
-                if period in results['source_3_user_chart_cache']:
-                    period_data = results['source_3_user_chart_cache'][period]
+                if period in results['source_2_user_chart_cache']:
+                    period_data = results['source_2_user_chart_cache'][period]
                     if 'test_dates' in period_data and test_date in period_data['test_dates']:
                         results['data_flow_analysis'][test_date]['user_chart_cache'][period] = period_data['test_dates'][test_date]['value']
             
             # Check for discrepancies
             market_data_value = results['data_flow_analysis'][test_date]['market_data']
-            
-            # Check SP500ChartCache vs MarketData
-            for period, cache_value in results['data_flow_analysis'][test_date]['sp500_chart_cache'].items():
-                if cache_value and market_data_value and abs(cache_value - market_data_value) > 1:
-                    results['data_flow_analysis'][test_date]['discrepancies'].append({
-                        'source': f'SP500ChartCache[{period}]',
-                        'value': cache_value,
-                        'expected': market_data_value,
-                        'difference': abs(cache_value - market_data_value)
-                    })
             
             # Check UserChartCache vs MarketData
             for period, cache_value in results['data_flow_analysis'][test_date]['user_chart_cache'].items():
@@ -27781,14 +27417,13 @@ def admin_diagnose_chart_sp500_mismatch():
             'user_id': user_id,
             'test_dates': test_dates,
             'source_1_market_data': results['source_1_market_data'],
-            'source_2_sp500_chart_cache': results['source_2_sp500_chart_cache'],
-            'source_3_user_chart_cache': results['source_3_user_chart_cache'],
-            'source_4_portfolio_snapshots': results['source_4_portfolio_snapshots'],
+            'source_2_user_chart_cache': results['source_2_user_chart_cache'],
+            'source_3_portfolio_snapshots': results['source_3_portfolio_snapshots'],
             'data_flow_analysis': results['data_flow_analysis'],
             'summary': {
                 'total_discrepancies': total_discrepancies,
                 'dates_with_issues': dates_with_issues,
-                'sources_checked': 4,
+                'sources_checked': 3,
                 'smoking_gun': 'Check data_flow_analysis for each date to see where values diverge'
             }
         })

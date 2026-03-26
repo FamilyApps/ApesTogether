@@ -10,7 +10,8 @@ Each route includes comprehensive diagnostics and progress tracking.
 """
 
 from flask import jsonify, request
-from flask_login import login_required, current_user
+from flask_login import current_user
+from admin_auth import admin_required
 from models import User, Stock, Transaction, PortfolioSnapshot
 from datetime import datetime, date, timedelta
 from sqlalchemy import text, func, and_
@@ -22,12 +23,9 @@ def register_phase_3_routes(app, db):
     """Register Phase 3 snapshot rebuild routes"""
     
     @app.route('/admin/phase3/preview-rebuild')
-    @login_required
+    @admin_required
     def preview_snapshot_rebuild():
         """Preview which snapshots will be rebuilt"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         username = request.args.get('user')
         
         try:
@@ -80,16 +78,13 @@ def register_phase_3_routes(app, db):
             })
             
         except Exception as e:
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Phase3 error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/phase3/rebuild-snapshots')
-    @login_required
+    @admin_required
     def rebuild_snapshots():
         """Rebuild all historical snapshots with cash tracking"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         execute = request.args.get('execute') == 'true'
         username = request.args.get('user')
         
@@ -197,16 +192,13 @@ def register_phase_3_routes(app, db):
             
         except Exception as e:
             db.session.rollback()
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Phase3 error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/phase3/verify-rebuild')
-    @login_required
+    @admin_required
     def verify_snapshot_rebuild():
         """Verify that snapshots were rebuilt correctly"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         username = request.args.get('user')
         
         try:
@@ -280,5 +272,5 @@ def register_phase_3_routes(app, db):
             })
             
         except Exception as e:
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Phase3 error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500

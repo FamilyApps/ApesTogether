@@ -10,7 +10,8 @@ Each route includes progress tracking and batch processing.
 """
 
 from flask import jsonify, request, render_template_string
-from flask_login import login_required, current_user
+from flask_login import current_user
+from admin_auth import admin_required
 from models import User, Stock, Transaction, PortfolioSnapshot
 from datetime import datetime, date, timedelta
 from sqlalchemy import text, func, and_
@@ -22,12 +23,9 @@ def register_phase_4_routes(app, db):
     """Register Phase 4 historical backfill routes"""
     
     @app.route('/admin/phase4/dashboard')
-    @login_required
+    @admin_required
     def phase4_dashboard():
         """Dashboard showing historical data gaps and backfill progress"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         try:
             from portfolio_performance import get_market_date
             
@@ -178,16 +176,13 @@ def register_phase_4_routes(app, db):
             return html
             
         except Exception as e:
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Phase4 error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/phase4/backfill-user')
-    @login_required
+    @admin_required
     def backfill_user():
         """Backfill missing historical snapshots for a single user"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         username = request.args.get('user')
         execute = request.args.get('execute') == 'true'
         
@@ -291,16 +286,13 @@ def register_phase_4_routes(app, db):
                 })
             
         except Exception as e:
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Phase4 error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/phase4/inspect-snapshots')
-    @login_required
+    @admin_required
     def inspect_snapshots():
         """Inspect snapshot values to check for aberrations"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         username = request.args.get('user', 'witty-raven')
         
         try:
@@ -402,5 +394,5 @@ def register_phase_4_routes(app, db):
             })
             
         except Exception as e:
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Phase4 error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500

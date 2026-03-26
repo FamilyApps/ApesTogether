@@ -5,7 +5,8 @@ These GET endpoints allow easy browser-based testing and verification.
 """
 
 from flask import Blueprint, jsonify, request
-from flask_login import login_required, current_user
+from flask_login import current_user
+from admin_auth import admin_required
 from datetime import datetime
 import json
 import traceback
@@ -13,8 +14,8 @@ import traceback
 # Create blueprint
 admin_perf_bp = Blueprint('admin_performance', __name__)
 
-# Admin email (should match your config)
-ADMIN_EMAIL = "catalystcatalyst101@gmail.com"
+import os
+ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
 
 
 def require_admin():
@@ -27,7 +28,7 @@ def require_admin():
 
 
 @admin_perf_bp.route('/admin/test-unified-calculator')
-@login_required
+@admin_required
 def test_unified_calculator():
     """
     Test the new unified performance calculator with real user data.
@@ -129,12 +130,12 @@ def test_unified_calculator():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs for details'
         }), 500
 
 
 @admin_perf_bp.route('/admin/compare-all-users-ytd')
-@login_required
+@admin_required
 def compare_all_users_ytd():
     """
     Compare YTD performance for all users using new calculator.
@@ -235,12 +236,12 @@ def compare_all_users_ytd():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs for details'
         }), 500
 
 
 @admin_perf_bp.route('/admin/update-single-user-cache')
-@login_required
+@admin_required
 def update_single_user_cache():
     """
     Update performance cache for a single user using new calculator.
@@ -316,12 +317,12 @@ def update_single_user_cache():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs for details'
         }), 500
 
 
 @admin_perf_bp.route('/admin/regenerate-all-performance-caches')
-@login_required
+@admin_required
 def regenerate_all_performance_caches():
     """
     Regenerate ALL performance caches for ALL users and ALL periods using new calculator.
@@ -426,12 +427,12 @@ def regenerate_all_performance_caches():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs for details'
         }), 500
 
 
 @admin_perf_bp.route('/admin/verify-calculator-consistency')
-@login_required
+@admin_required
 def verify_calculator_consistency():
     """
     Verify that dashboard, leaderboard, and new calculator all show consistent values.
@@ -550,5 +551,5 @@ def verify_calculator_consistency():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'details': 'Check server logs for details'
         }), 500

@@ -98,7 +98,8 @@ class PushNotificationService:
         ticker: str,
         quantity: float,
         price: float,
-        portfolio_slug: Optional[str] = None
+        portfolio_slug: Optional[str] = None,
+        position_pct: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         Send a trade alert notification to subscribers
@@ -116,7 +117,10 @@ class PushNotificationService:
         # Format the notification
         action_emoji = "🟢" if action.upper() == "BUY" else "🔴"
         title = f"{action_emoji} {trader_username} {action.upper()}"
-        body = f"{quantity} {ticker} @ ${price:.2f}"
+        if position_pct is not None and action.upper() == 'SELL':
+            body = f"{quantity} {ticker} ({position_pct:.0f}% of position) @ ${price:.2f}"
+        else:
+            body = f"{quantity} {ticker} @ ${price:.2f}"
         
         # Data payload for app to handle
         data = {
@@ -128,6 +132,8 @@ class PushNotificationService:
             'price': str(price),
             'timestamp': datetime.utcnow().isoformat(),
         }
+        if position_pct is not None:
+            data['position_pct'] = str(position_pct)
         if portfolio_slug:
             data['portfolio_slug'] = portfolio_slug
         
@@ -370,12 +376,13 @@ def send_trade_alert(
     ticker: str,
     quantity: float,
     price: float,
-    portfolio_slug: Optional[str] = None
+    portfolio_slug: Optional[str] = None,
+    position_pct: Optional[float] = None
 ) -> Dict[str, Any]:
     """Send trade alert to multiple devices"""
     service = get_push_service()
     return service.send_trade_notification(
-        device_tokens, trader_username, action, ticker, quantity, price, portfolio_slug
+        device_tokens, trader_username, action, ticker, quantity, price, portfolio_slug, position_pct
     )
 
 
@@ -385,7 +392,8 @@ def notify_subscribers_of_trade(
     action: str,
     ticker: str,
     quantity: float,
-    price: float
+    price: float,
+    position_pct: Optional[float] = None
 ) -> Dict[str, Any]:
     """
     Notify all subscribers of a trader about a new trade
@@ -435,7 +443,8 @@ def notify_subscribers_of_trade(
         ticker=ticker,
         quantity=quantity,
         price=price,
-        portfolio_slug=trader.portfolio_slug
+        portfolio_slug=trader.portfolio_slug,
+        position_pct=position_pct
     )
     
     # Log notifications
@@ -446,7 +455,7 @@ def notify_subscribers_of_trade(
             portfolio_owner_id=trader_user_id,
             device_token_id=dt.id,
             title=f"{'🟢' if action.upper() == 'BUY' else '🔴'} {trader.username} {action.upper()}",
-            body=f"{quantity} {ticker} @ ${price:.2f}",
+            body=f"{quantity} {ticker} ({position_pct:.0f}% of position) @ ${price:.2f}" if position_pct is not None and action.upper() == 'SELL' else f"{quantity} {ticker} @ ${price:.2f}",
             data_payload={
                 'type': 'trade_alert',
                 'ticker': ticker,

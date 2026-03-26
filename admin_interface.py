@@ -62,7 +62,6 @@ def admin_required(f):
 
 # Admin dashboard
 @admin_bp.route('/')
-@login_required
 @admin_required
 def admin_dashboard():
     """Admin dashboard showing system overview"""
@@ -94,7 +93,6 @@ def admin_dashboard():
 
 # User management
 @admin_bp.route('/users')
-@login_required
 @admin_required
 def user_list():
     """List all users with portfolio values and trade counts"""
@@ -151,7 +149,6 @@ def user_list():
                          now=datetime.now())
 
 @admin_bp.route('/users/<int:user_id>')
-@login_required
 @admin_required
 def user_detail(user_id):
     """View user details"""
@@ -170,7 +167,6 @@ def user_detail(user_id):
     )
 
 @admin_bp.route('/users/<int:user_id>/edit', methods=['GET', 'POST'])
-@login_required
 @admin_required
 def user_edit(user_id):
     """Edit user details"""
@@ -198,7 +194,6 @@ def user_edit(user_id):
 
 # Stock management
 @admin_bp.route('/users/<int:user_id>/stocks/add', methods=['GET', 'POST'])
-@login_required
 @admin_required
 def add_stock(user_id):
     """Add a stock to user's portfolio"""
@@ -252,7 +247,6 @@ def add_stock(user_id):
     return render_template('admin/add_stock.html', user=user, now=datetime.now())
 
 @admin_bp.route('/users/<int:user_id>/transactions/add', methods=['GET', 'POST'])
-@login_required
 @admin_required
 def add_transaction(user_id):
     """Add a manual transaction with custom date and price"""
@@ -351,7 +345,6 @@ def add_transaction(user_id):
 
 
 @admin_bp.route('/users/<int:user_id>/transactions/<int:transaction_id>/edit', methods=['GET', 'POST'])
-@login_required
 @admin_required
 def edit_transaction(user_id, transaction_id):
     """Edit an existing transaction with custom date and price"""
@@ -420,7 +413,6 @@ def edit_transaction(user_id, transaction_id):
 
 
 @admin_bp.route('/users/<int:user_id>/transactions/<int:transaction_id>/delete', methods=['POST'])
-@login_required
 @admin_required
 def delete_transaction(user_id, transaction_id):
     """Delete a transaction and update stock position"""
@@ -468,7 +460,6 @@ def delete_transaction(user_id, transaction_id):
     return redirect(url_for('admin.user_detail', user_id=user.id))
 
 @admin_bp.route('/users/<int:user_id>/stocks/<int:stock_id>/edit', methods=['GET', 'POST'])
-@login_required
 @admin_required
 def edit_stock(user_id, stock_id):
     """Edit a stock in user's portfolio"""
@@ -513,7 +504,6 @@ def edit_stock(user_id, stock_id):
     return render_template('admin/edit_stock.html', user=user, stock=stock, now=datetime.now())
 
 @admin_bp.route('/fix-subscription-prices', methods=['GET', 'POST'])
-@login_required
 @admin_required
 def fix_subscription_prices():
     """Fix missing subscription prices for users via web interface"""
@@ -581,7 +571,6 @@ def fix_subscription_prices():
     """, users_without_prices=users_without_prices, now=datetime.now())
 
 @admin_bp.route('/users/<int:user_id>/stocks/<int:stock_id>/delete', methods=['POST'])
-@login_required
 @admin_required
 def delete_stock(user_id, stock_id):
     """Delete a stock from user's portfolio"""
@@ -616,7 +605,6 @@ def delete_stock(user_id, stock_id):
 
 # API endpoints for AJAX operations
 @admin_bp.route('/api/update-user-subscription', methods=['POST'])
-@login_required
 @admin_required
 def update_user_subscription():
     """API endpoint to update user subscription data"""
@@ -647,7 +635,6 @@ def update_user_subscription():
         return jsonify({'error': str(e)}), 500
 
 @admin_bp.route('/comprehensive-leaderboard-fix')
-@login_required
 @admin_required
 def comprehensive_leaderboard_fix():
     """Comprehensive leaderboard diagnosis and fix - addresses the core data population issues"""
@@ -673,7 +660,6 @@ def comprehensive_leaderboard_fix():
         }), 500
 
 @admin_bp.route('/debug-performance-calculations')
-@login_required
 @admin_required
 def debug_performance_calculations():
     """Debug why performance calculations are broken (1D no data, 5D returns 0%)"""
@@ -855,7 +841,6 @@ def debug_performance_calculations():
         }), 500
 
 @admin_bp.route('/fix-leaderboard-to-use-cache')
-@login_required
 @admin_required
 def fix_leaderboard_to_use_cache():
     """Fix leaderboard to use cached chart data instead of broken live calculations"""
@@ -1072,7 +1057,6 @@ def fix_leaderboard_to_use_cache():
         }), 500
 
 @admin_bp.route('/generate-missing-chart-cache')
-@login_required
 @admin_required
 def admin_generate_missing_chart_cache():
     """Generate missing 1D/5D chart cache for users who have snapshot data but no chart cache"""
@@ -1091,7 +1075,6 @@ def admin_generate_missing_chart_cache():
         }), 500
 
 @admin_bp.route('/debug-friday-snapshot-issue')
-@login_required
 @admin_required
 def debug_friday_snapshot_issue():
     """Debug the Friday 9/26/2025 snapshot issue affecting charts and cache"""
@@ -1110,7 +1093,6 @@ def debug_friday_snapshot_issue():
         }), 500
 
 @admin_bp.route('/comprehensive-data-flow-debug')
-@login_required
 @admin_required
 def comprehensive_data_flow_debug():
     """Comprehensive diagnostic: snapshots → calculations → cache → display"""
@@ -1129,7 +1111,6 @@ def comprehensive_data_flow_debug():
         }), 500
 
 @admin_bp.route('/regenerate-chart-cache-from-snapshots')
-@login_required
 @admin_required
 def regenerate_chart_cache_from_snapshots():
     """Regenerate all chart cache using snapshot-based approach"""

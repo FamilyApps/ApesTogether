@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # Push notification integration flag - set to True when Firebase is configured
 PUSH_NOTIFICATIONS_ENABLED = True
 
-def process_transaction(db, user_id, ticker, quantity, price, transaction_type, timestamp=None):
+def process_transaction(db, user_id, ticker, quantity, price, transaction_type, timestamp=None, position_before_qty=None):
     """
     Process a transaction and update user's cash tracking fields.
     
@@ -123,13 +123,18 @@ def process_transaction(db, user_id, ticker, quantity, price, transaction_type, 
     if PUSH_NOTIFICATIONS_ENABLED and transaction_type in ('buy', 'sell'):
         try:
             from push_notification_service import notify_subscribers_of_trade
+            # Calculate position percentage for sell notifications
+            position_pct = None
+            if transaction_type == 'sell' and position_before_qty and position_before_qty > 0:
+                position_pct = round((quantity / position_before_qty) * 100, 1)
             notification_result = notify_subscribers_of_trade(
                 db=db,
                 trader_user_id=user_id,
                 action=transaction_type,
                 ticker=ticker,
                 quantity=quantity,
-                price=price
+                price=price,
+                position_pct=position_pct
             )
             logger.info(f"Push notifications sent: {notification_result.get('success_count', 0)} success, {notification_result.get('failure_count', 0)} failures")
         except Exception as e:

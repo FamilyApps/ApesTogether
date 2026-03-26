@@ -11,7 +11,8 @@ Each route includes comprehensive diagnostics and verification.
 """
 
 from flask import jsonify, request
-from flask_login import login_required, current_user
+from flask_login import current_user
+from admin_auth import admin_required
 from models import User, Stock, Transaction, PortfolioSnapshot
 from datetime import datetime, date, timedelta
 from sqlalchemy import text, func, and_, or_
@@ -23,12 +24,9 @@ def register_phase_2_routes(app, db):
     """Register Phase 2 data cleanup routes"""
     
     @app.route('/admin/phase2/find-first-holdings')
-    @login_required
+    @admin_required
     def find_first_holdings():
         """Find the first date each user had actual stock holdings"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         try:
             from portfolio_performance import get_market_date
             
@@ -108,16 +106,13 @@ def register_phase_2_routes(app, db):
             })
             
         except Exception as e:
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Phase2 error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/phase2/audit-snapshots')
-    @login_required
+    @admin_required
     def audit_snapshots():
         """Detailed audit of all snapshots to identify issues"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         username = request.args.get('user')
         
         try:
@@ -208,16 +203,13 @@ def register_phase_2_routes(app, db):
             })
             
         except Exception as e:
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Phase2 error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/phase2/delete-corrupted-snapshots')
-    @login_required
+    @admin_required
     def delete_corrupted_snapshots():
         """Delete snapshots that are corrupted (before holdings or zero value)"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         execute = request.args.get('execute') == 'true'
         username = request.args.get('user')
         
@@ -320,5 +312,5 @@ def register_phase_2_routes(app, db):
             
         except Exception as e:
             db.session.rollback()
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Phase2 error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500

@@ -10,7 +10,8 @@ Each route includes comprehensive diagnostics and verification.
 """
 
 from flask import jsonify, request
-from flask_login import login_required, current_user
+from flask_login import current_user
+from admin_auth import admin_required
 from models import User, Stock, Transaction, PortfolioSnapshot
 from datetime import datetime, date, timedelta
 from sqlalchemy import text, func, and_
@@ -22,12 +23,9 @@ def register_phase_1_routes(app, db):
     """Register Phase 1 implementation routes"""
     
     @app.route('/admin/phase1/dashboard')
-    @login_required
+    @admin_required
     def phase1_dashboard():
         """Phase 1 implementation dashboard with status and diagnostics"""
-        if not current_user.is_admin:
-            return "Admin access required", 403
-        
         try:
             from sqlalchemy import inspect
             
@@ -211,15 +209,13 @@ def register_phase_1_routes(app, db):
             
         except Exception as e:
             import traceback
-            return f"<h1>Error</h1><pre>{str(e)}\n\n{traceback.format_exc()}</pre>", 500
+            logger.error(f"Phase 1 snapshot debug error: {traceback.format_exc()}")
+            return f"<h1>Error</h1><pre>{str(e)}</pre>", 500
     
     @app.route('/admin/phase1/test-snapshot-creation')
-    @login_required
+    @admin_required
     def test_snapshot_creation():
         """Test creating a snapshot with cash tracking fields"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         username = request.args.get('user', 'witty-raven')
         
         try:
@@ -297,16 +293,13 @@ def register_phase_1_routes(app, db):
             
         except Exception as e:
             db.session.rollback()
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Phase1 snapshot error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/phase1/verify-snapshot-logic')
-    @login_required
+    @admin_required
     def verify_snapshot_logic():
         """Verify snapshot creation logic is correct"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         try:
             from cash_tracking import calculate_portfolio_value_with_cash
             from sqlalchemy import text
@@ -350,16 +343,13 @@ def register_phase_1_routes(app, db):
             })
             
         except Exception as e:
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Phase1 error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/phase1/create-todays-snapshots')
-    @login_required
+    @admin_required
     def create_todays_snapshots_with_cash():
         """Create today's snapshots for all users with cash tracking"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         try:
             from portfolio_performance import PortfolioPerformanceCalculator, get_market_date
             from sqlalchemy import text
@@ -444,16 +434,13 @@ def register_phase_1_routes(app, db):
             })
             
         except Exception as e:
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Phase1 error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/phase1/test-modified-dietz')
-    @login_required
+    @admin_required
     def test_modified_dietz():
         """Test Modified Dietz calculation for a user"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         username = request.args.get('user', 'witty-raven')
         period = request.args.get('period', '1M')  # 1D, 1W, 1M, 3M, YTD, 1Y
         
@@ -556,16 +543,13 @@ def register_phase_1_routes(app, db):
             })
             
         except Exception as e:
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Phase1 error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/phase1/compare-all-users')
-    @login_required
+    @admin_required
     def compare_all_users_performance():
         """Compare performance calculations for all users"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         period = request.args.get('period', '1M')
         
         try:
@@ -652,5 +636,5 @@ def register_phase_1_routes(app, db):
             })
             
         except Exception as e:
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Phase1 error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500

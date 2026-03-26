@@ -183,12 +183,9 @@ def create_monitoring_endpoint():
     """Create Flask endpoint for monitoring market close pipeline"""
     endpoint_code = '''
 @app.route('/admin/market-close-status')
-@login_required
+@admin_required
 def admin_market_close_status():
     """Monitor the status of market close pipeline processes"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from datetime import datetime, date, timedelta
         from models import db, PortfolioSnapshot, LeaderboardCache, UserPortfolioChartCache
@@ -213,16 +210,8 @@ def admin_market_close_status():
             UserPortfolioChartCache.generated_at >= datetime.now() - timedelta(hours=24)
         ).count()
         
-        # Check for HTML pre-rendering
+        # HTML pre-rendering removed - leaderboard is now rendered dynamically
         html_prerendered = 0
-        try:
-            html_entries = LeaderboardCache.query.filter(
-                LeaderboardCache.rendered_html.isnot(None),
-                LeaderboardCache.generated_at >= datetime.now() - timedelta(hours=24)
-            ).count()
-            html_prerendered = html_entries
-        except Exception:
-            html_prerendered = 0
         
         # Determine overall status
         pipeline_health = "healthy"
@@ -270,12 +259,9 @@ def admin_market_close_status():
         }), 500
 
 @app.route('/admin/trigger-market-close-test', methods=['POST'])
-@login_required  
+@admin_required  
 def admin_trigger_market_close_test():
     """Manually trigger market close pipeline for testing"""
-    if not current_user.is_authenticated or current_user.email != ADMIN_EMAIL:
-        return jsonify({'error': 'Admin access required'}), 403
-    
     try:
         from market_close_monitor import MarketCloseMonitor
         
@@ -320,22 +306,10 @@ def admin_trigger_market_close_test():
         except Exception as e:
             monitor.complete_step("leaderboard_calculation", False, 0, [str(e)])
         
-        # 3. Test HTML pre-rendering (check if it worked)
+        # 3. HTML pre-rendering removed - leaderboard is now rendered dynamically
         monitor.start_step("html_prerendering")
-        try:
-            from models import LeaderboardCache
-            html_count = LeaderboardCache.query.filter(
-                LeaderboardCache.rendered_html.isnot(None)
-            ).count()
-            
-            if html_count > 0:
-                monitor.complete_step("html_prerendering", True, html_count)
-            else:
-                monitor.complete_step("html_prerendering", False, 0, 
-                                    ["No HTML pre-rendering found - may need cron job run"])
-            
-        except Exception as e:
-            monitor.complete_step("html_prerendering", False, 0, [str(e)])
+        monitor.complete_step("html_prerendering", True, 0, 
+                            ["HTML pre-rendering has been removed. Leaderboard is rendered dynamically."])
         
         report = monitor.end_pipeline()
         

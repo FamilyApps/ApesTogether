@@ -4,7 +4,7 @@ Admin endpoint to test intraday data collection system manually.
 import os
 from datetime import datetime
 from flask import request, jsonify
-from models import db, User, PortfolioSnapshotIntraday, MarketData, SP500ChartCache
+from models import db, User, PortfolioSnapshotIntraday, MarketData
 from portfolio_performance import PortfolioPerformanceCalculator
 import logging
 
@@ -98,24 +98,30 @@ def handler(request):
         except Exception as e:
             results['errors'].append(f"User processing error: {str(e)}")
         
-        # Test chart generation
+        # Test S&P 500 MarketData availability
         try:
-            from api.cron.collect_intraday_data import SP500ChartGenerator
-            generator = SP500ChartGenerator()
+            from datetime import timedelta
+            today = current_time.date()
+            week_ago = today - timedelta(days=7)
             
-            test_chart = generator.generate_sp500_chart('1D')
-            if test_chart:
+            sp500_records = MarketData.query.filter(
+                MarketData.ticker == 'SPY_SP500',
+                MarketData.date >= week_ago,
+                MarketData.date <= today
+            ).order_by(MarketData.date.desc()).all()
+            
+            if sp500_records:
                 results['chart_generation_test'] = {
                     'success': True,
-                    'period': test_chart.get('period'),
-                    'data_points': len(test_chart.get('data', [])),
-                    'start_date': test_chart.get('start_date'),
-                    'end_date': test_chart.get('end_date')
+                    'source': 'MarketData (SPY_SP500)',
+                    'data_points': len(sp500_records),
+                    'latest_date': sp500_records[0].date.isoformat(),
+                    'latest_value': float(sp500_records[0].close_price)
                 }
             else:
                 results['chart_generation_test'] = {
                     'success': False,
-                    'error': 'Failed to generate test chart'
+                    'error': 'No SPY_SP500 MarketData records found in last 7 days'
                 }
         
         except Exception as e:
@@ -123,7 +129,7 @@ def handler(request):
                 'success': False,
                 'error': str(e)
             }
-            results['errors'].append(f"Chart generation test error: {str(e)}")
+            results['errors'].append(f"S&P 500 data test error: {str(e)}")
         
         # Commit test data
         try:

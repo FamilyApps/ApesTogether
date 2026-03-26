@@ -3,7 +3,7 @@ Admin route to diagnose max_cash_deployed tracking in snapshots
 """
 
 from flask import Blueprint, jsonify, request
-from flask_login import login_required
+from admin_auth import admin_required
 from models import PortfolioSnapshot, User
 from datetime import date
 
@@ -13,7 +13,7 @@ ADMIN_EMAIL = "catalystcatalyst101@gmail.com"
 
 
 @diagnostic_bp.route('/admin/diagnose-max-cash-deployed')
-@login_required
+@admin_required
 def diagnose_max_cash_deployed():
     """
     Check if max_cash_deployed is being properly tracked in snapshots.
@@ -105,8 +105,8 @@ def diagnose_max_cash_deployed():
         
     except Exception as e:
         import traceback
+        logger.error(f"Snapshot diagnostic error: {traceback.format_exc()}")
         return jsonify({
             'success': False,
-            'error': str(e),
-            'traceback': traceback.format_exc()
+            'error': str(e)
         }), 500

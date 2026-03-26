@@ -154,30 +154,14 @@ class PortfolioSnapshotIntraday(db.Model):
     def __repr__(self):
         return f"<PortfolioSnapshotIntraday {self.user_id} {self.timestamp} ${self.total_value}>"
 
-class SP500ChartCache(db.Model):
-    """Pre-generated S&P 500 chart data cache"""
-    __tablename__ = 'sp500_chart_cache'
-    
-    id = db.Column(db.Integer, primary_key=True)
-    period = db.Column(db.String(10), nullable=False)  # '1D', '5D', '1M', etc.
-    chart_data = db.Column(db.Text, nullable=False)  # JSON string of chart data
-    generated_at = db.Column(db.DateTime, nullable=False)
-    expires_at = db.Column(db.DateTime, nullable=False)
-    
-    # Ensure one cache entry per period
-    __table_args__ = (db.UniqueConstraint('period', name='unique_period_chart'),)
-    
-    def __repr__(self):
-        return f"<SP500ChartCache {self.period} generated at {self.generated_at}>"
-
 class LeaderboardCache(db.Model):
-    """Pre-generated leaderboard data cache updated at market close"""
+    """Pre-generated leaderboard JSON cache updated at market close"""
     __tablename__ = 'leaderboard_cache'
     
     id = db.Column(db.Integer, primary_key=True)
     period = db.Column(db.String(20), nullable=False)  # '1D_all', '1D_small_cap', '1D_large_cap', etc.
     leaderboard_data = db.Column(db.Text, nullable=False)  # JSON string of leaderboard data
-    rendered_html = db.Column(db.Text, nullable=True)  # Pre-rendered HTML for maximum performance
+    rendered_html = db.Column(db.Text, nullable=True)  # DEPRECATED - kept for DB compat, no longer written
     generated_at = db.Column(db.DateTime, nullable=False)
     
     # Ensure one cache entry per period

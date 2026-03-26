@@ -180,10 +180,10 @@ def diagnose_full_chart_flow(username, period):
         
     except Exception as e:
         import traceback
+        logger.error(f"Full flow diagnostic error: {traceback.format_exc()}")
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc(),
             'partial_results': results
         }), 500
 

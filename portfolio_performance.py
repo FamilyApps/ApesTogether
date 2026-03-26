@@ -829,15 +829,39 @@ class PortfolioPerformanceCalculator:
                 except Exception as e:
                     logger.error(f"Error fetching recent S&P 500 data: {e}")
             
-            # For older missing dates, use forward-fill from existing data
+            # For older missing dates, use linear interpolation between nearest known data points
             old_missing = [d for d in missing_dates if (today - d).days > 7]
             if old_missing and cached_dates:
-                # Use the most recent cached price for old missing dates
-                recent_prices = [price for date_key, price in cached_dates.items() if (today - date_key).days <= 30]
-                if recent_prices:
-                    fill_price = recent_prices[-1]  # Most recent price
-                    for missing_date in old_missing:
-                        cached_dates[missing_date] = fill_price
+                sorted_known = sorted(cached_dates.items(), key=lambda x: x[0])
+                known_dates = [kd for kd, _ in sorted_known]
+                known_prices = [kp for _, kp in sorted_known]
+                
+                for missing_date in old_missing:
+                    # Find nearest known date before and after
+                    before_idx = None
+                    after_idx = None
+                    for i, kd in enumerate(known_dates):
+                        if kd <= missing_date:
+                            before_idx = i
+                        if kd >= missing_date and after_idx is None:
+                            after_idx = i
+                    
+                    if before_idx is not None and after_idx is not None and before_idx != after_idx:
+                        # Linear interpolation
+                        d0, p0 = known_dates[before_idx], known_prices[before_idx]
+                        d1, p1 = known_dates[after_idx], known_prices[after_idx]
+                        span = (d1 - d0).days
+                        if span > 0:
+                            frac = (missing_date - d0).days / span
+                            cached_dates[missing_date] = p0 + (p1 - p0) * frac
+                        else:
+                            cached_dates[missing_date] = p0
+                    elif before_idx is not None:
+                        # No data after — forward-fill from last known
+                        cached_dates[missing_date] = known_prices[before_idx]
+                    elif after_idx is not None:
+                        # No data before — back-fill from first known
+                        cached_dates[missing_date] = known_prices[after_idx]
         
         try:
             db.session.commit()

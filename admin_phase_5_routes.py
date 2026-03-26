@@ -6,7 +6,8 @@ and re-creation with proper historical prices.
 """
 
 from flask import jsonify, request
-from flask_login import login_required, current_user
+from flask_login import current_user
+from admin_auth import admin_required
 from models import User, PortfolioSnapshot
 from datetime import datetime, date
 from sqlalchemy import text
@@ -18,12 +19,9 @@ def register_phase_5_routes(app, db):
     """Register Phase 5 cleanup and re-backfill routes"""
     
     @app.route('/admin/phase5/delete-invalid-snapshots')
-    @login_required
+    @admin_required
     def delete_invalid_snapshots():
         """Delete all snapshots that were created with current prices instead of historical"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         execute = request.args.get('execute') == 'true'
         
         try:
@@ -94,16 +92,13 @@ def register_phase_5_routes(app, db):
             
         except Exception as e:
             db.session.rollback()
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Phase5 error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/phase5/status')
-    @login_required
+    @admin_required
     def phase5_status():
         """Show current status of historical data quality"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         try:
             from portfolio_performance import get_market_date
             
@@ -178,26 +173,20 @@ def register_phase_5_routes(app, db):
             })
             
         except Exception as e:
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Phase5 error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/phase5/historical-prices-dashboard')
-    @login_required
+    @admin_required
     def historical_prices_dashboard():
         """Dashboard for fetching historical prices with per-ticker control"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         from flask import render_template
         return render_template('admin_historical_prices_dashboard.html')
     
     @app.route('/admin/phase5/fetch-historical-prices')
-    @login_required
+    @admin_required
     def fetch_historical_prices_route():
         """Fetch historical prices for all tickers to populate MarketData cache"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         execute = request.args.get('execute') == 'true'
         single_ticker = request.args.get('ticker')  # Optional: fetch single ticker
         
@@ -309,16 +298,13 @@ def register_phase_5_routes(app, db):
             })
             
         except Exception as e:
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Phase5 error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/phase5/verify-prices')
-    @login_required
+    @admin_required
     def verify_prices():
         """Verify that cached prices actually vary day-to-day"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         try:
             from models import MarketData
             
@@ -386,5 +372,5 @@ def register_phase_5_routes(app, db):
             })
             
         except Exception as e:
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Phase5 error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500

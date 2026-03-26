@@ -412,7 +412,7 @@ def get_user_chart_data(user_id, period):
     fresh_data = generate_user_portfolio_chart(user_id, period)
     
     if fresh_data:
-        # Update cache with fresh data
+        # Update cache with fresh data and commit immediately (on-demand generation)
         try:
             if chart_cache:
                 chart_cache.chart_data = json.dumps(fresh_data)
@@ -426,15 +426,14 @@ def get_user_chart_data(user_id, period):
                 )
                 db.session.add(chart_cache)
             
-            # NOTE: Do NOT commit here - let the market close cron handle atomic commit
-            # Committing mid-transaction breaks atomicity and can cause data loss
+            db.session.commit()
             logger.info(f"Updated chart cache for user {user_id}, period {period}")
         except Exception as e:
             logger.error(f"Failed to update chart cache: {e}")
-            # NOTE: Do NOT rollback here - it would wipe user snapshots and S&P 500 data
-            # Just log the error and continue - caller decides whether to rollback entire transaction
-            import traceback
-            logger.error(f"Chart cache update error traceback: {traceback.format_exc()}")
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
     
     return fresh_data
 
@@ -749,287 +748,80 @@ def generate_user_portfolio_chart(user_id, period):
 
 def update_leaderboard_cache(periods=None):
     """
-    Update cached leaderboard data for specified periods and categories, pre-generate charts for top users
-    Called at market close to pre-generate leaderboard data, charts, and HTML
+    Update cached leaderboard JSON data for specified periods and categories.
+    Called at market close. Charts are NOT pre-generated here — they are generated
+    on-demand via get_user_chart_data() when users view them.
     
     Args:
-        periods: List of periods to update (e.g., ['7D', '1D', '5D']). If None, updates all periods.
+        periods: List of periods to update. If None, updates all periods.
     """
     import json
     from datetime import datetime
-    from models import db, LeaderboardCache, UserPortfolioChartCache
-    from flask import render_template
+    from models import db, LeaderboardCache
+    from sqlalchemy import text
     
-    # Use provided periods or default to all periods
     if periods is None:
-        periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']
+        periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y']
     
     categories = ['all', 'small_cap', 'large_cap']
     updated_count = 0
-    charts_generated = 0
     
-    # Track all users who make any leaderboard
-    leaderboard_users = set()
-    
-    # CRITICAL FIX: Generate portfolio charts for ALL users FIRST
-    # Leaderboard data calculation reads from chart cache, so charts must exist first
-    from models import User
-    all_users = User.query.all()
-    
-    for user in all_users:
-        for period in periods:
-            try:
-                # Generate chart data for this user and period using updated function
-                chart_data = generate_chart_from_snapshots(user.id, period)
-                
-                if chart_data:
-                    try:
-                        # FIX: Force PRIMARY connection to bypass read replica lag (Vercel Postgres)
-                        # ORM queries hit stale replicas, causing "duplicate key" errors
-                        from sqlalchemy import text
-                        
-                        chart_data_json = json.dumps(chart_data)
-                        now = datetime.now()
-                        
-                        print(f"🔄 Generating chart cache: user={user.id}, period={period}")
-                        
-                        # Use explicit PRIMARY connection with transaction
-                        # This ensures SELECT, DELETE, INSERT all hit PRIMARY (not replicas)
-                        with db.engine.connect() as primary_conn:
-                            with primary_conn.begin():  # Auto-commits on exit
-                                # Step 1: SELECT on PRIMARY
-                                select_sql = text("""
-                                    SELECT id FROM user_portfolio_chart_cache 
-                                    WHERE user_id = :uid AND period = :period
-                                """)
-                                result = primary_conn.execute(select_sql, {
-                                    'uid': user.id,
-                                    'period': period
-                                })
-                                existing_id = result.scalar()
-                                
-                                if existing_id:
-                                    # Step 2: DELETE on PRIMARY
-                                    delete_sql = text("""
-                                        DELETE FROM user_portfolio_chart_cache WHERE id = :id
-                                    """)
-                                    primary_conn.execute(delete_sql, {'id': existing_id})
-                                
-                                # Step 3: INSERT on PRIMARY
-                                insert_sql = text("""
-                                    INSERT INTO user_portfolio_chart_cache 
-                                    (user_id, period, chart_data, generated_at)
-                                    VALUES (:uid, :period, :data, :time)
-                                    RETURNING id, generated_at
-                                """)
-                                result = primary_conn.execute(insert_sql, {
-                                    'uid': user.id,
-                                    'period': period,
-                                    'data': chart_data_json,
-                                    'time': now
-                                })
-                                row = result.fetchone()
-                                print(f"   ✅ Chart cache saved: id={row[0]}")
-                        
-                        charts_generated += 1
-                        
-                    except Exception as cache_error:
-                        print(f"   ❌ Error saving chart cache for user {user.id}, period {period}: {str(cache_error)}")
-                        import traceback
-                        print(f"   {traceback.format_exc()}")
-                        
-            except Exception as e:
-                print(f"Error generating chart for user {user.id}, period {period}: {str(e)}")
-                import traceback
-                print(f"Full traceback: {traceback.format_exc()}")
-                continue
-    
-    print(f"✅ Generated {charts_generated} chart caches for all users")
-    
-    # NOW calculate leaderboard data (reads from chart caches we just created)
     for period in periods:
         for category in categories:
             try:
                 print(f"Processing leaderboard cache for {period}_{category}...")
                 
-                # Calculate fresh leaderboard data for this period and category
-                leaderboard_data = calculate_leaderboard_data(period, 20, category)  # Top 20 for leaderboard
+                leaderboard_data = calculate_leaderboard_data(period, 20, category)
                 print(f"  Calculated {len(leaderboard_data)} entries for {period}_{category}")
                 
                 if not leaderboard_data:
-                    print(f"  ⚠ No leaderboard data for {period}_{category} - skipping cache update")
+                    print(f"  ⚠ No leaderboard data for {period}_{category} - skipping")
                     continue
                 
-                # Collect user IDs who made this leaderboard
-                for entry in leaderboard_data:
-                    leaderboard_users.add(entry['user_id'])
-                
-                # Create unique cache key for period + category
                 cache_key = f"{period}_{category}"
-                
-                # Update or create cache entry
-                # Pre-render HTML for maximum performance (authenticated + anonymous versions)
-                auth_html = None
-                anon_html = None
-                
-                try:
-                    from flask import current_app
-                    from werkzeug.local import LocalProxy
-                    
-                    # Create mock authenticated user for rendering
-                    class MockAuthUser:
-                        is_authenticated = True
-                        username = "authenticated_user"
-                    
-                    with current_app.app_context():
-                        # Render AUTHENTICATED version (with Dashboard, Logout menu)
-                        # We'll temporarily set current_user context
-                        auth_html = render_template('leaderboard.html',
-                            leaderboard_data=leaderboard_data,
-                            current_period=period,
-                            current_category=category,
-                            periods=['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX'],
-                            categories=[
-                                ('all', 'All Portfolios'),
-                                ('small_cap', 'Small Cap Focus'),
-                                ('large_cap', 'Large Cap Focus')
-                            ],
-                            now=datetime.now()
-                        )
-                        
-                        # GROK-RECOMMENDED: Use HTML comment markers for robust find/replace
-                        # Create ANONYMOUS version by replacing auth nav section
-                        # This is faster than re-rendering (~0.06ms vs ~200ms)
-                        if auth_html:
-                            # Replace authenticated nav items with anonymous ones
-                            # Pattern: Dashboard, Leaderboard, Explore, Subscriptions, Logout → Leaderboard, Login
-                            anon_html = auth_html.replace(
-                                '<li class="nav-item">\n                        <a class="nav-link" href="/dashboard">Dashboard</a>\n                    </li>',
-                                ''
-                            ).replace(
-                                '<li class="nav-item">\n                        <a class="nav-link" href="/explore">Explore</a>\n                    </li>',
-                                ''
-                            ).replace(
-                                '<li class="nav-item">\n                        <a class="nav-link" href="/subscriptions">Subscriptions</a>\n                    </li>',
-                                ''
-                            ).replace(
-                                '<li class="nav-item">\n                        <a class="nav-link" href="/logout">Logout</a>\n                    </li>',
-                                '<li class="nav-item">\n                        <a class="nav-link" href="/login">Login</a>\n                    </li>'
-                            )
-                        
-                except Exception as e:
-                    print(f"  Warning: HTML pre-rendering failed for {cache_key}: {str(e)}")
-                    import traceback
-                    print(f"  Traceback: {traceback.format_exc()}")
-                
-                # Store BOTH versions with different cache keys using raw SQL (like chart cache)
-                # This ensures LeaderboardCache commits are not lost when chart cache uses raw SQL
-                from sqlalchemy import text
-                
                 leaderboard_data_json = json.dumps(leaderboard_data)
                 now = datetime.now()
                 
-                # Authenticated version: {period}_{category}_auth
-                auth_cache_key = f"{cache_key}_auth"
-                
+                # Store JSON-only cache (no HTML pre-rendering)
                 with db.engine.connect() as primary_conn:
                     with primary_conn.begin():
-                        # Check if exists
                         select_sql = text("SELECT id FROM leaderboard_cache WHERE period = :period")
-                        result = primary_conn.execute(select_sql, {'period': auth_cache_key})
+                        result = primary_conn.execute(select_sql, {'period': cache_key})
                         existing_id = result.scalar()
                         
                         if existing_id:
-                            # Update existing
                             update_sql = text("""
                                 UPDATE leaderboard_cache 
-                                SET leaderboard_data = :data, rendered_html = :html, generated_at = :time
+                                SET leaderboard_data = :data, generated_at = :time
                                 WHERE id = :id
                             """)
                             primary_conn.execute(update_sql, {
                                 'id': existing_id,
                                 'data': leaderboard_data_json,
-                                'html': auth_html,
                                 'time': now
                             })
                         else:
-                            # Insert new
                             insert_sql = text("""
-                                INSERT INTO leaderboard_cache (period, leaderboard_data, rendered_html, generated_at)
-                                VALUES (:period, :data, :html, :time)
+                                INSERT INTO leaderboard_cache (period, leaderboard_data, generated_at)
+                                VALUES (:period, :data, :time)
                             """)
                             primary_conn.execute(insert_sql, {
-                                'period': auth_cache_key,
+                                'period': cache_key,
                                 'data': leaderboard_data_json,
-                                'html': auth_html,
                                 'time': now
                             })
-                
-                # Anonymous version: {period}_{category}_anon
-                anon_cache_key = f"{cache_key}_anon"
-                
-                with db.engine.connect() as primary_conn:
-                    with primary_conn.begin():
-                        # Check if exists
-                        select_sql = text("SELECT id FROM leaderboard_cache WHERE period = :period")
-                        result = primary_conn.execute(select_sql, {'period': anon_cache_key})
-                        existing_id = result.scalar()
-                        
-                        if existing_id:
-                            # Update existing
-                            update_sql = text("""
-                                UPDATE leaderboard_cache 
-                                SET leaderboard_data = :data, rendered_html = :html, generated_at = :time
-                                WHERE id = :id
-                            """)
-                            primary_conn.execute(update_sql, {
-                                'id': existing_id,
-                                'data': leaderboard_data_json,
-                                'html': anon_html,
-                                'time': now
-                            })
-                        else:
-                            # Insert new
-                            insert_sql = text("""
-                                INSERT INTO leaderboard_cache (period, leaderboard_data, rendered_html, generated_at)
-                                VALUES (:period, :data, :html, :time)
-                            """)
-                            primary_conn.execute(insert_sql, {
-                                'period': anon_cache_key,
-                                'data': leaderboard_data_json,
-                                'html': anon_html,
-                                'time': now
-                            })
-                
-                print(f"  ✓ Cache entries saved for {auth_cache_key} and {anon_cache_key}")
                 
                 updated_count += 1
-                print(f"  ✓ Cache entry prepared for {cache_key} (count: {updated_count})")
+                print(f"  ✓ Leaderboard cache saved for {cache_key}")
                 
             except Exception as e:
-                print(f"Error updating leaderboard cache for period {period}, category {category}: {str(e)}")
+                print(f"Error updating leaderboard cache for {period}_{category}: {str(e)}")
                 import traceback
                 print(f"Full traceback: {traceback.format_exc()}")
-                # NOTE: Do NOT rollback - let caller handle transaction
-                # Just skip this period/category and continue with others
-                print(f"Skipping period {period}, category {category} due to error")
                 continue
     
     print(f"\n=== LEADERBOARD CACHE UPDATE COMPLETE ===")
-    print(f"Updated {updated_count} leaderboard cache entries")
-    print(f"Generated {charts_generated} chart cache entries")
-    print(f"Leaderboard users: {len(leaderboard_users)} - {list(leaderboard_users)}")
-    
-    # Check what's in the session before commit
-    print(f"Session new objects: {len(db.session.new)}")
-    print(f"Session dirty objects: {len(db.session.dirty)}")
-    for obj in list(db.session.new)[:3]:  # Show first 3 new objects
-        print(f"New object: {obj}")
-    
-    # NOTE: Do NOT commit here - let caller handle transaction
-    # This allows atomic commits with other operations (snapshots, S&P 500 data)
-    print(f"Leaderboard cache prepared: {updated_count} periods, {charts_generated} charts generated for {len(leaderboard_users)} users")
-    print(f"Added {len(db.session.new)} new objects to session - caller must commit")
+    print(f"Updated {updated_count} leaderboard cache entries (JSON only, no chart pre-gen)")
     
     return updated_count
 
@@ -1567,143 +1359,3 @@ def calculate_chart_y_axis_range(chart_data_list):
     
     return {'min': y_min, 'max': y_max}
 
-def prerender_leaderboard_html(period, category='all'):
-    """
-    Pre-render complete leaderboard HTML with embedded chart data
-    Called during market-close cron for maximum performance
-    
-    Args:
-        period: Time period ('1D', '5D', '1M', etc.)
-        category: Portfolio category ('all', 'small_cap', 'large_cap')
-        
-    Returns:
-        dict with 'html' (rendered HTML string) and 'data' (JSON leaderboard data)
-    """
-    from flask import render_template
-    from models import UserPortfolioChartCache, LeaderboardCache
-    import json
-    
-    logger.info(f"Pre-rendering leaderboard HTML for {period}_{category}")
-    
-    # Calculate leaderboard data (uses cached UserPortfolioChartCache)
-    leaderboard_data = calculate_leaderboard_data(period, limit=20, category=category)
-    
-    # Embed chart JSON for each user (no API calls needed on page load)
-    import json
-    chart_data_list = []
-    
-    for entry in leaderboard_data:
-        chart_cache = UserPortfolioChartCache.query.filter_by(
-            user_id=entry['user_id'],
-            period=period
-        ).first()
-        
-        # Parse JSON string from database to dict for template
-        if chart_cache and chart_cache.chart_data:
-            try:
-                chart_data = json.loads(chart_cache.chart_data)
-                entry['chart_json'] = chart_data
-                chart_data_list.append(chart_data)
-            except (json.JSONDecodeError, TypeError):
-                entry['chart_json'] = None
-        else:
-            entry['chart_json'] = None
-    
-    # Calculate consistent y-axis range for visual comparison
-    y_axis_range = calculate_chart_y_axis_range(chart_data_list)
-    
-    # Render complete HTML (single variant for all users - auth handled client-side)
-    try:
-        html = render_template('leaderboard.html',
-                             leaderboard_data=leaderboard_data,
-                             current_period=period,
-                             current_category=category,
-                             y_axis_range=y_axis_range,  # Consistent scale for visual comparison
-                             periods=['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX'],
-                             categories=[
-                                 ('all', 'All Portfolios'),
-                                 ('small_cap', 'Small Cap Focus'),
-                                 ('large_cap', 'Large Cap Focus')
-                             ],
-                             current_user=None,  # Public version - no auth state
-                             now=datetime.now())
-        
-        logger.info(f"Successfully pre-rendered {period}_{category} HTML ({len(html)} bytes)")
-        
-        return {
-            'html': html,
-            'data': json.dumps(leaderboard_data),
-            'generated_at': datetime.now()
-        }
-        
-    except Exception as e:
-        logger.error(f"Failed to pre-render {period}_{category}: {e}")
-        return None
-
-def update_leaderboard_cache_html(periods=None, categories=None):
-    """
-    Update pre-rendered HTML for specified periods and categories
-    Called during market-close cron
-    
-    Args:
-        periods: List of periods to update (default: all)
-        categories: List of categories to update (default: all)
-        
-    Returns:
-        dict with update statistics
-    """
-    from models import LeaderboardCache
-    
-    if periods is None:
-        periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']
-    
-    if categories is None:
-        categories = ['all', 'small_cap', 'large_cap']
-    
-    stats = {
-        'updated': 0,
-        'failed': 0,
-        'total': len(periods) * len(categories)
-    }
-    
-    for period in periods:
-        for category in categories:
-            try:
-                # Pre-render HTML
-                result = prerender_leaderboard_html(period, category)
-                
-                if result:
-                    # Store in cache
-                    cache_key = f"{period}_{category}"
-                    cache_entry = LeaderboardCache.query.filter_by(period=cache_key).first()
-                    
-                    if not cache_entry:
-                        cache_entry = LeaderboardCache(period=cache_key)
-                    
-                    cache_entry.leaderboard_data = result['data']
-                    cache_entry.rendered_html = result['html']
-                    cache_entry.generated_at = result['generated_at']
-                    
-                    db.session.add(cache_entry)
-                    stats['updated'] += 1
-                    
-                    logger.info(f"✅ Cached pre-rendered HTML for {cache_key}")
-                else:
-                    stats['failed'] += 1
-                    logger.warning(f"❌ Failed to pre-render {period}_{category}")
-                    
-            except Exception as e:
-                stats['failed'] += 1
-                logger.error(f"Error updating {period}_{category}: {e}")
-    
-    # Commit all updates
-    try:
-        db.session.commit()
-        logger.info(f"Leaderboard HTML cache updated: {stats['updated']}/{stats['total']} successful")
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Failed to commit leaderboard cache: {e}")
-        stats['failed'] = stats['total']
-        stats['updated'] = 0
-    
-    return stats

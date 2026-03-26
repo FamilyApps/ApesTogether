@@ -28,17 +28,13 @@ except Exception as e:
     print(f"Error importing app from index.py: {error_message}")
     print(error_traceback)
     
-    # Create a fallback app for debugging
+    # Create a fallback app — no internal details exposed
     from flask import Flask, jsonify
     app = Flask(__name__)
     
     @app.route('/')
     def debug_index():
         return jsonify({
-            "error": error_message,
-            "traceback": error_traceback,
-            "sys_path": sys.path,
-            "cwd": os.getcwd(),
-            "files": os.listdir(os.path.dirname(os.path.abspath(__file__)))
-        })
+            "error": "Application failed to start. Check server logs."
+        }), 500
 

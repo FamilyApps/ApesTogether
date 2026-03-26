@@ -13,7 +13,8 @@ Import these routes in api/index.py:
 """
 
 from flask import jsonify, request
-from flask_login import login_required, current_user
+from flask_login import current_user
+from admin_auth import admin_required
 from models import User, Stock, Transaction, PortfolioSnapshot
 from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
@@ -25,12 +26,9 @@ def register_cash_tracking_routes(app, db):
     """Register all cash tracking admin routes"""
     
     @app.route('/admin/cash-tracking/status')
-    @login_required
+    @admin_required
     def cash_tracking_status():
         """Quick JSON status check of all phases"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         try:
             from sqlalchemy import inspect, text
             
@@ -64,12 +62,9 @@ def register_cash_tracking_routes(app, db):
             return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/cash-tracking/dashboard')
-    @login_required  
+    @admin_required  
     def cash_tracking_dashboard():
         """Comprehensive HTML dashboard for cash tracking implementation"""
-        if not current_user.is_admin:
-            return "Admin access required", 403
-        
         try:
             from sqlalchemy import inspect, text
             
@@ -197,15 +192,13 @@ def register_cash_tracking_routes(app, db):
             
         except Exception as e:
             import traceback
-            return f"<h1>Error</h1><pre>{str(e)}\n\n{traceback.format_exc()}</pre>", 500
+            logger.error(f"Cash tracking error: {traceback.format_exc()}")
+            return f"<h1>Error</h1><pre>{str(e)}</pre>", 500
     
     @app.route('/admin/cash-tracking/create-transactions')
-    @login_required
+    @admin_required
     def create_missing_transactions():
         """Create missing transaction records for stocks"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         preview = request.args.get('preview') == 'true'
         execute = request.args.get('execute') == 'true'
         
@@ -303,16 +296,13 @@ def register_cash_tracking_routes(app, db):
                 
         except Exception as e:
             db.session.rollback()
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Cash tracking error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/cash-tracking/fix-transaction-type-column')
-    @login_required
+    @admin_required
     def fix_transaction_type_column():
         """Widen transaction_type column to support 'initial' (7 chars)"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         try:
             from sqlalchemy import text
             
@@ -330,16 +320,13 @@ def register_cash_tracking_routes(app, db):
             
         except Exception as e:
             db.session.rollback()
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Cash tracking error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/cash-tracking/add-user-columns')
-    @login_required
+    @admin_required
     def add_user_cash_columns():
         """Add max_cash_deployed and cash_proceeds columns to User table"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         execute = request.args.get('execute') == 'true'
         
         try:
@@ -395,16 +382,13 @@ def register_cash_tracking_routes(app, db):
                 
         except Exception as e:
             db.session.rollback()
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Cash tracking error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/cash-tracking/add-snapshot-columns')
-    @login_required
+    @admin_required
     def add_snapshot_cash_columns():
         """Add stock_value, cash_proceeds, max_cash_deployed to PortfolioSnapshot"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         execute = request.args.get('execute') == 'true'
         
         try:
@@ -463,16 +447,13 @@ def register_cash_tracking_routes(app, db):
                 
         except Exception as e:
             db.session.rollback()
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Cash tracking error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/cash-tracking/backfill-single-user')
-    @login_required
+    @admin_required
     def backfill_single_user():
         """Backfill a single user with direct SQL (fast, no timeout)"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         username = request.args.get('user')
         if not username:
             return jsonify({'error': 'Missing ?user=username parameter'}), 400
@@ -550,16 +531,13 @@ def register_cash_tracking_routes(app, db):
             
         except Exception as e:
             db.session.rollback()
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Cash tracking error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/cash-tracking/test-direct-update')
-    @login_required
+    @admin_required
     def test_direct_update():
         """Test writing directly to user cash columns"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         try:
             from sqlalchemy import text
             
@@ -591,16 +569,13 @@ def register_cash_tracking_routes(app, db):
             
         except Exception as e:
             db.session.rollback()
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Cash tracking error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/cash-tracking/backfill-users-v2')
-    @login_required
+    @admin_required
     def backfill_user_cash_v2():
         """Backfill with direct SQL UPDATE (more reliable)"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         execute = request.args.get('execute') == 'true'
         
         try:
@@ -689,16 +664,13 @@ def register_cash_tracking_routes(app, db):
                 
         except Exception as e:
             db.session.rollback()
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Cash tracking error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/admin/cash-tracking/backfill-users')
-    @login_required
+    @admin_required
     def backfill_user_cash():
         """Backfill max_cash_deployed and cash_proceeds for all users"""
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
         preview = request.args.get('preview') == 'true'
         execute = request.args.get('execute') == 'true'
         
@@ -754,5 +726,5 @@ def register_cash_tracking_routes(app, db):
                 
         except Exception as e:
             db.session.rollback()
-            import traceback
-            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+            logger.error(f"Cash tracking error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
