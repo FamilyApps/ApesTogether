@@ -31,7 +31,7 @@ struct TopInfluencersView: View {
                     // Header
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Top Influencers")
+                            Text("Top Creators")
                                 .font(.title3.bold())
                                 .foregroundColor(.textPrimary)
                             Text("Ranked by subscriber count")
@@ -187,8 +187,8 @@ struct TopInfluencersView: View {
                         Spacer()
                         EmptyStateView(
                             icon: "star.circle",
-                            title: "No Influencers Yet",
-                            message: "As traders gain subscribers, the top influencers will appear here. Share your portfolio to be the first!"
+                            title: "No Creators Yet",
+                            message: "As traders gain subscribers, the top creators will appear here. Share your portfolio to be the first!"
                         )
                         Spacer()
                     } else {

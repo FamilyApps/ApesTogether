@@ -114,7 +114,7 @@ struct MainTabView: View {
             
             TopInfluencersView()
                 .tabItem {
-                    Label("Influencers", systemImage: "star.circle.fill")
+                    Label("Top Creators", systemImage: "person.2.fill")
                 }
                 .tag(1)
             

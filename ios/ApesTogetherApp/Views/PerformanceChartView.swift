@@ -8,13 +8,12 @@ struct PerformanceChartView: View {
     let selectedPeriod: String
     let onPeriodChange: (String) -> Void
     
-    private let periods = ["1D", "5D", "7D", "1M", "3M", "YTD", "1Y"]
+    private let periods = ["1D", "1W", "1M", "3M", "YTD", "1Y"]
     
     private var xAxisLabelCount: Int {
         switch selectedPeriod {
         case "1D": return 4
-        case "5D": return 5
-        case "7D": return 4
+        case "1W": return 5
         case "1M": return 4
         case "3M": return 5
         case "YTD": return 5

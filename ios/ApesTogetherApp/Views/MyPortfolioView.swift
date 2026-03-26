@@ -141,7 +141,7 @@ class ShareDataViewModel: ObservableObject {
     @Published var chartData: [ChartPoint] = []
     @Published var holdingsCount: Int = 0
     @Published var subscriberCount: Int = 0
-    @Published var selectedPeriod: String = "7D"
+    @Published var selectedPeriod: String = "1W"
     
     func loadData(slug: String) async {
         do {

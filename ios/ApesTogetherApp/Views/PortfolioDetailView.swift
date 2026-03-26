@@ -531,7 +531,7 @@ class PortfolioDetailViewModel: ObservableObject {
     @Published var chartData: [ChartPoint] = []
     @Published var portfolioReturn: Double = 0
     @Published var sp500Return: Double = 0
-    @Published var selectedPeriod: String = "7D"
+    @Published var selectedPeriod: String = "1W"
     @Published var isLoadingChart = false
     
     func loadPortfolio(slug: String) async {

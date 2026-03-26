@@ -30,8 +30,8 @@ struct PortfolioShareCardView: View {
     private var periodLabel: String {
         switch period {
         case "1D": return "Today"
-        case "5D": return "5 Days"
-        case "7D": return "7 Days"
+        case "1W": return "1 Week"
+        case "5D": return "1 Week"
         case "1M": return "1 Month"
         case "3M": return "3 Months"
         case "YTD": return "Year to Date"
@@ -413,7 +413,7 @@ struct PortfolioShareCardView_Previews: PreviewProvider {
                     chartData: [],
                     holdingsCount: 8,
                     subscriberCount: 14,
-                    period: "7D",
+                    period: "1W",
                     slug: "abc123"
                 )
                 

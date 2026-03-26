@@ -717,21 +717,23 @@ def add_stocks():
 def get_leaderboard():
     """
     Get leaderboard for mobile app.
-    Uses the same LeaderboardCache / calculate_leaderboard_data source as the web.
     
     Query params:
-    - period: 1D, 5D, 7D, 1M, 3M, YTD, 1Y (default: 7D)
+    - period: 1D, 1W, 1M, 3M, YTD, 1Y (default: 1W)
     - category: all, large_cap, small_cap (default: all)
     - limit: number of entries (default: 50, max: 100)
-    - active_edge: 1/0 — proprietary filter removing inactive/one-hit accounts (default: 1)
+    - active_edge: 1/0 — filter removing inactive/one-hit accounts (default: 1)
     - industry: filter by industry name (default: all)
     - frequency: day_trader, moderate, any (default: any)
     """
-    from models import User, Stock, Transaction, UserPortfolioStats
-    from datetime import datetime, timedelta, date
+    from models import User, Stock, Transaction, UserPortfolioStats, PortfolioSnapshot, MarketData, Subscription
+    from datetime import datetime, timedelta, date as dt_date
     import json as json_module
     
-    period = request.args.get('period', '7D')
+    period = request.args.get('period', '1W')
+    # Backward compat: map old period names
+    if period == '5D' or period == '7D':
+        period = '1W'
     category = request.args.get('category', 'all')
     limit = min(int(request.args.get('limit', 50)), 100)
     active_edge = request.args.get('active_edge', '1') == '1'
@@ -741,19 +743,72 @@ def get_leaderboard():
     try:
         from leaderboard_utils import get_leaderboard_data, calculate_leaderboard_data
         
-        # Use the cached leaderboard data (same source as web)
-        raw_data = get_leaderboard_data(period=period, limit=100, category=category)
+        # Map 1W -> 5D for backend cache lookup (cache uses 5D key)
+        cache_period = '5D' if period == '1W' else period
         
-        # Fallback: compute on-the-fly if cache is empty
+        # Try cached data first, then compute on-the-fly
+        raw_data = get_leaderboard_data(period=cache_period, limit=100, category=category)
         if not raw_data:
-            raw_data = calculate_leaderboard_data(period=period, limit=100, category=category)
+            raw_data = calculate_leaderboard_data(period=cache_period, limit=100, category=category)
         
-        # Collect S&P 500 return for this period from chart cache
+        # If still no data, build from ALL users with portfolio snapshots
+        if not raw_data:
+            raw_data = []
+            all_users = User.query.filter(User.deleted_at.is_(None)).all()
+            for u in all_users:
+                snap = PortfolioSnapshot.query.filter_by(user_id=u.id)\
+                    .order_by(PortfolioSnapshot.date.desc()).first()
+                if snap:
+                    raw_data.append({
+                        'user_id': u.id,
+                        'username': u.username,
+                        'performance_percent': 0.0,
+                        'subscriber_count': 0,
+                        'subscription_price': 9.00,
+                        'large_cap_percent': 0.0,
+                        'avg_trades_per_week': 0.0,
+                        'chart_data': None
+                    })
+        
+        # ── Compute S&P 500 return for this period directly from MarketData ──
         sp500_return_for_period = 0.0
+        sp500_sparkline_global = []
+        try:
+            today = dt_date.today()
+            period_days_map = {
+                '1D': 1, '1W': 7, '1M': 30, '3M': 90,
+                'YTD': (today - dt_date(today.year, 1, 1)).days or 1,
+                '1Y': 365
+            }
+            days_back = period_days_map.get(period, 7)
+            start_date = today - timedelta(days=days_back + 5)  # pad for weekends
+            
+            sp500_records = MarketData.query.filter(
+                MarketData.ticker == 'SPY_SP500',
+                MarketData.date >= start_date,
+                MarketData.date <= today
+            ).order_by(MarketData.date.asc()).all()
+            
+            if sp500_records and len(sp500_records) >= 2:
+                base_val = float(sp500_records[0].close_price)
+                if base_val > 0:
+                    sp500_sparkline_global = [
+                        round(((float(r.close_price) - base_val) / base_val) * 100, 2)
+                        for r in sp500_records
+                    ]
+                    sp500_return_for_period = sp500_sparkline_global[-1]
+        except Exception as e:
+            logger.warning(f"S&P 500 lookup failed: {e}")
         
         # Build enriched entries
         leaderboard = []
         available_industries = set()
+        
+        # Period-aware age thresholds for Active Edge
+        min_age_for_period = {
+            '1D': 1, '1W': 5, '1M': 7, '3M': 14,
+            'YTD': 14, '1Y': 30
+        }
         
         for entry in (raw_data or []):
             user_id = entry.get('user_id')
@@ -761,67 +816,83 @@ def get_leaderboard():
             if not user:
                 continue
             
-            # Get trades per week and unique stocks from cached data or compute
-            avg_trades_per_week = entry.get('avg_trades_per_week', 0.0)
+            # ── Compute trades per week directly from Transaction table ──
+            thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+            recent_trade_count = Transaction.query.filter(
+                Transaction.user_id == user_id,
+                Transaction.timestamp >= thirty_days_ago
+            ).count()
+            avg_trades_per_week = round((recent_trade_count / 30.0) * 7, 1)
             
-            # Get unique stock count
+            # Unique stock count
             unique_stocks = Stock.query.filter_by(user_id=user_id).count()
             
-            # Get large cap percent from leaderboard data
+            # Large cap percent
             large_cap_pct = entry.get('large_cap_percent', 0.0)
             
-            # Account age in days
+            # Account age
             account_age_days = 0
             if user.created_at:
                 account_age_days = (datetime.utcnow() - user.created_at).days
             
-            # Industry mix from UserPortfolioStats or entry
+            # Industry mix
             industry_mix = {}
-            stats = UserPortfolioStats.query.filter_by(user_id=user_id).first()
-            if stats and stats.industry_mix:
-                industry_mix = stats.industry_mix if isinstance(stats.industry_mix, dict) else {}
+            try:
+                stats = UserPortfolioStats.query.filter_by(user_id=user_id).first()
+                if stats and stats.industry_mix and isinstance(stats.industry_mix, dict):
+                    industry_mix = stats.industry_mix
+            except Exception:
+                pass
             
             for ind_name in industry_mix.keys():
                 available_industries.add(ind_name)
             
-            # Last trade date
+            # Last trade
             last_trade = Transaction.query.filter_by(user_id=user_id)\
                 .order_by(Transaction.timestamp.desc()).first()
             last_trade_date = last_trade.timestamp.isoformat() if last_trade else None
             
-            # Extract sparkline data points from chart_data if available
+            # Subscriber count (compute directly)
+            sub_count = entry.get('subscriber_count', 0)
+            if sub_count == 0:
+                sub_count = Subscription.query.filter_by(
+                    subscribed_to_id=user_id, status='active'
+                ).count()
+            
+            # Extract sparkline from chart_data if available
             sparkline_points = []
-            sp500_sparkline_points = []
             chart_data_raw = entry.get('chart_data')
             if chart_data_raw:
                 datasets = chart_data_raw.get('datasets', [])
                 if datasets and len(datasets) > 0:
-                    sparkline_points = datasets[0].get('data', [])
-                # S&P 500 benchmark from chart data
-                sp500_perf = chart_data_raw.get('sp500_performance', {})
-                sp500_vals = sp500_perf.get('values', [])
-                if sp500_vals and len(sp500_vals) >= 2:
-                    start_val = sp500_vals[0]
-                    if start_val > 0:
-                        sp500_sparkline_points = [round(((v - start_val) / start_val) * 100, 2) for v in sp500_vals]
-                        sp500_return_for_period = sp500_sparkline_points[-1] if sp500_sparkline_points else 0.0
+                    raw_vals = datasets[0].get('data', [])
+                    # Convert absolute values to percentage returns for sparkline
+                    if raw_vals and len(raw_vals) >= 2:
+                        base = raw_vals[0]
+                        if base and float(base) > 0:
+                            sparkline_points = [
+                                round(((float(v) - float(base)) / float(base)) * 100, 2)
+                                for v in raw_vals
+                            ]
+                        else:
+                            sparkline_points = raw_vals
             
             # ── Active Edge filter ──
-            # Remove accounts that appear inactive or are one-hit wonders
             if active_edge:
-                # Must have traded within last 30 days
-                if not last_trade or (datetime.utcnow() - last_trade.timestamp).days > 30:
+                # Must have traded within last 60 days
+                if not last_trade or (datetime.utcnow() - last_trade.timestamp).days > 60:
                     continue
                 # Must have at least 2 trades total
                 total_trades = Transaction.query.filter_by(user_id=user_id).count()
                 if total_trades < 2:
                     continue
-                # Must have at least 7 days of account history
-                if account_age_days < 7:
+                # Period-aware minimum age
+                min_age = min_age_for_period.get(period, 1)
+                if account_age_days < min_age:
                     continue
             
             # ── Industry filter ──
-            if industry_filter != 'all' and industry_filter:
+            if industry_filter and industry_filter != 'all':
                 if industry_filter not in industry_mix:
                     continue
             
@@ -832,18 +903,18 @@ def get_leaderboard():
                 continue
             
             leaderboard.append({
-                'rank': 0,  # Will be set after filtering
+                'rank': 0,
                 'user': {
                     'id': user_id,
                     'username': entry.get('username', user.username),
                     'portfolio_slug': user.portfolio_slug
                 },
                 'return_percent': entry.get('performance_percent', 0.0),
-                'subscriber_count': entry.get('subscriber_count', 0),
+                'subscriber_count': sub_count,
                 'subscription_price': entry.get('subscription_price', 9.00),
                 'sparkline_data': sparkline_points[-20:] if sparkline_points else [],
-                'sp500_sparkline_data': sp500_sparkline_points[-20:] if sp500_sparkline_points else [],
-                'avg_trades_per_week': round(avg_trades_per_week, 1),
+                'sp500_sparkline_data': sp500_sparkline_global[-20:] if sp500_sparkline_global else [],
+                'avg_trades_per_week': avg_trades_per_week,
                 'unique_stocks': unique_stocks,
                 'large_cap_pct': round(large_cap_pct, 1),
                 'account_age_days': account_age_days,
@@ -851,9 +922,10 @@ def get_leaderboard():
                 'last_trade_date': last_trade_date
             })
         
-        # Re-rank after filtering
-        for i, entry in enumerate(leaderboard):
-            entry['rank'] = i + 1
+        # Sort by performance descending, then re-rank
+        leaderboard.sort(key=lambda x: x['return_percent'], reverse=True)
+        for i, e in enumerate(leaderboard):
+            e['rank'] = i + 1
         
         return jsonify({
             'period': period,
@@ -1329,16 +1401,19 @@ def get_portfolio_chart(slug):
     Get portfolio performance chart data with S&P 500 overlay.
     
     Query params:
-    - period: 1D, 5D, 7D, 1M, 3M, YTD, 1Y (default: 7D)
+    - period: 1D, 1W, 1M, 3M, YTD, 1Y (default: 1W)
     
     Returns chart_data array with {date, portfolio, sp500} points.
     """
     from models import User, PortfolioSnapshot, MarketData
     
-    period = request.args.get('period', '7D')
-    valid_periods = ['1D', '5D', '7D', '1M', '3M', 'YTD', '1Y']
+    period = request.args.get('period', '1W')
+    # Map 1W -> 5D for backend compatibility, accept legacy 5D/7D too
+    if period in ('1W', '7D'):
+        period = '5D'
+    valid_periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y']
     if period not in valid_periods:
-        return jsonify({'error': f'Invalid period. Must be one of: {", ".join(valid_periods)}'}), 400
+        return jsonify({'error': f'Invalid period. Must be one of: 1D, 1W, 1M, 3M, YTD, 1Y'}), 400
     
     try:
         # Find portfolio owner
