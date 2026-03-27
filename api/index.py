@@ -18699,21 +18699,61 @@ def admin_trigger_market_close_backfill():
         
         # ATOMIC BACKFILL PIPELINE
         try:
+            # PHASE 0: Pre-fetch historical prices for all tickers
+            # Without this, each user's calculation triggers individual API calls
+            # that hit rate limits and return $0 values
+            logger.info(f"PHASE 0: Pre-fetching historical prices for {target_date}...")
+            results['pipeline_phases'].append('price_prefetch_started')
+            
+            from models import Stock
+            users = User.query.all()
+            
+            # Collect all unique tickers across all users
+            unique_tickers = set()
+            unique_tickers.add('SPY')
+            for user in users:
+                user_stocks = Stock.query.filter_by(user_id=user.id).all()
+                for stock in user_stocks:
+                    if stock.quantity > 0:
+                        unique_tickers.add(stock.ticker.upper())
+            
+            # Fetch historical prices - one API call per ticker stores ~100 days
+            calculator = PortfolioPerformanceCalculator()
+            prefetch_count = 0
+            for ticker in unique_tickers:
+                try:
+                    price = calculator.get_historical_price(ticker, target_date)
+                    if price and price > 0:
+                        prefetch_count += 1
+                        logger.info(f"Pre-fetched {ticker} for {target_date}: ${price}")
+                    else:
+                        logger.warning(f"No price found for {ticker} on {target_date}")
+                except Exception as e:
+                    logger.error(f"Error pre-fetching {ticker}: {e}")
+            
+            logger.info(f"PHASE 0 Complete: Pre-fetched prices for {prefetch_count}/{len(unique_tickers)} tickers")
+            results['pipeline_phases'].append('price_prefetch_completed')
+            results['tickers_prefetched'] = prefetch_count
+            
             # PHASE 1: Create/Update Portfolio Snapshots for target date
             logger.info(f"PHASE 1: Creating portfolio snapshots for {target_date}...")
             results['pipeline_phases'].append('snapshots_started')
             
-            users = User.query.all()
-            
             for user in users:
                 try:
-                    # Calculate portfolio value WITH cash tracking for target date
-                    from cash_tracking import calculate_portfolio_value_with_cash
-                    portfolio_data = calculate_portfolio_value_with_cash(user.id, target_date)
+                    # Use Stock table + historical prices (same as daily cron)
+                    # The transaction-replay approach returns $0 for users without Transaction records
+                    user_stocks = Stock.query.filter_by(user_id=user.id).all()
+                    stock_value = 0.0
+                    for stock in user_stocks:
+                        if stock.quantity > 0:
+                            price = calculator.get_historical_price(stock.ticker.upper(), target_date)
+                            if price and price > 0:
+                                stock_value += stock.quantity * price
                     
-                    total_value = portfolio_data['total_value']
-                    stock_value = portfolio_data['stock_value']
-                    cash_proceeds = portfolio_data['cash_proceeds']
+                    from cash_tracking import calculate_cash_proceeds_as_of_date
+                    cash_proceeds = calculate_cash_proceeds_as_of_date(user.id, target_date)
+                    total_value = stock_value + cash_proceeds
                     
                     # Skip if portfolio value is 0 or None
                     if total_value is None or total_value <= 0:
