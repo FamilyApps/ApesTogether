@@ -11048,25 +11048,6 @@ def debug_info():
     except Exception as e:
         return jsonify({'error': str(e)})
 
-@app.route('/admin/drop-rendered-html')
-@admin_required
-def drop_rendered_html_migration():
-    """One-time migration: drop deprecated rendered_html column from leaderboard_cache"""
-    try:
-        result = db.session.execute(text("""
-            SELECT column_name FROM information_schema.columns 
-            WHERE table_name = 'leaderboard_cache' AND column_name = 'rendered_html'
-        """))
-        if not result.fetchone():
-            return jsonify({'success': True, 'message': 'rendered_html column already gone — nothing to do'})
-        
-        db.session.execute(text("ALTER TABLE leaderboard_cache DROP COLUMN rendered_html"))
-        db.session.commit()
-        return jsonify({'success': True, 'message': 'Dropped rendered_html column from leaderboard_cache'})
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'success': False, 'error': str(e)}), 500
-
 @app.route('/admin/run-migration')
 @admin_required
 def run_migration():
