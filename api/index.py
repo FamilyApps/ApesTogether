@@ -18233,34 +18233,30 @@ def market_close_cron():
                         logger.warning(error_msg)
                         continue
                     
-                    # Check if snapshot already exists for today (using ET date)
-                    existing_snapshot = PortfolioSnapshot.query.filter_by(
-                        user_id=user.id, 
-                        date=today_et
-                    ).first()
-                    
-                    if existing_snapshot:
-                        # Update all fields
-                        existing_snapshot.total_value = total_value
-                        existing_snapshot.stock_value = stock_value
-                        existing_snapshot.cash_proceeds = cash_proceeds
-                        existing_snapshot.max_cash_deployed = user.max_cash_deployed
-                        results['snapshots_updated'] += 1
-                        logger.info(f"Updated snapshot for user {user.id}: ${total_value:.2f} on {today_et}")
-                    else:
-                        # Create new EOD snapshot with ET date and ALL required fields
-                        snapshot = PortfolioSnapshot(
-                            user_id=user.id,
-                            date=today_et,  # Use ET date
-                            total_value=total_value,
-                            stock_value=stock_value,
-                            cash_proceeds=cash_proceeds,
-                            max_cash_deployed=user.max_cash_deployed,
-                            cash_flow=0  # Legacy field
-                        )
-                        db.session.add(snapshot)
-                        results['snapshots_created'] += 1
-                        logger.info(f"Created snapshot for user {user.id}: ${total_value:.2f} on {today_et}")
+                    # UPSERT: Atomic insert-or-update to avoid UniqueViolation
+                    # from Vercel read-replica lag (ORM query may miss existing rows)
+                    from sqlalchemy.dialects.postgresql import insert as pg_insert
+                    stmt = pg_insert(PortfolioSnapshot).values(
+                        user_id=user.id,
+                        date=today_et,
+                        total_value=total_value,
+                        stock_value=stock_value,
+                        cash_proceeds=cash_proceeds,
+                        max_cash_deployed=user.max_cash_deployed,
+                        cash_flow=0
+                    ).on_conflict_do_update(
+                        constraint='unique_user_date_snapshot',
+                        set_={
+                            'total_value': total_value,
+                            'stock_value': stock_value,
+                            'cash_proceeds': cash_proceeds,
+                            'max_cash_deployed': user.max_cash_deployed,
+                        }
+                    )
+                    result = db.session.execute(stmt)
+                    # rowcount == 1 for both insert and update in PostgreSQL
+                    results['snapshots_created'] += 1
+                    logger.info(f"Upserted snapshot for user {user.id}: ${total_value:.2f} on {today_et}")
                     
                     results['users_processed'] += 1
                     
