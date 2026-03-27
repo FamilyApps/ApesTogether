@@ -5680,22 +5680,6 @@ def admin_command_center():
                     </div>
                 </div>
                 
-                <!-- Clear Leaderboard HTML Cache -->
-                <div class="col-md-6">
-                    <div class="card command-card">
-                        <div class="card-header bg-warning text-dark">
-                            <h5>🗑 Clear Leaderboard HTML Cache</h5>
-                        </div>
-                        <div class="card-body">
-                            <p>Clear pre-rendered HTML (fixes nav menu issues)</p>
-                            <button class="btn btn-warning" onclick="runCommand('clear-html')">
-                                Clear HTML Cache
-                            </button>
-                            <div id="clear-html-result" class="result-box" style="display:none;"></div>
-                        </div>
-                    </div>
-                </div>
-                
                 <!-- Check Recent Snapshots -->
                 <div class="col-md-6">
                     <div class="card command-card">
@@ -5763,9 +5747,6 @@ def admin_command_center():
                 } else if (cmd === 'regenerate') {
                     url = '/admin/regenerate-chart-cache';
                     method = 'GET';
-                } else if (cmd === 'clear-html') {
-                    url = '/admin/clear-leaderboard-html';
-                    method = 'POST';
                 } else if (cmd === 'check-snapshots') {
                     url = '/admin/check-recent-snapshots';
                     method = 'GET';
@@ -6063,16 +6044,6 @@ def check_recent_snapshots():
             'error': str(e),
             'details': 'Check server logs'
         }), 500
-
-@app.route('/admin/clear-leaderboard-html', methods=['POST'])
-@admin_required
-def clear_leaderboard_html():
-    """No-op: rendered_html has been removed from LeaderboardCache"""
-    return jsonify({
-        'success': True,
-        'message': 'HTML pre-rendering has been removed. Leaderboard is now rendered dynamically.',
-        'cleared_count': 0
-    })
 
 @app.route('/admin/clear-leaderboard-cache', methods=['GET', 'POST'])
 @admin_required
@@ -9772,12 +9743,13 @@ def admin_clear_chart_cache():
         <p><a href="/admin">Back to Admin</a></p>
         """
 
+@app.route('/admin/regenerate-leaderboard-cache', methods=['GET', 'POST'])
 @app.route('/admin/regenerate-leaderboard-html', methods=['GET', 'POST'])
 @admin_required
-def admin_regenerate_leaderboard_html():
+def admin_regenerate_leaderboard_cache():
     """
-    Pre-render leaderboard HTML for all periods/categories
-    Optimized for 10k+ concurrent users with CDN edge caching
+    Regenerate leaderboard JSON cache for all periods/categories.
+    Charts are generated on-demand when users view the leaderboard.
     """
     if request.method == 'GET':
         return '''
@@ -9796,11 +9768,11 @@ def admin_regenerate_leaderboard_html():
             </style>
         </head>
         <body>
-            <h1>🚀 Regenerate Leaderboard HTML</h1>
+            <h1>🚀 Regenerate Leaderboard Cache</h1>
             
             <div class="info">
-                <strong>Purpose:</strong> Pre-render leaderboard HTML with embedded chart data for all periods/categories.
-                This enables <100ms CDN-cached responses for 10,000+ concurrent users.
+                <strong>Purpose:</strong> Regenerate leaderboard JSON cache for all periods/categories.
+                Charts are generated on-demand when users view the leaderboard.
             </div>
             
             <div class="info">
@@ -9809,7 +9781,7 @@ def admin_regenerate_leaderboard_html():
                 <strong>💾 Cache location:</strong> LeaderboardCache.leaderboard_data
             </div>
             
-            <button onclick="regenerate()">🔄 Regenerate All Leaderboard HTML</button>
+            <button onclick="regenerate()">🔄 Regenerate All Leaderboard Cache</button>
             
             <div id="result"></div>
             
@@ -9823,7 +9795,7 @@ def admin_regenerate_leaderboard_html():
                 resultDiv.style.display = 'none';
                 
                 try {
-                    const response = await fetch('/admin/regenerate-leaderboard-html', {
+                    const response = await fetch('/admin/regenerate-leaderboard-cache', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' }
                     });
@@ -9838,7 +9810,7 @@ def admin_regenerate_leaderboard_html():
                             <p><strong>Failed:</strong> ${data.stats.failed}</p>
                             <p><strong>Time:</strong> ${data.time_taken}s</p>
                             <hr>
-                            <p>Leaderboard will now load from pre-rendered HTML with <100ms response time!</p>
+                            <p>Leaderboard JSON cache has been regenerated.</p>
                         `;
                     } else {
                         throw new Error(data.error || 'Unknown error');
@@ -9852,7 +9824,7 @@ def admin_regenerate_leaderboard_html():
                 } finally {
                     resultDiv.style.display = 'block';
                     button.disabled = false;
-                    button.textContent = '🔄 Regenerate All Leaderboard HTML';
+                    button.textContent = '🔄 Regenerate All Leaderboard Cache';
                 }
             }
             </script>
@@ -18136,9 +18108,15 @@ def market_open_cron():
 def market_close_cron():
     """Market close cron job endpoint - creates EOD snapshots and updates leaderboards
     
-    VERSION: 2024-10-28-PHASE-2.4-FIX-v2
-    This version includes Phase 2.4 commit BEFORE Phase 2.5 HTML rendering
-    to prevent transaction rollback from destroying chart cache UPSERTs.
+    Pipeline phases:
+      1    – Portfolio snapshots
+      1.5  – S&P 500 close data
+      1.75 – Commit core data
+      1.8  – Dividend detection
+      2    – Leaderboard JSON cache
+      2.25 – Portfolio stats
+      2.4  – Commit cache data
+      3.5  – S&P 500 verification
     """
     # Force cache invalidation marker
     _rebuild_marker = os.environ.get('VERCEL_DEPLOYMENT_ID', 'local')
@@ -18183,7 +18161,6 @@ def market_close_cron():
             'snapshots_created': 0,
             'snapshots_updated': 0,
             'leaderboard_updated': False,
-            'chart_cache_updated': False,
             'errors': [],
             'pipeline_phases': []
         }
@@ -18469,9 +18446,6 @@ def market_close_cron():
                     db.session.rollback()
                 except Exception:
                     pass
-            
-            # PHASE 3: Already committed in Phase 2.4 - HTML pre-rendering is non-critical
-            logger.info("PHASE 3: Cache updates already committed in Phase 2.4")
             
             # PHASE 3.5: VERIFICATION - Confirm S&P 500 data actually persisted
             logger.info("PHASE 3.5: Verifying S&P 500 data persistence...")
@@ -20862,16 +20836,6 @@ def update_leaderboard_chunk_cron():
         logger.error(f"Automated leaderboard chunk update error: {str(e)}")
         return jsonify({'error': f'Leaderboard chunk update error: {str(e)}'}), 500
 
-@app.route('/admin/add-html-cache-column', methods=['GET', 'POST'])
-@admin_required
-def admin_add_html_cache_column():
-    """No-op: rendered_html column is deprecated. HTML pre-rendering has been removed."""
-    return jsonify({
-        'success': True,
-        'message': 'rendered_html column is deprecated. HTML pre-rendering has been removed.',
-        'action': 'none'
-    }), 200
-
 @app.route('/admin/market-close-status')
 @admin_required
 def admin_market_close_status():
@@ -20899,9 +20863,6 @@ def admin_market_close_status():
         recent_charts = UserPortfolioChartCache.query.filter(
             UserPortfolioChartCache.generated_at >= datetime.now() - timedelta(hours=24)
         ).count()
-        
-        # HTML pre-rendering removed - leaderboard is now rendered dynamically
-        html_prerendered = 0
         
         # Check GitHub Actions workflow status (last run)
         workflow_status = "unknown"
@@ -20932,9 +20893,6 @@ def admin_market_close_status():
             pipeline_health = "warning"
             issues.append("No recent chart generation (last 24h)")
         
-        if html_prerendered == 0:
-            issues.append("No HTML pre-rendering detected (expected after market close)")
-        
         return jsonify({
             "success": True,
             "pipeline_health": pipeline_health,
@@ -20947,7 +20905,6 @@ def admin_market_close_status():
             "leaderboard_cache": {
                 "total_entries": leaderboard_entries,
                 "recent_updates": recent_leaderboard,
-                "html_prerendered": html_prerendered,
                 "status": "✅ Good" if recent_leaderboard > 0 else "⚠️ Stale"
             },
             "chart_cache": {
@@ -21033,13 +20990,7 @@ def admin_trigger_market_close_test():
                 "error": str(e)
             }
         
-        # 3. HTML pre-rendering removed - leaderboard is now rendered dynamically
-        results["steps"]["html_prerendering"] = {
-            "status": "skipped",
-            "note": "HTML pre-rendering has been removed. Leaderboard is rendered dynamically."
-        }
-        
-        # 4. Test AlphaVantage connectivity
+        # 3. Test AlphaVantage connectivity
         try:
             from stock_metadata_utils import get_stock_info_from_api
             
@@ -28183,7 +28134,7 @@ def admin_fix_spy_unmultiplied_data():
             'message': f'Multiplied {fixed_count} SPY_INTRADAY entries by 10. Now regenerate chart cache!',
             'next_steps': [
                 '1. Run: fetch(\'/admin/regenerate-chart-cache\').then(r => r.json()).then(console.log)',
-                '2. Run: fetch(\'/admin/regenerate-leaderboard-html\', {method: \'POST\'}).then(r => r.json()).then(console.log)',
+                '2. Run: fetch(\'/admin/regenerate-leaderboard-cache\', {method: \'POST\'}).then(r => r.json()).then(console.log)',
                 '3. Refresh leaderboard page - 900% jump should be gone!'
             ]
         })

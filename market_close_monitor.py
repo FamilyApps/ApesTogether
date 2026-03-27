@@ -44,7 +44,6 @@ class MarketCloseMonitor:
             "alpha_vantage_calls",
             "portfolio_snapshots", 
             "leaderboard_calculation",
-            "html_prerendering",
             "chart_generation",
             "cache_cleanup"
         ]
@@ -169,8 +168,6 @@ class MarketCloseMonitor:
                     recommendations.append("Verify database connectivity and user portfolio data")
                 elif name == "leaderboard_calculation":
                     recommendations.append("Check leaderboard calculation logic and data availability")
-                elif name == "html_prerendering":
-                    recommendations.append("Verify template rendering and database schema")
                 elif name == "chart_generation":
                     recommendations.append("Check chart data availability and rendering logic")
             
@@ -210,9 +207,6 @@ def admin_market_close_status():
             UserPortfolioChartCache.generated_at >= datetime.now() - timedelta(hours=24)
         ).count()
         
-        # HTML pre-rendering removed - leaderboard is now rendered dynamically
-        html_prerendered = 0
-        
         # Determine overall status
         pipeline_health = "healthy"
         issues = []
@@ -239,8 +233,7 @@ def admin_market_close_status():
             },
             "leaderboard_cache": {
                 "total_entries": leaderboard_entries,
-                "recent_updates": recent_leaderboard,
-                "html_prerendered": html_prerendered
+                "recent_updates": recent_leaderboard
             },
             "chart_cache": {
                 "total_entries": chart_entries,
@@ -305,11 +298,6 @@ def admin_trigger_market_close_test():
             
         except Exception as e:
             monitor.complete_step("leaderboard_calculation", False, 0, [str(e)])
-        
-        # 3. HTML pre-rendering removed - leaderboard is now rendered dynamically
-        monitor.start_step("html_prerendering")
-        monitor.complete_step("html_prerendering", True, 0, 
-                            ["HTML pre-rendering has been removed. Leaderboard is rendered dynamically."])
         
         report = monitor.end_pipeline()
         
