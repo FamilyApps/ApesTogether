@@ -17828,31 +17828,25 @@ def create_tables():
 @app.route('/admin/test-market-close')
 @admin_required  
 def test_market_close():
-    """Admin endpoint to manually trigger market close for testing"""
+    """Admin endpoint to manually trigger market close pipeline directly (no HTTP round-trip)"""
     try:
-        # Call the market close endpoint internally
-        import requests
-        import os
-        
-        token = os.environ.get('CRON_SECRET')
-        if not token:
-            flash('CRON_SECRET not configured', 'danger')
-            return redirect(url_for('admin_dashboard'))
-        url = "https://apestogether.ai/api/cron/market-close"
-        headers = {
-            'Authorization': f'Bearer {token}',
-            'Content-Type': 'application/json'
-        }
-        
-        response = requests.post(url, headers=headers, timeout=30)
-        
-        if response.status_code == 200:
-            flash('Market close test successful!', 'success')
-        else:
-            flash(f'Market close test failed: {response.status_code} - {response.text}', 'danger')
+        # Call the cron function directly to avoid self-request timeout
+        with app.test_request_context('/api/cron/market-close', method='GET',
+                                       headers={'x-vercel-cron': '1'}):
+            response = market_close_cron()
+            # response is a tuple (Response, status_code) or just a Response
+            if isinstance(response, tuple):
+                resp_obj, status_code = response
+            else:
+                resp_obj, status_code = response, 200
+            
+            if status_code == 200:
+                flash('Market close pipeline completed successfully!', 'success')
+            else:
+                flash(f'Market close pipeline failed ({status_code}): {resp_obj.get_data(as_text=True)[:500]}', 'danger')
             
     except Exception as e:
-        flash(f'Error testing market close: {str(e)}', 'danger')
+        flash(f'Error running market close: {str(e)}', 'danger')
     
     return redirect(url_for('admin_dashboard'))
 
@@ -18728,33 +18722,28 @@ def admin_trigger_market_close_backfill():
                         logger.warning(error_msg)
                         continue
                     
-                    # Check if snapshot already exists for target date
-                    existing_snapshot = PortfolioSnapshot.query.filter_by(
-                        user_id=user.id, 
-                        date=target_date
-                    ).first()
-                    
-                    if existing_snapshot:
-                        existing_snapshot.total_value = total_value
-                        existing_snapshot.stock_value = stock_value
-                        existing_snapshot.cash_proceeds = cash_proceeds
-                        existing_snapshot.max_cash_deployed = user.max_cash_deployed
-                        results['snapshots_updated'] += 1
-                        logger.info(f"Updated snapshot for user {user.id} on {target_date}: ${total_value:.2f}")
-                    else:
-                        # Create new snapshot for target date with ALL required fields
-                        snapshot = PortfolioSnapshot(
-                            user_id=user.id,
-                            date=target_date,
-                            total_value=total_value,
-                            stock_value=stock_value,
-                            cash_proceeds=cash_proceeds,
-                            max_cash_deployed=user.max_cash_deployed,
-                            cash_flow=0  # Legacy field
-                        )
-                        db.session.add(snapshot)
-                        results['snapshots_created'] += 1
-                        logger.info(f"Created snapshot for user {user.id} on {target_date}: ${total_value:.2f}")
+                    # UPSERT: Atomic insert-or-update to avoid UniqueViolation
+                    from sqlalchemy.dialects.postgresql import insert as pg_insert
+                    stmt = pg_insert(PortfolioSnapshot).values(
+                        user_id=user.id,
+                        date=target_date,
+                        total_value=total_value,
+                        stock_value=stock_value,
+                        cash_proceeds=cash_proceeds,
+                        max_cash_deployed=user.max_cash_deployed,
+                        cash_flow=0
+                    ).on_conflict_do_update(
+                        constraint='unique_user_date_snapshot',
+                        set_={
+                            'total_value': total_value,
+                            'stock_value': stock_value,
+                            'cash_proceeds': cash_proceeds,
+                            'max_cash_deployed': user.max_cash_deployed,
+                        }
+                    )
+                    db.session.execute(stmt)
+                    results['snapshots_created'] += 1
+                    logger.info(f"Upserted snapshot for user {user.id} on {target_date}: ${total_value:.2f}")
                     
                     results['users_processed'] += 1
                     
