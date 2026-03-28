@@ -6519,6 +6519,256 @@ def force_regenerate_all_caches():
             'details': 'Check server logs'
         }), 500
 
+@app.route('/admin/cache-backfill-ui')
+@admin_required
+def cache_backfill_ui():
+    """Admin page with buttons to backfill caches one task at a time"""
+    from models import User
+    users = User.query.all()
+    user_list = [{'id': u.id, 'username': u.username} for u in users]
+    periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']
+    
+    html = '''<!DOCTYPE html>
+<html><head><title>Cache Backfill</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #0a0a0a; color: #e0e0e0; padding: 20px; }
+  h1 { color: #00e676; margin-bottom: 6px; }
+  h2 { color: #69f0ae; margin: 20px 0 10px; }
+  .subtitle { color: #888; margin-bottom: 20px; font-size: 14px; }
+  .section { background: #1a1a2e; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+  button { padding: 10px 14px; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s; }
+  button:hover { transform: scale(1.03); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  .btn-chart { background: #1565c0; color: white; }
+  .btn-lb { background: #6a1b9a; color: white; }
+  .btn-stats { background: #e65100; color: white; }
+  .btn-auto { background: #00e676; color: black; font-size: 15px; padding: 14px 28px; }
+  .done { background: #2e7d32 !important; color: white !important; }
+  .fail { background: #c62828 !important; color: white !important; }
+  .running { background: #f9a825 !important; color: black !important; animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: 0.6; } }
+  #log { background: #111; border-radius: 8px; padding: 12px; margin-top: 16px; max-height: 300px; overflow-y: auto; font-family: monospace; font-size: 12px; line-height: 1.6; }
+  .log-ok { color: #69f0ae; }
+  .log-err { color: #ef5350; }
+  .log-info { color: #90caf9; }
+  .progress { margin: 12px 0; height: 6px; background: #333; border-radius: 3px; overflow: hidden; }
+  .progress-bar { height: 100%; background: #00e676; transition: width 0.3s; }
+</style>
+</head><body>
+<h1>Cache Backfill Manager</h1>
+<p class="subtitle">Click buttons one at a time. Each processes a single task within Vercel's timeout.</p>
+
+<button class="btn-auto" onclick="runAll()" id="autoBtn">Run All (auto-sequence)</button>
+<div class="progress"><div class="progress-bar" id="progressBar" style="width:0%"></div></div>
+
+<h2>Step 1: Chart Caches (per user, per period)</h2>
+<div class="section">
+''' + ''.join([
+        f'<h3 style="color:#90caf9;margin:10px 0 6px">Period: {p}</h3><div class="grid">' +
+        ''.join([f'<button class="btn-chart" id="chart_{u["id"]}_{p}" onclick="runTask(this,\'chart\',{u["id"]},\'{p}\')">{u["username"]}</button>' for u in user_list]) +
+        '</div>'
+        for p in periods
+    ]) + '''
+</div>
+
+<h2>Step 2: Leaderboard Caches</h2>
+<div class="section"><div class="grid">
+''' + ''.join([
+        f'<button class="btn-lb" id="lb_{p}" onclick="runTask(this,\'leaderboard\',0,\'{p}\')">{p}</button>'
+        for p in periods
+    ]) + '''
+</div></div>
+
+<h2>Step 3: Portfolio Stats</h2>
+<div class="section"><div class="grid">
+''' + ''.join([
+        f'<button class="btn-stats" id="stats_{u["id"]}" onclick="runTask(this,\'stats\',{u["id"]},\'\')">{u["username"]}</button>'
+        for u in user_list
+    ]) + '''
+</div></div>
+
+<div id="log"></div>
+
+<script>
+const log = document.getElementById('log');
+function addLog(msg, cls) {
+  log.innerHTML += '<div class="' + cls + '">[' + new Date().toLocaleTimeString() + '] ' + msg + '</div>';
+  log.scrollTop = log.scrollHeight;
+}
+
+async function runTask(btn, type, userId, period) {
+  if (btn.disabled) return;
+  btn.disabled = true;
+  btn.classList.add('running');
+  btn.textContent = '...';
+  
+  let url = '/admin/cache-backfill-task?type=' + type + '&user_id=' + userId + '&period=' + period;
+  addLog('Starting ' + type + (userId ? ' user=' + userId : '') + (period ? ' period=' + period : ''), 'log-info');
+  
+  try {
+    let resp = await fetch(url);
+    let data = await resp.json();
+    if (data.success) {
+      btn.classList.remove('running');
+      btn.classList.add('done');
+      btn.textContent = 'Done';
+      addLog(type + ' OK: ' + (data.message || JSON.stringify(data.results)), 'log-ok');
+      return true;
+    } else {
+      btn.classList.remove('running');
+      btn.classList.add('fail');
+      btn.textContent = 'FAIL';
+      addLog(type + ' FAILED: ' + (data.error || 'Unknown'), 'log-err');
+      return false;
+    }
+  } catch(e) {
+    btn.classList.remove('running');
+    btn.classList.add('fail');
+    btn.textContent = 'TIMEOUT';
+    addLog(type + ' TIMEOUT: ' + e.message, 'log-err');
+    return false;
+  }
+}
+
+async function runAll() {
+  const autoBtn = document.getElementById('autoBtn');
+  autoBtn.disabled = true;
+  autoBtn.textContent = 'Running...';
+  
+  const allBtns = document.querySelectorAll('button.btn-chart, button.btn-lb, button.btn-stats');
+  const total = allBtns.length;
+  let done = 0;
+  
+  for (let btn of allBtns) {
+    if (btn.classList.contains('done')) { done++; continue; }
+    let ok = await runTask(btn, 
+      btn.classList.contains('btn-chart') ? 'chart' : 
+      btn.classList.contains('btn-lb') ? 'leaderboard' : 'stats',
+      parseInt(btn.id.split('_')[1]) || 0,
+      btn.id.split('_').slice(-1)[0] || ''
+    );
+    done++;
+    document.getElementById('progressBar').style.width = ((done/total)*100) + '%';
+    if (!ok) {
+      addLog('Paused auto-run due to failure. Fix and click Run All again.', 'log-err');
+      autoBtn.disabled = false;
+      autoBtn.textContent = 'Resume All';
+      return;
+    }
+    // Small delay between tasks to avoid hammering
+    await new Promise(r => setTimeout(r, 500));
+  }
+  
+  autoBtn.textContent = 'All Done!';
+  autoBtn.classList.add('done');
+  document.getElementById('progressBar').style.width = '100%';
+  addLog('All cache backfill tasks completed!', 'log-ok');
+}
+</script>
+</body></html>'''
+    
+    return html, 200, {'Content-Type': 'text/html'}
+
+
+@app.route('/admin/cache-backfill-task')
+@admin_required
+def cache_backfill_task():
+    """Process a SINGLE cache task (one user+period chart, one period leaderboard, or one user stats)"""
+    from sqlalchemy import text
+    import json
+    
+    task_type = request.args.get('type')
+    user_id = request.args.get('user_id', 0, type=int)
+    period = request.args.get('period', '')
+    
+    try:
+        if task_type == 'chart':
+            from models import UserPortfolioChartCache
+            from leaderboard_utils import generate_chart_from_snapshots
+            
+            with db.session.no_autoflush:
+                chart_data = generate_chart_from_snapshots(user_id, period)
+            
+            if chart_data:
+                chart_json = json.dumps(chart_data)
+                now = datetime.now()
+                db.session.execute(text("SET LOCAL statement_timeout = '30s'"))
+                db.session.execute(
+                    text("DELETE FROM user_portfolio_chart_cache WHERE user_id = :uid AND period = :p"),
+                    {'uid': user_id, 'p': period}
+                )
+                db.session.execute(
+                    text("INSERT INTO user_portfolio_chart_cache (user_id, period, chart_data, generated_at) VALUES (:uid, :p, :cd, :ga)"),
+                    {'uid': user_id, 'p': period, 'cd': chart_json, 'ga': now}
+                )
+                db.session.commit()
+                return jsonify({'success': True, 'message': f'Chart cached for user {user_id} period {period}'})
+            else:
+                return jsonify({'success': True, 'message': f'No snapshot data for user {user_id} period {period} (skipped)'})
+        
+        elif task_type == 'leaderboard':
+            from models import LeaderboardCache
+            from leaderboard_utils import calculate_leaderboard_data
+            
+            categories = ['all', 'small_cap', 'large_cap']
+            generated = 0
+            for category in categories:
+                with db.session.no_autoflush:
+                    leaderboard_data = calculate_leaderboard_data(period, 20, category)
+                if leaderboard_data:
+                    lb_json = json.dumps(leaderboard_data)
+                    now = datetime.now()
+                    cache_key = f"{period}_{category}"
+                    for suffix in ['_auth', '_anon']:
+                        full_key = cache_key + suffix
+                        db.session.execute(text("SET LOCAL statement_timeout = '30s'"))
+                        db.session.execute(text("DELETE FROM leaderboard_cache WHERE period = :pk"), {'pk': full_key})
+                        db.session.execute(
+                            text("INSERT INTO leaderboard_cache (period, leaderboard_data, generated_at) VALUES (:pk, :ld, :ga)"),
+                            {'pk': full_key, 'ld': lb_json, 'ga': now}
+                        )
+                        generated += 1
+                    db.session.commit()
+            return jsonify({'success': True, 'message': f'Leaderboard cached for period {period} ({generated} entries)'})
+        
+        elif task_type == 'stats':
+            from leaderboard_utils import calculate_user_portfolio_stats
+            
+            with db.session.no_autoflush:
+                stats_data = calculate_user_portfolio_stats(user_id)
+            industry_json = json.dumps(stats_data['industry_mix']) if isinstance(stats_data.get('industry_mix'), dict) else stats_data.get('industry_mix', '{}')
+            db.session.execute(text("SET LOCAL statement_timeout = '30s'"))
+            db.session.execute(text("DELETE FROM user_portfolio_stats WHERE user_id = :uid"), {'uid': user_id})
+            db.session.execute(
+                text(
+                    "INSERT INTO user_portfolio_stats (user_id, unique_stocks_count, avg_trades_per_week, total_trades, large_cap_percent, small_cap_percent, industry_mix, subscriber_count, last_updated) "
+                    "VALUES (:uid, :usc, :atpw, :tt, :lcp, :scp, :im, :sc, :lu)"
+                ),
+                {
+                    'uid': user_id,
+                    'usc': stats_data['unique_stocks_count'],
+                    'atpw': stats_data['avg_trades_per_week'],
+                    'tt': stats_data['total_trades'],
+                    'lcp': stats_data['large_cap_percent'],
+                    'scp': stats_data['small_cap_percent'],
+                    'im': industry_json,
+                    'sc': stats_data['subscriber_count'],
+                    'lu': stats_data['last_updated']
+                }
+            )
+            db.session.commit()
+            return jsonify({'success': True, 'message': f'Stats updated for user {user_id}'})
+        
+        else:
+            return jsonify({'success': False, 'error': f'Unknown type: {task_type}'}), 400
+    
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 # ============================================================================
 # ADMIN ROUTES: New Unified Performance Calculator Testing
 # ============================================================================
