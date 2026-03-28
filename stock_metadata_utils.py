@@ -129,6 +129,15 @@ ETF_SECTOR_FALLBACK = {
     'XLF': 'Financials',      # Financial Select Sector SPDR
     'XLE': 'Energy',          # Energy Select Sector SPDR
     'XLK': 'Technology',      # Technology Select Sector SPDR
+    'VYM': 'Financials',      # Vanguard High Dividend Yield ETF
+    'TLT': 'Financials',      # iShares 20+ Year Treasury Bond ETF
+    'SGOV': 'Financials',     # iShares 0-3 Month Treasury Bond ETF
+    'BND': 'Financials',      # Vanguard Total Bond Market ETF
+    'AGG': 'Financials',      # iShares Core US Aggregate Bond ETF
+    'HYG': 'Financials',      # iShares High Yield Corporate Bond ETF
+    'LQD': 'Financials',      # iShares Investment Grade Corporate Bond ETF
+    'TIP': 'Financials',      # iShares TIPS Bond ETF
+    'SCHD': 'Financials',     # Schwab US Dividend Equity ETF
 }
 
 # Tickers Alpha Vantage OVERVIEW doesn't cover (restructured, recently listed, etc.)
