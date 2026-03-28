@@ -1,5 +1,6 @@
 # This file is specifically for Vercel's Python runtime
 # It exports the Flask app in a way that Vercel expects
+# Deploy trigger: 2026-03-27
 
 import os
 import sys
