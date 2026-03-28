@@ -6349,125 +6349,127 @@ def check_intraday_dates():
 @app.route('/admin/force-regenerate-all-caches')
 @admin_required
 def force_regenerate_all_caches():
-    """Force regenerate both chart cache AND leaderboard cache in correct order"""
+    """
+    Force regenerate caches in small chunks to avoid Vercel statement timeouts.
+    
+    Usage (run each in sequence):
+      /admin/force-regenerate-all-caches?step=charts&period=1D
+      /admin/force-regenerate-all-caches?step=charts&period=5D
+      /admin/force-regenerate-all-caches?step=charts&period=1M
+      /admin/force-regenerate-all-caches?step=charts&period=3M
+      /admin/force-regenerate-all-caches?step=charts&period=YTD
+      /admin/force-regenerate-all-caches?step=charts&period=1Y
+      /admin/force-regenerate-all-caches?step=charts&period=5Y
+      /admin/force-regenerate-all-caches?step=charts&period=MAX
+      /admin/force-regenerate-all-caches?step=leaderboard
+      /admin/force-regenerate-all-caches?step=stats
+    
+    Or run all periods automatically:
+      /admin/force-regenerate-all-caches?step=charts&period=all  (sequential, may timeout with many users)
+    """
+    step = request.args.get('step', 'charts')
+    period_param = request.args.get('period', '1D')
+    
     try:
         from models import User, UserPortfolioChartCache, LeaderboardCache
         from leaderboard_utils import generate_chart_from_snapshots, calculate_leaderboard_data
         import json
         
-        results = {
-            'started_at': datetime.now().isoformat(),
-            'phase1_chart_cache': {},
-            'phase2_leaderboard_cache': {},
-            'errors': []
-        }
+        results = {'started_at': datetime.now().isoformat(), 'step': step, 'errors': []}
         
-        periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']
-        categories = ['all', 'small_cap', 'large_cap']
-        
-        # PHASE 1: Generate Chart Cache for ALL users and periods
-        logger.info("PHASE 1: Generating chart cache...")
-        all_users = User.query.all()
-        charts_generated = 0
-        
-        for user in all_users:
-            for period in periods:
-                try:
-                    chart_data = generate_chart_from_snapshots(user.id, period)
-                    
-                    if chart_data:
-                        chart_cache = UserPortfolioChartCache.query.filter_by(
-                            user_id=user.id, period=period
-                        ).first()
-                        
-                        if chart_cache:
-                            chart_cache.chart_data = json.dumps(chart_data)
-                            chart_cache.generated_at = datetime.now()
-                            db.session.merge(chart_cache)  # Use merge for Vercel serverless
-                        else:
-                            chart_cache = UserPortfolioChartCache(
-                                user_id=user.id,
-                                period=period,
-                                chart_data=json.dumps(chart_data),
-                                generated_at=datetime.now()
-                            )
-                            db.session.add(chart_cache)
-                        
-                        charts_generated += 1
-                        logger.info(f"Cached chart for user {user.id}, period {period}")
-                except Exception as e:
-                    error_msg = f"Chart gen failed for user {user.id}, period {period}: {str(e)}"
-                    results['errors'].append(error_msg)
-                    logger.error(error_msg)
-        
-        # Commit chart caches
-        db.session.commit()
-        results['phase1_chart_cache'] = {
-            'charts_generated': charts_generated,
-            'status': 'completed'
-        }
-        logger.info(f"PHASE 1 Complete: {charts_generated} chart caches generated")
-        
-        # PHASE 2: Generate Leaderboard Cache using the chart caches
-        logger.info("PHASE 2: Generating leaderboard cache...")
-        leaderboards_generated = 0
-        
-        for period in periods:
-            for category in categories:
-                try:
-                    # Calculate using chart cache
-                    leaderboard_data = calculate_leaderboard_data(period, 20, category)
-                    
-                    if leaderboard_data:
-                        cache_key = f"{period}_{category}"
-                        
-                        # Store both auth and anon versions
-                        for suffix in ['_auth', '_anon']:
-                            full_key = cache_key + suffix
-                            cache_entry = LeaderboardCache.query.filter_by(period=full_key).first()
-                            
-                            if cache_entry:
-                                cache_entry.leaderboard_data = json.dumps(leaderboard_data)
-                                cache_entry.generated_at = datetime.now()
+        if step == 'charts':
+            # Generate chart cache for ONE period (all users), commit per user
+            periods_to_run = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX'] if period_param == 'all' else [period_param]
+            all_users = User.query.all()
+            charts_generated = 0
+            
+            for period in periods_to_run:
+                for user in all_users:
+                    try:
+                        chart_data = generate_chart_from_snapshots(user.id, period)
+                        if chart_data:
+                            chart_cache = UserPortfolioChartCache.query.filter_by(
+                                user_id=user.id, period=period
+                            ).first()
+                            if chart_cache:
+                                chart_cache.chart_data = json.dumps(chart_data)
+                                chart_cache.generated_at = datetime.now()
                             else:
-                                cache_entry = LeaderboardCache(
-                                    period=full_key,
-                                    leaderboard_data=json.dumps(leaderboard_data),
+                                chart_cache = UserPortfolioChartCache(
+                                    user_id=user.id, period=period,
+                                    chart_data=json.dumps(chart_data),
                                     generated_at=datetime.now()
                                 )
-                                db.session.add(cache_entry)
-                            
-                            leaderboards_generated += 1
-                
-                except Exception as e:
-                    error_msg = f"Leaderboard gen failed for {period}_{category}: {str(e)}"
-                    results['errors'].append(error_msg)
-                    logger.error(error_msg)
+                                db.session.add(chart_cache)
+                            db.session.commit()
+                            charts_generated += 1
+                    except Exception as e:
+                        db.session.rollback()
+                        results['errors'].append(f"Chart failed user {user.id} {period}: {str(e)}")
+            
+            results['charts_generated'] = charts_generated
+            results['periods'] = periods_to_run
+            next_steps = []
+            if period_param != 'all':
+                all_periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']
+                idx = all_periods.index(period_param) if period_param in all_periods else -1
+                if idx < len(all_periods) - 1:
+                    next_steps.append(f'?step=charts&period={all_periods[idx + 1]}')
+                else:
+                    next_steps.append('?step=leaderboard')
+            else:
+                next_steps.append('?step=leaderboard')
+            results['next'] = next_steps
         
-        # Commit leaderboard caches
-        db.session.commit()
-        results['phase2_leaderboard_cache'] = {
-            'leaderboards_generated': leaderboards_generated,
-            'status': 'completed'
-        }
-        logger.info(f"PHASE 2 Complete: {leaderboards_generated} leaderboard caches generated")
+        elif step == 'leaderboard':
+            # Generate leaderboard cache for all periods/categories
+            periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']
+            categories = ['all', 'small_cap', 'large_cap']
+            leaderboards_generated = 0
+            
+            for period in periods:
+                for category in categories:
+                    try:
+                        leaderboard_data = calculate_leaderboard_data(period, 20, category)
+                        if leaderboard_data:
+                            cache_key = f"{period}_{category}"
+                            for suffix in ['_auth', '_anon']:
+                                full_key = cache_key + suffix
+                                cache_entry = LeaderboardCache.query.filter_by(period=full_key).first()
+                                if cache_entry:
+                                    cache_entry.leaderboard_data = json.dumps(leaderboard_data)
+                                    cache_entry.generated_at = datetime.now()
+                                else:
+                                    cache_entry = LeaderboardCache(
+                                        period=full_key,
+                                        leaderboard_data=json.dumps(leaderboard_data),
+                                        generated_at=datetime.now()
+                                    )
+                                    db.session.add(cache_entry)
+                                leaderboards_generated += 1
+                            db.session.commit()
+                    except Exception as e:
+                        db.session.rollback()
+                        results['errors'].append(f"Leaderboard failed {period}_{category}: {str(e)}")
+            
+            results['leaderboards_generated'] = leaderboards_generated
+            results['next'] = ['?step=stats']
         
-        # PHASE 2.5: Refresh UserPortfolioStats (industry_mix, cap%, trades/wk)
-        logger.info("PHASE 2.5: Refreshing UserPortfolioStats...")
-        stats_updated = 0
-        try:
+        elif step == 'stats':
+            # Refresh UserPortfolioStats (industry_mix, cap%, trades/wk)
             from leaderboard_utils import calculate_user_portfolio_stats
             from models import UserPortfolioStats
+            
+            all_users = User.query.all()
+            stats_updated = 0
             
             for user in all_users:
                 try:
                     stats_data = calculate_user_portfolio_stats(user.id)
-                    
                     user_stats = UserPortfolioStats.query.filter_by(user_id=user.id).first()
                     if not user_stats:
                         user_stats = UserPortfolioStats(user_id=user.id)
                         db.session.add(user_stats)
-                    
                     user_stats.unique_stocks_count = stats_data['unique_stocks_count']
                     user_stats.avg_trades_per_week = stats_data['avg_trades_per_week']
                     user_stats.total_trades = stats_data['total_trades']
@@ -6476,28 +6478,20 @@ def force_regenerate_all_caches():
                     user_stats.industry_mix = stats_data['industry_mix']
                     user_stats.subscriber_count = stats_data['subscriber_count']
                     user_stats.last_updated = stats_data['last_updated']
+                    db.session.commit()
                     stats_updated += 1
                 except Exception as e:
-                    results['errors'].append(f"Stats update failed for user {user.id}: {str(e)}")
+                    db.session.rollback()
+                    results['errors'].append(f"Stats failed user {user.id}: {str(e)}")
             
-            db.session.commit()
-        except Exception as e:
-            results['errors'].append(f"Phase 2.5 error: {str(e)}")
+            results['stats_updated'] = stats_updated
+            results['next'] = ['Done! All caches refreshed.']
         
-        results['phase2_5_portfolio_stats'] = {
-            'stats_updated': stats_updated,
-            'status': 'completed'
-        }
-        logger.info(f"PHASE 2.5 Complete: {stats_updated} portfolio stats refreshed")
+        else:
+            return jsonify({'error': f'Unknown step: {step}. Use charts, leaderboard, or stats'}), 400
         
         results['completed_at'] = datetime.now().isoformat()
-        
-        return jsonify({
-            'success': True,
-            'message': f'Generated {charts_generated} chart caches, {leaderboards_generated} leaderboard caches, {stats_updated} portfolio stats',
-            'results': results,
-            'next_step': 'Visit /leaderboard to see correct data'
-        })
+        return jsonify({'success': True, 'results': results})
         
     except Exception as e:
         db.session.rollback()
