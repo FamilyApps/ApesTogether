@@ -112,6 +112,8 @@ sup.asterisk { color: var(--accent); font-size: 0.7em; }
 .btn-ghost:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
 
 /* ── WAITLIST FORM ── */
+#waitlist-anchor { scroll-margin-top: 80px; }
+#waitlist { scroll-margin-top: 80px; }
 .waitlist-form-wrap { margin-top: 0; }
 .waitlist-form {
     display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
