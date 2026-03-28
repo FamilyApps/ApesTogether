@@ -2407,7 +2407,89 @@ def login():
 @app.route('/')
 def index():
     """Marketing landing page"""
-    return render_template('landing.html')
+    from models import BetaWaitlist
+    try:
+        waitlist_count = BetaWaitlist.query.count()
+    except Exception:
+        waitlist_count = 0
+    return render_template('landing.html', waitlist_count=waitlist_count)
+
+@app.route('/api/waitlist', methods=['POST'])
+def join_waitlist():
+    """Add an email to the beta waitlist"""
+    from models import BetaWaitlist
+    try:
+        data = request.get_json() or {}
+        email = (data.get('email') or '').strip().lower()
+        role = data.get('role', '').strip() or None  # 'investor' or 'trader'
+        referral = data.get('referral_source', '').strip() or None
+
+        if not email or '@' not in email:
+            return jsonify({'error': 'Valid email required'}), 400
+
+        # Check duplicate
+        existing = BetaWaitlist.query.filter_by(email=email).first()
+        if existing:
+            return jsonify({'success': True, 'message': 'already_on_list', 'position': existing.id})
+
+        entry = BetaWaitlist(email=email, role=role, referral_source=referral)
+        db.session.add(entry)
+        db.session.commit()
+
+        count = BetaWaitlist.query.count()
+        return jsonify({'success': True, 'message': 'added', 'position': count})
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Waitlist signup error: {e}")
+        return jsonify({'error': 'Something went wrong. Please try again.'}), 500
+
+@app.route('/api/waitlist/count')
+def waitlist_count():
+    """Public count of waitlist signups (for social proof)"""
+    from models import BetaWaitlist
+    try:
+        count = BetaWaitlist.query.count()
+        return jsonify({'count': count})
+    except Exception:
+        return jsonify({'count': 0})
+
+@app.route('/admin/waitlist')
+@admin_required
+def admin_waitlist():
+    """View all beta waitlist signups"""
+    from models import BetaWaitlist
+    entries = BetaWaitlist.query.order_by(BetaWaitlist.created_at.desc()).all()
+    return jsonify({
+        'total': len(entries),
+        'entries': [{
+            'id': e.id,
+            'email': e.email,
+            'role': e.role,
+            'referral_source': e.referral_source,
+            'created_at': e.created_at.isoformat() if e.created_at else None
+        } for e in entries]
+    })
+
+@app.route('/admin/create-waitlist-table')
+@admin_required
+def create_waitlist_table():
+    """One-time migration: create beta_waitlist table"""
+    try:
+        db.session.execute(text("""
+            CREATE TABLE IF NOT EXISTS beta_waitlist (
+                id SERIAL PRIMARY KEY,
+                email VARCHAR(255) NOT NULL UNIQUE,
+                role VARCHAR(20),
+                referral_source VARCHAR(100),
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """))
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'beta_waitlist table created'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/terms-of-service')
 def terms_of_service():

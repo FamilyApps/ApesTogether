@@ -831,3 +831,17 @@ class MobileSubscription(db.Model):
     
     def __repr__(self):
         return f"<MobileSubscription sub={self.subscriber_id}->owner={self.subscribed_to_id} status={self.status}>"
+
+
+class BetaWaitlist(db.Model):
+    """Beta waitlist signups from the landing page"""
+    __tablename__ = 'beta_waitlist'
+
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(255), nullable=False, unique=True)
+    role = db.Column(db.String(20), nullable=True)  # 'investor', 'trader', or None
+    referral_source = db.Column(db.String(100), nullable=True)  # UTM or free-text
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<BetaWaitlist {self.email} role={self.role}>"
