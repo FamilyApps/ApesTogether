@@ -222,7 +222,7 @@ struct LeaderboardView: View {
                         .refreshable {
                             await viewModel.loadLeaderboard(
                                 period: selectedPeriod, category: selectedCategory,
-                                activeEdge: hideLoQ, industry: selectedIndustry,
+                                activeEdge: hideLoQ, industry: sectorFilterParam,
                                 frequency: selectedFrequency
                             )
                         }
