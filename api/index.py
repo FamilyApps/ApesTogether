@@ -6415,8 +6415,8 @@ def force_regenerate_all_caches():
         for period in periods:
             for category in categories:
                 try:
-                    # Calculate using chart cache
-                    leaderboard_data = calculate_leaderboard_data(period, 20, category)
+                    # Calculate using chart cache (100 to cover mobile app's max request)
+                    leaderboard_data = calculate_leaderboard_data(period, 100, category)
                     
                     if leaderboard_data:
                         cache_key = f"{period}_{category}"
@@ -6452,11 +6452,49 @@ def force_regenerate_all_caches():
         }
         logger.info(f"PHASE 2 Complete: {leaderboards_generated} leaderboard caches generated")
         
+        # PHASE 2.5: Refresh UserPortfolioStats (industry_mix, cap%, trades/wk)
+        logger.info("PHASE 2.5: Refreshing UserPortfolioStats...")
+        stats_updated = 0
+        try:
+            from leaderboard_utils import calculate_user_portfolio_stats
+            from models import UserPortfolioStats
+            
+            for user in all_users:
+                try:
+                    stats_data = calculate_user_portfolio_stats(user.id)
+                    
+                    user_stats = UserPortfolioStats.query.filter_by(user_id=user.id).first()
+                    if not user_stats:
+                        user_stats = UserPortfolioStats(user_id=user.id)
+                        db.session.add(user_stats)
+                    
+                    user_stats.unique_stocks_count = stats_data['unique_stocks_count']
+                    user_stats.avg_trades_per_week = stats_data['avg_trades_per_week']
+                    user_stats.total_trades = stats_data['total_trades']
+                    user_stats.large_cap_percent = stats_data['large_cap_percent']
+                    user_stats.small_cap_percent = stats_data['small_cap_percent']
+                    user_stats.industry_mix = stats_data['industry_mix']
+                    user_stats.subscriber_count = stats_data['subscriber_count']
+                    user_stats.last_updated = stats_data['last_updated']
+                    stats_updated += 1
+                except Exception as e:
+                    results['errors'].append(f"Stats update failed for user {user.id}: {str(e)}")
+            
+            db.session.commit()
+        except Exception as e:
+            results['errors'].append(f"Phase 2.5 error: {str(e)}")
+        
+        results['phase2_5_portfolio_stats'] = {
+            'stats_updated': stats_updated,
+            'status': 'completed'
+        }
+        logger.info(f"PHASE 2.5 Complete: {stats_updated} portfolio stats refreshed")
+        
         results['completed_at'] = datetime.now().isoformat()
         
         return jsonify({
             'success': True,
-            'message': f'Generated {charts_generated} chart caches and {leaderboards_generated} leaderboard caches',
+            'message': f'Generated {charts_generated} chart caches, {leaderboards_generated} leaderboard caches, {stats_updated} portfolio stats',
             'results': results,
             'next_step': 'Visit /leaderboard to see correct data'
         })

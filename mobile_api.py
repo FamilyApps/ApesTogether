@@ -746,43 +746,55 @@ def get_leaderboard():
         # Map 1W -> 5D for backend cache lookup (cache uses 5D key)
         cache_period = '5D' if period == '1W' else period
         
-        # Build raw_data from ALL users with snapshots — always compute live performance
-        # This ensures period-correct returns and avoids empty results for any period
-        raw_data = []
-        all_users = User.query.filter(User.deleted_at.is_(None)).all()
+        # ── Cache-first architecture (scales to thousands of users) ──
+        # 1) Try pre-computed LeaderboardCache (populated at market close)
+        raw_data = get_leaderboard_data(period=cache_period, limit=100, category=category)
         
-        # Pre-fetch cached leaderboard for sparkline chart data (optional enrichment)
-        cached_data_map = {}
+        # 2) Fallback: recompute from UserPortfolioChartCache (still cached, O(n) read)
+        if not raw_data:
+            raw_data = calculate_leaderboard_data(period=cache_period, limit=100, category=category)
+        
+        # 3) Thin fallback for brand-new users not yet in any cache
+        # Only runs if caches are completely empty (first deploy or cache wipe)
+        if not raw_data:
+            raw_data = []
+            all_users = User.query.filter(User.deleted_at.is_(None)).all()
+            for u in all_users:
+                snap = PortfolioSnapshot.query.filter_by(user_id=u.id)\
+                    .order_by(PortfolioSnapshot.date.desc()).first()
+                if snap:
+                    perf = calculate_performance_metrics(u.id, cache_period)
+                    raw_data.append({
+                        'user_id': u.id,
+                        'username': u.username,
+                        'performance_percent': perf,
+                        'subscriber_count': 0,
+                        'subscription_price': 9.00,
+                        'large_cap_percent': 0.0,
+                        'avg_trades_per_week': 0.0,
+                        'chart_data': None
+                    })
+        
+        # Fetch previous cron's cached leaderboard for rank-change comparison
+        prev_rank_map = {}
         try:
-            cached_data = get_leaderboard_data(period=cache_period, limit=100, category=category)
-            if cached_data:
-                for entry in cached_data:
-                    cached_data_map[entry.get('user_id')] = entry
+            from models import LeaderboardCache
+            import json as json_module_lb
+            prev_cache_key = f"{cache_period}_all_auth"
+            prev_cache = LeaderboardCache.query.filter_by(period=prev_cache_key).first()
+            if not prev_cache:
+                prev_cache_key = f"{cache_period}_all_anon"
+                prev_cache = LeaderboardCache.query.filter_by(period=prev_cache_key).first()
+            if not prev_cache:
+                prev_cache_key = f"{cache_period}_all"
+                prev_cache = LeaderboardCache.query.filter_by(period=prev_cache_key).first()
+            if prev_cache:
+                prev_entries = json_module_lb.loads(prev_cache.leaderboard_data)
+                prev_entries.sort(key=lambda x: x.get('performance_percent', 0), reverse=True)
+                for idx, pe in enumerate(prev_entries):
+                    prev_rank_map[pe.get('user_id')] = idx + 1
         except Exception:
             pass
-        
-        for u in all_users:
-            snap = PortfolioSnapshot.query.filter_by(user_id=u.id)\
-                .order_by(PortfolioSnapshot.date.desc()).first()
-            if not snap:
-                continue
-            
-            # Always compute performance live from snapshots for correct period
-            perf = calculate_performance_metrics(u.id, cache_period)
-            
-            # Pull sparkline chart_data from cache if available
-            cached_entry = cached_data_map.get(u.id, {})
-            
-            raw_data.append({
-                'user_id': u.id,
-                'username': u.username,
-                'performance_percent': perf,
-                'subscriber_count': cached_entry.get('subscriber_count', 0),
-                'subscription_price': cached_entry.get('subscription_price', 9.00),
-                'large_cap_percent': cached_entry.get('large_cap_percent', 0.0),
-                'avg_trades_per_week': cached_entry.get('avg_trades_per_week', 0.0),
-                'chart_data': cached_entry.get('chart_data')
-            })
         
         # ── Compute S&P 500 return for this period directly from MarketData ──
         sp500_return_for_period = 0.0
@@ -849,19 +861,19 @@ def get_leaderboard():
             if user.created_at:
                 account_age_days = (datetime.utcnow() - user.created_at).days
             
-            # Industry mix — compute live so it reflects latest sector data
+            # Industry mix — cache-first from UserPortfolioStats (updated at market close)
             industry_mix = {}
             try:
-                from leaderboard_utils import calculate_industry_mix
-                industry_mix = calculate_industry_mix(user_id) or {}
+                stats = UserPortfolioStats.query.filter_by(user_id=user_id).first()
+                if stats and stats.industry_mix and isinstance(stats.industry_mix, dict):
+                    industry_mix = stats.industry_mix
             except Exception:
                 pass
-            # Fallback to cached stats if live calc returned nothing
+            # Thin fallback: live compute only if cache is empty (new user)
             if not industry_mix:
                 try:
-                    stats = UserPortfolioStats.query.filter_by(user_id=user_id).first()
-                    if stats and stats.industry_mix and isinstance(stats.industry_mix, dict):
-                        industry_mix = stats.industry_mix
+                    from leaderboard_utils import calculate_industry_mix
+                    industry_mix = calculate_industry_mix(user_id) or {}
                 except Exception:
                     pass
             
@@ -947,17 +959,6 @@ def get_leaderboard():
         
         # Sort by performance descending, then re-rank
         leaderboard.sort(key=lambda x: x['return_percent'], reverse=True)
-        
-        # Build previous-rank map from cached leaderboard (last cron run)
-        prev_rank_map = {}
-        try:
-            cached_entries = list(cached_data_map.values())
-            if cached_entries:
-                cached_entries.sort(key=lambda x: x.get('performance_percent', 0), reverse=True)
-                for idx, ce in enumerate(cached_entries):
-                    prev_rank_map[ce.get('user_id')] = idx + 1
-        except Exception:
-            pass
         
         for i, e in enumerate(leaderboard):
             e['rank'] = i + 1
