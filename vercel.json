@@ -1,11 +1,6 @@
 {
   "version": 2,
   "name": "stock-portfolio-app",
-  "functions": {
-    "api/vercel.py": {
-      "maxDuration": 60
-    }
-  },
   "builds": [
     {
       "src": "api/vercel.py",
