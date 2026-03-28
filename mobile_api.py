@@ -3533,17 +3533,25 @@ def admin_backfill_sectors():
         return jsonify({'error': str(e)}), 500
 
 
-@mobile_api.route('/admin/run-all-backfills', methods=['POST'])
-@require_admin_key
+@mobile_api.route('/admin/run-all-backfills', methods=['GET', 'POST'])
 @with_db_retry
 def admin_run_all_backfills():
     """
     TEMPORARY: One-click endpoint to run both S&P 500 and sector backfills.
     Delete this after confirming success.
+    Accepts admin key via header OR ?key= query param for browser use.
     """
     from models import db, MarketData, Stock, StockInfo
     from stock_metadata_utils import populate_stock_info
     import os, time as _time
+
+    # Auth: check header OR query param
+    admin_key = request.headers.get('X-Admin-Key') or request.args.get('key')
+    expected_key = os.environ.get('ADMIN_API_KEY')
+    if not expected_key:
+        return jsonify({'error': 'admin_api_not_configured'}), 503
+    if not admin_key or admin_key != expected_key:
+        return jsonify({'error': 'invalid_admin_key', 'hint': 'Pass ?key=YOUR_ADMIN_KEY in the URL'}), 403
 
     av_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
     if not av_key:
