@@ -6593,15 +6593,32 @@ def cache_backfill_ui():
 
 <script>
 const log = document.getElementById('log');
+let errCount = 0;
 function addLog(msg, cls) {
   log.innerHTML += '<div class="' + cls + '">[' + new Date().toLocaleTimeString() + '] ' + msg + '</div>';
   log.scrollTop = log.scrollHeight;
 }
+function addError(label, data) {
+  errCount++;
+  let id = 'err_' + errCount;
+  let detail = '';
+  if (data.traceback) detail += '<b>Traceback:</b>\\n<pre style="white-space:pre-wrap;color:#ef9a9a;font-size:11px;margin:4px 0">' + data.traceback + '</pre>';
+  if (data.error_type) detail += '<b>Type:</b> ' + data.error_type + '\\n';
+  if (data.elapsed) detail += '<b>Elapsed:</b> ' + data.elapsed + 's\\n';
+  if (data.task) detail += '<b>Task:</b> ' + JSON.stringify(data.task) + '\\n';
+  log.innerHTML += '<div class="log-err">[' + new Date().toLocaleTimeString() + '] ' + label + ': ' + (data.error || 'Unknown error') +
+    ' <a href="#" style="color:#90caf9;font-size:11px" onclick="document.getElementById(\\'' + id + '\\').style.display=document.getElementById(\\'' + id + '\\').style.display==\\'none\\'?\\'block\\':\\'none\\';return false">[show details]</a>' +
+    '<div id="' + id + '" style="display:none;background:#1a0a0a;padding:8px;border-radius:6px;margin:4px 0;border:1px solid #c62828">' + detail + '</div></div>';
+  log.scrollTop = log.scrollHeight;
+}
 
 async function runTask(btn, type, userId, period) {
-  if (btn.disabled) return;
+  if (btn.disabled && !btn.classList.contains('fail')) return;
   btn.disabled = true;
+  btn.classList.remove('fail');
   btn.classList.add('running');
+  let origText = btn.getAttribute('data-orig') || btn.textContent;
+  btn.setAttribute('data-orig', origText);
   btn.textContent = '...';
   
   let url = '/admin/cache-backfill-task?type=' + type + '&user_id=' + userId + '&period=' + period;
@@ -6609,25 +6626,33 @@ async function runTask(btn, type, userId, period) {
   
   try {
     let resp = await fetch(url);
-    let data = await resp.json();
+    let text = await resp.text();
+    let data;
+    try { data = JSON.parse(text); } catch(pe) {
+      addError(type + ' PARSE ERROR', {error: 'Non-JSON response: ' + text.substring(0, 500), error_type: 'ParseError', elapsed: 0, task: {type, user_id: userId, period}});
+      btn.classList.remove('running'); btn.classList.add('fail'); btn.textContent = 'FAIL (click to retry)'; btn.disabled = false;
+      return false;
+    }
     if (data.success) {
       btn.classList.remove('running');
       btn.classList.add('done');
       btn.textContent = 'Done';
-      addLog(type + ' OK: ' + (data.message || JSON.stringify(data.results)), 'log-ok');
+      addLog(type + ' OK: ' + (data.message || 'success'), 'log-ok');
       return true;
     } else {
       btn.classList.remove('running');
       btn.classList.add('fail');
-      btn.textContent = 'FAIL';
-      addLog(type + ' FAILED: ' + (data.error || 'Unknown'), 'log-err');
+      btn.textContent = 'FAIL (click to retry)';
+      btn.disabled = false;
+      addError(type + ' FAILED', data);
       return false;
     }
   } catch(e) {
     btn.classList.remove('running');
     btn.classList.add('fail');
-    btn.textContent = 'TIMEOUT';
-    addLog(type + ' TIMEOUT: ' + e.message, 'log-err');
+    btn.textContent = 'TIMEOUT (click to retry)';
+    btn.disabled = false;
+    addError(type + ' NETWORK/TIMEOUT', {error: e.message, error_type: 'FetchError', task: {type, user_id: userId, period}});
     return false;
   }
 }
@@ -6652,12 +6677,11 @@ async function runAll() {
     done++;
     document.getElementById('progressBar').style.width = ((done/total)*100) + '%';
     if (!ok) {
-      addLog('Paused auto-run due to failure. Fix and click Run All again.', 'log-err');
+      addLog('Paused auto-run due to failure. Fix the issue and click Run All to resume.', 'log-err');
       autoBtn.disabled = false;
       autoBtn.textContent = 'Resume All';
       return;
     }
-    // Small delay between tasks to avoid hammering
     await new Promise(r => setTimeout(r, 500));
   }
   
@@ -6678,22 +6702,31 @@ def cache_backfill_task():
     """Process a SINGLE cache task (one user+period chart, one period leaderboard, or one user stats)"""
     from sqlalchemy import text
     import json
+    import traceback
+    import time
     
     task_type = request.args.get('type')
     user_id = request.args.get('user_id', 0, type=int)
     period = request.args.get('period', '')
+    t_start = time.time()
     
     try:
         if task_type == 'chart':
             from models import UserPortfolioChartCache
             from leaderboard_utils import generate_chart_from_snapshots
             
+            logger.info(f"[BACKFILL] chart: user={user_id} period={period} — generating...")
+            t0 = time.time()
             with db.session.no_autoflush:
                 chart_data = generate_chart_from_snapshots(user_id, period)
+            gen_time = round(time.time() - t0, 2)
+            logger.info(f"[BACKFILL] chart: generate took {gen_time}s, got data={chart_data is not None}")
             
             if chart_data:
                 chart_json = json.dumps(chart_data)
                 now = datetime.now()
+                logger.info(f"[BACKFILL] chart: writing {len(chart_json)} bytes to DB...")
+                t1 = time.time()
                 db.session.execute(text("SET LOCAL statement_timeout = '30s'"))
                 db.session.execute(
                     text("DELETE FROM user_portfolio_chart_cache WHERE user_id = :uid AND period = :p"),
@@ -6704,7 +6737,11 @@ def cache_backfill_task():
                     {'uid': user_id, 'p': period, 'cd': chart_json, 'ga': now}
                 )
                 db.session.commit()
-                return jsonify({'success': True, 'message': f'Chart cached for user {user_id} period {period}'})
+                db_time = round(time.time() - t1, 2)
+                total = round(time.time() - t_start, 2)
+                msg = f'Chart cached for user {user_id} period {period} ({len(chart_json)}B, gen={gen_time}s, db={db_time}s, total={total}s)'
+                logger.info(f"[BACKFILL] {msg}")
+                return jsonify({'success': True, 'message': msg})
             else:
                 return jsonify({'success': True, 'message': f'No snapshot data for user {user_id} period {period} (skipped)'})
         
@@ -6714,9 +6751,16 @@ def cache_backfill_task():
             
             categories = ['all', 'small_cap', 'large_cap']
             generated = 0
+            details = []
             for category in categories:
+                logger.info(f"[BACKFILL] leaderboard: period={period} category={category}")
+                t0 = time.time()
                 with db.session.no_autoflush:
                     leaderboard_data = calculate_leaderboard_data(period, 20, category)
+                calc_time = round(time.time() - t0, 2)
+                entry_count = len(leaderboard_data) if leaderboard_data else 0
+                logger.info(f"[BACKFILL] leaderboard: {category} calc={calc_time}s entries={entry_count}")
+                
                 if leaderboard_data:
                     lb_json = json.dumps(leaderboard_data)
                     now = datetime.now()
@@ -6731,13 +6775,25 @@ def cache_backfill_task():
                         )
                         generated += 1
                     db.session.commit()
-            return jsonify({'success': True, 'message': f'Leaderboard cached for period {period} ({generated} entries)'})
+                    details.append(f'{category}: {entry_count} entries ({calc_time}s)')
+                else:
+                    details.append(f'{category}: no data ({calc_time}s)')
+            
+            total = round(time.time() - t_start, 2)
+            msg = f'Leaderboard period={period}: {generated} caches saved in {total}s — {"; ".join(details)}'
+            logger.info(f"[BACKFILL] {msg}")
+            return jsonify({'success': True, 'message': msg})
         
         elif task_type == 'stats':
             from leaderboard_utils import calculate_user_portfolio_stats
             
+            logger.info(f"[BACKFILL] stats: user={user_id}")
+            t0 = time.time()
             with db.session.no_autoflush:
                 stats_data = calculate_user_portfolio_stats(user_id)
+            calc_time = round(time.time() - t0, 2)
+            logger.info(f"[BACKFILL] stats: calc={calc_time}s industry_mix={stats_data.get('industry_mix')}")
+            
             industry_json = json.dumps(stats_data['industry_mix']) if isinstance(stats_data.get('industry_mix'), dict) else stats_data.get('industry_mix', '{}')
             db.session.execute(text("SET LOCAL statement_timeout = '30s'"))
             db.session.execute(text("DELETE FROM user_portfolio_stats WHERE user_id = :uid"), {'uid': user_id})
@@ -6759,14 +6815,26 @@ def cache_backfill_task():
                 }
             )
             db.session.commit()
-            return jsonify({'success': True, 'message': f'Stats updated for user {user_id}'})
+            total = round(time.time() - t_start, 2)
+            msg = f'Stats updated for user {user_id} in {total}s (calc={calc_time}s, industry_mix keys={list(stats_data.get("industry_mix", {}).keys()) if isinstance(stats_data.get("industry_mix"), dict) else "N/A"})'
+            logger.info(f"[BACKFILL] {msg}")
+            return jsonify({'success': True, 'message': msg})
         
         else:
             return jsonify({'success': False, 'error': f'Unknown type: {task_type}'}), 400
     
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'error': str(e)}), 500
+        tb = traceback.format_exc()
+        logger.error(f"[BACKFILL] FAILED type={task_type} user={user_id} period={period}\n{tb}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'error_type': type(e).__name__,
+            'traceback': tb,
+            'task': {'type': task_type, 'user_id': user_id, 'period': period},
+            'elapsed': round(time.time() - t_start, 2)
+        }), 500
 
 
 # ============================================================================
