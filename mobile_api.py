@@ -741,7 +741,7 @@ def get_leaderboard():
     frequency_filter = request.args.get('frequency', 'any')
     
     try:
-        from leaderboard_utils import get_leaderboard_data, calculate_leaderboard_data
+        from leaderboard_utils import get_leaderboard_data, calculate_leaderboard_data, calculate_performance_metrics
         
         # Map 1W -> 5D for backend cache lookup (cache uses 5D key)
         cache_period = '5D' if period == '1W' else period
@@ -752,6 +752,7 @@ def get_leaderboard():
             raw_data = calculate_leaderboard_data(period=cache_period, limit=100, category=category)
         
         # If still no data, build from ALL users with portfolio snapshots
+        # Compute performance directly from snapshots for each user
         if not raw_data:
             raw_data = []
             all_users = User.query.filter(User.deleted_at.is_(None)).all()
@@ -759,10 +760,11 @@ def get_leaderboard():
                 snap = PortfolioSnapshot.query.filter_by(user_id=u.id)\
                     .order_by(PortfolioSnapshot.date.desc()).first()
                 if snap:
+                    perf = calculate_performance_metrics(u.id, cache_period)
                     raw_data.append({
                         'user_id': u.id,
                         'username': u.username,
-                        'performance_percent': 0.0,
+                        'performance_percent': perf,
                         'subscriber_count': 0,
                         'subscription_price': 9.00,
                         'large_cap_percent': 0.0,
@@ -1421,23 +1423,7 @@ def get_portfolio_chart(slug):
         if not owner:
             return jsonify({'error': 'portfolio_not_found'}), 404
         
-        # Check access: must be owner or subscribed
-        is_owner = owner.id == g.user_id
-        is_subscribed = False
-        if not is_owner:
-            try:
-                from models import MobileSubscription
-                is_subscribed = MobileSubscription.query.filter_by(
-                    subscriber_id=g.user_id,
-                    subscribed_to_id=owner.id,
-                    status='active'
-                ).first() is not None
-            except Exception:
-                pass
-        
-        if not is_owner and not is_subscribed:
-            return jsonify({'error': 'subscription_required'}), 403
-        
+        # Performance charts are publicly viewable (holdings are locked)
         # Try to use the unified performance calculator
         chart_data = []
         portfolio_return = 0.0

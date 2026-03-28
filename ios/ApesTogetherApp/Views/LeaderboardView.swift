@@ -13,9 +13,16 @@ struct LeaderboardView: View {
     @State private var hideLoQ = true
     @State private var sortBySubscribers = false
     @State private var showSettings = false
+    @State private var showFilters = false
     @State private var expandedEntryId: Int? = nil
-    @State private var scrollOffset: CGFloat = 0
     @State private var autoExpandedTop = true
+    
+    // Pending filter state (applied only on "Apply")
+    @State private var pendingCategory = "all"
+    @State private var pendingIndustry = "all"
+    @State private var pendingFrequency = "any"
+    @State private var pendingHideLoQ = true
+    @State private var pendingSortBySubs = false
     
     private let periods = ["1D", "1W", "1M", "3M", "YTD", "1Y"]
     
@@ -36,11 +43,20 @@ struct LeaderboardView: View {
         return viewModel.entries
     }
     
+    private var activeFilterCount: Int {
+        var count = 0
+        if selectedCategory != "all" { count += 1 }
+        if selectedIndustry != "all" { count += 1 }
+        if selectedFrequency != "any" { count += 1 }
+        if !hideLoQ { count += 1 }
+        if sortBySubscribers { count += 1 }
+        return count
+    }
+    
     private func isExpanded(_ entry: LeaderboardEntry) -> Bool {
         if let explicit = expandedEntryId {
             return explicit == entry.id
         }
-        // Auto-expand top 2 if user hasn't scrolled or tapped anything
         if autoExpandedTop && entry.rank <= 2 {
             return true
         }
@@ -57,101 +73,124 @@ struct LeaderboardView: View {
         }
     }
     
+    private func openFilters() {
+        pendingCategory = selectedCategory
+        pendingIndustry = selectedIndustry
+        pendingFrequency = selectedFrequency
+        pendingHideLoQ = hideLoQ
+        pendingSortBySubs = sortBySubscribers
+        showFilters = true
+    }
+    
+    private func applyFilters() {
+        selectedCategory = pendingCategory
+        selectedIndustry = pendingIndustry
+        selectedFrequency = pendingFrequency
+        hideLoQ = pendingHideLoQ
+        sortBySubscribers = pendingSortBySubs
+        showFilters = false
+        expandedEntryId = nil
+        autoExpandedTop = true
+        reloadLeaderboard()
+    }
+    
+    private func resetFilters() {
+        pendingCategory = "all"
+        pendingIndustry = "all"
+        pendingFrequency = "any"
+        pendingHideLoQ = true
+        pendingSortBySubs = false
+    }
+    
     var body: some View {
         NavigationView {
             ZStack {
                 Color.appBackground.ignoresSafeArea()
                 
                 VStack(spacing: 0) {
-                    // ── Period pills ──
-                    HStack(spacing: 0) {
-                        ForEach(periods, id: \.self) { period in
-                            Button {
-                                selectedPeriod = period
-                                expandedEntryId = nil
-                                autoExpandedTop = true
-                                reloadLeaderboard()
-                            } label: {
-                                Text(period)
-                                    .font(.system(size: 13, weight: .bold))
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 8)
-                                    .background(selectedPeriod == period ? Color.primaryAccent : Color.clear)
-                                    .foregroundColor(selectedPeriod == period ? .appBackground : .textMuted)
-                                    .cornerRadius(8)
+                    // ── Period pills + Filter button row ──
+                    HStack(spacing: 8) {
+                        HStack(spacing: 0) {
+                            ForEach(periods, id: \.self) { period in
+                                Button {
+                                    selectedPeriod = period
+                                    expandedEntryId = nil
+                                    autoExpandedTop = true
+                                    reloadLeaderboard()
+                                } label: {
+                                    Text(period)
+                                        .font(.system(size: 13, weight: .bold))
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 8)
+                                        .background(selectedPeriod == period ? Color.primaryAccent : Color.clear)
+                                        .foregroundColor(selectedPeriod == period ? .appBackground : .textMuted)
+                                        .cornerRadius(8)
+                                }
+                            }
+                        }
+                        
+                        // Filter button
+                        Button(action: openFilters) {
+                            ZStack(alignment: .topTrailing) {
+                                Image(systemName: "line.3.horizontal.decrease")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(activeFilterCount > 0 ? .primaryAccent : .textMuted)
+                                    .frame(width: 36, height: 36)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(activeFilterCount > 0 ? Color.primaryAccent.opacity(0.15) : Color.cardBackground)
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(activeFilterCount > 0 ? Color.primaryAccent.opacity(0.4) : Color.cardBorder, lineWidth: 0.5)
+                                    )
+                                
+                                if activeFilterCount > 0 {
+                                    Text("\(activeFilterCount)")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundColor(.appBackground)
+                                        .frame(width: 16, height: 16)
+                                        .background(Circle().fill(Color.primaryAccent))
+                                        .offset(x: 4, y: -4)
+                                }
                             }
                         }
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     
-                    // ── Horizontal filter chips (always visible, scrollable) ──
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            // S&P 500 benchmark pill (non-interactive, informational)
-                            HStack(spacing: 4) {
-                                Text("S&P 500")
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundColor(.textMuted)
-                                Text(String(format: "%+.1f%%", viewModel.sp500Return))
-                                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                                    .foregroundColor(viewModel.sp500Return >= 0 ? .gains : .losses)
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Capsule().fill(Color.cardBackground))
-                            .overlay(Capsule().stroke(Color.cardBorder, lineWidth: 0.5))
-                            
-                            // Hide low quality toggle
-                            FilterChip(
-                                label: "Hide low quality",
-                                icon: hideLoQ ? "checkmark.shield.fill" : "shield",
-                                isSelected: hideLoQ
-                            ) {
-                                hideLoQ.toggle()
-                                reloadLeaderboard()
-                            }
-                            
-                            // Sort chip
-                            FilterChip(
-                                label: sortBySubscribers ? "By Subs" : "By Gain",
-                                icon: "arrow.up.arrow.down",
-                                isSelected: sortBySubscribers
-                            ) {
-                                sortBySubscribers.toggle()
-                            }
-                            
-                            // Market cap chips
-                            ForEach([("all", "All Caps"), ("large_cap", "Large Cap"), ("small_cap", "Small Cap")], id: \.0) { key, label in
-                                FilterChip(label: label, isSelected: selectedCategory == key) {
-                                    selectedCategory = key
-                                    reloadLeaderboard()
-                                }
-                            }
-                            
-                            // Frequency chips
-                            ForEach([("any", "Any Freq"), ("day_trader", "Day Traders"), ("moderate", "Moderate")], id: \.0) { key, label in
-                                FilterChip(label: label, isSelected: selectedFrequency == key) {
-                                    selectedFrequency = key
-                                    reloadLeaderboard()
-                                }
-                            }
-                            
-                            // Industry chips (dynamic from API)
-                            if let industries = viewModel.availableIndustries, !industries.isEmpty {
-                                ForEach(industries, id: \.self) { ind in
-                                    FilterChip(label: ind, isSelected: selectedIndustry == ind) {
-                                        selectedIndustry = selectedIndustry == ind ? "all" : ind
-                                        reloadLeaderboard()
-                                    }
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 12)
+                    // ── S&P 500 benchmark banner ──
+                    HStack(spacing: 10) {
+                        Image(systemName: "chart.line.uptrend.xyaxis")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.primaryAccent)
+                        
+                        Text("S&P 500")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.textSecondary)
+                        
+                        Text(String(format: "%+.2f%%", viewModel.sp500Return))
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .foregroundColor(viewModel.sp500Return >= 0 ? .gains : .losses)
+                        
+                        Spacer()
+                        
+                        Text(selectedPeriod)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.textMuted)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(Color.cardBorder.opacity(0.3)))
                     }
-                    .padding(.bottom, 6)
-                    
-                    Rectangle().fill(Color.cardBorder.opacity(0.3)).frame(height: 0.5)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Color.cardBackground)
+                    .overlay(
+                        VStack {
+                            Spacer()
+                            Rectangle().fill(Color.cardBorder.opacity(0.3)).frame(height: 0.5)
+                        }
+                    )
                     
                     // ── Leaderboard list ──
                     if viewModel.isLoading && viewModel.entries.isEmpty {
@@ -207,37 +246,204 @@ struct LeaderboardView: View {
                 if viewModel.entries.isEmpty { reloadLeaderboard() }
             }
             .sheet(isPresented: $showSettings) { SettingsView() }
+            .sheet(isPresented: $showFilters) {
+                FilterSheet(
+                    category: $pendingCategory,
+                    industry: $pendingIndustry,
+                    frequency: $pendingFrequency,
+                    hideLoQ: $pendingHideLoQ,
+                    sortBySubs: $pendingSortBySubs,
+                    availableIndustries: viewModel.availableIndustries ?? [],
+                    onApply: applyFilters,
+                    onReset: resetFilters
+                )
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            }
         }
     }
 }
 
-// MARK: - Filter Chip
+// MARK: - Filter Sheet
 
-struct FilterChip: View {
-    let label: String
-    var icon: String? = nil
-    let isSelected: Bool
-    let action: () -> Void
+struct FilterSheet: View {
+    @Binding var category: String
+    @Binding var industry: String
+    @Binding var frequency: String
+    @Binding var hideLoQ: Bool
+    @Binding var sortBySubs: Bool
+    let availableIndustries: [String]
+    let onApply: () -> Void
+    let onReset: () -> Void
+    @Environment(\.dismiss) private var dismiss
     
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                if let icon = icon {
-                    Image(systemName: icon)
-                        .font(.system(size: 9, weight: .semibold))
+        NavigationView {
+            ZStack {
+                Color.appBackground.ignoresSafeArea()
+                
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        
+                        // ── Quality ──
+                        filterSection(title: "Quality") {
+                            Toggle(isOn: $hideLoQ) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: hideLoQ ? "checkmark.shield.fill" : "shield")
+                                        .foregroundColor(.primaryAccent)
+                                        .font(.system(size: 14))
+                                    Text("Hide low quality")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.textPrimary)
+                                }
+                            }
+                            .tint(.primaryAccent)
+                        }
+                        
+                        // ── Sort ──
+                        filterSection(title: "Sort By") {
+                            HStack(spacing: 10) {
+                                filterOption(label: "Performance", isSelected: !sortBySubs) {
+                                    sortBySubs = false
+                                }
+                                filterOption(label: "Subscribers", isSelected: sortBySubs) {
+                                    sortBySubs = true
+                                }
+                            }
+                        }
+                        
+                        // ── Market Cap ──
+                        filterSection(title: "Market Cap") {
+                            HStack(spacing: 10) {
+                                filterOption(label: "All", isSelected: category == "all") {
+                                    category = "all"
+                                }
+                                filterOption(label: "Large Cap", isSelected: category == "large_cap") {
+                                    category = "large_cap"
+                                }
+                                filterOption(label: "Small Cap", isSelected: category == "small_cap") {
+                                    category = "small_cap"
+                                }
+                            }
+                        }
+                        
+                        // ── Trading Frequency ──
+                        filterSection(title: "Trading Frequency") {
+                            HStack(spacing: 10) {
+                                filterOption(label: "Any", isSelected: frequency == "any") {
+                                    frequency = "any"
+                                }
+                                filterOption(label: "Day Traders", isSelected: frequency == "day_trader") {
+                                    frequency = "day_trader"
+                                }
+                                filterOption(label: "Moderate", isSelected: frequency == "moderate") {
+                                    frequency = "moderate"
+                                }
+                            }
+                        }
+                        
+                        // ── Industry ──
+                        if !availableIndustries.isEmpty {
+                            filterSection(title: "Industry") {
+                                LazyVGrid(columns: [
+                                    GridItem(.flexible()),
+                                    GridItem(.flexible())
+                                ], spacing: 8) {
+                                    filterOption(label: "All Industries", isSelected: industry == "all") {
+                                        industry = "all"
+                                    }
+                                    ForEach(availableIndustries, id: \.self) { ind in
+                                        filterOption(label: ind, isSelected: industry == ind) {
+                                            industry = industry == ind ? "all" : ind
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        Spacer(minLength: 80)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
                 }
-                Text(label)
-                    .font(.system(size: 11, weight: .semibold))
+                
+                // ── Bottom Apply bar ──
+                VStack {
+                    Spacer()
+                    HStack(spacing: 12) {
+                        Button(action: onReset) {
+                            Text("Reset")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(.textSecondary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color.cardBorder, lineWidth: 1)
+                                )
+                        }
+                        
+                        Button(action: onApply) {
+                            Text("Apply Filters")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundColor(.appBackground)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color.primaryAccent)
+                                )
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 16)
+                    .background(
+                        Color.appBackground
+                            .shadow(color: .black.opacity(0.3), radius: 8, y: -4)
+                    )
+                }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(
-                Capsule().fill(isSelected ? Color.primaryAccent.opacity(0.15) : Color.cardBackground)
-            )
-            .foregroundColor(isSelected ? .primaryAccent : .textSecondary)
-            .overlay(
-                Capsule().stroke(isSelected ? Color.primaryAccent.opacity(0.4) : Color.cardBorder.opacity(0.5), lineWidth: 0.5)
-            )
+            .navigationTitle("Filters")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.textMuted)
+                            .font(.system(size: 20))
+                    }
+                }
+            }
+        }
+    }
+    
+    private func filterSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(.textMuted)
+                .textCase(.uppercase)
+                .tracking(0.8)
+            content()
+        }
+    }
+    
+    private func filterOption(label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(isSelected ? .appBackground : .textSecondary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(isSelected ? Color.primaryAccent : Color.cardBackground)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(isSelected ? Color.clear : Color.cardBorder, lineWidth: 0.5)
+                )
         }
     }
 }

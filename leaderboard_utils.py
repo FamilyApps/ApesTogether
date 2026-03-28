@@ -234,6 +234,8 @@ def calculate_performance_metrics(user_id, period):
             start_date = end_date - timedelta(days=1)
         elif period == '5D':
             start_date = end_date - timedelta(days=5)
+        elif period == '1M':
+            start_date = end_date - timedelta(days=30)
         elif period == '3M':
             start_date = end_date - timedelta(days=90)
         elif period == 'YTD':
@@ -667,6 +669,8 @@ def generate_user_portfolio_chart(user_id, period):
             # For multi-day periods, use daily snapshots
             if period == '5D':
                 start_date = today - timedelta(days=7)  # Get more days to ensure 5 business days
+            elif period == '1M':
+                start_date = today - timedelta(days=30)
             elif period == '3M':
                 start_date = today - timedelta(days=90)
             elif period == 'YTD':

@@ -234,24 +234,19 @@ struct AppNavBar: ViewModifier {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button(action: {}) {
-                        HStack(spacing: 8) {
-                            Image("NavLogo")
-                                .renderingMode(.original)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 28, height: 28)
-                                .clipShape(Circle())
-                            Text("Apes Together")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(.textPrimary)
-                                .lineLimit(1)
-                                .fixedSize()
-                        }
+                    HStack(spacing: 8) {
+                        Image("NavLogo")
+                            .renderingMode(.original)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 28, height: 28)
+                            .clipShape(Circle())
+                        Text("Apes Together")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.textPrimary)
+                            .lineLimit(1)
+                            .fixedSize()
                     }
-                    .buttonStyle(.plain)
-                    .disabled(true)
-                    .allowsHitTesting(false)
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {

@@ -221,7 +221,7 @@
                     <h5 class="mb-0">Portfolio Performance</h5>
                     <div class="btn-group" role="group" aria-label="Time period selector">
                         <button type="button" class="btn btn-outline-light btn-sm period-btn" data-period="1D">1D</button>
-                        <button type="button" class="btn btn-outline-light btn-sm period-btn" data-period="5D">5D</button>
+                        <button type="button" class="btn btn-outline-light btn-sm period-btn" data-period="5D">1W</button>
                         <button type="button" class="btn btn-outline-light btn-sm period-btn" data-period="1M">1M</button>
                         <button type="button" class="btn btn-outline-light btn-sm period-btn" data-period="3M">3M</button>
                         <button type="button" class="btn btn-outline-light btn-sm period-btn" data-period="YTD">YTD</button>
@@ -584,7 +584,7 @@ function loadPerformanceData(period) {
     document.getElementById('sp500-return').textContent = 'Loading...';
     
     // For all periods, use the performance API which checks chart cache first
-    // This ensures 1D and 5D use intraday data from chart cache (populated at market close)
+    // This ensures 1D and 1W use intraday data from chart cache (populated at market close)
     const apiEndpoint = `/api/portfolio/performance/${period}`;
     
     fetch(apiEndpoint)
@@ -758,7 +758,7 @@ function updatePerformanceChart(data) {
         
         // Use category scale for ALL periods including 1D
         // Category scale treats date labels as strings, avoiding Date parsing issues
-        // Backend sends pre-formatted labels (e.g., "Oct 21 9:30 AM" for 1D, "Oct 21" for 5D)
+        // Backend sends pre-formatted labels (e.g., "Oct 21 9:30 AM" for 1D, "Oct 21" for 1W)
         const useCategoryScale = true;
         
         // Extract labels and y-values from backend data
@@ -852,7 +852,7 @@ function updatePerformanceChart(data) {
                                 text: currentPeriod === '1D' ? 'Time (ET)' : 'Date'
                             },
                             ticks: {
-                                maxTicksLimit: currentPeriod === '1D' ? 8 : (currentPeriod === '5D' ? 5 : 10),
+                                maxTicksLimit: currentPeriod === '1D' ? 8 : (currentPeriod === '5D' || currentPeriod === '1W' ? 5 : 10),
                                 maxRotation: 45,
                                 minRotation: 0,
                                 autoSkip: true,
