@@ -47,6 +47,7 @@ struct LeaderboardEntry: Codable, Identifiable {
     let accountAgeDays: Int?
     let industryMix: [String: Double]?
     let lastTradeDate: String?
+    let rankChange: Int?
     
     var id: Int { user.id }
 }

@@ -247,7 +247,7 @@ struct LeaderboardView: View {
                     onApply: applyFilters,
                     onReset: resetFilters
                 )
-                .presentationDetents([.medium, .large])
+                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             }
         }
@@ -487,8 +487,15 @@ struct LeaderboardCard: View {
             // ── Compact row ──
             Button(action: onTap) {
                 HStack(spacing: 10) {
-                    // Rank badge
-                    rankBadge
+                    // Rank badge + change indicator
+                    HStack(spacing: 3) {
+                        rankBadge
+                        if let rc = entry.rankChange, rc != 0 {
+                            Image(systemName: rc > 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
+                                .font(.system(size: 7))
+                                .foregroundColor(rc > 0 ? .gains : .losses)
+                        }
+                    }
                     
                     // User info column
                     VStack(alignment: .leading, spacing: 2) {

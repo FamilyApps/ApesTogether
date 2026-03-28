@@ -408,13 +408,13 @@ def _generate_chart_points(
     # Build S&P 500 lookup map (by date for daily, by timestamp for intraday)
     if period in ['1D', '5D']:
         # For intraday: build map by timestamp for precise matching
-        # Multiply SPY prices by 10 to approximate S&P 500 index
+        # SPY_INTRADAY is already stored as spy_price * 10, do NOT multiply again
         sp500_map_timestamp = {}
         for s in sp500_data:
             if hasattr(s, 'timestamp') and s.timestamp:
-                sp500_map_timestamp[s.timestamp] = float(s.close_price) * 10
+                sp500_map_timestamp[s.timestamp] = float(s.close_price)
         # Also keep a date map for fallback
-        sp500_map = {s.date: float(s.close_price) * 10 for s in sp500_data}
+        sp500_map = {s.date: float(s.close_price) for s in sp500_data}
     else:
         # For daily: build map by date only
         sp500_map = {s.date: float(s.close_price) for s in sp500_data}
@@ -423,11 +423,8 @@ def _generate_chart_points(
     # Get baseline S&P 500 value from period start (not user join date)
     baseline_sp500 = None
     if sp500_data:
-        # Multiply by 10 for intraday SPY data to approximate S&P 500 index
-        if period in ['1D', '5D']:
-            baseline_sp500 = float(sp500_data[0].close_price) * 10
-        else:
-            baseline_sp500 = float(sp500_data[0].close_price)
+        # SPY_INTRADAY and SPY_SP500 are both already stored as spy_price * 10
+        baseline_sp500 = float(sp500_data[0].close_price)
     
     if not baseline_sp500:
         logger.warning(f"No S&P 500 baseline data found for period starting {period_start}")
