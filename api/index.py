@@ -21674,7 +21674,7 @@ def debug_user_data(username):
         html += f"<h2>Recent Transactions ({len(recent_txns)}):</h2><ul>"
         for t in recent_txns:
             ts = t.timestamp.strftime('%Y-%m-%d %H:%M') if t.timestamp else '—'
-            html += f"<li>{ts}: {t.transaction_type.upper()} {t.quantity} {t.ticker} @ ${t.price_per_share:.2f}</li>"
+            html += f"<li>{ts}: {t.transaction_type.upper()} {t.quantity} {t.ticker} @ ${t.price:.2f}</li>"
         html += "</ul>"
 
         html += f"""
