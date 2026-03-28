@@ -1,6 +1,5 @@
 # This file is specifically for Vercel's Python runtime
 # It exports the Flask app in a way that Vercel expects
-# Deploy trigger: 2026-03-27
 
 import os
 import sys
@@ -11,31 +10,6 @@ root_dir = os.path.dirname(api_dir)
 sys.path.insert(0, api_dir)
 sys.path.insert(0, root_dir)  # For blueprints in root: mobile_api, leaderboard_routes, etc.
 
-# FORCE REBUILD: Print version info to trigger function bundle refresh
-print(f"🔄 VERCEL BUILD INFO - Commit: {os.environ.get('VERCEL_GIT_COMMIT_SHA', 'UNKNOWN')}")
-print(f"🔄 Deployment ID: {os.environ.get('VERCEL_DEPLOYMENT_ID', 'UNKNOWN')}")
-print(f"🔄 Environment: {os.environ.get('VERCEL_ENV', 'UNKNOWN')}")
-
-# Now import the app from index.py
-error_info = None
-try:
-    from index import app
-    print("Successfully imported app from index.py")
-    print(f"App routes: {[rule.rule for rule in app.url_map.iter_rules()]}")
-except Exception as e:
-    import traceback
-    error_message = str(e)
-    error_traceback = traceback.format_exc()
-    print(f"Error importing app from index.py: {error_message}")
-    print(error_traceback)
-    
-    # Create a fallback app — no internal details exposed
-    from flask import Flask, jsonify
-    app = Flask(__name__)
-    
-    @app.route('/')
-    def debug_index():
-        return jsonify({
-            "error": "Application failed to start. Check server logs."
-        }), 500
+# Import the Flask app from index.py
+from index import app
 
