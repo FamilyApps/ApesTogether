@@ -8,15 +8,6 @@ struct TopInfluencersView: View {
     @State private var showFilters = false
     @State private var showSettings = false
     
-    init() {
-        let appearance = UINavigationBarAppearance()
-        appearance.configureWithOpaqueBackground()
-        appearance.backgroundColor = UIColor(Color.appBackground)
-        appearance.titleTextAttributes = [.foregroundColor: UIColor(Color.textPrimary)]
-        appearance.largeTitleTextAttributes = [.foregroundColor: UIColor(Color.textPrimary)]
-        UINavigationBar.appearance().standardAppearance = appearance
-        UINavigationBar.appearance().scrollEdgeAppearance = appearance
-    }
     
     private var activeFilterCount: Int {
         selectedIndustry != "all" ? 1 : 0

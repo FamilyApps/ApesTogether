@@ -893,9 +893,11 @@ def get_leaderboard():
                 if account_age_days < min_age:
                     continue
             
-            # ── Industry filter ──
+            # ── Sector filter (supports comma-separated multi-select) ──
             if industry_filter and industry_filter != 'all':
-                if industry_filter not in industry_mix:
+                requested_sectors = [s.strip() for s in industry_filter.split(',')]
+                # User must have at least one of the selected sectors
+                if not any(sector in industry_mix for sector in requested_sectors):
                     continue
             
             # ── Frequency filter ──

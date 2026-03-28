@@ -8,10 +8,9 @@ struct LeaderboardView: View {
     @StateObject private var viewModel = LeaderboardViewModel()
     @State private var selectedPeriod = "1W"
     @State private var selectedCategory = "all"
-    @State private var selectedIndustry = "all"
+    @State private var selectedSectors: Set<String> = []
     @State private var selectedFrequency = "any"
     @State private var hideLoQ = true
-    @State private var sortBySubscribers = false
     @State private var showSettings = false
     @State private var showFilters = false
     @State private var expandedEntryId: Int? = nil
@@ -19,37 +18,25 @@ struct LeaderboardView: View {
     
     // Pending filter state (applied only on "Apply")
     @State private var pendingCategory = "all"
-    @State private var pendingIndustry = "all"
+    @State private var pendingSectors: Set<String> = []
     @State private var pendingFrequency = "any"
     @State private var pendingHideLoQ = true
-    @State private var pendingSortBySubs = false
     
     private let periods = ["1D", "1W", "1M", "3M", "YTD", "1Y"]
     
-    init() {
-        let appearance = UINavigationBarAppearance()
-        appearance.configureWithOpaqueBackground()
-        appearance.backgroundColor = UIColor(Color.appBackground)
-        appearance.titleTextAttributes = [.foregroundColor: UIColor(Color.textPrimary)]
-        appearance.largeTitleTextAttributes = [.foregroundColor: UIColor(Color.textPrimary)]
-        UINavigationBar.appearance().standardAppearance = appearance
-        UINavigationBar.appearance().scrollEdgeAppearance = appearance
-    }
-    
-    private var sortedEntries: [LeaderboardEntry] {
-        if sortBySubscribers {
-            return viewModel.entries.sorted { $0.subscriberCount > $1.subscriberCount }
-        }
-        return viewModel.entries
-    }
+    // 11 GICS sectors
+    static let gicsSectors = [
+        "Technology", "Healthcare", "Financials", "Consumer Discretionary",
+        "Communication Services", "Industrials", "Consumer Staples",
+        "Energy", "Utilities", "Real Estate", "Materials"
+    ]
     
     private var activeFilterCount: Int {
         var count = 0
         if selectedCategory != "all" { count += 1 }
-        if selectedIndustry != "all" { count += 1 }
+        if !selectedSectors.isEmpty { count += 1 }
         if selectedFrequency != "any" { count += 1 }
         if !hideLoQ { count += 1 }
-        if sortBySubscribers { count += 1 }
         return count
     }
     
@@ -63,11 +50,15 @@ struct LeaderboardView: View {
         return false
     }
     
+    private var sectorFilterParam: String {
+        selectedSectors.isEmpty ? "all" : selectedSectors.sorted().joined(separator: ",")
+    }
+    
     private func reloadLeaderboard() {
         Task {
             await viewModel.loadLeaderboard(
                 period: selectedPeriod, category: selectedCategory,
-                activeEdge: hideLoQ, industry: selectedIndustry,
+                activeEdge: hideLoQ, industry: sectorFilterParam,
                 frequency: selectedFrequency
             )
         }
@@ -75,19 +66,17 @@ struct LeaderboardView: View {
     
     private func openFilters() {
         pendingCategory = selectedCategory
-        pendingIndustry = selectedIndustry
+        pendingSectors = selectedSectors
         pendingFrequency = selectedFrequency
         pendingHideLoQ = hideLoQ
-        pendingSortBySubs = sortBySubscribers
         showFilters = true
     }
     
     private func applyFilters() {
         selectedCategory = pendingCategory
-        selectedIndustry = pendingIndustry
+        selectedSectors = pendingSectors
         selectedFrequency = pendingFrequency
         hideLoQ = pendingHideLoQ
-        sortBySubscribers = pendingSortBySubs
         showFilters = false
         expandedEntryId = nil
         autoExpandedTop = true
@@ -96,10 +85,9 @@ struct LeaderboardView: View {
     
     private func resetFilters() {
         pendingCategory = "all"
-        pendingIndustry = "all"
+        pendingSectors = []
         pendingFrequency = "any"
         pendingHideLoQ = true
-        pendingSortBySubs = false
     }
     
     var body: some View {
@@ -215,7 +203,7 @@ struct LeaderboardView: View {
                     } else {
                         ScrollView {
                             LazyVStack(spacing: 8) {
-                                ForEach(sortedEntries) { entry in
+                                ForEach(viewModel.entries) { entry in
                                     LeaderboardCard(
                                         entry: entry,
                                         isExpanded: isExpanded(entry),
@@ -249,11 +237,10 @@ struct LeaderboardView: View {
             .sheet(isPresented: $showFilters) {
                 FilterSheet(
                     category: $pendingCategory,
-                    industry: $pendingIndustry,
+                    sectors: $pendingSectors,
                     frequency: $pendingFrequency,
                     hideLoQ: $pendingHideLoQ,
-                    sortBySubs: $pendingSortBySubs,
-                    availableIndustries: viewModel.availableIndustries ?? [],
+                    allSectors: LeaderboardView.gicsSectors,
                     onApply: applyFilters,
                     onReset: resetFilters
                 )
@@ -268,14 +255,15 @@ struct LeaderboardView: View {
 
 struct FilterSheet: View {
     @Binding var category: String
-    @Binding var industry: String
+    @Binding var sectors: Set<String>
     @Binding var frequency: String
     @Binding var hideLoQ: Bool
-    @Binding var sortBySubs: Bool
-    let availableIndustries: [String]
+    let allSectors: [String]
     let onApply: () -> Void
     let onReset: () -> Void
     @Environment(\.dismiss) private var dismiss
+    
+    private var allSectorsSelected: Bool { sectors.isEmpty }
     
     var body: some View {
         NavigationView {
@@ -298,18 +286,6 @@ struct FilterSheet: View {
                                 }
                             }
                             .tint(.primaryAccent)
-                        }
-                        
-                        // ── Sort ──
-                        filterSection(title: "Sort By") {
-                            HStack(spacing: 10) {
-                                filterOption(label: "Performance", isSelected: !sortBySubs) {
-                                    sortBySubs = false
-                                }
-                                filterOption(label: "Subscribers", isSelected: sortBySubs) {
-                                    sortBySubs = true
-                                }
-                            }
                         }
                         
                         // ── Market Cap ──
@@ -342,23 +318,61 @@ struct FilterSheet: View {
                             }
                         }
                         
-                        // ── Industry ──
-                        if !availableIndustries.isEmpty {
-                            filterSection(title: "Industry") {
-                                LazyVGrid(columns: [
-                                    GridItem(.flexible()),
-                                    GridItem(.flexible())
-                                ], spacing: 8) {
-                                    filterOption(label: "All Industries", isSelected: industry == "all") {
-                                        industry = "all"
+                        // ── Sector (GICS) ──
+                        filterSection(title: "Sector") {
+                            VStack(spacing: 0) {
+                                // "All Sectors" row
+                                Button {
+                                    sectors = []
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: allSectorsSelected ? "checkmark.circle.fill" : "circle")
+                                            .font(.system(size: 18))
+                                            .foregroundColor(allSectorsSelected ? .primaryAccent : .textMuted)
+                                        Text("All Sectors")
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundColor(.textPrimary)
+                                        Spacer()
                                     }
-                                    ForEach(availableIndustries, id: \.self) { ind in
-                                        filterOption(label: ind, isSelected: industry == ind) {
-                                            industry = industry == ind ? "all" : ind
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 10)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .fill(allSectorsSelected ? Color.primaryAccent.opacity(0.1) : Color.cardBackground)
+                                    )
+                                }
+                                
+                                ForEach(allSectors, id: \.self) { sector in
+                                    let isSelected = sectors.contains(sector)
+                                    Button {
+                                        if isSelected {
+                                            sectors.remove(sector)
+                                        } else {
+                                            sectors.insert(sector)
                                         }
+                                    } label: {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                                                .font(.system(size: 18))
+                                                .foregroundColor(isSelected ? .primaryAccent : .textMuted)
+                                            Text(sector)
+                                                .font(.system(size: 14, weight: .medium))
+                                                .foregroundColor(.textPrimary)
+                                            Spacer()
+                                        }
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 10)
                                     }
                                 }
                             }
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color.cardBackground)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.cardBorder, lineWidth: 0.5)
+                            )
                         }
                         
                         Spacer(minLength: 80)
@@ -599,25 +613,54 @@ struct LeaderboardCard: View {
             )
             .padding(.horizontal, 14)
             
-            // Industry mix pills
+            // Sector mix pills (by dollar value)
             if let mix = entry.industryMix, !mix.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(Array(mix.sorted(by: { $0.value > $1.value }).prefix(4)), id: \.key) { name, pct in
-                            HStack(spacing: 3) {
-                                Text(name)
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundColor(.textSecondary)
-                                Text(String(format: "%.0f%%", pct))
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundColor(.primaryAccent)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("PORTFOLIO MIX")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.textMuted)
+                        .tracking(0.6)
+                        .padding(.horizontal, 14)
+                    
+                    // Stacked bar showing sector proportions
+                    GeometryReader { geo in
+                        HStack(spacing: 1) {
+                            ForEach(Array(mix.sorted(by: { $0.value > $1.value })), id: \.key) { name, pct in
+                                let width = max(geo.size.width * CGFloat(pct / 100.0), 2)
+                                Rectangle()
+                                    .fill(sectorColor(name))
+                                    .frame(width: width)
                             }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(Capsule().fill(Color.primaryAccent.opacity(0.08)))
                         }
+                        .clipShape(Capsule())
                     }
+                    .frame(height: 6)
                     .padding(.horizontal, 14)
+                    
+                    // Sector labels
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(Array(mix.sorted(by: { $0.value > $1.value })), id: \.key) { name, pct in
+                                HStack(spacing: 4) {
+                                    Circle()
+                                        .fill(sectorColor(name))
+                                        .frame(width: 6, height: 6)
+                                    Text(name)
+                                        .font(.system(size: 10, weight: .medium))
+                                        .foregroundColor(.textSecondary)
+                                    Text(String(format: "%.0f%%", pct))
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundColor(.textPrimary)
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(
+                                    Capsule().fill(Color.cardBorder.opacity(0.3))
+                                )
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                    }
                 }
             }
             
@@ -681,6 +724,23 @@ struct LeaderboardCard: View {
         if days < 30 { return "\(days)d" }
         if days < 365 { return "\(days / 30)mo" }
         return "\(days / 365)y"
+    }
+    
+    private func sectorColor(_ sector: String) -> Color {
+        switch sector.lowercased() {
+        case let s where s.contains("tech"):        return Color(hex: "3B82F6")
+        case let s where s.contains("health"):      return Color(hex: "22C55E")
+        case let s where s.contains("financ"):      return Color(hex: "F59E0B")
+        case let s where s.contains("consumer d"):  return Color(hex: "EC4899")
+        case let s where s.contains("communicat"):  return Color(hex: "8B5CF6")
+        case let s where s.contains("industrial"):  return Color(hex: "6366F1")
+        case let s where s.contains("consumer s"):  return Color(hex: "14B8A6")
+        case let s where s.contains("energy"):      return Color(hex: "EF4444")
+        case let s where s.contains("utilit"):       return Color(hex: "64748B")
+        case let s where s.contains("real"):         return Color(hex: "D97706")
+        case let s where s.contains("material"):     return Color(hex: "78716C")
+        default:                                      return Color(hex: "9CA3AF")
+        }
     }
 }
 

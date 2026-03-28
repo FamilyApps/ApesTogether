@@ -229,6 +229,26 @@ struct SectionHeader: View {
 struct AppNavBar: ViewModifier {
     @Binding var showSettings: Bool
     
+    init(showSettings: Binding<Bool>) {
+        _showSettings = showSettings
+        // Remove toolbar button background tint that causes the "shape"
+        let barButtonAppearance = UIBarButtonItemAppearance(style: .plain)
+        barButtonAppearance.normal.backgroundImage = UIImage()
+        barButtonAppearance.highlighted.backgroundImage = UIImage()
+        
+        let navAppearance = UINavigationBarAppearance()
+        navAppearance.configureWithOpaqueBackground()
+        navAppearance.backgroundColor = UIColor(Color.appBackground)
+        navAppearance.shadowColor = .clear
+        navAppearance.buttonAppearance = barButtonAppearance
+        navAppearance.doneButtonAppearance = barButtonAppearance
+        
+        UINavigationBar.appearance().standardAppearance = navAppearance
+        UINavigationBar.appearance().scrollEdgeAppearance = navAppearance
+        UINavigationBar.appearance().compactAppearance = navAppearance
+        UINavigationBar.appearance().tintColor = UIColor(Color.textSecondary)
+    }
+    
     func body(content: Content) -> some View {
         content
             .navigationBarTitleDisplayMode(.inline)
@@ -247,6 +267,8 @@ struct AppNavBar: ViewModifier {
                             .lineLimit(1)
                             .fixedSize()
                     }
+                    .contentShape(Rectangle())
+                    .allowsHitTesting(false)
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
