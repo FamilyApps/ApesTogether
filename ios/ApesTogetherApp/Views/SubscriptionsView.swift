@@ -14,105 +14,105 @@ struct SubscriptionsView: View {
                     // ── Custom header (no nav bar pill) ──
                     AppHeaderRow(showSettings: $showSettings)
                     
-                ScrollView {
-                    VStack(spacing: 24) {
-                        // My Subscribers section
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack {
-                                SectionHeader(title: "My Subscribers")
-                                Spacer()
-                                Text("\(viewModel.subscriberCount)")
-                                    .font(.title2.bold())
-                                    .foregroundColor(.primaryAccent)
-                            }
-                            
-                            if viewModel.subscribers.isEmpty {
+                    ScrollView {
+                        VStack(spacing: 24) {
+                            // My Subscribers section
+                            VStack(alignment: .leading, spacing: 12) {
                                 HStack {
-                                    Image(systemName: "person.badge.plus")
-                                        .foregroundColor(.primaryAccent.opacity(0.6))
-                                        .font(.title3)
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text("No subscribers yet")
-                                            .font(.subheadline.weight(.medium))
-                                            .foregroundColor(.textPrimary)
-                                        Text("Share your portfolio to attract subscribers")
-                                            .font(.caption)
-                                            .foregroundColor(.textSecondary)
-                                    }
+                                    SectionHeader(title: "My Subscribers")
                                     Spacer()
+                                    Text("\(viewModel.subscriberCount)")
+                                        .font(.title2.bold())
+                                        .foregroundColor(.primaryAccent)
                                 }
-                                .padding()
-                                .cardStyle(padding: 0)
-                            } else {
-                                VStack(spacing: 0) {
-                                    ForEach(viewModel.subscribers) { sub in
-                                        HStack {
-                                            Image(systemName: "person.circle.fill")
-                                                .foregroundColor(.primaryAccent)
-                                                .font(.title3)
-                                            Text(sub.subscriber?.username ?? "User")
+                                
+                                if viewModel.subscribers.isEmpty {
+                                    HStack {
+                                        Image(systemName: "person.badge.plus")
+                                            .foregroundColor(.primaryAccent.opacity(0.6))
+                                            .font(.title3)
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text("No subscribers yet")
                                                 .font(.subheadline.weight(.medium))
                                                 .foregroundColor(.textPrimary)
-                                            Spacer()
-                                            Text("Since \(formatShortDate(sub.createdAt))")
+                                            Text("Share your portfolio to attract subscribers")
                                                 .font(.caption)
-                                                .foregroundColor(.textMuted)
+                                                .foregroundColor(.textSecondary)
                                         }
-                                        .padding()
-                                        if sub.id != viewModel.subscribers.last?.id {
-                                            AccentDivider()
-                                        }
+                                        Spacer()
                                     }
-                                }
-                                .cardStyle(padding: 0)
-                            }
-                        }
-                        
-                        // My Subscriptions section
-                        VStack(alignment: .leading, spacing: 12) {
-                            SectionHeader(title: "My Subscriptions")
-                            
-                            if viewModel.subscriptions.isEmpty {
-                                HStack {
-                                    Image(systemName: "star.circle")
-                                        .foregroundColor(.primaryAccent.opacity(0.6))
-                                        .font(.title3)
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text("No subscriptions yet")
-                                            .font(.subheadline.weight(.medium))
-                                            .foregroundColor(.textPrimary)
-                                        Text("Subscribe to traders from the leaderboard to get real-time alerts")
-                                            .font(.caption)
-                                            .foregroundColor(.textSecondary)
-                                    }
-                                    Spacer()
-                                }
-                                .padding()
-                                .cardStyle(padding: 0)
-                            } else {
-                                VStack(spacing: 0) {
-                                    ForEach(viewModel.subscriptions) { subscription in
-                                        if let owner = subscription.portfolioOwner {
-                                            NavigationLink(destination: PortfolioDetailView(slug: owner.portfolioSlug ?? "")) {
-                                                SubscriptionRow(subscription: subscription, viewModel: viewModel)
+                                    .padding()
+                                    .cardStyle(padding: 0)
+                                } else {
+                                    VStack(spacing: 0) {
+                                        ForEach(viewModel.subscribers) { sub in
+                                            HStack {
+                                                Image(systemName: "person.circle.fill")
+                                                    .foregroundColor(.primaryAccent)
+                                                    .font(.title3)
+                                                Text(sub.subscriber?.username ?? "User")
+                                                    .font(.subheadline.weight(.medium))
+                                                    .foregroundColor(.textPrimary)
+                                                Spacer()
+                                                Text("Since \(formatShortDate(sub.createdAt))")
+                                                    .font(.caption)
+                                                    .foregroundColor(.textMuted)
                                             }
-                                            .buttonStyle(PlainButtonStyle())
-                                            if subscription.id != viewModel.subscriptions.last?.id {
+                                            .padding()
+                                            if sub.id != viewModel.subscribers.last?.id {
                                                 AccentDivider()
                                             }
                                         }
                                     }
+                                    .cardStyle(padding: 0)
                                 }
-                                .cardStyle(padding: 0)
+                            }
+                            
+                            // My Subscriptions section
+                            VStack(alignment: .leading, spacing: 12) {
+                                SectionHeader(title: "My Subscriptions")
+                                
+                                if viewModel.subscriptions.isEmpty {
+                                    HStack {
+                                        Image(systemName: "star.circle")
+                                            .foregroundColor(.primaryAccent.opacity(0.6))
+                                            .font(.title3)
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text("No subscriptions yet")
+                                                .font(.subheadline.weight(.medium))
+                                                .foregroundColor(.textPrimary)
+                                            Text("Subscribe to traders from the leaderboard to get real-time alerts")
+                                                .font(.caption)
+                                                .foregroundColor(.textSecondary)
+                                        }
+                                        Spacer()
+                                    }
+                                    .padding()
+                                    .cardStyle(padding: 0)
+                                } else {
+                                    VStack(spacing: 0) {
+                                        ForEach(viewModel.subscriptions) { subscription in
+                                            if let owner = subscription.portfolioOwner {
+                                                NavigationLink(destination: PortfolioDetailView(slug: owner.portfolioSlug ?? "")) {
+                                                    SubscriptionRow(subscription: subscription, viewModel: viewModel)
+                                                }
+                                                .buttonStyle(PlainButtonStyle())
+                                                if subscription.id != viewModel.subscriptions.last?.id {
+                                                    AccentDivider()
+                                                }
+                                            }
+                                        }
+                                    }
+                                    .cardStyle(padding: 0)
+                                }
                             }
                         }
+                        .padding()
                     }
-                    .padding()
+                    .refreshable {
+                        await viewModel.loadSubscriptions()
+                    }
                 }
-                .refreshable {
-                    await viewModel.loadSubscriptions()
-                }
-                } // end VStack with header
             }
             .appNavBar(showSettings: $showSettings)
             .sheet(isPresented: $showSettings) {
