@@ -96,6 +96,67 @@ def classify_market_cap(market_cap_str):
     except (ValueError, AttributeError):
         return 'unknown'
 
+# Alpha Vantage returns sectors in ALL CAPS and sometimes uses different names
+# than our standard GICS labels. This map normalizes them.
+AV_SECTOR_TO_GICS = {
+    'TECHNOLOGY': 'Technology',
+    'HEALTHCARE': 'Healthcare',
+    'FINANCIALS': 'Financials',
+    'FINANCIAL SERVICES': 'Financials',
+    'CONSUMER DISCRETIONARY': 'Consumer Discretionary',
+    'CONSUMER CYCLICAL': 'Consumer Discretionary',
+    'COMMUNICATION SERVICES': 'Communication Services',
+    'INDUSTRIALS': 'Industrials',
+    'CONSUMER STAPLES': 'Consumer Staples',
+    'CONSUMER DEFENSIVE': 'Consumer Staples',
+    'ENERGY': 'Energy',
+    'UTILITIES': 'Utilities',
+    'REAL ESTATE': 'Real Estate',
+    'MATERIALS': 'Materials',
+    'BASIC MATERIALS': 'Materials',
+}
+
+ETF_SECTOR_FALLBACK = {
+    'GLD': 'Materials',       # Gold ETF
+    'GLTR': 'Materials',      # Precious metals ETF
+    'SLV': 'Materials',       # Silver ETF
+    'IAU': 'Materials',       # Gold ETF
+    'SPY': 'Other',           # S&P 500 ETF (broad market)
+    'QQQ': 'Technology',      # Nasdaq 100 ETF
+    'VOO': 'Other',           # S&P 500 ETF
+    'VTI': 'Other',           # Total Stock Market ETF
+    'ARKK': 'Technology',     # ARK Innovation ETF
+    'XLF': 'Financials',      # Financial Select Sector SPDR
+    'XLE': 'Energy',          # Energy Select Sector SPDR
+    'XLK': 'Technology',      # Technology Select Sector SPDR
+}
+
+# Tickers Alpha Vantage OVERVIEW doesn't cover (restructured, recently listed, etc.)
+MANUAL_SECTOR_OVERRIDES = {
+    'TLN': 'Utilities',       # Talen Energy Corp — independent power producer
+}
+
+def get_etf_sector_fallback(ticker):
+    """Return sector for ETFs/funds or manually overridden tickers that AV can't classify."""
+    t = ticker.upper()
+    return ETF_SECTOR_FALLBACK.get(t) or MANUAL_SECTOR_OVERRIDES.get(t)
+
+
+def normalize_sector_name(sector):
+    """Normalize Alpha Vantage sector name to standard GICS label."""
+    if not sector:
+        return None
+    upper = sector.strip().upper()
+    if upper in AV_SECTOR_TO_GICS:
+        return AV_SECTOR_TO_GICS[upper]
+    # Already title-cased GICS name?
+    for gics in AV_SECTOR_TO_GICS.values():
+        if upper == gics.upper():
+            return gics
+    # Unknown — return title-cased as-is
+    return sector.strip().title()
+
+
 def get_naics_code_mapping():
     """
     Return a mapping of common industries to NAICS codes
@@ -196,7 +257,24 @@ def populate_stock_info(ticker, force_update=False):
     overview_data = get_alpha_vantage_company_overview(ticker_upper)
     
     if not overview_data:
-        print(f"Failed to get overview data for {ticker_upper}")
+        # Alpha Vantage has no data — try manual/ETF fallback
+        fallback_sector = get_etf_sector_fallback(ticker_upper)
+        if fallback_sector:
+            if not stock_info:
+                stock_info = StockInfo(ticker=ticker_upper)
+                db.session.add(stock_info)
+            stock_info.company_name = stock_info.company_name or ticker_upper
+            stock_info.sector = fallback_sector
+            stock_info.last_updated = datetime.now()
+            try:
+                db.session.commit()
+                print(f"✓ Used manual fallback for {ticker_upper}: {fallback_sector}")
+                return stock_info
+            except Exception as e:
+                db.session.rollback()
+                print(f"Error saving fallback for {ticker_upper}: {str(e)}")
+                return None
+        print(f"Failed to get overview data for {ticker_upper} (no fallback available)")
         return None
     
     # Create or update stock info
@@ -206,7 +284,7 @@ def populate_stock_info(ticker, force_update=False):
     
     # Update fields from Alpha Vantage data
     stock_info.company_name = overview_data.get('Name', ticker_upper)
-    stock_info.sector = overview_data.get('Sector')
+    stock_info.sector = normalize_sector_name(overview_data.get('Sector'))
     stock_info.industry = overview_data.get('Industry')
     stock_info.exchange = overview_data.get('Exchange')
     stock_info.country = overview_data.get('Country', 'US')

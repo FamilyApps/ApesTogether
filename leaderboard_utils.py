@@ -1252,7 +1252,13 @@ def calculate_industry_mix(user_id):
             stock_current_value = (stock_purchase_value / total_purchase_value) * total_value
             
             # Use GICS sector (e.g. 'Technology', 'Healthcare') not sub-industry
-            sector = stock_info.sector if stock_info and stock_info.sector else 'Other'
+            raw_sector = stock_info.sector if stock_info and stock_info.sector else None
+            if raw_sector:
+                from stock_metadata_utils import normalize_sector_name
+                sector = normalize_sector_name(raw_sector)
+            else:
+                from stock_metadata_utils import get_etf_sector_fallback
+                sector = get_etf_sector_fallback(stock.ticker) or 'Other'
             
             industry_values[sector] = industry_values.get(sector, 0) + stock_current_value
     

@@ -3607,19 +3607,52 @@ def admin_run_all_backfills():
         results['sp500_backfill'] = {'error': str(e)}
         logger.error(f"SP500 backfill error: {e}")
 
-    # ── PART 2: Sector backfill (up to 20 tickers, 2s sleep between calls) ──
+    # ── PART 2: Normalize existing uppercase sectors + backfill missing ──
     try:
+        from stock_metadata_utils import normalize_sector_name, get_etf_sector_fallback
+
         held_tickers = db.session.query(Stock.ticker).filter(Stock.quantity > 0).distinct().all()
         held_tickers = [t[0].upper() for t in held_tickers]
 
+        # First pass: normalize any existing uppercase sectors in DB
+        normalized_count = 0
+        for ticker in held_tickers:
+            info = StockInfo.query.filter_by(ticker=ticker).first()
+            if info and info.sector:
+                fixed = normalize_sector_name(info.sector)
+                if fixed != info.sector:
+                    info.sector = fixed
+                    normalized_count += 1
+        if normalized_count > 0:
+            db.session.commit()
+
+        # Second pass: find truly missing sectors
         missing = []
         for ticker in held_tickers:
             info = StockInfo.query.filter_by(ticker=ticker).first()
             if not info or not info.sector:
                 missing.append(ticker)
 
+        # Try ETF fallback first (no API call needed)
+        etf_fixed = 0
+        still_missing = []
+        for ticker in missing:
+            fallback = get_etf_sector_fallback(ticker)
+            if fallback:
+                info = StockInfo.query.filter_by(ticker=ticker).first()
+                if not info:
+                    info = StockInfo(ticker=ticker)
+                    db.session.add(info)
+                info.sector = fallback
+                etf_fixed += 1
+            else:
+                still_missing.append(ticker)
+        if etf_fixed > 0:
+            db.session.commit()
+
+        # API calls for all remaining (premium AV account: 150 req/min)
         sector_results = []
-        for ticker in missing[:20]:
+        for ticker in still_missing:
             try:
                 result = populate_stock_info(ticker, force_update=True)
                 if result and result.sector:
@@ -3628,20 +3661,22 @@ def admin_run_all_backfills():
                     sector_results.append({'ticker': ticker, 'status': 'failed'})
             except Exception as e:
                 sector_results.append({'ticker': ticker, 'status': 'error', 'error': str(e)})
-            _time.sleep(2)
+            _time.sleep(0.5)
 
         ok_count = sum(1 for r in sector_results if r.get('status') == 'ok')
-        remaining = len(missing) - min(20, len(missing))
+        remaining = len(still_missing) - len(sector_results)
         results['sector_backfill'] = {
             'success': True,
             'total_held': len(held_tickers),
             'missing_before': len(missing),
-            'processed': len(sector_results),
-            'succeeded': ok_count,
+            'normalized_existing': normalized_count,
+            'etf_fallback_fixed': etf_fixed,
+            'api_processed': len(sector_results),
+            'api_succeeded': ok_count,
             'remaining': remaining,
             'details': sector_results
         }
-        logger.info(f"Sector backfill complete: {ok_count}/{len(sector_results)} succeeded, {remaining} remaining")
+        logger.info(f"Sector backfill: {normalized_count} normalized, {etf_fixed} ETFs fixed, {ok_count}/{len(sector_results)} API ok, {remaining} remaining")
     except Exception as e:
         results['sector_backfill'] = {'error': str(e)}
         logger.error(f"Sector backfill error: {e}")
