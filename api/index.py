@@ -6705,10 +6705,22 @@ def cache_backfill_task():
     import traceback
     import time
     
+    db_retry = app.db_retry
+    
     task_type = request.args.get('type')
     user_id = request.args.get('user_id', 0, type=int)
     period = request.args.get('period', '')
     t_start = time.time()
+    
+    # Fresh connection for each task to avoid SSL drops from PgBouncer
+    try:
+        db.session.remove()
+    except Exception:
+        pass
+    try:
+        db.engine.dispose()
+    except Exception:
+        pass
     
     try:
         if task_type == 'chart':
@@ -6717,8 +6729,7 @@ def cache_backfill_task():
             
             logger.info(f"[BACKFILL] chart: user={user_id} period={period} — generating...")
             t0 = time.time()
-            with db.session.no_autoflush:
-                chart_data = generate_chart_from_snapshots(user_id, period)
+            chart_data = db_retry(lambda: generate_chart_from_snapshots(user_id, period), max_retries=2)
             gen_time = round(time.time() - t0, 2)
             logger.info(f"[BACKFILL] chart: generate took {gen_time}s, got data={chart_data is not None}")
             
@@ -6727,16 +6738,18 @@ def cache_backfill_task():
                 now = datetime.now()
                 logger.info(f"[BACKFILL] chart: writing {len(chart_json)} bytes to DB...")
                 t1 = time.time()
-                db.session.execute(text("SET LOCAL statement_timeout = '30s'"))
-                db.session.execute(
-                    text("DELETE FROM user_portfolio_chart_cache WHERE user_id = :uid AND period = :p"),
-                    {'uid': user_id, 'p': period}
-                )
-                db.session.execute(
-                    text("INSERT INTO user_portfolio_chart_cache (user_id, period, chart_data, generated_at) VALUES (:uid, :p, :cd, :ga)"),
-                    {'uid': user_id, 'p': period, 'cd': chart_json, 'ga': now}
-                )
-                db.session.commit()
+                def _write_chart():
+                    db.session.execute(text("SET LOCAL statement_timeout = '30s'"))
+                    db.session.execute(
+                        text("DELETE FROM user_portfolio_chart_cache WHERE user_id = :uid AND period = :p"),
+                        {'uid': user_id, 'p': period}
+                    )
+                    db.session.execute(
+                        text("INSERT INTO user_portfolio_chart_cache (user_id, period, chart_data, generated_at) VALUES (:uid, :p, :cd, :ga)"),
+                        {'uid': user_id, 'p': period, 'cd': chart_json, 'ga': now}
+                    )
+                    db.session.commit()
+                db_retry(_write_chart, max_retries=2)
                 db_time = round(time.time() - t1, 2)
                 total = round(time.time() - t_start, 2)
                 msg = f'Chart cached for user {user_id} period {period} ({len(chart_json)}B, gen={gen_time}s, db={db_time}s, total={total}s)'
@@ -6755,8 +6768,7 @@ def cache_backfill_task():
             for category in categories:
                 logger.info(f"[BACKFILL] leaderboard: period={period} category={category}")
                 t0 = time.time()
-                with db.session.no_autoflush:
-                    leaderboard_data = calculate_leaderboard_data(period, 20, category)
+                leaderboard_data = db_retry(lambda cat=category: calculate_leaderboard_data(period, 20, cat), max_retries=2)
                 calc_time = round(time.time() - t0, 2)
                 entry_count = len(leaderboard_data) if leaderboard_data else 0
                 logger.info(f"[BACKFILL] leaderboard: {category} calc={calc_time}s entries={entry_count}")
@@ -6765,16 +6777,18 @@ def cache_backfill_task():
                     lb_json = json.dumps(leaderboard_data)
                     now = datetime.now()
                     cache_key = f"{period}_{category}"
-                    for suffix in ['_auth', '_anon']:
-                        full_key = cache_key + suffix
-                        db.session.execute(text("SET LOCAL statement_timeout = '30s'"))
-                        db.session.execute(text("DELETE FROM leaderboard_cache WHERE period = :pk"), {'pk': full_key})
-                        db.session.execute(
-                            text("INSERT INTO leaderboard_cache (period, leaderboard_data, generated_at) VALUES (:pk, :ld, :ga)"),
-                            {'pk': full_key, 'ld': lb_json, 'ga': now}
-                        )
-                        generated += 1
-                    db.session.commit()
+                    def _write_lb(ck=cache_key, lj=lb_json, n=now):
+                        for suffix in ['_auth', '_anon']:
+                            full_key = ck + suffix
+                            db.session.execute(text("SET LOCAL statement_timeout = '30s'"))
+                            db.session.execute(text("DELETE FROM leaderboard_cache WHERE period = :pk"), {'pk': full_key})
+                            db.session.execute(
+                                text("INSERT INTO leaderboard_cache (period, leaderboard_data, generated_at) VALUES (:pk, :ld, :ga)"),
+                                {'pk': full_key, 'ld': lj, 'ga': n}
+                            )
+                        db.session.commit()
+                    db_retry(_write_lb, max_retries=2)
+                    generated += 2
                     details.append(f'{category}: {entry_count} entries ({calc_time}s)')
                 else:
                     details.append(f'{category}: no data ({calc_time}s)')
@@ -6789,32 +6803,33 @@ def cache_backfill_task():
             
             logger.info(f"[BACKFILL] stats: user={user_id}")
             t0 = time.time()
-            with db.session.no_autoflush:
-                stats_data = calculate_user_portfolio_stats(user_id)
+            stats_data = db_retry(lambda: calculate_user_portfolio_stats(user_id), max_retries=2)
             calc_time = round(time.time() - t0, 2)
             logger.info(f"[BACKFILL] stats: calc={calc_time}s industry_mix={stats_data.get('industry_mix')}")
             
             industry_json = json.dumps(stats_data['industry_mix']) if isinstance(stats_data.get('industry_mix'), dict) else stats_data.get('industry_mix', '{}')
-            db.session.execute(text("SET LOCAL statement_timeout = '30s'"))
-            db.session.execute(text("DELETE FROM user_portfolio_stats WHERE user_id = :uid"), {'uid': user_id})
-            db.session.execute(
-                text(
-                    "INSERT INTO user_portfolio_stats (user_id, unique_stocks_count, avg_trades_per_week, total_trades, large_cap_percent, small_cap_percent, industry_mix, subscriber_count, last_updated) "
-                    "VALUES (:uid, :usc, :atpw, :tt, :lcp, :scp, :im, :sc, :lu)"
-                ),
-                {
-                    'uid': user_id,
-                    'usc': stats_data['unique_stocks_count'],
-                    'atpw': stats_data['avg_trades_per_week'],
-                    'tt': stats_data['total_trades'],
-                    'lcp': stats_data['large_cap_percent'],
-                    'scp': stats_data['small_cap_percent'],
-                    'im': industry_json,
-                    'sc': stats_data['subscriber_count'],
-                    'lu': stats_data['last_updated']
-                }
-            )
-            db.session.commit()
+            def _write_stats():
+                db.session.execute(text("SET LOCAL statement_timeout = '30s'"))
+                db.session.execute(text("DELETE FROM user_portfolio_stats WHERE user_id = :uid"), {'uid': user_id})
+                db.session.execute(
+                    text(
+                        "INSERT INTO user_portfolio_stats (user_id, unique_stocks_count, avg_trades_per_week, total_trades, large_cap_percent, small_cap_percent, industry_mix, subscriber_count, last_updated) "
+                        "VALUES (:uid, :usc, :atpw, :tt, :lcp, :scp, :im, :sc, :lu)"
+                    ),
+                    {
+                        'uid': user_id,
+                        'usc': stats_data['unique_stocks_count'],
+                        'atpw': stats_data['avg_trades_per_week'],
+                        'tt': stats_data['total_trades'],
+                        'lcp': stats_data['large_cap_percent'],
+                        'scp': stats_data['small_cap_percent'],
+                        'im': industry_json,
+                        'sc': stats_data['subscriber_count'],
+                        'lu': stats_data['last_updated']
+                    }
+                )
+                db.session.commit()
+            db_retry(_write_stats, max_retries=2)
             total = round(time.time() - t_start, 2)
             msg = f'Stats updated for user {user_id} in {total}s (calc={calc_time}s, industry_mix keys={list(stats_data.get("industry_mix", {}).keys()) if isinstance(stats_data.get("industry_mix"), dict) else "N/A"})'
             logger.info(f"[BACKFILL] {msg}")
@@ -6824,7 +6839,10 @@ def cache_backfill_task():
             return jsonify({'success': False, 'error': f'Unknown type: {task_type}'}), 400
     
     except Exception as e:
-        db.session.rollback()
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         tb = traceback.format_exc()
         logger.error(f"[BACKFILL] FAILED type={task_type} user={user_id} period={period}\n{tb}")
         return jsonify({
