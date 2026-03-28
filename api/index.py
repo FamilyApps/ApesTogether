@@ -6415,8 +6415,8 @@ def force_regenerate_all_caches():
         for period in periods:
             for category in categories:
                 try:
-                    # Calculate using chart cache (100 to cover mobile app's max request)
-                    leaderboard_data = calculate_leaderboard_data(period, 100, category)
+                    # Calculate using chart cache
+                    leaderboard_data = calculate_leaderboard_data(period, 20, category)
                     
                     if leaderboard_data:
                         cache_key = f"{period}_{category}"

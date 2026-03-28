@@ -69,6 +69,16 @@ struct PortfolioResponse: Codable {
     let holdings: [Holding]?
     let recentTrades: [Trade]?
     let previewMessage: String?
+    let leaderboardBadges: [LeaderboardBadge]?
+}
+
+struct LeaderboardBadge: Codable, Identifiable {
+    let period: String
+    let rank: Int
+    let type: String        // "overall" or "sector"
+    let sector: String?     // only for type == "sector"
+    
+    var id: String { "\(type)_\(period)_\(sector ?? "")" }
 }
 
 struct PortfolioOwner: Codable {

@@ -575,6 +575,68 @@ def get_portfolio(slug):
         ).count()
         response['subscriber_count'] = subscriber_count
         
+        # Leaderboard badges — check if user ranks in top 20 for any period
+        leaderboard_badges = []
+        try:
+            from models import LeaderboardCache
+            import json as json_lb
+            
+            badge_periods = {'1D': '1D', '5D': '1W', '1M': '1M', '3M': '3M', 'YTD': 'YTD', '1Y': '1Y'}
+            for cache_period, display_period in badge_periods.items():
+                for suffix in ['_auth', '_anon', '']:
+                    cache_key = f"{cache_period}_all{suffix}"
+                    cache_entry = LeaderboardCache.query.filter_by(period=cache_key).first()
+                    if cache_entry:
+                        entries = json_lb.loads(cache_entry.leaderboard_data)
+                        # Sort and find user's rank
+                        entries.sort(key=lambda x: x.get('performance_percent', 0), reverse=True)
+                        for idx, e in enumerate(entries[:20]):
+                            if e.get('user_id') == owner.id:
+                                leaderboard_badges.append({
+                                    'period': display_period,
+                                    'rank': idx + 1,
+                                    'type': 'overall'
+                                })
+                        break  # Found cache for this period, no need to try other suffixes
+            
+            # Also check industry-specific ranking from the user's top sector
+            try:
+                stats = UserPortfolioStats.query.filter_by(user_id=owner.id).first()
+                if stats and stats.industry_mix and isinstance(stats.industry_mix, dict):
+                    top_sector = max(stats.industry_mix, key=stats.industry_mix.get) if stats.industry_mix else None
+                    if top_sector:
+                        # Check if user would be top 3 in their dominant sector
+                        # Use the YTD overall leaderboard and filter by sector
+                        for suffix in ['_auth', '_anon', '']:
+                            ytd_key = f"YTD_all{suffix}"
+                            ytd_cache = LeaderboardCache.query.filter_by(period=ytd_key).first()
+                            if ytd_cache:
+                                all_entries = json_lb.loads(ytd_cache.leaderboard_data)
+                                all_entries.sort(key=lambda x: x.get('performance_percent', 0), reverse=True)
+                                # Filter to users who have this sector in their mix
+                                sector_rank = 0
+                                for e in all_entries:
+                                    uid = e.get('user_id')
+                                    u_stats = UserPortfolioStats.query.filter_by(user_id=uid).first()
+                                    if u_stats and u_stats.industry_mix and top_sector in u_stats.industry_mix:
+                                        sector_rank += 1
+                                        if uid == owner.id:
+                                            if sector_rank <= 20:
+                                                leaderboard_badges.append({
+                                                    'period': 'YTD',
+                                                    'rank': sector_rank,
+                                                    'type': 'sector',
+                                                    'sector': top_sector
+                                                })
+                                            break
+                                break
+            except Exception:
+                pass
+        except Exception as e:
+            logger.warning(f"Leaderboard badge lookup failed: {e}")
+        
+        response['leaderboard_badges'] = leaderboard_badges
+        
         # If subscribed or owner, show full portfolio
         if is_owner or is_subscribed:
             stocks = Stock.query.filter_by(user_id=owner.id).all()
@@ -735,7 +797,7 @@ def get_leaderboard():
     if period == '5D' or period == '7D':
         period = '1W'
     category = request.args.get('category', 'all')
-    limit = min(int(request.args.get('limit', 50)), 100)
+    limit = min(int(request.args.get('limit', 20)), 20)
     active_edge = request.args.get('active_edge', '1') == '1'
     industry_filter = request.args.get('industry', 'all')
     frequency_filter = request.args.get('frequency', 'any')

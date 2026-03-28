@@ -43,6 +43,18 @@ struct PortfolioDetailView: View {
                         )
                         .padding(.horizontal, 16)
                         
+                        // ── Leaderboard Badges ──
+                        if let badges = portfolio.leaderboardBadges, !badges.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(badges) { badge in
+                                        LeaderboardBadgePill(badge: badge)
+                                    }
+                                }
+                                .padding(.horizontal, 16)
+                            }
+                        }
+                        
                         // ── Buy / Sell Buttons ──
                         if portfolio.isOwner {
                             HStack(spacing: 12) {
@@ -575,6 +587,54 @@ class PortfolioDetailViewModel: ObservableObject {
         }
         
         isLoadingChart = false
+    }
+}
+
+// MARK: - Leaderboard Badge Pill
+
+struct LeaderboardBadgePill: View {
+    let badge: LeaderboardBadge
+    
+    private var icon: String {
+        switch badge.rank {
+        case 1: return "🥇"
+        case 2: return "🥈"
+        case 3: return "🥉"
+        default: return "🏆"
+        }
+    }
+    
+    private var label: String {
+        if badge.type == "sector", let sector = badge.sector {
+            return "#\(badge.rank) \(sector) (\(badge.period))"
+        }
+        return "#\(badge.rank) Overall (\(badge.period))"
+    }
+    
+    private var pillColor: Color {
+        switch badge.rank {
+        case 1: return Color(hex: "FFD700")
+        case 2: return Color(hex: "C0C0C0")
+        case 3: return Color(hex: "CD7F32")
+        default: return Color.primaryAccent
+        }
+    }
+    
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(icon).font(.system(size: 12))
+            Text(label)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.textPrimary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(pillColor.opacity(0.15))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(pillColor.opacity(0.4), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
     }
 }
 
