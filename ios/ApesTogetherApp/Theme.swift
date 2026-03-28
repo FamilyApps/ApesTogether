@@ -225,61 +225,47 @@ struct SectionHeader: View {
     }
 }
 
-// MARK: - Navigation Bar
+// MARK: - Navigation Bar (custom header – avoids iOS toolbar pill shape)
+
+struct AppHeaderRow: View {
+    @Binding var showSettings: Bool
+    
+    var body: some View {
+        HStack(spacing: 8) {
+            Image("NavLogo")
+                .renderingMode(.original)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 28, height: 28)
+                .clipShape(Circle())
+            Text("Apes Together")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(.textPrimary)
+                .lineLimit(1)
+                .fixedSize()
+            
+            Spacer()
+            
+            Button {
+                showSettings = true
+            } label: {
+                Image(systemName: "gearshape.fill")
+                    .foregroundColor(.textSecondary)
+                    .font(.system(size: 18))
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Color.appBackground)
+    }
+}
+
 struct AppNavBar: ViewModifier {
     @Binding var showSettings: Bool
     
-    init(showSettings: Binding<Bool>) {
-        _showSettings = showSettings
-        // Remove toolbar button background tint that causes the "shape"
-        let barButtonAppearance = UIBarButtonItemAppearance(style: .plain)
-        barButtonAppearance.normal.backgroundImage = UIImage()
-        barButtonAppearance.highlighted.backgroundImage = UIImage()
-        
-        let navAppearance = UINavigationBarAppearance()
-        navAppearance.configureWithOpaqueBackground()
-        navAppearance.backgroundColor = UIColor(Color.appBackground)
-        navAppearance.shadowColor = .clear
-        navAppearance.buttonAppearance = barButtonAppearance
-        navAppearance.doneButtonAppearance = barButtonAppearance
-        
-        UINavigationBar.appearance().standardAppearance = navAppearance
-        UINavigationBar.appearance().scrollEdgeAppearance = navAppearance
-        UINavigationBar.appearance().compactAppearance = navAppearance
-        UINavigationBar.appearance().tintColor = UIColor(Color.textSecondary)
-    }
-    
     func body(content: Content) -> some View {
         content
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    HStack(spacing: 8) {
-                        Image("NavLogo")
-                            .renderingMode(.original)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 28, height: 28)
-                            .clipShape(Circle())
-                        Text("Apes Together")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(.textPrimary)
-                            .lineLimit(1)
-                            .fixedSize()
-                    }
-                    .contentShape(Rectangle())
-                    .allowsHitTesting(false)
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showSettings = true
-                    } label: {
-                        Image(systemName: "gearshape.fill")
-                            .foregroundColor(.textSecondary)
-                            .font(.system(size: 18))
-                    }
-                }
-            }
+            .navigationBarHidden(true)
     }
 }
 

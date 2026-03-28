@@ -7,6 +7,7 @@ struct PerformanceChartView: View {
     let sp500Return: Double
     let selectedPeriod: String
     let onPeriodChange: (String) -> Void
+    var portfolioLabel: String = "Your Portfolio"
     
     private let periods = ["1D", "1W", "1M", "3M", "YTD", "1Y"]
     
@@ -59,7 +60,7 @@ struct PerformanceChartView: View {
             // Return summary header
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Your Portfolio")
+                    Text(portfolioLabel)
                         .font(.caption)
                         .foregroundColor(.textMuted)
                     Text(String(format: "%+.2f%%", portfolioReturn))

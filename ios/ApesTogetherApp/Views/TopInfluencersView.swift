@@ -19,6 +19,9 @@ struct TopInfluencersView: View {
                 Color.appBackground.ignoresSafeArea()
                 
                 VStack(spacing: 0) {
+                    // ── Custom header (no nav bar pill) ──
+                    AppHeaderRow(showSettings: $showSettings)
+                    
                     // Header
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
@@ -115,10 +118,10 @@ struct TopInfluencersView: View {
                                             Task { await viewModel.loadInfluencers(industry: "all") }
                                         }
                                         
-                                        ForEach(viewModel.availableIndustries, id: \.self) { industry in
-                                            IndustryFilterChip(label: industry, isSelected: selectedIndustry == industry) {
-                                                selectedIndustry = industry
-                                                Task { await viewModel.loadInfluencers(industry: industry) }
+                                        ForEach(LeaderboardView.gicsSectors, id: \.self) { sector in
+                                            IndustryFilterChip(label: sector, isSelected: selectedIndustry == sector) {
+                                                selectedIndustry = sector
+                                                Task { await viewModel.loadInfluencers(industry: sector) }
                                             }
                                         }
                                     }

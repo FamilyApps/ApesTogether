@@ -183,6 +183,26 @@ def calculate_portfolio_performance(
                 snapshots = sorted(snapshots + wrapped_intraday, key=lambda s: s.timestamp)
                 logger.info(f"Including {len(intraday_snapshots)} intraday + {len(snapshots) - len(intraday_snapshots)} daily snapshots for {period} period")
     
+    # For 1D: if we only have 0 or 1 snapshot (e.g. market closed, no intraday),
+    # expand to include the previous trading day's daily close as a baseline
+    if period == '1D' and len(snapshots) <= 1:
+        prev_day = start_date - timedelta(days=1)
+        while prev_day.weekday() >= 5:
+            prev_day = prev_day - timedelta(days=1)
+        
+        prev_snapshots = PortfolioSnapshot.query.filter(
+            and_(
+                PortfolioSnapshot.user_id == user_id,
+                PortfolioSnapshot.date >= prev_day,
+                PortfolioSnapshot.date <= end_date
+            )
+        ).order_by(PortfolioSnapshot.date.asc()).all()
+        
+        if len(prev_snapshots) >= 2:
+            snapshots = prev_snapshots
+            start_date = prev_day
+            logger.info(f"1D fallback: expanded to {prev_day} -> {end_date} ({len(snapshots)} daily snapshots)")
+    
     # Edge case: No snapshots
     if not snapshots:
         logger.warning(f"No snapshots found for user {user_id} in period {start_date} to {end_date}")
@@ -663,7 +683,7 @@ def _calculate_sp500_benchmark(start_date: date, end_date: date) -> float:
     Returns:
         S&P 500 percentage return
     """
-    # For 1D periods (start_date == end_date), use intraday data
+    # For 1D periods (start_date == end_date), try intraday data first, fall back to daily
     if start_date == end_date:
         # Query intraday SPY data for this date
         intraday_data = MarketData.query.filter(
@@ -675,7 +695,22 @@ def _calculate_sp500_benchmark(start_date: date, end_date: date) -> float:
         ).order_by(MarketData.timestamp.asc()).all()
         
         if not intraday_data or len(intraday_data) < 2:
-            logger.warning(f"Missing SPY_INTRADAY data for {start_date}")
+            # Fallback: use previous trading day close vs this day close from daily data
+            prev_day = start_date - timedelta(days=1)
+            while prev_day.weekday() >= 5:
+                prev_day = prev_day - timedelta(days=1)
+            
+            prev_sp500 = MarketData.query.filter(
+                and_(MarketData.ticker == 'SPY_SP500', MarketData.date == prev_day)
+            ).first()
+            curr_sp500 = MarketData.query.filter(
+                and_(MarketData.ticker == 'SPY_SP500', MarketData.date == end_date)
+            ).first()
+            
+            if prev_sp500 and curr_sp500 and float(prev_sp500.close_price) > 0:
+                return ((float(curr_sp500.close_price) - float(prev_sp500.close_price)) / float(prev_sp500.close_price)) * 100
+            
+            logger.warning(f"Missing SPY data for 1D: intraday and daily fallback both failed for {start_date}")
             return 0.0
         
         # SPY_INTRADAY already contains S&P 500 value (spy_price * 10 from intraday cron)

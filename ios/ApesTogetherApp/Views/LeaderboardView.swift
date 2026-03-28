@@ -96,6 +96,9 @@ struct LeaderboardView: View {
                 Color.appBackground.ignoresSafeArea()
                 
                 VStack(spacing: 0) {
+                    // ── Custom header (no nav bar pill) ──
+                    AppHeaderRow(showSettings: $showSettings)
+                    
                     // ── Period pills + Filter button row ──
                     HStack(spacing: 8) {
                         HStack(spacing: 0) {

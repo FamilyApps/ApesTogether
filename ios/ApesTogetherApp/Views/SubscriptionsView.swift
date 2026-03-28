@@ -10,6 +10,10 @@ struct SubscriptionsView: View {
             ZStack {
                 Color.appBackground.ignoresSafeArea()
                 
+                VStack(spacing: 0) {
+                    // ── Custom header (no nav bar pill) ──
+                    AppHeaderRow(showSettings: $showSettings)
+                    
                 ScrollView {
                     VStack(spacing: 24) {
                         // My Subscribers section
@@ -108,6 +112,7 @@ struct SubscriptionsView: View {
                 .refreshable {
                     await viewModel.loadSubscriptions()
                 }
+                } // end VStack with header
             }
             .appNavBar(showSettings: $showSettings)
             .sheet(isPresented: $showSettings) {

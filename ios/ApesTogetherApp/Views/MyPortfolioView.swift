@@ -21,7 +21,10 @@ struct MyPortfolioView: View {
             ZStack {
                 Color.appBackground.ignoresSafeArea()
                 
-                VStack(spacing: 20) {
+                VStack(spacing: 0) {
+                    // ── Custom header (no nav bar pill) ──
+                    AppHeaderRow(showSettings: $showSettings)
+                    
                     if let user = authManager.currentUser, let slug = user.portfolioSlug {
                         VStack(spacing: 0) {
                             PortfolioDetailView(slug: slug)

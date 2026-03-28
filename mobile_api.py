@@ -3464,6 +3464,75 @@ def bot_holdings():
         return jsonify({'error': 'holdings_failed'}), 500
 
 
+@mobile_api.route('/admin/backfill-sectors', methods=['POST'])
+@require_admin_key
+@with_db_retry
+def admin_backfill_sectors():
+    """
+    Backfill missing sector data for all stocks held by any user.
+    Fetches from Alpha Vantage OVERVIEW for any StockInfo with null sector.
+    Query params:
+      - limit: max tickers to process (default 20, Alpha Vantage free = 25/day)
+      - sleep: seconds between API calls (default 2)
+      - dry_run: if true, just list tickers that need backfill
+    """
+    from models import db, Stock, StockInfo
+    from stock_metadata_utils import populate_stock_info
+    import time as _time
+    
+    limit = request.args.get('limit', 20, type=int)
+    sleep_sec = request.args.get('sleep', 2, type=int)
+    dry_run = request.args.get('dry_run', 'false').lower() == 'true'
+    
+    try:
+        # Get all unique tickers held by any user
+        held_tickers = db.session.query(Stock.ticker).filter(
+            Stock.quantity > 0
+        ).distinct().all()
+        held_tickers = [t[0].upper() for t in held_tickers]
+        
+        # Find which ones are missing sector data
+        missing = []
+        for ticker in held_tickers:
+            info = StockInfo.query.filter_by(ticker=ticker).first()
+            if not info or not info.sector:
+                missing.append(ticker)
+        
+        if dry_run:
+            return jsonify({
+                'total_held': len(held_tickers),
+                'missing_sector': len(missing),
+                'tickers': missing
+            })
+        
+        # Process up to limit
+        results = []
+        for ticker in missing[:limit]:
+            try:
+                result = populate_stock_info(ticker, force_update=True)
+                if result and result.sector:
+                    results.append({'ticker': ticker, 'sector': result.sector, 'status': 'ok'})
+                else:
+                    results.append({'ticker': ticker, 'status': 'failed'})
+            except Exception as e:
+                results.append({'ticker': ticker, 'status': 'error', 'error': str(e)})
+            
+            if sleep_sec > 0 and ticker != missing[min(limit, len(missing)) - 1]:
+                _time.sleep(sleep_sec)
+        
+        ok_count = sum(1 for r in results if r.get('status') == 'ok')
+        return jsonify({
+            'total_held': len(held_tickers),
+            'missing_sector': len(missing),
+            'processed': len(results),
+            'success': ok_count,
+            'results': results
+        })
+    except Exception as e:
+        logger.error(f"Backfill sectors error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @mobile_api.route('/admin/bot/gift-subscribers', methods=['POST'])
 @require_admin_2fa
 @with_db_retry

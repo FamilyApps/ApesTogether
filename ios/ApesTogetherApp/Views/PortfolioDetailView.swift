@@ -38,7 +38,8 @@ struct PortfolioDetailView: View {
                             onPeriodChange: { period in
                                 viewModel.selectedPeriod = period
                                 Task { await viewModel.loadChart(slug: slug) }
-                            }
+                            },
+                            portfolioLabel: portfolio.isOwner ? "Your Portfolio" : portfolio.owner.username
                         )
                         .padding(.horizontal, 16)
                         
