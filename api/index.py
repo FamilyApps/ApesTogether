@@ -6378,7 +6378,9 @@ def force_regenerate_all_caches():
         results = {'started_at': datetime.now().isoformat(), 'step': step, 'errors': []}
         
         if step == 'charts':
-            # Generate chart cache for ONE period (all users), commit per user
+            # Generate chart cache for ONE period (all users)
+            # Use raw SQL to bypass statement_timeout and row lock issues
+            from sqlalchemy import text
             periods_to_run = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX'] if period_param == 'all' else [period_param]
             all_users = User.query.all()
             charts_generated = 0
@@ -6386,21 +6388,21 @@ def force_regenerate_all_caches():
             for period in periods_to_run:
                 for user in all_users:
                     try:
-                        chart_data = generate_chart_from_snapshots(user.id, period)
+                        with db.session.no_autoflush:
+                            chart_data = generate_chart_from_snapshots(user.id, period)
                         if chart_data:
-                            chart_cache = UserPortfolioChartCache.query.filter_by(
-                                user_id=user.id, period=period
-                            ).first()
-                            if chart_cache:
-                                chart_cache.chart_data = json.dumps(chart_data)
-                                chart_cache.generated_at = datetime.now()
-                            else:
-                                chart_cache = UserPortfolioChartCache(
-                                    user_id=user.id, period=period,
-                                    chart_data=json.dumps(chart_data),
-                                    generated_at=datetime.now()
-                                )
-                                db.session.add(chart_cache)
+                            chart_json = json.dumps(chart_data)
+                            now = datetime.now()
+                            # Use raw SQL: delete + insert to avoid UPDATE lock contention
+                            db.session.execute(text("SET LOCAL statement_timeout = '30s'"))
+                            db.session.execute(
+                                text("DELETE FROM user_portfolio_chart_cache WHERE user_id = :uid AND period = :p"),
+                                {'uid': user.id, 'p': period}
+                            )
+                            db.session.execute(
+                                text("INSERT INTO user_portfolio_chart_cache (user_id, period, chart_data, generated_at) VALUES (:uid, :p, :cd, :ga)"),
+                                {'uid': user.id, 'p': period, 'cd': chart_json, 'ga': now}
+                            )
                             db.session.commit()
                             charts_generated += 1
                     except Exception as e:
@@ -6423,6 +6425,7 @@ def force_regenerate_all_caches():
         
         elif step == 'leaderboard':
             # Generate leaderboard cache for all periods/categories
+            from sqlalchemy import text
             periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']
             categories = ['all', 'small_cap', 'large_cap']
             leaderboards_generated = 0
@@ -6430,22 +6433,23 @@ def force_regenerate_all_caches():
             for period in periods:
                 for category in categories:
                     try:
-                        leaderboard_data = calculate_leaderboard_data(period, 20, category)
+                        with db.session.no_autoflush:
+                            leaderboard_data = calculate_leaderboard_data(period, 20, category)
                         if leaderboard_data:
                             cache_key = f"{period}_{category}"
+                            lb_json = json.dumps(leaderboard_data)
+                            now = datetime.now()
                             for suffix in ['_auth', '_anon']:
                                 full_key = cache_key + suffix
-                                cache_entry = LeaderboardCache.query.filter_by(period=full_key).first()
-                                if cache_entry:
-                                    cache_entry.leaderboard_data = json.dumps(leaderboard_data)
-                                    cache_entry.generated_at = datetime.now()
-                                else:
-                                    cache_entry = LeaderboardCache(
-                                        period=full_key,
-                                        leaderboard_data=json.dumps(leaderboard_data),
-                                        generated_at=datetime.now()
-                                    )
-                                    db.session.add(cache_entry)
+                                db.session.execute(text("SET LOCAL statement_timeout = '30s'"))
+                                db.session.execute(
+                                    text("DELETE FROM leaderboard_cache WHERE period = :pk"),
+                                    {'pk': full_key}
+                                )
+                                db.session.execute(
+                                    text("INSERT INTO leaderboard_cache (period, leaderboard_data, generated_at) VALUES (:pk, :ld, :ga)"),
+                                    {'pk': full_key, 'ld': lb_json, 'ga': now}
+                                )
                                 leaderboards_generated += 1
                             db.session.commit()
                     except Exception as e:
@@ -6457,6 +6461,7 @@ def force_regenerate_all_caches():
         
         elif step == 'stats':
             # Refresh UserPortfolioStats (industry_mix, cap%, trades/wk)
+            from sqlalchemy import text
             from leaderboard_utils import calculate_user_portfolio_stats
             from models import UserPortfolioStats
             
@@ -6465,19 +6470,31 @@ def force_regenerate_all_caches():
             
             for user in all_users:
                 try:
-                    stats_data = calculate_user_portfolio_stats(user.id)
-                    user_stats = UserPortfolioStats.query.filter_by(user_id=user.id).first()
-                    if not user_stats:
-                        user_stats = UserPortfolioStats(user_id=user.id)
-                        db.session.add(user_stats)
-                    user_stats.unique_stocks_count = stats_data['unique_stocks_count']
-                    user_stats.avg_trades_per_week = stats_data['avg_trades_per_week']
-                    user_stats.total_trades = stats_data['total_trades']
-                    user_stats.large_cap_percent = stats_data['large_cap_percent']
-                    user_stats.small_cap_percent = stats_data['small_cap_percent']
-                    user_stats.industry_mix = stats_data['industry_mix']
-                    user_stats.subscriber_count = stats_data['subscriber_count']
-                    user_stats.last_updated = stats_data['last_updated']
+                    with db.session.no_autoflush:
+                        stats_data = calculate_user_portfolio_stats(user.id)
+                    industry_json = json.dumps(stats_data['industry_mix']) if isinstance(stats_data.get('industry_mix'), dict) else stats_data.get('industry_mix', '{}')
+                    db.session.execute(text("SET LOCAL statement_timeout = '30s'"))
+                    db.session.execute(
+                        text("DELETE FROM user_portfolio_stats WHERE user_id = :uid"),
+                        {'uid': user.id}
+                    )
+                    db.session.execute(
+                        text(
+                            "INSERT INTO user_portfolio_stats (user_id, unique_stocks_count, avg_trades_per_week, total_trades, large_cap_percent, small_cap_percent, industry_mix, subscriber_count, last_updated) "
+                            "VALUES (:uid, :usc, :atpw, :tt, :lcp, :scp, :im, :sc, :lu)"
+                        ),
+                        {
+                            'uid': user.id,
+                            'usc': stats_data['unique_stocks_count'],
+                            'atpw': stats_data['avg_trades_per_week'],
+                            'tt': stats_data['total_trades'],
+                            'lcp': stats_data['large_cap_percent'],
+                            'scp': stats_data['small_cap_percent'],
+                            'im': industry_json,
+                            'sc': stats_data['subscriber_count'],
+                            'lu': stats_data['last_updated']
+                        }
+                    )
                     db.session.commit()
                     stats_updated += 1
                 except Exception as e:
