@@ -21666,7 +21666,18 @@ def debug_user_data(username):
         
         html += f"""
         </ul>
-        
+        """
+
+        # Recent transactions
+        from models import Transaction
+        recent_txns = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.timestamp.desc()).limit(20).all()
+        html += f"<h2>Recent Transactions ({len(recent_txns)}):</h2><ul>"
+        for t in recent_txns:
+            ts = t.timestamp.strftime('%Y-%m-%d %H:%M') if t.timestamp else '—'
+            html += f"<li>{ts}: {t.transaction_type.upper()} {t.quantity} {t.ticker} @ ${t.price_per_share:.2f}</li>"
+        html += "</ul>"
+
+        html += f"""
         <h2>Active Users (1D): {active_count}</h2>
         
         <p><a href="/admin">Back to Admin</a></p>
