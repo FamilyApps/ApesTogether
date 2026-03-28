@@ -3533,6 +3533,118 @@ def admin_backfill_sectors():
         return jsonify({'error': str(e)}), 500
 
 
+@mobile_api.route('/admin/run-all-backfills', methods=['POST'])
+@require_admin_key
+@with_db_retry
+def admin_run_all_backfills():
+    """
+    TEMPORARY: One-click endpoint to run both S&P 500 and sector backfills.
+    Delete this after confirming success.
+    """
+    from models import db, MarketData, Stock, StockInfo
+    from stock_metadata_utils import populate_stock_info
+    import os, time as _time
+
+    av_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
+    if not av_key:
+        return jsonify({'error': 'ALPHA_VANTAGE_API_KEY not configured'}), 500
+
+    results = {'sp500_backfill': {}, 'sector_backfill': {}}
+
+    # ── PART 1: S&P 500 backfill (last 1 year, single API call) ──
+    try:
+        import requests as req
+        resp = req.get('https://www.alphavantage.co/query', params={
+            'function': 'TIME_SERIES_DAILY',
+            'symbol': 'SPY',
+            'outputsize': 'full',
+            'apikey': av_key
+        }, timeout=30)
+        data = resp.json()
+        time_series = data.get('Time Series (Daily)', {})
+
+        if not time_series:
+            results['sp500_backfill'] = {'error': 'No SPY data returned', 'keys': list(data.keys())}
+        else:
+            today = datetime.utcnow().date()
+            from datetime import timedelta
+            start_date = today - timedelta(days=365)
+            inserted = 0
+            updated = 0
+
+            for date_str, daily in time_series.items():
+                try:
+                    data_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                    if data_date < start_date:
+                        continue
+                    spy_close = float(daily['4. close'])
+                    sp500_value = round(spy_close * 10, 2)
+
+                    existing = MarketData.query.filter_by(ticker='SPY_SP500', date=data_date).first()
+                    if existing:
+                        if abs(existing.close_price - sp500_value) > 0.01:
+                            existing.close_price = sp500_value
+                            updated += 1
+                    else:
+                        db.session.add(MarketData(ticker='SPY_SP500', date=data_date, close_price=sp500_value))
+                        inserted += 1
+                except Exception as e:
+                    logger.warning(f"SP500 backfill skip {date_str}: {e}")
+
+            db.session.commit()
+            results['sp500_backfill'] = {'success': True, 'inserted': inserted, 'updated': updated}
+            logger.info(f"SP500 backfill complete: {inserted} inserted, {updated} updated")
+    except Exception as e:
+        db.session.rollback()
+        results['sp500_backfill'] = {'error': str(e)}
+        logger.error(f"SP500 backfill error: {e}")
+
+    # ── PART 2: Sector backfill (up to 20 tickers, 2s sleep between calls) ──
+    try:
+        held_tickers = db.session.query(Stock.ticker).filter(Stock.quantity > 0).distinct().all()
+        held_tickers = [t[0].upper() for t in held_tickers]
+
+        missing = []
+        for ticker in held_tickers:
+            info = StockInfo.query.filter_by(ticker=ticker).first()
+            if not info or not info.sector:
+                missing.append(ticker)
+
+        sector_results = []
+        for ticker in missing[:20]:
+            try:
+                result = populate_stock_info(ticker, force_update=True)
+                if result and result.sector:
+                    sector_results.append({'ticker': ticker, 'sector': result.sector, 'status': 'ok'})
+                else:
+                    sector_results.append({'ticker': ticker, 'status': 'failed'})
+            except Exception as e:
+                sector_results.append({'ticker': ticker, 'status': 'error', 'error': str(e)})
+            _time.sleep(2)
+
+        ok_count = sum(1 for r in sector_results if r.get('status') == 'ok')
+        remaining = len(missing) - min(20, len(missing))
+        results['sector_backfill'] = {
+            'success': True,
+            'total_held': len(held_tickers),
+            'missing_before': len(missing),
+            'processed': len(sector_results),
+            'succeeded': ok_count,
+            'remaining': remaining,
+            'details': sector_results
+        }
+        logger.info(f"Sector backfill complete: {ok_count}/{len(sector_results)} succeeded, {remaining} remaining")
+    except Exception as e:
+        results['sector_backfill'] = {'error': str(e)}
+        logger.error(f"Sector backfill error: {e}")
+
+    return jsonify({
+        'success': True,
+        'message': 'Both backfills completed. Delete this endpoint after verifying.',
+        'results': results
+    })
+
+
 @mobile_api.route('/admin/bot/gift-subscribers', methods=['POST'])
 @require_admin_2fa
 @with_db_retry
