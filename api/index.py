@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 from zoneinfo import ZoneInfo
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime, Boolean, func, text, and_, or_, cast, Date
 from sqlalchemy.pool import NullPool
-from flask import Flask, render_template_string, render_template, redirect, url_for, request, session, flash, jsonify, send_from_directory
+from flask import Flask, render_template_string, render_template, redirect, url_for, request, session, flash, jsonify, send_from_directory, make_response
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -2457,19 +2457,63 @@ def waitlist_count():
 @app.route('/admin/waitlist')
 @admin_required
 def admin_waitlist():
-    """View all beta waitlist signups"""
+    """View all beta waitlist signups — HTML table with CSV export"""
     from models import BetaWaitlist
+    fmt = request.args.get('format', 'html')
     entries = BetaWaitlist.query.order_by(BetaWaitlist.created_at.desc()).all()
-    return jsonify({
-        'total': len(entries),
-        'entries': [{
-            'id': e.id,
-            'email': e.email,
-            'role': e.role,
-            'referral_source': e.referral_source,
-            'created_at': e.created_at.isoformat() if e.created_at else None
-        } for e in entries]
-    })
+
+    if fmt == 'json':
+        return jsonify({
+            'total': len(entries),
+            'entries': [{
+                'id': e.id,
+                'email': e.email,
+                'role': e.role,
+                'referral_source': e.referral_source,
+                'created_at': e.created_at.isoformat() if e.created_at else None
+            } for e in entries]
+        })
+
+    if fmt == 'csv':
+        import csv, io
+        si = io.StringIO()
+        w = csv.writer(si)
+        w.writerow(['#', 'Email', 'Role', 'Referral Source', 'Signed Up'])
+        for i, e in enumerate(entries, 1):
+            w.writerow([i, e.email, e.role or '', e.referral_source or '',
+                        e.created_at.strftime('%Y-%m-%d %H:%M') if e.created_at else ''])
+        resp = make_response(si.getvalue())
+        resp.headers['Content-Type'] = 'text/csv'
+        resp.headers['Content-Disposition'] = 'attachment; filename=waitlist.csv'
+        return resp
+
+    rows = ''
+    for i, e in enumerate(entries, 1):
+        dt = e.created_at.strftime('%b %d, %Y %I:%M %p') if e.created_at else '—'
+        rows += f'<tr><td>{i}</td><td>{e.email}</td><td>{e.role or "—"}</td><td>{e.referral_source or "—"}</td><td>{dt}</td></tr>'
+
+    return f'''<!DOCTYPE html><html><head><meta charset="utf-8"><title>Beta Waitlist</title>
+<style>
+body{{font-family:Inter,-apple-system,sans-serif;background:#080C0A;color:#F0F4F2;padding:32px;margin:0}}
+h1{{font-size:1.6rem;margin-bottom:4px}}
+.meta{{color:#9CA3AF;margin-bottom:24px;font-size:0.9rem}}
+table{{width:100%;border-collapse:collapse;font-size:0.9rem}}
+th{{text-align:left;padding:10px 12px;border-bottom:2px solid #1A2520;color:#00D9A5;font-weight:600}}
+td{{padding:10px 12px;border-bottom:1px solid #1A2520}}
+tr:hover td{{background:#0F1513}}
+.actions{{display:flex;gap:12px;margin-bottom:20px}}
+.btn{{background:#00D9A5;color:#080C0A;padding:8px 20px;border-radius:8px;text-decoration:none;font-weight:700;font-size:0.85rem}}
+.btn-ghost{{background:transparent;border:1px solid #1A2520;color:#F0F4F2;padding:8px 20px;border-radius:8px;text-decoration:none;font-weight:600;font-size:0.85rem}}
+</style></head><body>
+<h1>Beta Waitlist</h1>
+<p class="meta">{len(entries)} signup{"s" if len(entries) != 1 else ""}</p>
+<div class="actions">
+<a href="/admin/waitlist?format=csv" class="btn">Download CSV</a>
+<a href="/admin/waitlist?format=json" class="btn-ghost">View JSON</a>
+</div>
+<table><thead><tr><th>#</th><th>Email</th><th>Role</th><th>Referral</th><th>Signed Up</th></tr></thead>
+<tbody>{rows}</tbody></table>
+</body></html>'''
 
 @app.route('/admin/create-waitlist-table')
 @admin_required

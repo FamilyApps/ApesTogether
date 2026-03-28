@@ -21,7 +21,7 @@ body {
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 .container { max-width: 1140px; margin: 0 auto; padding: 0 24px; }
-sup.asterisk { color: var(--accent); font-size: 0.7em; }
+sup.asterisk { color: var(--accent); font-size: 0.7em; margin-left: -0.15em; }
 
 /* ── NAV ── */
 .lp-nav {
