@@ -1598,6 +1598,18 @@ def execute_trade():
         
         db.session.commit()
         
+        # Auto-populate stock metadata if missing (sector, market cap, etc.)
+        if trade_type == 'buy':
+            try:
+                from models import StockInfo
+                existing_info = StockInfo.query.filter_by(ticker=ticker).first()
+                if not existing_info or not existing_info.sector:
+                    from stock_metadata_utils import populate_stock_info
+                    populate_stock_info(ticker)
+                    logger.info(f"Auto-populated stock metadata for {ticker}")
+            except Exception as meta_err:
+                logger.warning(f"Non-blocking: failed to auto-populate metadata for {ticker}: {meta_err}")
+        
         return jsonify({
             'success': True,
             'trade': {
@@ -2103,6 +2115,18 @@ def bot_execute_trade():
             pass
         
         db.session.commit()
+        
+        # Auto-populate stock metadata if missing (sector, market cap, etc.)
+        if trade_type == 'buy':
+            try:
+                from models import StockInfo
+                existing_info = StockInfo.query.filter_by(ticker=ticker).first()
+                if not existing_info or not existing_info.sector:
+                    from stock_metadata_utils import populate_stock_info
+                    populate_stock_info(ticker)
+            except Exception as meta_err:
+                logger.warning(f"Non-blocking: failed to auto-populate metadata for {ticker}: {meta_err}")
+        
         return jsonify({'success': True})
         
     except Exception as e:

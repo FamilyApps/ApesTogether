@@ -1251,10 +1251,10 @@ def calculate_industry_mix(user_id):
             stock_purchase_value = stock.quantity * stock.purchase_price
             stock_current_value = (stock_purchase_value / total_purchase_value) * total_value
             
-            # Get industry (default to 'Other' if not available)
-            industry = stock_info.industry if stock_info and stock_info.industry else 'Other'
+            # Use GICS sector (e.g. 'Technology', 'Healthcare') not sub-industry
+            sector = stock_info.sector if stock_info and stock_info.sector else 'Other'
             
-            industry_values[industry] = industry_values.get(industry, 0) + stock_current_value
+            industry_values[sector] = industry_values.get(sector, 0) + stock_current_value
     
     # Convert to percentages
     industry_percentages = {
