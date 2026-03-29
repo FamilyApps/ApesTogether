@@ -16,7 +16,7 @@ from datetime import datetime
 logger = logging.getLogger('bot_executor')
 
 API_BASE = os.environ.get('API_BASE_URL', 'https://apestogether.ai/api/mobile')
-ADMIN_KEY = os.environ.get('ADMIN_API_KEY', '')
+CRON_SECRET = os.environ.get('CRON_SECRET', '')
 
 
 # ── API Communication ────────────────────────────────────────────────────────
@@ -24,7 +24,7 @@ ADMIN_KEY = os.environ.get('ADMIN_API_KEY', '')
 def api_call(endpoint, method='GET', data=None, timeout=30):
     """Make an authenticated admin API call."""
     headers = {
-        'X-Admin-Key': ADMIN_KEY,
+        'X-Cron-Secret': CRON_SECRET,
         'Content-Type': 'application/json'
     }
     url = f"{API_BASE}{endpoint}"
@@ -37,8 +37,8 @@ def api_call(endpoint, method='GET', data=None, timeout=30):
 
         result = resp.json()
         if resp.status_code == 403:
-            logger.error("AUTH ERROR: Invalid admin key")
-            return {'error': 'invalid_admin_key'}, 403
+            logger.error("AUTH ERROR: Invalid cron secret")
+            return {'error': 'invalid_cron_secret'}, 403
         return result, resp.status_code
     except requests.exceptions.Timeout:
         logger.warning(f"API timeout: {endpoint}")

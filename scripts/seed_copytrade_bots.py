@@ -10,7 +10,7 @@ trade notification emails and calls the /admin/bot/email-trade endpoint.
 Usage:
     python scripts/seed_copytrade_bots.py
 
-Requires: ADMIN_API_KEY in .env or environment
+Requires: CRON_SECRET in .env or environment
 """
 import os
 import sys
@@ -28,15 +28,15 @@ except ImportError:
 from bot_personas import generate_username
 
 API_BASE = os.environ.get('API_BASE_URL', 'https://apestogether.ai/api/mobile')
-ADMIN_KEY = os.environ.get('ADMIN_API_KEY')
+CRON_SECRET = os.environ.get('CRON_SECRET')
 
-if not ADMIN_KEY:
-    print("ERROR: ADMIN_API_KEY not set")
+if not CRON_SECRET:
+    print("ERROR: CRON_SECRET not set")
     sys.exit(1)
 
 HEADERS = {
     'Content-Type': 'application/json',
-    'X-Admin-Key': ADMIN_KEY
+    'X-Cron-Secret': CRON_SECRET
 }
 
 BOTS = [
@@ -115,7 +115,7 @@ def main():
         prop_name = f"{'GROK' if 'grok' in bot['source'] else 'WOLFF'}_BOT_USERNAME"
         print(f"   {prop_name} = {bot['username']}")
     
-    print(f"   ADMIN_API_KEY = (your admin key)")
+    print(f"   CRON_SECRET = (your cron secret)")
     print(f"   API_BASE_URL = {API_BASE}")
     
     print(f"\nBot Summary:")

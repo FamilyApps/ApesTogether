@@ -114,7 +114,7 @@ def with_db_retry(f):
     Usage::
 
         @mobile_api.route('/admin/bot/dashboard')
-        @require_admin_key
+        @require_admin_2fa
         @with_db_retry
         def bot_dashboard():
             ...
@@ -1876,8 +1876,71 @@ def _is_admin_session():
     return session_email == admin_email and has_2fa
 
 
+def require_cron_secret(f):
+    """Decorator for automation-called endpoints (GitHub Actions, Google Apps Script).
+    Accepts either:
+      - X-Cron-Secret header (for automated callers — separate from admin API key)
+      - Valid admin session with 2FA (for manual triggering from admin panel)
+    Does NOT accept X-Admin-Key alone — that's intentional to isolate cron auth."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        # Path 1: Cron secret (for automated systems)
+        cron_secret = request.headers.get('X-Cron-Secret')
+        expected = os.environ.get('CRON_SECRET')
+        if cron_secret and expected and cron_secret == expected:
+            return f(*args, **kwargs)
+        
+        # Path 2: Admin session with 2FA (for manual triggering)
+        if _is_admin_session():
+            return f(*args, **kwargs)
+        
+        if not expected:
+            return jsonify({'error': 'cron_secret_not_configured'}), 503
+        return jsonify({'error': 'invalid_cron_secret'}), 403
+    decorated.__name__ = f.__name__
+    return decorated
+
+
+def require_admin_or_cron(f):
+    """Decorator for endpoints used BOTH by admin panel (2FA) and by automated pipelines (cron secret).
+    Accepts either:
+      - X-Cron-Secret header (automation)
+      - X-Admin-Key + X-Admin-OTP headers (manual API call with 2FA)
+      - Valid admin session with 2FA (admin panel browser)"""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        # Path 1: Cron secret
+        cron_secret = request.headers.get('X-Cron-Secret')
+        expected_cron = os.environ.get('CRON_SECRET')
+        if cron_secret and expected_cron and cron_secret == expected_cron:
+            return f(*args, **kwargs)
+        
+        # Path 2: Admin session with 2FA
+        if _is_admin_session():
+            return f(*args, **kwargs)
+        
+        # Path 3: API key + OTP
+        admin_key = request.headers.get('X-Admin-Key')
+        expected_key = os.environ.get('ADMIN_API_KEY')
+        if admin_key and expected_key and admin_key == expected_key:
+            totp_secret = os.environ.get('ADMIN_TOTP_SECRET')
+            if totp_secret:
+                otp_code = request.headers.get('X-Admin-OTP')
+                if otp_code and _verify_totp(otp_code):
+                    return f(*args, **kwargs)
+                return jsonify({'error': '2fa_required', 'message': 'X-Admin-OTP header required'}), 401
+            # No TOTP configured — allow key-only with warning
+            logger.warning(f"2FA not configured — allowing key-only access to {f.__name__}")
+            return f(*args, **kwargs)
+        
+        return jsonify({'error': 'unauthorized'}), 403
+    decorated.__name__ = f.__name__
+    return decorated
+
+
 def require_admin_key(f):
-    """Decorator to require admin API key OR valid admin session for bot endpoints"""
+    """DEPRECATED — all callers should use require_admin_2fa, require_cron_secret, or require_admin_or_cron.
+    Kept temporarily in case any code references it."""
     @wraps(f)
     def decorated(*args, **kwargs):
         # Path 1: API key auth (for bot scripts, cron jobs)
@@ -1977,7 +2040,7 @@ def require_admin_2fa(f):
 
 
 @mobile_api.route('/admin/bot/create-user', methods=['POST'])
-@require_admin_key
+@require_admin_or_cron
 @with_db_retry
 def bot_create_user():
     """
@@ -2050,7 +2113,7 @@ def bot_create_user():
 
 
 @mobile_api.route('/admin/bot/add-stocks', methods=['POST'])
-@require_admin_key
+@require_admin_or_cron
 @with_db_retry
 def bot_add_stocks():
     """
@@ -2114,7 +2177,7 @@ def bot_add_stocks():
 
 
 @mobile_api.route('/admin/bot/set-cash', methods=['POST'])
-@require_admin_key
+@require_admin_or_cron
 @with_db_retry
 def bot_set_cash():
     """
@@ -2243,7 +2306,7 @@ def bot_scale_holdings():
 
 
 @mobile_api.route('/admin/bot/subscribe', methods=['POST'])
-@require_admin_key
+@require_admin_2fa
 @with_db_retry
 def bot_subscribe():
     """
@@ -2299,7 +2362,7 @@ def bot_subscribe():
 
 
 @mobile_api.route('/admin/bot/execute-trade', methods=['POST'])
-@require_admin_key
+@require_cron_secret
 @rate_limit(30)
 @with_db_retry
 def bot_execute_trade():
@@ -2382,7 +2445,7 @@ def bot_execute_trade():
 
 
 @mobile_api.route('/admin/bot/list-users', methods=['GET'])
-@require_admin_key
+@require_admin_or_cron
 @with_db_retry
 def bot_list_users():
     """List all users with their portfolio info, filterable by role"""
@@ -2466,7 +2529,7 @@ def bot_list_users():
 
 
 @mobile_api.route('/admin/user/<int:user_id>', methods=['GET'])
-@require_admin_key
+@require_admin_2fa
 @with_db_retry
 def admin_user_detail(user_id):
     """Get a single user's portfolio holdings and recent transactions."""
@@ -2535,7 +2598,7 @@ def admin_user_detail(user_id):
 
 
 @mobile_api.route('/admin/bot/dashboard', methods=['GET'])
-@require_admin_key
+@require_admin_or_cron
 @with_db_retry
 def bot_dashboard():
     """Get summary stats for the admin dashboard"""
@@ -2599,7 +2662,7 @@ def bot_dashboard():
 
 
 @mobile_api.route('/admin/alphavantage/usage', methods=['GET'])
-@require_admin_key
+@require_admin_2fa
 @with_db_retry
 def alphavantage_usage():
     """Get AlphaVantage API usage stats for the admin dashboard.
@@ -2710,7 +2773,7 @@ def alphavantage_usage():
 
 
 @mobile_api.route('/admin/bot/trade', methods=['POST'])
-@require_admin_key
+@require_cron_secret
 @with_db_retry
 def bot_trade_cron():
     """
@@ -2886,7 +2949,7 @@ def bot_trade_cron():
 
 
 @mobile_api.route('/admin/dividend', methods=['POST'])
-@require_admin_key
+@require_admin_2fa
 @with_db_retry
 def admin_record_dividend():
     """
@@ -2977,7 +3040,7 @@ def admin_record_dividend():
 
 
 @mobile_api.route('/admin/bot/email-trade', methods=['POST'])
-@require_admin_key
+@require_cron_secret
 @rate_limit(30)
 @with_db_retry
 def bot_email_trade():
@@ -3253,7 +3316,7 @@ def bot_email_trade():
 
 
 @mobile_api.route('/admin/bot/process-pending-trades', methods=['POST'])
-@require_admin_key
+@require_cron_secret
 @rate_limit(10)
 @with_db_retry
 def bot_process_pending_trades():
@@ -3378,7 +3441,7 @@ def bot_process_pending_trades():
 
 
 @mobile_api.route('/admin/bot/pending-trades', methods=['GET'])
-@require_admin_key
+@require_admin_2fa
 @with_db_retry
 def bot_pending_trades():
     """List all pending/unroutable trades for admin review."""
@@ -3570,7 +3633,7 @@ POST /admin/bot/assign-pending-trades
 
 
 @mobile_api.route('/admin/bot/sp500-backfill', methods=['POST'])
-@require_admin_key
+@require_admin_2fa
 @with_db_retry
 def bot_sp500_backfill():
     """
@@ -3659,7 +3722,7 @@ def bot_sp500_backfill():
 
 
 @mobile_api.route('/admin/bot/sp500-check', methods=['GET'])
-@require_admin_key
+@require_admin_2fa
 @with_db_retry
 def bot_sp500_check():
     """Check S&P 500 data coverage in the database for diagnostics."""
@@ -3717,7 +3780,7 @@ def bot_sp500_check():
 
 
 @mobile_api.route('/admin/bot/holdings', methods=['GET'])
-@require_admin_key
+@require_admin_or_cron
 @with_db_retry
 def bot_holdings():
     """
@@ -3745,7 +3808,7 @@ def bot_holdings():
 
 
 @mobile_api.route('/admin/backfill-sectors', methods=['POST'])
-@require_admin_key
+@require_admin_2fa
 @with_db_retry
 def admin_backfill_sectors():
     """
@@ -3989,7 +4052,7 @@ def bot_reactivate():
 
 
 @mobile_api.route('/admin/bot/update-config', methods=['POST'])
-@require_admin_key
+@require_admin_or_cron
 @with_db_retry
 def bot_update_config():
     """
@@ -4097,7 +4160,7 @@ def bot_remove_subscribers():
 # ── Dashboard API Endpoints ──────────────────────────────────────────────────
 
 @mobile_api.route('/admin/bot/activity-feed', methods=['GET'])
-@require_admin_key
+@require_admin_2fa
 @with_db_retry
 def bot_activity_feed():
     """Recent activity across the platform for the admin dashboard."""
@@ -4151,7 +4214,7 @@ def bot_activity_feed():
 
 
 @mobile_api.route('/admin/bot/alert-summary', methods=['GET'])
-@require_admin_key
+@require_admin_2fa
 @with_db_retry
 def bot_alert_summary():
     """Get alert counts and health status for the admin dashboard."""
@@ -4247,7 +4310,7 @@ def bot_alert_summary():
 
 
 @mobile_api.route('/admin/bot/revenue-summary', methods=['GET'])
-@require_admin_key
+@require_admin_2fa
 @with_db_retry
 def bot_revenue_summary():
     """Revenue breakdown for the admin dashboard."""
@@ -4523,7 +4586,7 @@ def bot_generate_payout_records():
 
 
 @mobile_api.route('/admin/bot/payout-records', methods=['GET'])
-@require_admin_key
+@require_admin_2fa
 @with_db_retry
 def bot_list_payout_records():
     """
@@ -4676,7 +4739,7 @@ def xero_callback():
 
 
 @mobile_api.route('/admin/xero/status', methods=['GET'])
-@require_admin_key
+@require_admin_2fa
 def xero_status():
     """Check current Xero connection status."""
     import xero_service
@@ -4684,7 +4747,7 @@ def xero_status():
 
 
 @mobile_api.route('/admin/xero/sync-payouts', methods=['POST'])
-@require_admin_key
+@require_admin_2fa
 @with_db_retry
 def xero_sync_payouts():
     """Sync pending XeroPayoutRecord entries as bills in Xero.
@@ -4729,7 +4792,7 @@ def xero_sync_payouts():
 
 
 @mobile_api.route('/admin/xero/disconnect', methods=['POST'])
-@require_admin_key
+@require_admin_2fa
 def xero_disconnect():
     """Remove stored Xero tokens (disconnect)."""
     from models import db, XeroOAuthToken
@@ -4744,7 +4807,7 @@ def xero_disconnect():
 
 
 @mobile_api.route('/admin/bot/cron-health', methods=['GET'])
-@require_admin_key
+@require_admin_2fa
 @with_db_retry
 def bot_cron_health():
     """Check health of cron jobs based on data freshness."""
@@ -4828,7 +4891,7 @@ def bot_cron_health():
 
 
 @mobile_api.route('/admin/bot/trade-history', methods=['GET'])
-@require_admin_key
+@require_admin_2fa
 @with_db_retry
 def bot_trade_history():
     """Paginated trade history with filtering for the admin dashboard."""
@@ -4888,7 +4951,7 @@ def bot_trade_history():
 # ── Batch Bot Seed & Auto-Creation ───────────────────────────────────────────
 
 @mobile_api.route('/admin/bot/batch-seed', methods=['POST'])
-@require_admin_key
+@require_admin_2fa
 @with_db_retry
 def bot_batch_seed():
     """
@@ -5101,7 +5164,7 @@ def _gift_bot_subscribers(user_id, count):
 
 
 @mobile_api.route('/admin/bot/auto-create-settings', methods=['GET'])
-@require_admin_key
+@require_admin_2fa
 @with_db_retry
 def bot_auto_create_settings_get():
     """Get the current auto-creation settings."""
@@ -5118,7 +5181,7 @@ def bot_auto_create_settings_get():
 
 
 @mobile_api.route('/admin/bot/auto-create-settings', methods=['POST'])
-@require_admin_key
+@require_admin_2fa
 @with_db_retry
 def bot_auto_create_settings_set():
     """
@@ -5157,7 +5220,7 @@ def bot_auto_create_settings_set():
 
 
 @mobile_api.route('/admin/bot/auto-create-run', methods=['POST'])
-@require_admin_key
+@require_cron_secret
 @with_db_retry
 def bot_auto_create_run():
     """

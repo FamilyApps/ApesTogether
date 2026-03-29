@@ -9,7 +9,7 @@
  * 1. Go to https://script.google.com while logged in as bobford00@gmail.com
  * 2. Create a new project, paste this code
  * 3. Set Script Properties (Project Settings → Script Properties):
- *    - ADMIN_API_KEY: your admin API key
+ *    - CRON_SECRET: your cron secret (separate from admin API key)
  *    - API_BASE_URL: https://apestogether.ai/api/mobile
  *    - GROK_BOT_USERNAME: (the randomly generated bot username for Grok Portfolio)
  *    - WOLFF_BOT_USERNAME: (the randomly generated bot username for Wolff's Fund)
@@ -22,7 +22,7 @@
 function getConfig() {
   const props = PropertiesService.getScriptProperties();
   return {
-    ADMIN_API_KEY: props.getProperty('ADMIN_API_KEY'),
+    CRON_SECRET: props.getProperty('CRON_SECRET'),
     API_BASE_URL: props.getProperty('API_BASE_URL') || 'https://apestogether.ai/api/mobile',
     GROK_BOT_USERNAME: props.getProperty('GROK_BOT_USERNAME'),
     WOLFF_BOT_USERNAME: props.getProperty('WOLFF_BOT_USERNAME'),
@@ -33,8 +33,8 @@ function getConfig() {
 
 function checkForTradeEmails() {
   const config = getConfig();
-  if (!config.ADMIN_API_KEY) {
-    Logger.log('ERROR: ADMIN_API_KEY not configured');
+  if (!config.CRON_SECRET) {
+    Logger.log('ERROR: CRON_SECRET not configured');
     return;
   }
 
@@ -89,7 +89,7 @@ function checkForTradeEmails() {
     const retryResp = UrlFetchApp.fetch(retryUrl, {
       method: 'post',
       contentType: 'application/json',
-      headers: { 'X-Admin-Key': config.ADMIN_API_KEY },
+      headers: { 'X-Cron-Secret': config.CRON_SECRET },
       payload: JSON.stringify({}),
       muteHttpExceptions: true,
     });
@@ -266,7 +266,7 @@ function submitTrades(config, botUsername, trades, source, rawEmail, emailSubjec
     method: 'post',
     contentType: 'application/json',
     headers: {
-      'X-Admin-Key': config.ADMIN_API_KEY
+      'X-Cron-Secret': config.CRON_SECRET
     },
     payload: JSON.stringify(payload),
     muteHttpExceptions: true

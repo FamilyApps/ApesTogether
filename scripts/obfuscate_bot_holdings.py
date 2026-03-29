@@ -18,15 +18,15 @@ except ImportError:
     pass
 
 API_BASE = os.environ.get('API_BASE_URL', 'https://apestogether.ai/api/mobile')
-ADMIN_KEY = os.environ.get('ADMIN_API_KEY')
+CRON_SECRET = os.environ.get('CRON_SECRET')
 
-if not ADMIN_KEY:
-    print("ERROR: ADMIN_API_KEY not set")
+if not CRON_SECRET:
+    print("ERROR: CRON_SECRET not set")
     sys.exit(1)
 
 HEADERS = {
     'Content-Type': 'application/json',
-    'X-Admin-Key': ADMIN_KEY
+    'X-Cron-Secret': CRON_SECRET
 }
 
 # Different multipliers per bot for extra obfuscation
