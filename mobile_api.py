@@ -485,10 +485,20 @@ def get_subscriptions():
                 'created_at': sub.created_at.isoformat()
             })
         
+        active_real_subs = len([s for s in received_subs if s.status == 'active'])
+        gifted_subs_count = 0
+        try:
+            from models import AdminSubscription
+            admin_sub = AdminSubscription.query.filter_by(portfolio_user_id=user_id).first()
+            if admin_sub:
+                gifted_subs_count = admin_sub.bonus_subscriber_count or 0
+        except Exception:
+            pass
+        
         return jsonify({
             'subscriptions_made': subscriptions_made,
             'subscribers': subscribers,
-            'subscriber_count': len([s for s in received_subs if s.status == 'active'])
+            'subscriber_count': active_real_subs + gifted_subs_count
         })
         
     except Exception as e:
@@ -568,11 +578,18 @@ def get_portfolio(slug):
             'subscription_price': 9.00
         }
         
-        # Get subscriber count
+        # Get subscriber count (real + gifted)
         subscriber_count = MobileSubscription.query.filter_by(
             subscribed_to_id=owner.id,
             status='active'
         ).count()
+        try:
+            from models import AdminSubscription
+            admin_sub = AdminSubscription.query.filter_by(portfolio_user_id=owner.id).first()
+            if admin_sub:
+                subscriber_count += admin_sub.bonus_subscriber_count or 0
+        except Exception:
+            pass
         response['subscriber_count'] = subscriber_count
         
         # Leaderboard badges — check if user ranks in top 20 for any period
@@ -999,7 +1016,7 @@ def get_leaderboard():
             ).group_by(Stock.user_id).all()
             stock_count_map = {uid: cnt for uid, cnt in stock_counts}
         
-        # Batch load subscriber counts (single query)
+        # Batch load subscriber counts (real + gifted)
         sub_count_map = {}
         if raw_user_ids:
             sub_counts = db.session.query(
@@ -1010,6 +1027,15 @@ def get_leaderboard():
                 Subscription.status == 'active'
             ).group_by(Subscription.subscribed_to_id).all()
             sub_count_map = {uid: cnt for uid, cnt in sub_counts}
+            # Add gifted (admin) subscribers
+            try:
+                from models import AdminSubscription
+                for asub in AdminSubscription.query.filter(AdminSubscription.portfolio_user_id.in_(raw_user_ids)).all():
+                    bonus = asub.bonus_subscriber_count or 0
+                    if bonus > 0:
+                        sub_count_map[asub.portfolio_user_id] = sub_count_map.get(asub.portfolio_user_id, 0) + bonus
+            except Exception:
+                pass
         
         for entry in (raw_data or []):
             user_id = entry.get('user_id')
@@ -2364,7 +2390,8 @@ def bot_list_users():
         # Batch-fetch stock and trade counts in simple separate queries
         stock_counts = {}
         trade_counts = {}
-        sub_counts = {}
+        real_sub_counts = {}
+        gifted_sub_counts = {}
         try:
             from models import Stock
             from sqlalchemy import func
@@ -2383,16 +2410,15 @@ def bot_list_users():
             from models import MobileSubscription
             from sqlalchemy import func
             for uid, cnt in db.session.query(MobileSubscription.subscribed_to_id, func.count(MobileSubscription.id)).filter(MobileSubscription.status == 'active').group_by(MobileSubscription.subscribed_to_id).all():
-                sub_counts[uid] = cnt
+                real_sub_counts[uid] = cnt
         except Exception:
             pass
-        # Also include gifted (admin) subscribers
         try:
             from models import AdminSubscription
             for asub in AdminSubscription.query.all():
                 bonus = asub.bonus_subscriber_count or 0
                 if bonus > 0:
-                    sub_counts[asub.portfolio_user_id] = sub_counts.get(asub.portfolio_user_id, 0) + bonus
+                    gifted_sub_counts[asub.portfolio_user_id] = bonus
         except Exception:
             pass
         
@@ -2416,7 +2442,9 @@ def bot_list_users():
                 'bot_active': bot_active,
                 'stock_count': stock_counts.get(u.id, 0),
                 'trade_count': trade_counts.get(u.id, 0),
-                'subscriber_count': sub_counts.get(u.id, 0)
+                'real_subscribers': real_sub_counts.get(u.id, 0),
+                'gifted_subscribers': gifted_sub_counts.get(u.id, 0),
+                'subscriber_count': real_sub_counts.get(u.id, 0) + gifted_sub_counts.get(u.id, 0)
             })
         return jsonify({'users': user_list, 'total': len(user_list)})
     except Exception as e:
@@ -2444,22 +2472,23 @@ def admin_user_detail(user_id):
     
     extra = user.extra_data or {}
     
-    # Subscriber count (real + gifted)
+    # Subscriber counts (real vs gifted)
     from models import Subscription, MobileSubscription
-    sub_count = 0
+    real_subs = 0
+    gifted_subs = 0
     try:
-        sub_count += Subscription.query.filter_by(subscribed_to_id=user.id, status='active').count()
+        real_subs += Subscription.query.filter_by(subscribed_to_id=user.id, status='active').count()
     except Exception:
         pass
     try:
-        sub_count += MobileSubscription.query.filter_by(subscribed_to_id=user.id, status='active').count()
+        real_subs += MobileSubscription.query.filter_by(subscribed_to_id=user.id, status='active').count()
     except Exception:
         pass
     try:
         from models import AdminSubscription
         admin_sub = AdminSubscription.query.filter_by(portfolio_user_id=user.id).first()
         if admin_sub:
-            sub_count += admin_sub.bonus_subscriber_count or 0
+            gifted_subs = admin_sub.bonus_subscriber_count or 0
     except Exception:
         pass
     
@@ -2473,7 +2502,9 @@ def admin_user_detail(user_id):
             'bot_active': extra.get('bot_active', True) if user.role == 'agent' else None,
             'strategy': extra.get('trading_style', extra.get('strategy_name', None)),
             'industry': extra.get('industry', 'General'),
-            'subscriber_count': sub_count,
+            'subscriber_count': real_subs + gifted_subs,
+            'real_subscribers': real_subs,
+            'gifted_subscribers': gifted_subs,
         },
         'holdings': [{
             'ticker': s.ticker,

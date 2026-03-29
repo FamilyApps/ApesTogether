@@ -526,12 +526,19 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
         elif category == 'large_cap' and large_cap_percent < 60:
             continue
         
-        # Calculate subscriber count
+        # Calculate subscriber count (real + gifted)
         from models import Subscription
         subscriber_count = Subscription.query.filter_by(
             subscribed_to_id=user.id, 
             status='active'
         ).count()
+        try:
+            from models import AdminSubscription
+            admin_sub = AdminSubscription.query.filter_by(portfolio_user_id=user.id).first()
+            if admin_sub:
+                subscriber_count += admin_sub.bonus_subscriber_count or 0
+        except Exception:
+            pass
         
         # Calculate average trades per week (last 30 days)
         from models import Transaction

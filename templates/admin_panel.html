@@ -474,7 +474,7 @@ const BotManagement = ({ api }) => {
     { key: 'strategy', label: 'Strategy', render: (v) => <Badge text={v || '—'} color="var(--accent-dim)" /> },
     { key: 'industry', label: 'Industry', render: (v) => <Badge text={v || 'General'} color="var(--blue)" /> },
     { key: 'stock_count', label: 'Stocks' },
-    { key: 'subscriber_count', label: 'Subs' },
+    { key: 'subscriber_count', label: 'Subs', render: (v, row) => <span>{row.real_subscribers || 0} real + {row.gifted_subscribers || 0} gift</span> },
     { key: 'bot_active', label: 'Status', render: (v) => v !== false ? <Badge text="Active" color="var(--green)" /> : <Badge text="Inactive" color="var(--red)" /> },
     { key: 'id', label: 'Actions', render: (id, row) => (
       <div style={{ display: 'flex', gap: 6 }}>
@@ -492,6 +492,8 @@ const BotManagement = ({ api }) => {
     strategy: b.extra_data?.trading_style || '—',
     stock_count: b.stock_count || 0,
     subscriber_count: b.subscriber_count || 0,
+    real_subscribers: b.real_subscribers || 0,
+    gifted_subscribers: b.gifted_subscribers || 0,
     bot_active: b.bot_active !== false,
   }));
 
@@ -786,7 +788,7 @@ const UserDetailDrawer = ({ api, userId, onClose }) => {
               <div><span style={{ color: 'var(--text-muted)' }}>Created:</span> {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}</div>
               {u.strategy && <div><span style={{ color: 'var(--text-muted)' }}>Strategy:</span> {u.strategy}</div>}
               {u.industry && <div><span style={{ color: 'var(--text-muted)' }}>Industry:</span> {u.industry}</div>}
-              <div><span style={{ color: 'var(--text-muted)' }}>Subs:</span> {u.subscriber_count || 0}</div>
+              <div><span style={{ color: 'var(--text-muted)' }}>Subs:</span> {(u.real_subscribers || 0)} real + {(u.gifted_subscribers || 0)} gifted = {u.subscriber_count || 0}</div>
             </div>
           </Card>
 
@@ -904,7 +906,7 @@ const UsersPage = ({ api }) => {
             { key: 'email', label: 'Email', render: v => <span style={{ color: 'var(--text-secondary)' }}>{v}</span> },
             { key: 'role', label: 'Role', render: v => <Badge text={v || 'user'} color={v === 'agent' ? 'var(--blue)' : v === 'admin' ? 'var(--red)' : 'var(--accent)'} /> },
             { key: 'stock_count', label: 'Stocks' },
-            { key: 'subscriber_count', label: 'Subs' },
+            { key: 'subscriber_count', label: 'Subs', render: (v, row) => <span>{row.real_subscribers || 0}r + {row.gifted_subscribers || 0}g</span> },
           ]} data={filtered} onRowClick={row => setSelectedUserId(row.id)} />
         )}
       </Card>
