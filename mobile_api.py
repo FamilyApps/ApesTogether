@@ -637,6 +637,55 @@ def get_portfolio(slug):
         
         response['leaderboard_badges'] = leaderboard_badges
         
+        # Portfolio stats (always visible — public info for the profile)
+        # Industry mix
+        industry_mix = {}
+        large_cap_pct = 0.0
+        try:
+            stats = UserPortfolioStats.query.filter_by(user_id=owner.id).first()
+            if stats:
+                if stats.industry_mix and isinstance(stats.industry_mix, dict):
+                    industry_mix = stats.industry_mix
+                large_cap_pct = float(stats.large_cap_percent) if stats.large_cap_percent else 0.0
+        except Exception:
+            pass
+        if not industry_mix:
+            try:
+                from leaderboard_utils import calculate_industry_mix, calculate_portfolio_cap_percentages
+                industry_mix = calculate_industry_mix(owner.id) or {}
+                _, large_cap_pct = calculate_portfolio_cap_percentages(owner.id)
+                large_cap_pct = float(large_cap_pct) if large_cap_pct else 0.0
+            except Exception:
+                pass
+        response['industry_mix'] = industry_mix
+        response['large_cap_pct'] = round(large_cap_pct, 1)
+        
+        # Account age
+        account_age_days = 0
+        if owner.created_at:
+            account_age_days = (datetime.utcnow() - owner.created_at).days
+        response['account_age_days'] = account_age_days
+        
+        # Trades per week (last 30 days)
+        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+        recent_trade_count = Transaction.query.filter(
+            Transaction.user_id == owner.id,
+            Transaction.timestamp >= thirty_days_ago
+        ).count()
+        response['avg_trades_per_week'] = round(recent_trade_count / 4.3, 1)
+        
+        # Unique stocks count
+        num_stocks = Stock.query.filter_by(user_id=owner.id).count()
+        response['num_stocks'] = num_stocks
+        
+        # Portfolio value (always visible as public info)
+        try:
+            from portfolio_performance import PortfolioPerformanceCalculator
+            calc = PortfolioPerformanceCalculator()
+            response['portfolio_value'] = round(calc.calculate_portfolio_value(owner.id), 2)
+        except Exception:
+            response['portfolio_value'] = 0.0
+        
         # If subscribed or owner, show full portfolio
         if is_owner or is_subscribed:
             stocks = Stock.query.filter_by(user_id=owner.id).all()

@@ -70,6 +70,12 @@ struct PortfolioResponse: Codable {
     let recentTrades: [Trade]?
     let previewMessage: String?
     let leaderboardBadges: [LeaderboardBadge]?
+    let industryMix: [String: Double]?
+    let largeCapPct: Double?
+    let accountAgeDays: Int?
+    let avgTradesPerWeek: Double?
+    let numStocks: Int?
+    let portfolioValue: Double?
 }
 
 struct LeaderboardBadge: Codable, Identifiable {

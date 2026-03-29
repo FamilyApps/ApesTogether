@@ -29,6 +29,12 @@ struct PortfolioDetailView: View {
                             .padding(.top, 100)
                     } else if let portfolio = viewModel.portfolio {
                         
+                        // ── Hero Header ──
+                        if !portfolio.isOwner {
+                            PortfolioHeroCard(portfolio: portfolio)
+                                .padding(.horizontal, 16)
+                        }
+                        
                         // ── Performance Chart Card ──
                         PerformanceChartView(
                             chartData: viewModel.chartData,
@@ -53,6 +59,61 @@ struct PortfolioDetailView: View {
                                 }
                                 .padding(.horizontal, 16)
                             }
+                        }
+                        
+                        // ── Stats Grid (non-owner view) ──
+                        if !portfolio.isOwner {
+                            PortfolioStatsGrid(portfolio: portfolio)
+                                .padding(.horizontal, 16)
+                        }
+                        
+                        // ── Sector Allocation ──
+                        if let mix = portfolio.industryMix, !mix.isEmpty {
+                            SectorAllocationCard(industryMix: mix)
+                                .padding(.horizontal, 16)
+                        }
+                        
+                        // ── Action Buttons (non-owner: Subscribe + Share) ──
+                        if !portfolio.isOwner && !portfolio.isSubscribed {
+                            HStack(spacing: 10) {
+                                Button {
+                                    Task { await subscriptionManager.subscribe(to: portfolio.owner.id) }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "crown.fill")
+                                            .font(.system(size: 13))
+                                        Text("Subscribe $\(String(format: "%.0f", portfolio.subscriptionPrice))/mo")
+                                            .font(.system(size: 14, weight: .bold))
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 13)
+                                    .background(Color.primaryAccent)
+                                    .foregroundColor(.white)
+                                    .cornerRadius(12)
+                                }
+                                .disabled(subscriptionManager.isProcessing)
+                                
+                                ShareLink(
+                                    item: URL(string: "https://apestogether.ai/p/\(portfolio.owner.portfolioSlug ?? slug)")!,
+                                    subject: Text("\(portfolio.owner.username)'s Portfolio"),
+                                    message: Text("Check out \(portfolio.owner.username)'s stock portfolio on ApesTogether!")
+                                ) {
+                                    HStack(spacing: 5) {
+                                        Image(systemName: "square.and.arrow.up")
+                                            .font(.system(size: 13))
+                                        Text("Share")
+                                            .font(.system(size: 14, weight: .semibold))
+                                    }
+                                    .foregroundColor(.textSecondary)
+                                    .padding(.vertical, 13)
+                                    .padding(.horizontal, 20)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                                    )
+                                }
+                            }
+                            .padding(.horizontal, 16)
                         }
                         
                         // ── Buy / Sell Buttons ──
@@ -172,37 +233,16 @@ struct PortfolioDetailView: View {
                                 }
                             }
                         } else if portfolio.holdings == nil {
-                            // Subscription prompt for non-owners
-                            VStack(spacing: 20) {
-                                ZStack {
-                                    Circle()
-                                        .fill(Color.primaryAccent.opacity(0.1))
-                                        .frame(width: 80, height: 80)
-                                    Image(systemName: "lock.fill")
-                                        .font(.system(size: 32))
-                                        .foregroundColor(.primaryAccent)
-                                }
-                                
-                                Text(portfolio.previewMessage ?? "Subscribe to view holdings")
-                                    .foregroundColor(.textSecondary)
-                                    .multilineTextAlignment(.center)
-                                
-                                Button {
-                                    Task {
-                                        await subscriptionManager.subscribe(to: portfolio.owner.id)
-                                    }
-                                } label: {
-                                    HStack {
-                                        Text("Subscribe")
-                                        Text("$\(String(format: "%.2f", portfolio.subscriptionPrice))/mo")
-                                            .fontWeight(.semibold)
-                                    }
-                                }
-                                .buttonStyle(PrimaryButtonStyle(isDisabled: subscriptionManager.isProcessing))
-                                .padding(.horizontal, 40)
-                                .disabled(subscriptionManager.isProcessing)
-                            }
-                            .padding(.vertical, 40)
+                            // ── Blurred Holdings Teaser ──
+                            BlurredHoldingsTeaser(
+                                username: portfolio.owner.username,
+                                subscriptionPrice: portfolio.subscriptionPrice,
+                                onSubscribe: {
+                                    Task { await subscriptionManager.subscribe(to: portfolio.owner.id) }
+                                },
+                                isProcessing: subscriptionManager.isProcessing
+                            )
+                            .padding(.horizontal, 16)
                         } else {
                             // Owner with no holdings
                             VStack(spacing: 16) {
@@ -235,6 +275,21 @@ struct PortfolioDetailView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if let portfolio = viewModel.portfolio, !portfolio.isOwner {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    ShareLink(
+                        item: URL(string: "https://apestogether.ai/p/\(portfolio.owner.portfolioSlug ?? slug)")!,
+                        subject: Text("\(portfolio.owner.username)'s Portfolio"),
+                        message: Text("Check out \(portfolio.owner.username)'s portfolio on ApesTogether!")
+                    ) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 14))
+                            .foregroundColor(.primaryAccent)
+                    }
+                }
+            }
+        }
         .onAppear {
             Task {
                 await viewModel.loadPortfolio(slug: slug)
@@ -635,6 +690,281 @@ struct LeaderboardBadgePill: View {
                 .stroke(pillColor.opacity(0.4), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
+    }
+}
+
+// MARK: - Portfolio Hero Card
+
+struct PortfolioHeroCard: View {
+    let portfolio: PortfolioResponse
+    
+    private var accountAgeText: String {
+        let days = portfolio.accountAgeDays ?? 0
+        if days >= 365 {
+            let years = days / 365
+            let months = (days % 365) / 30
+            return "\(years)y \(months)m"
+        } else if days >= 30 {
+            return "\(days / 30) month\(days / 30 > 1 ? "s" : "")"
+        } else {
+            return "\(days) day\(days != 1 ? "s" : "")"
+        }
+    }
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            // Avatar
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.primaryAccent, Color(hex: "059669")],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 56, height: 56)
+                    .shadow(color: Color.primaryAccent.opacity(0.3), radius: 12)
+                
+                Text(String(portfolio.owner.username.prefix(1)).uppercased())
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+            }
+            
+            Text(portfolio.owner.username)
+                .font(.system(size: 20, weight: .bold))
+                .foregroundColor(.textPrimary)
+            
+            HStack(spacing: 4) {
+                Text("Member for \(accountAgeText)")
+                Text("·")
+                Text("\(portfolio.subscriberCount) subscriber\(portfolio.subscriberCount != 1 ? "s" : "")")
+            }
+            .font(.system(size: 12))
+            .foregroundColor(.textSecondary)
+            
+            // Portfolio value
+            if let value = portfolio.portfolioValue, value > 0 {
+                Text("$\(formatLargeNumber(value))")
+                    .font(.system(size: 28, weight: .heavy, design: .rounded))
+                    .foregroundColor(.textPrimary)
+                    .padding(.top, 4)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
+        .cardStyle()
+    }
+    
+    private func formatLargeNumber(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = 2
+        return formatter.string(from: NSNumber(value: value)) ?? String(format: "%.2f", value)
+    }
+}
+
+// MARK: - Portfolio Stats Grid
+
+struct PortfolioStatsGrid: View {
+    let portfolio: PortfolioResponse
+    
+    var body: some View {
+        HStack(spacing: 1) {
+            StatCell(value: "\(portfolio.numStocks ?? 0)", label: "Stocks")
+            StatCell(value: String(format: "%.1f", portfolio.avgTradesPerWeek ?? 0), label: "Trades/Wk")
+            StatCell(value: String(format: "%.0f%%", portfolio.largeCapPct ?? 0), label: "Large Cap")
+        }
+        .background(Color.white.opacity(0.06))
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.white.opacity(0.06), lineWidth: 1)
+        )
+    }
+}
+
+private struct StatCell: View {
+    let value: String
+    let label: String
+    
+    var body: some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .foregroundColor(.textPrimary)
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.textMuted)
+                .textCase(.uppercase)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+        .background(Color.cardBackground)
+    }
+}
+
+// MARK: - Sector Allocation Card
+
+struct SectorAllocationCard: View {
+    let industryMix: [String: Double]
+    
+    private let barColors: [Color] = [
+        Color(hex: "10b981"), Color(hex: "3b82f6"), Color(hex: "f59e0b"),
+        Color(hex: "ef4444"), Color(hex: "8b5cf6"), Color(hex: "ec4899"),
+        Color(hex: "06b6d4"), Color(hex: "f97316"), Color(hex: "14b8a6"),
+        Color(hex: "a855f7"), Color(hex: "6366f1")
+    ]
+    
+    private var sortedSectors: [(String, Double)] {
+        industryMix.sorted { $0.value > $1.value }.filter { $0.value >= 1.0 }
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Sector Allocation")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.textPrimary)
+            
+            ForEach(Array(sortedSectors.enumerated()), id: \.element.0) { index, sector in
+                HStack(spacing: 10) {
+                    Text(sector.0)
+                        .font(.system(size: 12))
+                        .foregroundColor(.textSecondary)
+                        .frame(width: 90, alignment: .leading)
+                        .lineLimit(1)
+                    
+                    GeometryReader { geo in
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(barColors[index % barColors.count])
+                            .frame(width: geo.size.width * CGFloat(sector.1 / 100.0))
+                    }
+                    .frame(height: 8)
+                    
+                    Text(String(format: "%.1f%%", sector.1))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.textPrimary)
+                        .frame(width: 42, alignment: .trailing)
+                }
+            }
+        }
+        .padding(16)
+        .cardStyle()
+    }
+}
+
+// MARK: - Blurred Holdings Teaser
+
+struct BlurredHoldingsTeaser: View {
+    let username: String
+    let subscriptionPrice: Double
+    let onSubscribe: () -> Void
+    let isProcessing: Bool
+    
+    private let fakeHoldings: [(String, String, String, Bool)] = [
+        ("AAPL", "$8,329", "+13.6%", true),
+        ("NVDA", "$9,193", "+27.1%", true),
+        ("TSLA", "$6,303", "-9.2%", false),
+        ("AMZN", "$3,729", "+31.0%", true),
+        ("MSFT", "$7,426", "+22.0%", true),
+    ]
+    
+    var body: some View {
+        ZStack {
+            // Blurred fake holdings
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Holdings")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.textPrimary)
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 14)
+                .padding(.bottom, 10)
+                
+                ForEach(fakeHoldings, id: \.0) { ticker, value, gain, isPositive in
+                    HStack {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.primaryAccent.opacity(0.1))
+                                .frame(width: 36, height: 36)
+                            Text(String(ticker.prefix(2)))
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.primaryAccent)
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(ticker)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.textPrimary)
+                            Text("42 shares")
+                                .font(.system(size: 11))
+                                .foregroundColor(.textMuted)
+                        }
+                        .padding(.leading, 4)
+                        
+                        Spacer()
+                        
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(value)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.textPrimary)
+                            Text(gain)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(isPositive ? .gains : .losses)
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    
+                    if ticker != fakeHoldings.last?.0 {
+                        Divider().background(Color.white.opacity(0.06))
+                    }
+                }
+            }
+            .blur(radius: 6)
+            .opacity(0.4)
+            
+            // Overlay CTA
+            VStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(Color.primaryAccent.opacity(0.15))
+                        .frame(width: 56, height: 56)
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 24))
+                        .foregroundColor(.primaryAccent)
+                }
+                
+                Text("See Full Holdings")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.textPrimary)
+                
+                Text("Subscribe to view \(username)'s exact positions, trade alerts, and full history.")
+                    .font(.system(size: 13))
+                    .foregroundColor(.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 260)
+                
+                Button(action: onSubscribe) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "crown.fill")
+                            .font(.system(size: 13))
+                        Text("Subscribe for $\(String(format: "%.0f", subscriptionPrice))/mo")
+                            .font(.system(size: 15, weight: .bold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.vertical, 13)
+                    .padding(.horizontal, 28)
+                    .background(Color.primaryAccent)
+                    .cornerRadius(12)
+                }
+                .disabled(isProcessing)
+            }
+            .padding(.vertical, 20)
+        }
+        .cardStyle()
     }
 }
 
