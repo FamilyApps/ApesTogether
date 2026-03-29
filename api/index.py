@@ -378,6 +378,7 @@ try:
     # SSL drops from PgBouncer are handled by the db_retry() wrapper instead.
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
         'poolclass': NullPool,
+        'pool_pre_ping': True,  # Validate connections before use — catches dead SSL sockets
         'connect_args': {
             'connect_timeout': 5,
             'keepalives': 1,
@@ -554,17 +555,43 @@ try:
                 logger.warning(f"DB disconnect detected, invalidating connection: {context.original_exception}")
     
     # Retry helper for DB operations that may fail due to PgBouncer SSL drops
+    def _nuke_session():
+        """Nuclear session cleanup — destroy every trace of the current session/connection."""
+        # 1. Try to rollback the session-level transaction
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        # 2. Close the session (releases underlying connection)
+        try:
+            db.session.close()
+        except Exception:
+            pass
+        # 3. Remove from scoped session registry
+        try:
+            db.session.remove()
+        except Exception:
+            pass
+        # 4. Clear the scoped session registry directly — this is the nuclear option
+        #    that ensures no stale session/connection references survive
+        try:
+            if hasattr(db.session, 'registry'):
+                db.session.registry.clear()
+        except Exception:
+            pass
+        # 5. Dispose engine (closes all engine-level connections)
+        try:
+            db.engine.dispose()
+        except Exception:
+            pass
+
     def db_retry(fn, max_retries=2):
         """Execute fn(), retrying on SSL/connection errors with fresh DB session."""
         last_error = None
         for attempt in range(max_retries + 1):
-            # Ensure clean session at the START of every attempt (including first)
+            # Ensure clean session at the START of every retry (not first attempt)
             if attempt > 0:
-                for cleanup_fn in [db.session.close, db.session.rollback, db.session.remove, db.engine.dispose]:
-                    try:
-                        cleanup_fn()
-                    except Exception:
-                        pass
+                _nuke_session()
                 import time as _time
                 _time.sleep(1)
             try:
@@ -586,12 +613,15 @@ try:
                 )
                 if is_connection_error:
                     app._last_request_had_db_error = True
+                    # Nuke immediately after error too, don't wait for next iteration top
+                    _nuke_session()
                 if is_connection_error and attempt < max_retries:
                     logger.warning(f"DB connection error (attempt {attempt+1}/{max_retries+1}): {e}")
-                    continue  # cleanup happens at top of next iteration
+                    continue
                 raise last_error
     
-    # Store on app so blueprints can access it
+    # Store on app so blueprints and decorators can access them
+    app._nuke_session = _nuke_session
     app.db_retry = db_retry
     
     # Use Flask's built-in signed cookie sessions (SecureCookieSession).
@@ -764,10 +794,19 @@ def admin_required(f):
     """Decorator to check if user is an admin (login + email check)"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # Check both Flask-Login and session-based auth
+        # Check session cookie FIRST (no DB query needed)
         email = session.get('email', '')
-        if not email and current_user.is_authenticated:
-            email = getattr(current_user, 'email', '')
+        if email == ADMIN_EMAIL:
+            return f(*args, **kwargs)
+        # Fallback: check Flask-Login current_user (triggers DB query via load_user)
+        # Wrap in try/except so SSL drops here don't poison the session for the route
+        if not email:
+            try:
+                if current_user.is_authenticated:
+                    email = getattr(current_user, 'email', '')
+            except Exception:
+                # DB error loading user — clean up so route's db_retry starts fresh
+                app._nuke_session()
         
         # Allow access only for admin email
         if email == ADMIN_EMAIL:
