@@ -2135,15 +2135,32 @@ def serve_favicon():
 @app.route('/api/health')
 def health_check():
     try:
-        # Check database connectivity
+        # Check database connectivity with retry to avoid poisoning connection state
         db_status = False
         version = None
         try:
-            result = db.session.execute(text('SELECT version()'))
-            version = result.scalar()
+            def _health_query():
+                r = db.session.execute(text('SELECT version()'))
+                return r.scalar()
+            version = db_retry(_health_query, max_retries=2)
             db_status = True
         except Exception as e:
             logger.error(f"Database health check failed: {str(e)}")
+            # Clean up immediately so this doesn't poison the next request
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            try:
+                db.session.remove()
+            except Exception:
+                pass
+            try:
+                db.engine.dispose()
+            except Exception:
+                pass
+            # Clear the error flag — we already disposed, no need for before_request to do it again
+            app._last_request_had_db_error = False
         
         # Return health status
         return jsonify({
@@ -2445,7 +2462,7 @@ def index():
     """Marketing landing page"""
     from models import BetaWaitlist
     try:
-        waitlist_count = BetaWaitlist.query.count()
+        waitlist_count = db_retry(lambda: BetaWaitlist.query.count(), max_retries=2)
     except Exception:
         waitlist_count = 0
     return render_template('landing.html', waitlist_count=waitlist_count)
