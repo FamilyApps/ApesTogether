@@ -571,7 +571,9 @@ try:
                     'connection refused' in err_str or
                     'server closed the connection' in err_str or
                     'closed the connection unexpectedly' in err_str or
-                    'connection timed out' in err_str
+                    'connection timed out' in err_str or
+                    'pending rollback' in err_str or
+                    "can't reconnect" in err_str
                 )
                 if is_connection_error:
                     app._last_request_had_db_error = True
@@ -7112,7 +7114,19 @@ def cache_backfill_task():
     try:
         db.session.execute(text("SET statement_timeout = '55s'"))
     except Exception:
-        pass
+        # If SET fails (stale/broken session), clean up fully so queries start fresh
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        try:
+            db.session.remove()
+        except Exception:
+            pass
+        try:
+            db.engine.dispose()
+        except Exception:
+            pass
     
     try:
         if task_type == 'chart':
