@@ -6712,13 +6712,9 @@ def cache_backfill_task():
     period = request.args.get('period', '')
     t_start = time.time()
     
-    # Fresh connection for each task to avoid SSL drops from PgBouncer
+    # Release any stale connection from previous request
     try:
         db.session.remove()
-    except Exception:
-        pass
-    try:
-        db.engine.dispose()
     except Exception:
         pass
     
@@ -6736,7 +6732,12 @@ def cache_backfill_task():
             if chart_data:
                 chart_json = json.dumps(chart_data)
                 now = datetime.now()
-                logger.info(f"[BACKFILL] chart: writing {len(chart_json)} bytes to DB...")
+                # Close session after read to release PgBouncer connection before write
+                try:
+                    db.session.remove()
+                except Exception:
+                    pass
+                logger.info(f"[BACKFILL] chart: writing {len(chart_json)} bytes to DB (fresh conn)...")
                 t1 = time.time()
                 def _write_chart():
                     db.session.execute(text("SET LOCAL statement_timeout = '30s'"))
@@ -6777,6 +6778,11 @@ def cache_backfill_task():
                     lb_json = json.dumps(leaderboard_data)
                     now = datetime.now()
                     cache_key = f"{period}_{category}"
+                    # Release connection after read before write
+                    try:
+                        db.session.remove()
+                    except Exception:
+                        pass
                     def _write_lb(ck=cache_key, lj=lb_json, n=now):
                         for suffix in ['_auth', '_anon']:
                             full_key = ck + suffix
@@ -6808,6 +6814,11 @@ def cache_backfill_task():
             logger.info(f"[BACKFILL] stats: calc={calc_time}s industry_mix={stats_data.get('industry_mix')}")
             
             industry_json = json.dumps(stats_data['industry_mix']) if isinstance(stats_data.get('industry_mix'), dict) else stats_data.get('industry_mix', '{}')
+            # Release connection after read before write
+            try:
+                db.session.remove()
+            except Exception:
+                pass
             def _write_stats():
                 db.session.execute(text("SET LOCAL statement_timeout = '30s'"))
                 db.session.execute(text("DELETE FROM user_portfolio_stats WHERE user_id = :uid"), {'uid': user_id})
