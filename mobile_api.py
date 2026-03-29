@@ -1074,12 +1074,48 @@ def get_leaderboard():
             else:
                 e['rank_change'] = 0  # new entry or no previous data
         
+        # ── Override return_percent and sparkline with live performance calculator ──
+        # Uses the SAME function as the portfolio chart endpoint for consistency.
+        # Only runs for top N entries (max 20) so cost is bounded.
+        top_entries = leaderboard[:limit]
+        try:
+            from performance_calculator import calculate_portfolio_performance, get_period_dates
+            perf_period = cache_period  # Use the same period mapping (e.g. 1W -> 5D)
+            
+            for entry in top_entries:
+                try:
+                    uid = entry['user']['id']
+                    start_d, end_d = get_period_dates(perf_period, user_id=uid)
+                    result = calculate_portfolio_performance(
+                        uid, start_d, end_d,
+                        include_chart_data=True, period=perf_period
+                    )
+                    if result:
+                        live_return = result.get('portfolio_return', 0.0)
+                        entry['return_percent'] = round(live_return, 2)
+                        
+                        # Extract sparkline from chart_data (portfolio % returns)
+                        chart_pts = result.get('chart_data') or []
+                        if chart_pts:
+                            sparkline = [round(pt.get('portfolio', 0) or 0, 2) for pt in chart_pts]
+                            entry['sparkline_data'] = sparkline[-20:]
+                except Exception as e_perf:
+                    logger.warning(f"Live perf calc failed for user {entry['user']['id']}: {e_perf}")
+                    # Keep the cached value as fallback
+        except Exception as e_import:
+            logger.warning(f"Performance calculator import failed, using cached values: {e_import}")
+        
+        # Re-sort after live overrides (values may have changed)
+        top_entries.sort(key=lambda x: x['return_percent'], reverse=True)
+        for i, e in enumerate(top_entries):
+            e['rank'] = i + 1
+        
         return jsonify({
             'period': period,
             'category': category,
             'sp500_return': round(sp500_return_for_period, 2),
             'available_industries': sorted(list(available_industries)),
-            'entries': leaderboard[:limit]
+            'entries': top_entries
         })
         
     except Exception as e:
@@ -2369,6 +2405,25 @@ def admin_user_detail(user_id):
     
     extra = user.extra_data or {}
     
+    # Subscriber count (real + gifted)
+    from models import Subscription, MobileSubscription
+    sub_count = 0
+    try:
+        sub_count += Subscription.query.filter_by(subscribed_to_id=user.id, status='active').count()
+    except Exception:
+        pass
+    try:
+        sub_count += MobileSubscription.query.filter_by(subscribed_to_id=user.id, status='active').count()
+    except Exception:
+        pass
+    try:
+        from models import AdminSubscription
+        admin_sub = AdminSubscription.query.filter_by(portfolio_user_id=user.id).first()
+        if admin_sub:
+            sub_count += admin_sub.bonus_subscriber_count or 0
+    except Exception:
+        pass
+    
     return jsonify({
         'user': {
             'id': user.id,
@@ -2379,6 +2434,7 @@ def admin_user_detail(user_id):
             'bot_active': extra.get('bot_active', True) if user.role == 'agent' else None,
             'strategy': extra.get('trading_style', extra.get('strategy_name', None)),
             'industry': extra.get('industry', 'General'),
+            'subscriber_count': sub_count,
         },
         'holdings': [{
             'ticker': s.ticker,

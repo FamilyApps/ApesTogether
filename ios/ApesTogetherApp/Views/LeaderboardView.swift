@@ -44,7 +44,7 @@ struct LeaderboardView: View {
         if let explicit = expandedEntryId {
             return explicit == entry.id
         }
-        if autoExpandedTop && entry.rank <= 2 {
+        if autoExpandedTop && entry.rank == 1 {
             return true
         }
         return false

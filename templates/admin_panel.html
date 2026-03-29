@@ -732,12 +732,38 @@ const RevenuePage = ({ api }) => {
 const UserDetailDrawer = ({ api, userId, onClose }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [giftCount, setGiftCount] = useState(5);
+  const [giftMsg, setGiftMsg] = useState(null);
+  const [giftLoading, setGiftLoading] = useState(false);
+  const [removeCount, setRemoveCount] = useState(1);
 
-  useEffect(() => {
+  const reload = useCallback(() => {
     if (!userId) return;
     setLoading(true);
     api(`/admin/user/${userId}`).then(d => { setData(d); setLoading(false); }).catch(() => setLoading(false));
   }, [api, userId]);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  const handleGift = async () => {
+    setGiftLoading(true); setGiftMsg(null);
+    try {
+      const res = await api('/admin/bot/gift-subscribers', { method: 'POST', body: { user_id: userId, count: giftCount } });
+      setGiftMsg({ ok: true, text: `Gifted ${res.gifted || giftCount} subscribers (total: ${res.new_total || '?'})` });
+      reload();
+    } catch (e) { setGiftMsg({ ok: false, text: e.message }); }
+    setGiftLoading(false);
+  };
+
+  const handleRemoveGifted = async () => {
+    setGiftLoading(true); setGiftMsg(null);
+    try {
+      const res = await api('/admin/bot/remove-subscribers', { method: 'POST', body: { user_id: userId, count: removeCount } });
+      setGiftMsg({ ok: true, text: `Removed ${res.removed || removeCount} gifted subscribers` });
+      reload();
+    } catch (e) { setGiftMsg({ ok: false, text: e.message }); }
+    setGiftLoading(false);
+  };
 
   if (!userId) return null;
   const u = data?.user;
@@ -760,7 +786,44 @@ const UserDetailDrawer = ({ api, userId, onClose }) => {
               <div><span style={{ color: 'var(--text-muted)' }}>Created:</span> {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}</div>
               {u.strategy && <div><span style={{ color: 'var(--text-muted)' }}>Strategy:</span> {u.strategy}</div>}
               {u.industry && <div><span style={{ color: 'var(--text-muted)' }}>Industry:</span> {u.industry}</div>}
+              <div><span style={{ color: 'var(--text-muted)' }}>Subs:</span> {u.subscriber_count || 0}</div>
             </div>
+          </Card>
+
+          {/* Gift Subscribers */}
+          <Card>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <span style={{ color: 'var(--accent)' }}>{Icons.gift}</span>
+              <span style={{ fontSize: 14, fontWeight: 600 }}>Gift Subscribers</span>
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Count to gift</label>
+                <input type="number" min="1" max="100" value={giftCount}
+                  onChange={e => setGiftCount(Math.max(1, parseInt(e.target.value) || 1))}
+                  style={{ width: '100%', padding: '8px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-light)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 14 }} />
+              </div>
+              <Btn onClick={handleGift} disabled={giftLoading} small style={{ whiteSpace: 'nowrap' }}>
+                {giftLoading ? <Spinner /> : Icons.gift} Gift
+              </Btn>
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginTop: 10 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Count to remove</label>
+                <input type="number" min="1" max="100" value={removeCount}
+                  onChange={e => setRemoveCount(Math.max(1, parseInt(e.target.value) || 1))}
+                  style={{ width: '100%', padding: '8px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-light)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 14 }} />
+              </div>
+              <Btn onClick={handleRemoveGifted} disabled={giftLoading} small variant="danger" style={{ whiteSpace: 'nowrap' }}>
+                {Icons.trash} Remove
+              </Btn>
+            </div>
+            {giftMsg && (
+              <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500,
+                background: giftMsg.ok ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+                color: giftMsg.ok ? 'var(--green)' : 'var(--red)', border: `1px solid ${giftMsg.ok ? 'var(--green)' : 'var(--red)'}33`
+              }}>{giftMsg.text}</div>
+            )}
           </Card>
 
           <Card>
