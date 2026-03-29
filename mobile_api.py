@@ -1504,80 +1504,91 @@ def get_top_influencers():
     limit = min(int(request.args.get('limit', 20)), 50)
     
     try:
-        # Query UserPortfolioStats joined with User, ordered by subscriber_count desc
-        query = db.session.query(UserPortfolioStats, User).join(
-            User, UserPortfolioStats.user_id == User.id
-        ).filter(
-            UserPortfolioStats.subscriber_count > 0
-        )
+        # Build a combined subscriber count map from all sources:
+        # 1. MobileSubscription (real subs)
+        # 2. AdminSubscription (gifted subs)
+        from models import AdminSubscription
+        sub_totals = {}  # user_id -> total subscriber count
         
-        # Industry filter: check if the industry appears in the JSON industry_mix
-        if industry and industry.lower() != 'all':
-            try:
-                # Filter users where the industry exists in their industry_mix JSON
-                # and represents >= 10% of their portfolio
-                query = query.filter(
-                    UserPortfolioStats.industry_mix.isnot(None)
-                )
-            except Exception:
-                pass
+        try:
+            real_counts = db.session.query(
+                MobileSubscription.subscribed_to_id,
+                db.func.count(MobileSubscription.id)
+            ).filter_by(status='active').group_by(
+                MobileSubscription.subscribed_to_id
+            ).all()
+            for uid, cnt in real_counts:
+                sub_totals[uid] = sub_totals.get(uid, 0) + cnt
+        except Exception:
+            pass
         
-        results = query.order_by(
-            UserPortfolioStats.subscriber_count.desc()
-        ).limit(limit).all()
+        try:
+            for asub in AdminSubscription.query.filter(AdminSubscription.bonus_subscriber_count > 0).all():
+                sub_totals[asub.portfolio_user_id] = sub_totals.get(asub.portfolio_user_id, 0) + (asub.bonus_subscriber_count or 0)
+        except Exception:
+            pass
         
-        entries = []
-        rank = 0
-        for stats, user in results:
-            # If industry filter is active, check the JSON in Python
+        # Filter to users with > 0 subs
+        user_ids_with_subs = [uid for uid, cnt in sub_totals.items() if cnt > 0]
+        if not user_ids_with_subs:
+            return jsonify({'entries': [], 'available_industries': [], 'total': 0})
+        
+        # Load users and their stats
+        users_map = {u.id: u for u in User.query.filter(User.id.in_(user_ids_with_subs)).all()}
+        stats_map = {s.user_id: s for s in UserPortfolioStats.query.filter(
+            UserPortfolioStats.user_id.in_(user_ids_with_subs)
+        ).all()}
+        
+        # Build entries sorted by subscriber count
+        raw_entries = []
+        all_industries = set()
+        for uid in user_ids_with_subs:
+            user = users_map.get(uid)
+            if not user:
+                continue
+            stats = stats_map.get(uid)
+            industry_mix = (stats.industry_mix if stats and stats.industry_mix else {}) or {}
+            
+            # Industry filter
             if industry and industry.lower() != 'all':
-                mix = stats.industry_mix or {}
-                # Check if the filtered industry exists with >= 10%
-                matched = False
-                for ind_name, pct in mix.items():
-                    if industry.lower() in ind_name.lower() and pct >= 5:
-                        matched = True
-                        break
+                matched = any(
+                    industry.lower() in ind_name.lower() and pct >= 5
+                    for ind_name, pct in industry_mix.items()
+                )
                 if not matched:
                     continue
             
-            rank += 1
-            # Get top industries for display
+            # Collect available industries
+            for ind_name, pct in industry_mix.items():
+                if pct >= 5:
+                    all_industries.add(ind_name)
+            
             top_industries = []
-            if stats.industry_mix:
-                sorted_industries = sorted(stats.industry_mix.items(), key=lambda x: x[1], reverse=True)
+            if industry_mix:
+                sorted_industries = sorted(industry_mix.items(), key=lambda x: x[1], reverse=True)
                 top_industries = [
                     {'name': name, 'percent': round(pct, 1)}
                     for name, pct in sorted_industries[:3]
                 ]
             
-            entries.append({
-                'rank': rank,
+            raw_entries.append({
                 'user': {
                     'id': user.id,
                     'username': user.username,
                     'portfolio_slug': user.portfolio_slug
                 },
-                'subscriber_count': stats.subscriber_count or 0,
-                'unique_stocks': stats.unique_stocks_count or 0,
-                'avg_trades_per_week': round(stats.avg_trades_per_week or 0, 1),
+                'subscriber_count': sub_totals[uid],
+                'unique_stocks': (stats.unique_stocks_count if stats else 0) or 0,
+                'avg_trades_per_week': round((stats.avg_trades_per_week if stats else 0) or 0, 1),
                 'top_industries': top_industries
             })
         
-        # Get available industries for filter UI
-        all_industries = set()
-        try:
-            all_stats = UserPortfolioStats.query.filter(
-                UserPortfolioStats.industry_mix.isnot(None),
-                UserPortfolioStats.subscriber_count > 0
-            ).all()
-            for s in all_stats:
-                if s.industry_mix:
-                    for ind_name, pct in s.industry_mix.items():
-                        if pct >= 5:
-                            all_industries.add(ind_name)
-        except Exception:
-            pass
+        # Sort by subscriber count desc, assign ranks, apply limit
+        raw_entries.sort(key=lambda x: x['subscriber_count'], reverse=True)
+        entries = []
+        for i, entry in enumerate(raw_entries[:limit]):
+            entry['rank'] = i + 1
+            entries.append(entry)
         
         return jsonify({
             'entries': entries,
@@ -3856,6 +3867,7 @@ def bot_gift_subscribers():
             db.session.add(admin_sub)
         
         # Update UserPortfolioStats subscriber_count (what the influencer sees)
+        # Also populate industry_mix/stats so user appears in Top Creators
         stats = UserPortfolioStats.query.filter_by(user_id=user_id).first()
         if stats:
             stats.subscriber_count = (stats.subscriber_count or 0) + count
@@ -3865,6 +3877,16 @@ def bot_gift_subscribers():
                 subscriber_count=count
             )
             db.session.add(stats)
+        
+        # Populate stats fields if missing (needed for Top Creators)
+        try:
+            from leaderboard_utils import calculate_user_portfolio_stats
+            user_stats = calculate_user_portfolio_stats(user_id)
+            stats.unique_stocks_count = user_stats.get('unique_stocks_count', 0)
+            stats.avg_trades_per_week = user_stats.get('avg_trades_per_week', 0)
+            stats.industry_mix = user_stats.get('industry_mix', {})
+        except Exception as stats_err:
+            logger.warning(f"Non-blocking: failed to populate stats for user {user_id}: {stats_err}")
         
         db.session.commit()
         
