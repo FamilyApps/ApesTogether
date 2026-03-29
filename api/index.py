@@ -6631,20 +6631,23 @@ def cache_backfill_ui():
 <script>
 const log = document.getElementById('log');
 let errCount = 0;
+function esc(s) { let d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function addLog(msg, cls) {
   log.innerHTML += '<div class="' + cls + '">[' + new Date().toLocaleTimeString() + '] ' + msg + '</div>';
   log.scrollTop = log.scrollHeight;
 }
+function toggleDetail(id) { let el = document.getElementById(id); if(el) el.style.display = el.style.display === 'none' ? 'block' : 'none'; }
 function addError(label, data) {
   errCount++;
   let id = 'err_' + errCount;
   let detail = '';
-  if (data.traceback) detail += '<b>Traceback:</b>\\n<pre style="white-space:pre-wrap;color:#ef9a9a;font-size:11px;margin:4px 0">' + data.traceback + '</pre>';
-  if (data.error_type) detail += '<b>Type:</b> ' + data.error_type + '\\n';
-  if (data.elapsed) detail += '<b>Elapsed:</b> ' + data.elapsed + 's\\n';
-  if (data.task) detail += '<b>Task:</b> ' + JSON.stringify(data.task) + '\\n';
-  log.innerHTML += '<div class="log-err">[' + new Date().toLocaleTimeString() + '] ' + label + ': ' + (data.error || 'Unknown error') +
-    ' <a href="#" style="color:#90caf9;font-size:11px" onclick="document.getElementById(\\'' + id + '\\').style.display=document.getElementById(\\'' + id + '\\').style.display==\\'none\\'?\\'block\\':\\'none\\';return false">[show details]</a>' +
+  if (data.traceback) detail += '<b>Traceback:</b><pre style="white-space:pre-wrap;color:#ef9a9a;font-size:11px;margin:4px 0">' + esc(data.traceback) + '</pre>';
+  if (data.error_type) detail += '<b>Type:</b> ' + esc(data.error_type) + '<br>';
+  if (data.elapsed) detail += '<b>Elapsed:</b> ' + esc(String(data.elapsed)) + 's<br>';
+  if (data.task) detail += '<b>Task:</b> ' + esc(JSON.stringify(data.task)) + '<br>';
+  if (data.error) detail += '<b>Error:</b> ' + esc(data.error) + '<br>';
+  log.innerHTML += '<div class="log-err">[' + new Date().toLocaleTimeString() + '] ' + esc(label) + ': ' + esc(data.error || 'Unknown error') +
+    ' <a href="#" style="color:#90caf9;font-size:11px" onclick="toggleDetail(\'' + id + '\');return false">[show details]</a>' +
     '<div id="' + id + '" style="display:none;background:#1a0a0a;padding:8px;border-radius:6px;margin:4px 0;border:1px solid #c62828">' + detail + '</div></div>';
   log.scrollTop = log.scrollHeight;
 }
@@ -6666,7 +6669,7 @@ async function runTask(btn, type, userId, period) {
     let text = await resp.text();
     let data;
     try { data = JSON.parse(text); } catch(pe) {
-      addError(type + ' PARSE ERROR', {error: 'Non-JSON response: ' + text.substring(0, 500), error_type: 'ParseError', elapsed: 0, task: {type, user_id: userId, period}});
+      addError(type + ' PARSE ERROR', {error: 'Non-JSON response (status ' + resp.status + ')', error_type: 'ParseError / HTTP ' + resp.status, elapsed: 0, task: {type, user_id: userId, period}, traceback: text.substring(0, 2000)});
       btn.classList.remove('running'); btn.classList.add('fail'); btn.textContent = 'FAIL (click to retry)'; btn.disabled = false;
       return false;
     }
