@@ -1899,7 +1899,11 @@ def require_admin_2fa(f):
     
     Accepts either:
       - X-Admin-Key header (for bot scripts) + X-Admin-OTP header
-      - Valid admin Flask session (for dashboard) + X-Admin-OTP header
+      - Valid admin Flask session that already passed 2FA gate (for dashboard)
+    
+    Session-based admins already verified 2FA to enter the admin panel
+    (admin_2fa_verified flag in session), so we trust that flag and do NOT
+    demand a fresh OTP on every API call from the SPA.
     
     If ADMIN_TOTP_SECRET is not set, falls back to identity-only auth with a warning.
     """
@@ -1910,12 +1914,17 @@ def require_admin_2fa(f):
         expected_key = os.environ.get('ADMIN_API_KEY')
         
         has_key_auth = admin_key and expected_key and admin_key == expected_key
-        has_session_auth = _is_admin_session()
+        has_session_auth = _is_admin_session()  # Checks email == ADMIN_EMAIL AND admin_2fa_verified == True
         
         if not has_key_auth and not has_session_auth:
             return jsonify({'error': 'invalid_admin_key'}), 403
         
-        # Then check TOTP (required for both auth paths)
+        # For session auth: 2FA was already verified at login gate (admin_2fa_verified in session)
+        # No need for per-request OTP — the session IS the proof of 2FA.
+        if has_session_auth:
+            return f(*args, **kwargs)
+        
+        # For API key auth (bot scripts, cron): require per-request OTP
         totp_secret = os.environ.get('ADMIN_TOTP_SECRET')
         if totp_secret:
             otp_code = request.headers.get('X-Admin-OTP')

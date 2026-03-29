@@ -139,10 +139,13 @@ def calculate_portfolio_performance(
         filtered_out = []
         
         for snap in intraday_snapshots:
-            # Convert timestamp to EST
+            # Convert timestamp to ET
+            # NOTE: collect_intraday_data stores ET-naive timestamps (get_market_time()
+            # returns ET-aware, but PostgreSQL DateTime strips tzinfo and stores raw ET value).
+            # So naive timestamps here are ALREADY in ET — do NOT assume UTC.
             if snap.timestamp.tzinfo is None:
-                # Assume UTC if no timezone
-                snap_time_est = snap.timestamp.replace(tzinfo=ZoneInfo('UTC')).astimezone(MARKET_TZ)
+                # Treat as ET-naive (which is what the cron stores)
+                snap_time_est = snap.timestamp.replace(tzinfo=MARKET_TZ)
             else:
                 snap_time_est = snap.timestamp.astimezone(MARKET_TZ)
             
@@ -468,13 +471,15 @@ def _generate_chart_points(
             
             # Format label with time for intraday (ensure Eastern Time), date only for daily close
             if hasattr(snapshot, 'is_intraday') and snapshot.is_intraday:
-                # Convert to Eastern Time
-                # Database stores UTC timestamps (naive), so treat as UTC and convert to ET
+                # Format timestamp as Eastern Time label
+                # NOTE: Database stores ET-naive timestamps (cron uses get_market_time()),
+                # so the raw value IS already in ET — no UTC→ET conversion needed.
                 ts = snapshot.timestamp
+                # Naive timestamps are already ET; just use directly for formatting
                 if ts.tzinfo is None:
-                    # Add UTC timezone info
-                    ts = ts.replace(tzinfo=dt_timezone.utc)
-                ts_et = ts.astimezone(ET)
+                    ts_et = ts  # Already ET
+                else:
+                    ts_et = ts.astimezone(ET)
                 date_str = ts_et.strftime('%I:%M %p')  # "09:30 AM" (compact for mobile)
             else:
                 date_str = snapshot.date.strftime('%b %d')
