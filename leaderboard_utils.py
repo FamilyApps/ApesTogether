@@ -1373,11 +1373,26 @@ def calculate_user_portfolio_stats(user_id):
     industry_mix = calculate_industry_mix(user_id)
     stats['industry_mix'] = industry_mix
     
-    # 5. SUBSCRIBER COUNT
+    # 5. SUBSCRIBER COUNT (real + gifted from all sources)
     subscriber_count = Subscription.query.filter_by(
         subscribed_to_id=user_id,
         status='active'
     ).count()
+    try:
+        from models import MobileSubscription
+        subscriber_count += MobileSubscription.query.filter_by(
+            subscribed_to_id=user_id,
+            status='active'
+        ).count()
+    except Exception:
+        pass
+    try:
+        from models import AdminSubscription
+        admin_sub = AdminSubscription.query.filter_by(portfolio_user_id=user_id).first()
+        if admin_sub:
+            subscriber_count += admin_sub.bonus_subscriber_count or 0
+    except Exception:
+        pass
     stats['subscriber_count'] = subscriber_count
     
     stats['last_updated'] = datetime.utcnow()
