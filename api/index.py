@@ -426,6 +426,11 @@ try:
     login_manager.init_app(app)
     login_manager.login_view = 'login'
 
+    # Track whether the previous request on this Vercel instance had a DB error.
+    # If so, we need to dispose the engine (not just remove session) to get a
+    # truly fresh TCP connection, since PgBouncer may have blacklisted our socket.
+    app._last_request_had_db_error = False
+    
     # Add a before_request handler to ensure session and current_user are properly initialized
     @app.before_request
     def handle_before_request():
@@ -441,6 +446,15 @@ try:
             db.session.remove()
         except Exception:
             pass
+        
+        # If previous request had a DB error, dispose engine for a fresh TCP connection
+        if getattr(app, '_last_request_had_db_error', False):
+            logger.info("[before_request] Previous request had DB error — disposing engine for fresh connection")
+            try:
+                db.engine.dispose()
+            except Exception:
+                pass
+            app._last_request_had_db_error = False
         
         try:
             session.permanent = True
@@ -518,6 +532,26 @@ try:
     db = SQLAlchemy(app)
     migrate = Migrate(app, db)
     
+    # Global engine event: on any disconnect error, invalidate the connection
+    # so SQLAlchemy doesn't try to reuse a broken TCP socket
+    from sqlalchemy import event
+    @event.listens_for(db.engine, "handle_error")
+    def handle_db_error(context):
+        """Invalidate connections on SSL/connection errors so next query gets a fresh one."""
+        if context.original_exception:
+            err_str = str(context.original_exception).lower()
+            if any(phrase in err_str for phrase in [
+                'ssl connection has been closed',
+                'connection has been closed',
+                'server closed the connection',
+                'closed the connection unexpectedly',
+                'connection timed out',
+                'could not connect',
+            ]):
+                context.invalidate_pool_on_disconnect = True
+                app._last_request_had_db_error = True
+                logger.warning(f"DB disconnect detected, invalidating connection: {context.original_exception}")
+    
     # Retry helper for DB operations that may fail due to PgBouncer SSL drops
     def db_retry(fn, max_retries=2):
         """Execute fn(), retrying on SSL/connection errors with fresh DB session."""
@@ -538,6 +572,8 @@ try:
                     'closed the connection unexpectedly' in err_str or
                     'connection timed out' in err_str
                 )
+                if is_connection_error:
+                    app._last_request_had_db_error = True
                 if is_connection_error and attempt < max_retries:
                     logger.warning(f"DB connection error (attempt {attempt+1}/{max_retries+1}): {e}")
                     try:
@@ -6524,7 +6560,8 @@ def force_regenerate_all_caches():
 def cache_backfill_ui():
     """Admin page with buttons to backfill caches one task at a time"""
     from models import User
-    users = User.query.all()
+    db_retry = app.db_retry
+    users = db_retry(lambda: User.query.all(), max_retries=3)
     user_list = [{'id': u.id, 'username': u.username} for u in users]
     periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y', 'MAX']
     
