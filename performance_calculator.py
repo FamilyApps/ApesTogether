@@ -82,6 +82,8 @@ def calculate_portfolio_performance(
         - Negative CF (sales > buys): Handled correctly (can have negative returns)
         - All-zero snapshots: Skipped, uses first non-zero as baseline
     """
+    import time as _time
+    _t0 = _time.time()
     logger.info(f"Calculating performance for user {user_id} from {start_date} to {end_date}")
     
     # Determine if we should include intraday snapshots (for 1D and 5D periods only)
@@ -89,6 +91,7 @@ def calculate_portfolio_performance(
     include_intraday = period in ['1D', '5D'] if period else False
     
     # Get daily snapshots for period
+    _tq = _time.time()
     snapshots = PortfolioSnapshot.query.filter(
         and_(
             PortfolioSnapshot.user_id == user_id,
@@ -96,6 +99,7 @@ def calculate_portfolio_performance(
             PortfolioSnapshot.date <= end_date
         )
     ).order_by(PortfolioSnapshot.date.asc()).all()
+    logger.info(f"[PERF-TIMING] user={user_id} daily_snapshots_query: {round(_time.time()-_tq,2)}s, got {len(snapshots)} rows")
     
     # For 1D and 5D periods, also include intraday snapshots
     if include_intraday:
@@ -106,6 +110,7 @@ def calculate_portfolio_performance(
         start_datetime = datetime.combine(start_date, time.min)
         end_datetime = datetime.combine(end_date, time.max)
         
+        _tq2 = _time.time()
         intraday_snapshots = PortfolioSnapshotIntraday.query.filter(
             and_(
                 PortfolioSnapshotIntraday.user_id == user_id,
@@ -113,6 +118,7 @@ def calculate_portfolio_performance(
                 PortfolioSnapshotIntraday.timestamp <= end_datetime
             )
         ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
+        logger.info(f"[PERF-TIMING] user={user_id} intraday_query: {round(_time.time()-_tq2,2)}s, got {len(intraday_snapshots)} rows")
         
         # Filter to only valid 15-minute market intervals (9:30 AM - 4:00 PM EST)
         # Valid times: 09:30, 09:45, 10:00, ..., 15:45, 16:00 (27 intervals)
@@ -302,10 +308,15 @@ def calculate_portfolio_performance(
     # Generate chart data if requested (uses simple per-point formula for speed)
     chart_data = None
     if include_chart_data:
+        _tc = _time.time()
         chart_data = _generate_chart_points(snapshots, start_date, end_date, period)
+        logger.info(f"[PERF-TIMING] user={user_id} chart_points: {round(_time.time()-_tc,2)}s, {len(chart_data) if chart_data else 0} points")
     
     # Calculate S&P 500 benchmark (simple percentage, not time-weighted)
+    _ts = _time.time()
     sp500_return = _calculate_sp500_benchmark(start_date, end_date)
+    logger.info(f"[PERF-TIMING] user={user_id} sp500_benchmark: {round(_time.time()-_ts,2)}s")
+    logger.info(f"[PERF-TIMING] user={user_id} TOTAL: {round(_time.time()-_t0,2)}s")
     
     return {
         'portfolio_return': round(portfolio_return, 2),
@@ -346,6 +357,8 @@ def _generate_chart_points(
     Returns:
         List of chart points: [{'date': 'Oct 25', 'portfolio': 28.57, 'sp500': 15.32}, ...]
     """
+    import time as _time
+    _tcp0 = _time.time()
     chart_data = []
     
     # Find first non-zero snapshot as baseline
@@ -362,11 +375,13 @@ def _generate_chart_points(
     baseline_value = baseline_snapshot.total_value
     baseline_date = baseline_snapshot.date
     logger.debug(f"Chart baseline: ${baseline_value:.2f} on {baseline_date}")
+    logger.info(f"[CHART-TIMING] snapshots_count={len(snapshots)}, baseline={baseline_date}")
     
     # Get S&P 500 data for the FULL period (not just from user's join date)
     # This ensures charts show S&P performance for entire period
     # For 1D/5D: Use SPY_INTRADAY for intraday comparison, fallback to daily if unavailable
     # For longer periods: Use SPY_SP500 daily close
+    _tsp = _time.time()
     if period in ['1D', '5D']:
         # Query intraday S&P 500 data
         sp500_data = MarketData.query.filter(
@@ -397,6 +412,8 @@ def _generate_chart_points(
                 MarketData.date <= period_end
             )
         ).order_by(MarketData.date.asc()).all()
+    
+    logger.info(f"[CHART-TIMING] sp500_query: {round(_time.time()-_tsp,2)}s, got {len(sp500_data)} rows")
     
     # DEBUG: Log what dates we actually got
     if sp500_data:
@@ -444,6 +461,7 @@ def _generate_chart_points(
         # For now use UTC-4 for EDT (we're in daylight saving time through Nov 3)
         ET = dt_timezone(timedelta(hours=-4))
         
+        _tloop = _time.time()
         for snapshot in snapshots:
             if snapshot.total_value <= 0:
                 continue
@@ -519,6 +537,7 @@ def _generate_chart_points(
                 'portfolio': round(portfolio_pct, 2),
                 'sp500': round(sp500_pct, 2)
             })
+        logger.info(f"[CHART-TIMING] intraday_loop: {round(_time.time()-_tloop,2)}s for {len(chart_data)} points from {len(snapshots)} snapshots")
     else:
         # For longer periods: Generate points for S&P 500 dates
         # Sample data to avoid overcrowded charts on mobile screens

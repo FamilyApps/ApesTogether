@@ -6779,10 +6779,28 @@ def cache_backfill_task():
         if task_type == 'chart':
             from models import UserPortfolioChartCache
             from leaderboard_utils import generate_chart_from_snapshots
+            import concurrent.futures
             
             logger.info(f"[BACKFILL] chart: user={user_id} period={period} — generating...")
             t0 = time.time()
-            chart_data = db_retry(lambda: generate_chart_from_snapshots(user_id, period), max_retries=2)
+            
+            # Run with 50s timeout to return JSON error before Cloudflare 524 (100s) or Vercel timeout (60s)
+            TASK_TIMEOUT = 50
+            try:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(generate_chart_from_snapshots, user_id, period)
+                    chart_data = future.result(timeout=TASK_TIMEOUT)
+            except concurrent.futures.TimeoutError:
+                gen_time = round(time.time() - t0, 2)
+                msg = f'Chart generation TIMED OUT after {gen_time}s for user {user_id} period {period} (limit={TASK_TIMEOUT}s)'
+                logger.error(f"[BACKFILL] {msg}")
+                return jsonify({
+                    'success': False, 'error': msg,
+                    'error_type': 'TimeoutError',
+                    'elapsed': gen_time,
+                    'task': {'type': 'chart', 'user_id': user_id, 'period': period}
+                })
+            
             gen_time = round(time.time() - t0, 2)
             logger.info(f"[BACKFILL] chart: generate took {gen_time}s, got data={chart_data is not None}")
             
