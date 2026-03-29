@@ -3398,6 +3398,29 @@ def admin_stocks():
 
 # Removed duplicate admin_user_detail route - using admin_interface.py blueprint instead
 
+# ── Blueprint Registration ───────────────────────────────────────────────────
+try:
+    import sys
+    from admin_interface import admin_bp
+    app.register_blueprint(admin_bp, url_prefix='/admin')
+    logger.info("Admin interface blueprint registered successfully")
+except Exception as e:
+    logger.warning(f"Could not register admin blueprint: {e}")
+
+try:
+    from leaderboard_routes import leaderboard_bp
+    app.register_blueprint(leaderboard_bp)
+    logger.info("Leaderboard blueprint registered successfully")
+except Exception as e:
+    logger.warning(f"Could not register leaderboard blueprint: {e}")
+
+try:
+    from mobile_api import mobile_api
+    app.register_blueprint(mobile_api)
+    logger.info("Mobile API blueprint registered successfully")
+except Exception as e:
+    logger.warning(f"Could not register mobile API blueprint: {e}")
+
 # Error handler
 @app.errorhandler(500)
 def internal_error(error):
