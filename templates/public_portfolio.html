@@ -4,738 +4,726 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ username }}'s Portfolio - ApesTogether</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <meta property="og:title" content="{{ username }}'s Portfolio Performance">
-    <meta property="og:description" content="View {{ username }}'s portfolio performance on ApesTogether">
-    <meta property="og:type" content="website">
-</head>
-<body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
-        <div class="container">
-            <a class="navbar-brand" href="/">
-                <i class="fas fa-chart-line me-2"></i>ApesTogether
-            </a>
-            <div class="ms-auto">
-                <a href="{{ url_for('login') }}" class="btn btn-outline-light btn-sm me-2">Login</a>
-                <a href="{{ url_for('register') }}" class="btn btn-light btn-sm">Sign Up</a>
-            </div>
-        </div>
-    </nav>
-
-    <div class="container mt-4">
-        <div class="row">
-            <div class="col-md-10 mx-auto">
-                <!-- Header -->
-                <div class="card shadow-sm mb-4">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div>
-                                <h2 class="mb-1">
-                                    <i class="fas fa-user-circle me-2 text-primary"></i>{{ username }}'s Portfolio
-                                </h2>
-                                <p class="text-muted mb-0">Public portfolio view • Updated in real-time</p>
-                            </div>
-                            <div class="text-end">
-                                <h3 class="mb-0">${{ "{:,.2f}".format(current_value) }}</h3>
-                                <p class="mb-0 {% if day_change >= 0 %}text-success{% else %}text-danger{% endif %}">
-                                    <i class="fas fa-{% if day_change >= 0 %}arrow-up{% else %}arrow-down{% endif %} me-1"></i>
-                                    ${{ "{:,.2f}".format(day_change|abs) }} ({{ "{:.2f}".format(day_change_pct|abs) }}%)
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="card shadow-sm mb-4">
-                    <div class="card-body text-center">
-                        <h2 class="display-4 mb-0">${{ "{:,.2f}".format(current_value) }}</h2>
-                        <p class="text-muted mb-3">Total Portfolio Value</p>
-                        
-                        <div class="d-flex justify-content-center gap-3 mb-3">
-                            <div>
-                                <span class="badge {% if day_change >= 0 %}bg-success{% else %}bg-danger{% endif %}">
-                                    ${{ "{:,.2f}".format(day_change) }}
-                                </span>
-                            </div>
-                            <div>
-                                <span class="badge {% if day_change_pct >= 0 %}bg-success{% else %}bg-danger{% endif %}">
-                                    {{ "{:.2f}".format(day_change_pct) }}%
-                                </span>
-                            </div>
-                        </div>
-                        
-                        <!-- Portfolio Statistics -->
-                        <div class="row text-center mt-4">
-                            <div class="col-md-6">
-                                <div class="border-end">
-                                    <h4 class="mb-0">{{ num_stocks }}</h4>
-                                    <small class="text-muted">Stocks Held</small>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <h4 class="mb-0">{{ avg_trades_per_week }}</h4>
-                                <small class="text-muted">Avg Trades/Week</small>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Leaderboard Positions Card -->
-                {% if leaderboard_positions %}
-                <div class="card shadow-sm mb-4 border-success">
-                    <div class="card-body">
-                        <h5 class="mb-3"><i class="fas fa-trophy text-warning me-2"></i>Leaderboard Rankings</h5>
-                        <div class="row">
-                            {% for period, position in leaderboard_positions.items() %}
-                            <div class="col-6 col-md-2 mb-2">
-                                <div class="text-center">
-                                    <div class="badge bg-success fs-6 w-100 py-2">
-                                        <strong>{{ period }}</strong><br>
-                                        #{{ position }}
-                                    </div>
-                                </div>
-                            </div>
-                            {% endfor %}
-                        </div>
-                        <p class="text-muted small mb-0 mt-2">
-                            <i class="fas fa-star me-1"></i>
-                            Ranked in the top 20 performers across multiple time periods!
-                        </p>
-                    </div>
-                </div>
-                {% endif %}
-
-                <!-- Performance Chart -->
-                <div class="card shadow-sm mb-4">
-                    <div class="card-header bg-white">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <h5 class="mb-0">Performance</h5>
-                            <div class="btn-group btn-group-sm" role="group" id="periodSelector">
-                                <button type="button" class="btn btn-outline-primary active" data-period="1D">1D</button>
-                                <button type="button" class="btn btn-outline-primary" data-period="5D">1W</button>
-                                <button type="button" class="btn btn-outline-primary" data-period="1M">1M</button>
-                                <button type="button" class="btn btn-outline-primary" data-period="3M">3M</button>
-                                <button type="button" class="btn btn-outline-primary" data-period="YTD">YTD</button>
-                                <button type="button" class="btn btn-outline-primary" data-period="1Y">1Y</button>
-                                <button type="button" class="btn btn-outline-primary" data-period="MAX">MAX</button>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="card-body">
-                        <div style="position: relative; height: 400px;">
-                            <canvas id="performanceChart"></canvas>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Holdings Section - Different for Subscribers vs Non-Subscribers -->
-                {% if is_subscriber %}
-                <!-- SUBSCRIBER VIEW: Show actual holdings -->
-                <div class="alert alert-success mb-3">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <i class="fas fa-check-circle me-2"></i>
-                            <strong>Active Subscription</strong> - You have full access to {{ username }}'s portfolio
-                        </div>
-                        <button class="btn btn-sm btn-outline-danger" onclick="confirmUnsubscribe()">
-                            <i class="fas fa-times me-1"></i>Unsubscribe
-                        </button>
-                    </div>
-                </div>
-                
-                <div class="alert alert-info mb-3">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <i class="fas fa-bell me-2"></i>
-                            <strong>Trade Notifications:</strong> You will be notified when {{ username }} makes a trade
-                        </div>
-                        <button class="btn btn-sm btn-outline-primary" onclick="window.location.href='/notification-preferences?portfolio_owner={{ portfolio_owner_id }}'">
-                            <i class="fas fa-cog me-1"></i>Notification Settings
-                        </button>
-                    </div>
-                </div>
-                <div class="card shadow-sm mb-4">
-                    <div class="card-header bg-success text-white">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <h5 class="mb-0"><i class="fas fa-lock-open me-2"></i>Portfolio Holdings</h5>
-                            <span class="badge bg-light text-success">Subscriber Access</span>
-                        </div>
-                    </div>
-                    <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-hover">
-                                <thead>
-                                    <tr>
-                                        <th>Ticker</th>
-                                        <th>Shares</th>
-                                        <th>Avg Price</th>
-                                        <th>Current Price</th>
-                                        <th>Value</th>
-                                        <th>Gain/Loss</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="holdingsTable">
-                                    {% for holding in holdings %}
-                                    <tr>
-                                        <td><strong>{{ holding.ticker }}</strong></td>
-                                        <td>{{ "%.2f"|format(holding.quantity) }}</td>
-                                        <td>${{ "%.2f"|format(holding.purchase_price) }}</td>
-                                        <td>${{ "%.2f"|format(holding.current_price) }}</td>
-                                        <td>${{ "%.2f"|format(holding.value) }}</td>
-                                        <td class="{% if holding.gain_loss >= 0 %}text-success{% else %}text-danger{% endif %}">
-                                            {% if holding.gain_loss >= 0 %}+{% endif %}${{ "%.2f"|format(holding.gain_loss) }}
-                                            ({{ "%.2f"|format(holding.gain_loss_pct) }}%)
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-                {% else %}
-                <!-- NON-SUBSCRIBER VIEW: Blurred with subscribe CTA -->
-                <div class="card shadow-sm mb-4 position-relative" style="overflow: hidden;">
-                    <div class="card-header bg-secondary text-white">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <h5 class="mb-0"><i class="fas fa-lock me-2"></i>Portfolio Holdings</h5>
-                            <span class="badge bg-warning text-dark">Subscriber Only</span>
-                        </div>
-                    </div>
-                    <div class="card-body position-relative" style="min-height: 300px;">
-                        <!-- Blurred background image -->
-                        <div class="blurred-content" style="filter: blur(8px); opacity: 0.3;">
-                            <table class="table">
-                                <thead>
-                                    <tr>
-                                        <th>Ticker</th>
-                                        <th>Shares</th>
-                                        <th>Avg Price</th>
-                                        <th>Current Price</th>
-                                        <th>Value</th>
-                                        <th>Gain/Loss</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr><td>████</td><td>███</td><td>$███.██</td><td>$███.██</td><td>$████.██</td><td>+██.██%</td></tr>
-                                    <tr><td>████</td><td>███</td><td>$███.██</td><td>$███.██</td><td>$████.██</td><td>+██.██%</td></tr>
-                                    <tr><td>████</td><td>███</td><td>$███.██</td><td>$███.██</td><td>$████.██</td><td>-██.██%</td></tr>
-                                    <tr><td>████</td><td>███</td><td>$███.██</td><td>$███.██</td><td>$████.██</td><td>+██.██%</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
-                        
-                        <!-- Subscribe CTA overlay -->
-                        <div class="position-absolute top-50 start-50 translate-middle text-center" style="z-index: 10;">
-                            <div class="bg-white rounded shadow-lg p-4" style="min-width: 300px;">
-                                <i class="fas fa-crown fa-3x text-warning mb-3"></i>
-                                <h4 class="mb-3">Unlock Full Portfolio Access</h4>
-                                <p class="text-muted mb-4">See {{ username }}'s complete holdings, positions, and trade history</p>
-                                <button class="btn btn-warning btn-lg w-100" onclick="showSubscriptionModal()">
-                                    <i class="fas fa-unlock-alt me-2"></i>Subscribe for ${{ "%.2f"|format(subscription_price) }}/month
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                {% endif %}
-
-                <!-- Call to Action -->
-                <div class="card shadow-sm bg-light">
-                    <div class="card-body text-center py-4">
-                        <h4 class="mb-3">Track Your Own Portfolio</h4>
-                        <p class="text-muted mb-4">
-                            Join ApesTogether to track your investments, compete on leaderboards, and share your performance.
-                        </p>
-                        <a href="{{ url_for('register') }}" class="btn btn-primary btn-lg me-2">
-                            <i class="fas fa-rocket me-2"></i>Get Started Free
-                        </a>
-                        <a href="{{ url_for('leaderboard.leaderboard_home') }}" class="btn btn-outline-primary btn-lg">
-                            <i class="fas fa-trophy me-2"></i>View Leaderboard
-                        </a>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <footer class="mt-5 py-3 bg-light text-center">
-        <div class="container">
-            <p class="mb-0">&copy; 2025 ApesTogether. All rights reserved.</p>
-            <p class="mb-0 mt-2">
-                <a href="{{ url_for('terms_of_service') }}" class="text-muted text-decoration-none me-3">Terms of Service</a>
-                <a href="{{ url_for('privacy_policy') }}" class="text-muted text-decoration-none">Privacy Policy</a>
-            </p>
-        </div>
-    </footer>
-
-    <!-- Subscription Modal (Slide-up) -->
-    <div id="subscriptionModal" class="payment-modal">
-        <div class="payment-modal-content">
-            <div class="payment-modal-header">
-                <h4><i class="fas fa-crown me-2 text-warning"></i>Subscribe to {{ username }}'s Portfolio</h4>
-                <button class="btn-close" onclick="closeSubscriptionModal()"></button>
-            </div>
-            <div class="payment-modal-body">
-                <div class="subscription-details mb-4">
-                    <div class="text-center mb-3">
-                        <h2 class="text-primary">${{ "%.2f"|format(subscription_price) }}<span class="fs-6 text-muted">/month</span></h2>
-                        <p class="text-muted">Billed monthly • Cancel anytime</p>
-                    </div>
-                    <div class="alert alert-info">
-                        <i class="fas fa-info-circle me-2"></i>
-                        <strong>Recurring Subscription:</strong> You'll be charged ${{ "%.2f"|format(subscription_price) }} monthly until you cancel. 
-                        You can unsubscribe at any time and will retain access until the end of your billing period.
-                    </div>
-                    <ul class="list-unstyled mb-3">
-                        <li class="mb-2"><i class="fas fa-check text-success me-2"></i>Full access to portfolio holdings</li>
-                        <li class="mb-2"><i class="fas fa-check text-success me-2"></i>Real-time trade notifications</li>
-                        <li class="mb-2"><i class="fas fa-check text-success me-2"></i>Complete transaction history</li>
-                        <li class="mb-2"><i class="fas fa-check text-success me-2"></i>Performance analytics</li>
-                    </ul>
-                </div>
-                
-                <!-- Quick Pay Options (Apple Pay / Google Pay) -->
-                <div id="payment-request-button" class="mb-3">
-                    <!-- Payment Request Button will be inserted here -->
-                </div>
-                
-                <div class="text-center my-3">
-                    <span class="text-muted">or pay with card</span>
-                </div>
-                
-                <div class="card-element-container mb-3">
-                    <label class="form-label">Card Information</label>
-                    <div id="card-element" class="form-control" style="height: auto; padding: 12px;"></div>
-                    <div id="card-errors" class="text-danger mt-2" role="alert"></div>
-                </div>
-                
-                <button id="submitPayment" class="btn btn-primary btn-lg w-100" onclick="processSubscription()">
-                    <i class="fas fa-lock me-2"></i>Subscribe Now
-                </button>
-                
-                <p class="text-muted small text-center mt-3 mb-0">
-                    <i class="fas fa-shield-alt me-1"></i>Secure payment powered by Stripe
-                </p>
-            </div>
-        </div>
-    </div>
-
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- Social / OG Meta -->
+    <meta property="og:title" content="{{ username }} on ApesTogether{% if leaderboard_positions %} — {% for p, pos in leaderboard_positions.items() %}#{{ pos }} {{ p }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}">
+    <meta property="og:description" content="{% if leaderboard_positions %}Ranked top-20 in {{ leaderboard_positions|length }} period{{ 's' if leaderboard_positions|length > 1 }}. {% endif %}{{ num_stocks }} stocks held, {{ avg_trades_per_week }} trades/wk. Track & subscribe on ApesTogether.">
+    <meta property="og:type" content="profile">
+    <meta property="og:url" content="https://apestogether.ai/p/{{ slug }}">
+    <meta property="og:image" content="https://apestogether.ai/static/img/og-share.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ username }} on ApesTogether">
+    <meta name="twitter:description" content="{% if leaderboard_positions %}Ranked top-20 in {{ leaderboard_positions|length }} period{{ 's' if leaderboard_positions|length > 1 }}. {% endif %}{{ num_stocks }} stocks, {{ avg_trades_per_week }} trades/wk.">
     <style>
+        /* ── PrimeRev-inspired dark theme ── */
+        :root {
+            --bg-primary: #0a0f1a;
+            --bg-card: rgba(16, 22, 36, 0.85);
+            --bg-card-solid: #101624;
+            --border-card: rgba(255,255,255,0.06);
+            --accent: #10b981;
+            --accent-dim: rgba(16,185,129,0.15);
+            --accent-glow: rgba(16,185,129,0.25);
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --red: #ef4444;
+            --red-dim: rgba(239,68,68,0.15);
+            --gold: #f59e0b;
+        }
+        *, *::before, *::after { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            -webkit-font-smoothing: antialiased;
+        }
+        a { color: var(--accent); text-decoration: none; }
+        a:hover { color: #34d399; }
+        .container { max-width: 680px; margin: 0 auto; padding: 0 16px; }
+
+        /* ── Top bar ── */
+        .topbar {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 14px 16px;
+            background: rgba(10,15,26,0.95);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-card);
+            position: sticky; top: 0; z-index: 100;
+        }
+        .topbar-brand { display:flex; align-items:center; gap:8px; font-weight:700; font-size:15px; color:var(--text-primary); }
+        .topbar-brand i { color:var(--accent); }
+        .topbar-actions { display:flex; gap:8px; }
+        .btn-ghost {
+            background: transparent; border: 1px solid var(--border-card); color: var(--text-secondary);
+            padding: 6px 14px; border-radius: 8px; font-size: 13px; cursor: pointer; transition: all .2s;
+        }
+        .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+        /* ── Glass card ── */
+        .glass {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 16px;
+            backdrop-filter: blur(12px);
+            margin-bottom: 16px;
+            overflow: hidden;
+        }
+        .glass-inner { padding: 20px; }
+
+        /* ── Hero header ── */
+        .hero { text-align: center; padding: 32px 20px 24px; }
+        .avatar {
+            width: 72px; height: 72px; border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent), #059669);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 28px; font-weight: 700; color: #fff;
+            margin: 0 auto 12px; box-shadow: 0 0 24px var(--accent-glow);
+        }
+        .hero h1 { font-size: 22px; font-weight: 700; margin: 0 0 4px; }
+        .hero .sub { color: var(--text-secondary); font-size: 13px; }
+        .hero .value-big {
+            font-size: 34px; font-weight: 800; margin: 16px 0 4px;
+            letter-spacing: -0.5px;
+        }
+        .hero .change {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 4px 12px; border-radius: 20px; font-size: 14px; font-weight: 600;
+        }
+        .change.up { background: var(--accent-dim); color: var(--accent); }
+        .change.down { background: var(--red-dim); color: var(--red); }
+
+        /* ── Action buttons row ── */
+        .actions-row { display: flex; gap: 10px; padding: 0 20px 20px; }
+        .btn-accent {
+            flex: 1; padding: 12px; border-radius: 12px; border: none;
+            font-size: 14px; font-weight: 600; cursor: pointer; transition: all .2s;
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+        }
+        .btn-accent.primary { background: var(--accent); color: #fff; }
+        .btn-accent.primary:hover { background: #059669; }
+        .btn-accent.outline {
+            background: transparent; border: 1px solid var(--border-card); color: var(--text-secondary);
+        }
+        .btn-accent.outline:hover { border-color: var(--accent); color: var(--accent); }
+
+        /* ── Rankings pills ── */
+        .rankings-row { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 20px 20px; justify-content: center; }
+        .rank-pill {
+            display: flex; flex-direction: column; align-items: center;
+            background: var(--accent-dim); border: 1px solid rgba(16,185,129,0.2);
+            border-radius: 12px; padding: 8px 16px; min-width: 64px;
+        }
+        .rank-pill .period { font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
+        .rank-pill .pos { font-size: 18px; font-weight: 800; color: var(--accent); }
+
+        /* ── Stats grid ── */
+        .stats-grid {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+            background: var(--border-card); border-radius: 12px; overflow: hidden; margin-bottom: 0;
+        }
+        .stat-cell {
+            background: var(--bg-card-solid); padding: 16px 12px; text-align: center;
+        }
+        .stat-cell .val { font-size: 20px; font-weight: 700; color: var(--text-primary); }
+        .stat-cell .lbl { font-size: 11px; color: var(--text-muted); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.3px; }
+
+        /* ── Chart section ── */
+        .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .chart-header h3 { font-size: 16px; font-weight: 600; margin: 0; }
+        .period-tabs { display: flex; gap: 4px; }
+        .period-tab {
+            background: transparent; border: none; color: var(--text-muted);
+            font-size: 12px; font-weight: 600; padding: 6px 10px; border-radius: 8px;
+            cursor: pointer; transition: all .15s;
+        }
+        .period-tab:hover { color: var(--text-secondary); }
+        .period-tab.active { background: var(--accent-dim); color: var(--accent); }
+        .chart-wrap { position: relative; height: 240px; }
+
+        /* ── Industry mix bars ── */
+        .mix-section h3 { font-size: 16px; font-weight: 600; margin: 0 0 16px; }
+        .mix-bar-row { display: flex; align-items: center; margin-bottom: 10px; }
+        .mix-bar-label { width: 110px; font-size: 12px; color: var(--text-secondary); flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .mix-bar-track { flex: 1; height: 8px; background: rgba(255,255,255,0.06); border-radius: 4px; overflow: hidden; margin: 0 10px; }
+        .mix-bar-fill { height: 100%; border-radius: 4px; transition: width .6s ease; }
+        .mix-bar-pct { width: 42px; text-align: right; font-size: 12px; font-weight: 600; color: var(--text-primary); }
+        /* Industry color palette */
+        .mix-c0 { background: #10b981; } .mix-c1 { background: #3b82f6; }
+        .mix-c2 { background: #f59e0b; } .mix-c3 { background: #ef4444; }
+        .mix-c4 { background: #8b5cf6; } .mix-c5 { background: #ec4899; }
+        .mix-c6 { background: #06b6d4; } .mix-c7 { background: #f97316; }
+        .mix-c8 { background: #14b8a6; } .mix-c9 { background: #a855f7; }
+        .mix-c10 { background: #6366f1; }
+
+        /* ── Blurred holdings teaser ── */
+        .holdings-teaser { position: relative; }
+        .holdings-blur {
+            filter: blur(6px); opacity: 0.4; pointer-events: none; user-select: none;
+        }
+        .holdings-overlay {
+            position: absolute; inset: 0; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; text-align: center; padding: 24px;
+        }
+        .holdings-overlay .lock-icon {
+            width: 56px; height: 56px; border-radius: 50%;
+            background: var(--accent-dim); display: flex; align-items: center; justify-content: center;
+            margin-bottom: 16px;
+        }
+        .holdings-overlay .lock-icon i { font-size: 24px; color: var(--accent); }
+        .holdings-overlay h4 { font-size: 18px; font-weight: 700; margin: 0 0 8px; }
+        .holdings-overlay p { color: var(--text-secondary); font-size: 13px; margin: 0 0 16px; max-width: 280px; }
+        .btn-subscribe {
+            background: var(--accent); color: #fff; border: none;
+            padding: 12px 32px; border-radius: 12px; font-size: 15px; font-weight: 700;
+            cursor: pointer; transition: all .2s; display: inline-flex; align-items: center; gap: 8px;
+        }
+        .btn-subscribe:hover { background: #059669; transform: translateY(-1px); box-shadow: 0 8px 24px var(--accent-glow); }
+
+        /* ── Subscriber holdings table ── */
+        .holdings-table { width: 100%; border-collapse: collapse; }
+        .holdings-table th {
+            font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+            color: var(--text-muted); padding: 8px 12px; border-bottom: 1px solid var(--border-card); text-align: left;
+        }
+        .holdings-table td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid var(--border-card); }
+        .holdings-table tr:last-child td { border-bottom: none; }
+        .ticker-badge { font-weight: 700; color: var(--text-primary); }
+        .gain-up { color: var(--accent); font-weight: 600; }
+        .gain-down { color: var(--red); font-weight: 600; }
+
+        /* ── CTA banner ── */
+        .cta-banner {
+            text-align: center; padding: 32px 20px;
+            background: linear-gradient(135deg, rgba(16,185,129,0.08), rgba(59,130,246,0.08));
+            border: 1px solid rgba(16,185,129,0.12);
+        }
+        .cta-banner h3 { font-size: 20px; font-weight: 700; margin: 0 0 8px; }
+        .cta-banner p { color: var(--text-secondary); font-size: 14px; margin: 0 0 20px; }
+        .cta-banner .btn-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+
+        /* ── Footer ── */
+        .site-footer {
+            text-align: center; padding: 24px 16px; color: var(--text-muted); font-size: 12px;
+            border-top: 1px solid var(--border-card); margin-top: 8px;
+        }
+        .site-footer a { color: var(--text-muted); }
+        .site-footer a:hover { color: var(--accent); }
+
+        /* ── Subscription Modal ── */
         .payment-modal {
-            display: none;
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            z-index: 9999;
-            animation: fadeIn 0.3s;
+            display: none; position: fixed; inset: 0;
+            background: rgba(0,0,0,0.7); z-index: 9999;
+            backdrop-filter: blur(4px);
         }
-        
-        .payment-modal.show {
-            display: flex;
-            align-items: flex-end;
-            justify-content: center;
-        }
-        
+        .payment-modal.show { display: flex; align-items: flex-end; justify-content: center; }
         .payment-modal-content {
-            background: white;
-            width: 100%;
-            max-width: 600px;
-            max-height: 90vh;
-            overflow-y: auto;
-            border-radius: 20px 20px 0 0;
-            animation: slideUp 0.3s ease-out;
+            background: var(--bg-card-solid); width: 100%; max-width: 480px;
+            max-height: 90vh; overflow-y: auto;
+            border-radius: 20px 20px 0 0; border: 1px solid var(--border-card);
+            animation: slideUp .3s ease-out;
         }
-        
         .payment-modal-header {
-            padding: 20px;
-            border-bottom: 1px solid #e9ecef;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            position: sticky;
-            top: 0;
-            background: white;
-            z-index: 1;
+            padding: 20px; border-bottom: 1px solid var(--border-card);
+            display: flex; justify-content: space-between; align-items: center;
+            position: sticky; top: 0; background: var(--bg-card-solid); z-index: 1;
         }
-        
-        .payment-modal-body {
-            padding: 20px;
-        }
-        
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-        
-        @keyframes slideUp {
-            from { transform: translateY(100%); }
-            to { transform: translateY(0); }
-        }
-        
+        .payment-modal-header h4 { font-size: 16px; margin: 0; }
+        .payment-modal-body { padding: 20px; }
+        .modal-price { font-size: 28px; font-weight: 800; color: var(--accent); text-align: center; margin-bottom: 4px; }
+        .modal-price span { font-size: 14px; color: var(--text-muted); font-weight: 400; }
+        .modal-billing { text-align: center; color: var(--text-muted); font-size: 13px; margin-bottom: 16px; }
+        .modal-features { list-style: none; padding: 0; margin: 0 0 20px; }
+        .modal-features li { padding: 8px 0; font-size: 14px; color: var(--text-secondary); display: flex; align-items: center; gap: 10px; }
+        .modal-features li i { color: var(--accent); font-size: 14px; }
+        .modal-divider { text-align: center; color: var(--text-muted); font-size: 13px; margin: 16px 0; }
         #card-element {
-            border: 1px solid #ced4da;
+            background: rgba(255,255,255,0.05); border: 1px solid var(--border-card);
+            border-radius: 10px; padding: 14px; margin-bottom: 8px;
         }
-        
-        #card-element.StripeElement--focus {
-            border-color: #80bdff;
-            box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+        #card-element.StripeElement--focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
+        .card-label { font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; display: block; }
+        #card-errors { color: var(--red); font-size: 13px; margin-bottom: 12px; min-height: 18px; }
+        .btn-pay {
+            width: 100%; padding: 14px; border-radius: 12px; border: none;
+            background: var(--accent); color: #fff; font-size: 15px; font-weight: 700;
+            cursor: pointer; transition: all .2s; display: flex; align-items: center; justify-content: center; gap: 8px;
+        }
+        .btn-pay:hover { background: #059669; }
+        .btn-pay:disabled { opacity: 0.6; cursor: not-allowed; }
+        .secure-note { text-align: center; color: var(--text-muted); font-size: 12px; margin-top: 12px; }
+        .btn-close-modal {
+            background: transparent; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer;
+            width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 8px;
+        }
+        .btn-close-modal:hover { background: rgba(255,255,255,0.06); color: var(--text-primary); }
+
+        /* ── Subscriber alert bar ── */
+        .sub-alert {
+            display: flex; align-items: center; justify-content: space-between; gap: 12px;
+            padding: 12px 20px; font-size: 13px;
+        }
+        .sub-alert.success { background: var(--accent-dim); color: var(--accent); }
+        .sub-alert.info { background: rgba(59,130,246,0.1); color: #60a5fa; }
+        .sub-alert .btn-sm {
+            background: transparent; border: 1px solid currentColor; color: inherit;
+            padding: 4px 12px; border-radius: 8px; font-size: 12px; cursor: pointer; white-space: nowrap;
+        }
+        .sub-alert .btn-sm:hover { opacity: 0.8; }
+
+        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        /* Responsive */
+        @media (max-width: 480px) {
+            .hero .value-big { font-size: 28px; }
+            .stats-grid { grid-template-columns: repeat(3, 1fr); }
+            .stat-cell .val { font-size: 16px; }
+            .mix-bar-label { width: 80px; }
+            .actions-row { flex-direction: column; }
+            .period-tabs { flex-wrap: wrap; }
         }
     </style>
+</head>
+<body>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
-    <script src="https://js.stripe.com/v3/"></script>
-    
-    <script>
-        let chart = null;
-        const username = '{{ username }}';
-        const slug = '{{ slug }}';
-        const portfolioOwnerId = {{ portfolio_owner_id|default(0) }};
-        const subscriptionPrice = {{ subscription_price|default(4.00) }};
-        const isLoggedIn = {{ 'true' if current_user.is_authenticated else 'false' }};
-        const currentUrl = window.location.href;
-        let stripe, card, cardElement;
-        
-        // Initialize Stripe
-        let paymentRequest;
-        if (isLoggedIn) {
-            stripe = Stripe('{{ stripe_public_key }}');
+<!-- ── Top bar ── -->
+<div class="topbar">
+    <a href="/" class="topbar-brand"><i class="fas fa-chart-line"></i> ApesTogether</a>
+    <div class="topbar-actions">
+        <a href="{{ url_for('login') }}" class="btn-ghost">Log in</a>
+        <a href="{{ url_for('register') }}" class="btn-ghost" style="border-color:var(--accent);color:var(--accent);">Sign Up</a>
+    </div>
+</div>
+
+<div class="container" style="padding-top:16px; padding-bottom:32px;">
+
+    <!-- ── Hero Card ── -->
+    <div class="glass">
+        <div class="hero">
+            <div class="avatar">{{ username[0]|upper }}</div>
+            <h1>{{ username }}</h1>
+            <div class="sub">
+                {% if account_age_days >= 365 %}Member for {{ (account_age_days / 365)|int }}y {{ ((account_age_days % 365) / 30)|int }}m
+                {% elif account_age_days >= 30 %}Member for {{ (account_age_days / 30)|int }} month{{ 's' if (account_age_days / 30)|int > 1 }}
+                {% else %}Member for {{ account_age_days }} day{{ 's' if account_age_days != 1 }}
+                {% endif %}
+                &middot; {{ subscriber_count }} subscriber{{ 's' if subscriber_count != 1 }}
+            </div>
+            <div class="value-big">${{ "{:,.2f}".format(current_value) }}</div>
+            <div class="change {% if day_change >= 0 %}up{% else %}down{% endif %}">
+                <i class="fas fa-arrow-{% if day_change >= 0 %}up{% else %}down{% endif %}" style="font-size:12px;"></i>
+                ${{ "{:,.2f}".format(day_change|abs) }} ({{ "{:.2f}".format(day_change_pct|abs) }}%)
+            </div>
+        </div>
+
+        <!-- Rankings pills -->
+        {% if leaderboard_positions %}
+        <div class="rankings-row">
+            {% for period, position in leaderboard_positions.items() %}
+            <div class="rank-pill">
+                <span class="period">{{ period }}</span>
+                <span class="pos">#{{ position }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <!-- Action buttons -->
+        <div class="actions-row">
+            {% if not is_subscriber %}
+            <button class="btn-accent primary" onclick="showSubscriptionModal()">
+                <i class="fas fa-crown"></i> Subscribe &middot; ${{ "%.2f"|format(subscription_price) }}/mo
+            </button>
+            {% endif %}
+            <button class="btn-accent outline" onclick="sharePortfolio()">
+                <i class="fas fa-arrow-up-from-bracket"></i> Share
+            </button>
+        </div>
+    </div>
+
+    <!-- ── Stats Grid ── -->
+    <div class="glass" style="padding:0;">
+        <div class="stats-grid">
+            <div class="stat-cell">
+                <div class="val">{{ num_stocks }}</div>
+                <div class="lbl">Stocks</div>
+            </div>
+            <div class="stat-cell">
+                <div class="val">{{ avg_trades_per_week }}</div>
+                <div class="lbl">Trades/Wk</div>
+            </div>
+            <div class="stat-cell">
+                <div class="val">{{ large_cap_pct }}%</div>
+                <div class="lbl">Large Cap</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Performance Chart ── -->
+    <div class="glass">
+        <div class="glass-inner">
+            <div class="chart-header">
+                <h3>Performance</h3>
+                <div class="period-tabs" id="periodSelector">
+                    <button class="period-tab active" data-period="1D">1D</button>
+                    <button class="period-tab" data-period="5D">1W</button>
+                    <button class="period-tab" data-period="1M">1M</button>
+                    <button class="period-tab" data-period="3M">3M</button>
+                    <button class="period-tab" data-period="YTD">YTD</button>
+                    <button class="period-tab" data-period="1Y">1Y</button>
+                    <button class="period-tab" data-period="MAX">MAX</button>
+                </div>
+            </div>
+            <div class="chart-wrap">
+                <canvas id="performanceChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Industry Mix ── -->
+    {% if industry_mix %}
+    <div class="glass">
+        <div class="glass-inner mix-section">
+            <h3>Sector Allocation</h3>
+            {% for sector, pct in industry_mix|dictsort(by='value', reverse=true) %}
+            {% if pct >= 1 %}
+            <div class="mix-bar-row">
+                <div class="mix-bar-label">{{ sector }}</div>
+                <div class="mix-bar-track">
+                    <div class="mix-bar-fill mix-c{{ loop.index0 % 11 }}" style="width:{{ pct }}%;"></div>
+                </div>
+                <div class="mix-bar-pct">{{ "%.1f"|format(pct) }}%</div>
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- ── Holdings Section ── -->
+    {% if is_subscriber %}
+    <!-- Subscriber alerts -->
+    <div class="glass" style="padding:0;">
+        <div class="sub-alert success">
+            <span><i class="fas fa-check-circle" style="margin-right:6px;"></i> Active Subscription &mdash; Full access to {{ username }}'s portfolio</span>
+            <button class="btn-sm" onclick="confirmUnsubscribe()">Unsubscribe</button>
+        </div>
+        <div class="sub-alert info" style="border-top:1px solid var(--border-card);">
+            <span><i class="fas fa-bell" style="margin-right:6px;"></i> Trade notifications enabled</span>
+            <button class="btn-sm" onclick="window.location.href='/notification-preferences?portfolio_owner={{ portfolio_owner_id }}'">Settings</button>
+        </div>
+    </div>
+    <!-- Subscriber holdings table -->
+    <div class="glass">
+        <div class="glass-inner">
+            <h3 style="font-size:16px;font-weight:600;margin:0 0 12px;">
+                <i class="fas fa-lock-open" style="color:var(--accent);margin-right:8px;font-size:14px;"></i>Holdings
+            </h3>
+            <div style="overflow-x:auto;">
+                <table class="holdings-table">
+                    <thead>
+                        <tr>
+                            <th>Ticker</th>
+                            <th>Shares</th>
+                            <th>Avg Cost</th>
+                            <th>Price</th>
+                            <th>Value</th>
+                            <th>P&L</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for h in holdings %}
+                        <tr>
+                            <td><span class="ticker-badge">{{ h.ticker }}</span></td>
+                            <td>{{ "%.2f"|format(h.quantity) }}</td>
+                            <td>${{ "%.2f"|format(h.purchase_price) }}</td>
+                            <td>${{ "%.2f"|format(h.current_price) }}</td>
+                            <td>${{ "{:,.0f}".format(h.value) }}</td>
+                            <td class="{% if h.gain_loss >= 0 %}gain-up{% else %}gain-down{% endif %}">
+                                {% if h.gain_loss >= 0 %}+{% endif %}{{ "%.1f"|format(h.gain_loss_pct) }}%
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <!-- Non-subscriber: blurred teaser -->
+    <div class="glass holdings-teaser">
+        <div class="glass-inner">
+            <h3 style="font-size:16px;font-weight:600;margin:0 0 12px;">
+                <i class="fas fa-lock" style="color:var(--text-muted);margin-right:8px;font-size:14px;"></i>Holdings
+            </h3>
+            <!-- Fake blurred rows -->
+            <div class="holdings-blur">
+                <table class="holdings-table">
+                    <thead><tr><th>Ticker</th><th>Shares</th><th>Avg Cost</th><th>Price</th><th>Value</th><th>P&L</th></tr></thead>
+                    <tbody>
+                        <tr><td>AAPL</td><td>42.00</td><td>$174.50</td><td>$198.32</td><td>$8,329</td><td class="gain-up">+13.6%</td></tr>
+                        <tr><td>NVDA</td><td>15.00</td><td>$482.10</td><td>$612.87</td><td>$9,193</td><td class="gain-up">+27.1%</td></tr>
+                        <tr><td>TSLA</td><td>28.50</td><td>$243.60</td><td>$221.15</td><td>$6,303</td><td class="gain-down">-9.2%</td></tr>
+                        <tr><td>AMZN</td><td>20.00</td><td>$142.30</td><td>$186.45</td><td>$3,729</td><td class="gain-up">+31.0%</td></tr>
+                        <tr><td>MSFT</td><td>18.00</td><td>$338.20</td><td>$412.55</td><td>$7,426</td><td class="gain-up">+22.0%</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="holdings-overlay">
+                <div class="lock-icon"><i class="fas fa-lock"></i></div>
+                <h4>See Full Holdings</h4>
+                <p>Subscribe to view {{ username }}'s exact positions, trade alerts, and full history.</p>
+                <button class="btn-subscribe" onclick="showSubscriptionModal()">
+                    <i class="fas fa-crown"></i> Subscribe for ${{ "%.2f"|format(subscription_price) }}/mo
+                </button>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- ── CTA Banner ── -->
+    <div class="glass">
+        <div class="cta-banner">
+            <h3>Track Your Own Portfolio</h3>
+            <p>Join ApesTogether to compete on leaderboards and share your performance.</p>
+            <div class="btn-row">
+                <a href="{{ url_for('register') }}" class="btn-accent primary" style="padding:12px 24px;border-radius:12px;text-decoration:none;">
+                    <i class="fas fa-rocket"></i> Get Started Free
+                </a>
+                <a href="{{ url_for('leaderboard.leaderboard_home') }}" class="btn-accent outline" style="padding:12px 24px;border-radius:12px;text-decoration:none;">
+                    <i class="fas fa-trophy"></i> Leaderboard
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Footer ── -->
+<div class="site-footer">
+    <div>&copy; 2025 ApesTogether. All rights reserved.</div>
+    <div style="margin-top:6px;">
+        <a href="{{ url_for('terms_of_service') }}">Terms</a> &middot;
+        <a href="{{ url_for('privacy_policy') }}">Privacy</a>
+    </div>
+</div>
+
+<!-- ── Subscription Modal ── -->
+<div id="subscriptionModal" class="payment-modal">
+    <div class="payment-modal-content">
+        <div class="payment-modal-header">
+            <h4><i class="fas fa-crown" style="color:var(--gold);margin-right:8px;"></i>Subscribe to {{ username }}</h4>
+            <button class="btn-close-modal" onclick="closeSubscriptionModal()">&times;</button>
+        </div>
+        <div class="payment-modal-body">
+            <div class="modal-price">${{ "%.2f"|format(subscription_price) }}<span>/month</span></div>
+            <div class="modal-billing">Billed monthly &middot; Cancel anytime</div>
+            <ul class="modal-features">
+                <li><i class="fas fa-check-circle"></i> Full access to portfolio holdings</li>
+                <li><i class="fas fa-check-circle"></i> Real-time trade notifications</li>
+                <li><i class="fas fa-check-circle"></i> Complete transaction history</li>
+                <li><i class="fas fa-check-circle"></i> Performance analytics &amp; insights</li>
+            </ul>
+            <div id="payment-request-button" style="margin-bottom:12px;"></div>
+            <div class="modal-divider">or pay with card</div>
+            <label class="card-label">Card Information</label>
+            <div id="card-element"></div>
+            <div id="card-errors" role="alert"></div>
+            <button id="submitPayment" class="btn-pay" onclick="processSubscription()">
+                <i class="fas fa-lock"></i> Subscribe Now
+            </button>
+            <div class="secure-note"><i class="fas fa-shield-alt" style="margin-right:4px;"></i>Secure payment powered by Stripe</div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://js.stripe.com/v3/"></script>
+<script>
+    let chart = null;
+    const username = '{{ username }}';
+    const slug = '{{ slug }}';
+    const portfolioOwnerId = {{ portfolio_owner_id|default(0) }};
+    const subscriptionPrice = {{ subscription_price|default(4.00) }};
+    const isLoggedIn = {{ 'true' if current_user.is_authenticated else 'false' }};
+    const currentUrl = window.location.href;
+    let stripe, cardElement, paymentRequest;
+    if (isLoggedIn) { stripe = Stripe('{{ stripe_public_key }}'); }
+
+    /* ── Share ── */
+    function sharePortfolio() {
+        const shareData = {
+            title: username + "'s Portfolio on ApesTogether",
+            text: "Check out " + username + "'s stock portfolio performance on ApesTogether!",
+            url: currentUrl
+        };
+        if (navigator.share) {
+            navigator.share(shareData).catch(() => {});
+        } else {
+            navigator.clipboard.writeText(currentUrl).then(() => {
+                const btn = event.currentTarget;
+                const orig = btn.innerHTML;
+                btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+                setTimeout(() => btn.innerHTML = orig, 2000);
+            });
         }
-        
-        // Show subscription modal
-        function showSubscriptionModal() {
-            if (!isLoggedIn) {
-                // Save return URL and redirect to login
-                sessionStorage.setItem('returnAfterLogin', currentUrl);
-                sessionStorage.setItem('initiateSubscription', portfolioOwnerId);
-                window.location.href = '/login?next=' + encodeURIComponent(currentUrl);
-                return;
-            }
-            
-            document.getElementById('subscriptionModal').classList.add('show');
-            
-            // Initialize Stripe Elements if not already done
-            if (!cardElement) {
-                const elements = stripe.elements();
-                cardElement = elements.create('card', {
-                    style: {
-                        base: {
-                            fontSize: '16px',
-                            color: '#32325d',
-                            '::placeholder': {
-                                color: '#aab7c4'
-                            }
-                        }
-                    }
-                });
-                cardElement.mount('#card-element');
-                
-                // Initialize Payment Request Button (Apple Pay / Google Pay)
-                paymentRequest = stripe.paymentRequest({
-                    country: 'US',
-                    currency: 'usd',
-                    total: {
-                        label: `Subscribe to ${username}'s Portfolio`,
-                        amount: Math.round(subscriptionPrice * 100), // Amount in cents
-                    },
-                    requestPayerName: true,
-                    requestPayerEmail: true,
-                });
-                
-                // Check if Payment Request is available
-                paymentRequest.canMakePayment().then(function(result) {
-                    if (result) {
-                        const prButton = elements.create('paymentRequestButton', {
-                            paymentRequest: paymentRequest,
-                        });
-                        prButton.mount('#payment-request-button');
-                        document.getElementById('payment-request-button').style.display = 'block';
-                    } else {
-                        document.getElementById('payment-request-button').style.display = 'none';
-                    }
-                });
-                
-                // Handle Payment Request completion
-                paymentRequest.on('paymentmethod', async function(ev) {
-                    try {
-                        const response = await fetch('/create-subscription', {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({
-                                payment_method_id: ev.paymentMethod.id,
-                                portfolio_owner_id: portfolioOwnerId
-                            })
-                        });
-                        
-                        const data = await response.json();
-                        
-                        if (data.error) {
-                            ev.complete('fail');
-                            alert('Error: ' + data.error);
-                            return;
-                        }
-                        
-                        // Handle SCA if needed
-                        if (data.requiresAction) {
-                            const {error: confirmError} = await stripe.confirmCardPayment(data.clientSecret);
-                            if (confirmError) {
-                                ev.complete('fail');
-                                alert('Error: ' + confirmError.message);
-                                return;
-                            }
-                        }
-                        
-                        ev.complete('success');
-                        window.location.reload();
-                        
-                    } catch (error) {
-                        console.error('Error:', error);
-                        ev.complete('fail');
-                        alert('Payment failed. Please try again.');
-                    }
-                });
-            }
+    }
+
+    /* ── Subscription Modal ── */
+    function showSubscriptionModal() {
+        if (!isLoggedIn) {
+            sessionStorage.setItem('returnAfterLogin', currentUrl);
+            sessionStorage.setItem('initiateSubscription', portfolioOwnerId);
+            window.location.href = '/login?next=' + encodeURIComponent(currentUrl);
+            return;
         }
-        
-        function closeSubscriptionModal() {
-            document.getElementById('subscriptionModal').classList.remove('show');
-        }
-        
-        // Handle subscription payment
-        async function processSubscription() {
-            const submitButton = document.getElementById('submitPayment');
-            const errorElement = document.getElementById('card-errors');
-            
-            submitButton.disabled = true;
-            submitButton.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Processing...';
-            errorElement.textContent = '';
-            
-            try {
-                // Create payment method
-                const {paymentMethod, error} = await stripe.createPaymentMethod({
-                    type: 'card',
-                    card: cardElement,
-                });
-                
-                if (error) {
-                    errorElement.textContent = error.message;
-                    submitButton.disabled = false;
-                    submitButton.innerHTML = '<i class="fas fa-lock me-2"></i>Subscribe Now';
-                    return;
-                }
-                
-                // Create subscription on server
-                const response = await fetch('/create-subscription', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        payment_method_id: paymentMethod.id,
-                        portfolio_owner_id: portfolioOwnerId
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (data.error) {
-                    errorElement.textContent = data.error;
-                    submitButton.disabled = false;
-                    submitButton.innerHTML = '<i class="fas fa-lock me-2"></i>Subscribe Now';
-                    return;
-                }
-                
-                // Handle SCA if needed
-                if (data.requiresAction) {
-                    const {error: confirmError} = await stripe.confirmCardPayment(data.clientSecret);
-                    
-                    if (confirmError) {
-                        errorElement.textContent = confirmError.message;
-                        submitButton.disabled = false;
-                        submitButton.innerHTML = '<i class="fas fa-lock me-2"></i>Subscribe Now';
-                        return;
-                    }
-                }
-                
-                // Success!
-                window.location.reload();
-                
-            } catch (error) {
-                console.error('Error:', error);
-                errorElement.textContent = 'Payment failed. Please try again.';
-                submitButton.disabled = false;
-                submitButton.innerHTML = '<i class="fas fa-lock me-2"></i>Subscribe Now';
-            }
-        }
-        
-        // Unsubscribe confirmation
-        async function confirmUnsubscribe() {
-            const endDate = new Date();
-            endDate.setMonth(endDate.getMonth() + 1);
-            const endDateStr = endDate.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
-            
-            const confirmed = confirm(
-                `Unsubscribe from ${username}'s portfolio?\n\n` +
-                `• Your subscription will be canceled\n` +
-                `• You'll keep access until ${endDateStr}\n` +
-                `• You'll continue receiving trade notifications until then\n` +
-                `• No further charges after this billing period\n\n` +
-                'Are you sure you want to unsubscribe?'
-            );
-            
-            if (!confirmed) return;
-            
-            try {
-                const response = await fetch('/unsubscribe-from-portfolio', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({portfolio_owner_id: portfolioOwnerId})
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    alert('Subscription canceled. You\'ll have access until ' + endDateStr);
-                    window.location.reload();
+        document.getElementById('subscriptionModal').classList.add('show');
+        if (!cardElement) {
+            const elements = stripe.elements();
+            cardElement = elements.create('card', {
+                style: { base: { fontSize: '16px', color: '#f1f5f9', '::placeholder': { color: '#64748b' } } }
+            });
+            cardElement.mount('#card-element');
+            paymentRequest = stripe.paymentRequest({
+                country: 'US', currency: 'usd',
+                total: { label: "Subscribe to " + username + "'s Portfolio", amount: Math.round(subscriptionPrice * 100) },
+                requestPayerName: true, requestPayerEmail: true
+            });
+            paymentRequest.canMakePayment().then(r => {
+                if (r) {
+                    elements.create('paymentRequestButton', { paymentRequest }).mount('#payment-request-button');
+                    document.getElementById('payment-request-button').style.display = 'block';
                 } else {
-                    alert('Error: ' + (data.error || 'Failed to unsubscribe'));
+                    document.getElementById('payment-request-button').style.display = 'none';
                 }
-            } catch (error) {
-                console.error('Error:', error);
-                alert('Failed to unsubscribe. Please try again.');
-            }
-        }
-        
-        // Period selector
-        document.querySelectorAll('#periodSelector button').forEach(btn => {
-            btn.addEventListener('click', function() {
-                document.querySelectorAll('#periodSelector button').forEach(b => b.classList.remove('active'));
-                this.classList.add('active');
-                loadChart(this.dataset.period);
             });
+            paymentRequest.on('paymentmethod', async ev => {
+                try {
+                    const res = await fetch('/create-subscription', {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ payment_method_id: ev.paymentMethod.id, portfolio_owner_id: portfolioOwnerId })
+                    });
+                    const data = await res.json();
+                    if (data.error) { ev.complete('fail'); alert('Error: ' + data.error); return; }
+                    if (data.requiresAction) {
+                        const {error: e} = await stripe.confirmCardPayment(data.clientSecret);
+                        if (e) { ev.complete('fail'); alert('Error: ' + e.message); return; }
+                    }
+                    ev.complete('success'); window.location.reload();
+                } catch (e) { ev.complete('fail'); alert('Payment failed.'); }
+            });
+        }
+    }
+    function closeSubscriptionModal() { document.getElementById('subscriptionModal').classList.remove('show'); }
+
+    async function processSubscription() {
+        const btn = document.getElementById('submitPayment');
+        const err = document.getElementById('card-errors');
+        btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...'; err.textContent = '';
+        try {
+            const {paymentMethod, error} = await stripe.createPaymentMethod({ type: 'card', card: cardElement });
+            if (error) { err.textContent = error.message; btn.disabled = false; btn.innerHTML = '<i class="fas fa-lock"></i> Subscribe Now'; return; }
+            const res = await fetch('/create-subscription', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ payment_method_id: paymentMethod.id, portfolio_owner_id: portfolioOwnerId })
+            });
+            const data = await res.json();
+            if (data.error) { err.textContent = data.error; btn.disabled = false; btn.innerHTML = '<i class="fas fa-lock"></i> Subscribe Now'; return; }
+            if (data.requiresAction) {
+                const {error: e} = await stripe.confirmCardPayment(data.clientSecret);
+                if (e) { err.textContent = e.message; btn.disabled = false; btn.innerHTML = '<i class="fas fa-lock"></i> Subscribe Now'; return; }
+            }
+            window.location.reload();
+        } catch (e) { err.textContent = 'Payment failed.'; btn.disabled = false; btn.innerHTML = '<i class="fas fa-lock"></i> Subscribe Now'; }
+    }
+
+    async function confirmUnsubscribe() {
+        const end = new Date(); end.setMonth(end.getMonth() + 1);
+        const endStr = end.toLocaleDateString('en-US', { year:'numeric', month:'2-digit', day:'2-digit' });
+        if (!confirm(`Unsubscribe from ${username}'s portfolio?\n\nYou'll keep access until ${endStr}.\nNo further charges after this billing period.`)) return;
+        try {
+            const res = await fetch('/unsubscribe-from-portfolio', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ portfolio_owner_id: portfolioOwnerId })
+            });
+            const data = await res.json();
+            if (data.success) { alert('Canceled. Access until ' + endStr); window.location.reload(); }
+            else { alert('Error: ' + (data.error || 'Failed')); }
+        } catch (e) { alert('Failed to unsubscribe.'); }
+    }
+
+    /* ── Chart ── */
+    document.querySelectorAll('#periodSelector .period-tab').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('#periodSelector .period-tab').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            loadChart(this.dataset.period);
         });
-        
-        // Load chart data - uses pre-rendered cache from market close
-        function loadChart(period) {
-            fetch(`/api/portfolio/${portfolioOwnerId}/performance/${period}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.error) {
-                        console.error('Error loading chart:', data.error);
-                        return;
+    });
+
+    function loadChart(period) {
+        fetch('/api/portfolio/' + portfolioOwnerId + '/performance/' + period)
+            .then(r => r.json())
+            .then(data => { if (!data.error) updateChart(data, period); })
+            .catch(e => console.error('Chart error:', e));
+    }
+
+    function updateChart(data, period) {
+        const ctx = document.getElementById('performanceChart').getContext('2d');
+        if (chart) chart.destroy();
+        if (!data.chart_data || data.chart_data.length === 0) return;
+        const labels = data.chart_data.map(i => i.date);
+        const pData = data.chart_data.map(i => i.portfolio);
+        const sData = data.chart_data.map(i => i.sp500);
+
+        chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: username + "'s Portfolio", data: pData,
+                        borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.08)',
+                        borderWidth: 2.5, fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 4
+                    },
+                    {
+                        label: 'S&P 500', data: sData,
+                        borderColor: '#475569', backgroundColor: 'transparent',
+                        borderWidth: 1.5, fill: false, tension: 0.3, borderDash: [5,5], pointRadius: 0, pointHoverRadius: 3
                     }
-                    
-                    updateChart(data, period);
-                })
-                .catch(error => {
-                    console.error('Error fetching chart data:', error);
-                });
-        }
-        
-        // Update chart
-        function updateChart(data, period) {
-            const ctx = document.getElementById('performanceChart').getContext('2d');
-            
-            if (chart) {
-                chart.destroy();
-            }
-            
-            // Extract data from API response (same format as dashboard)
-            if (!data.chart_data || data.chart_data.length === 0) {
-                console.error('No chart data available');
-                return;
-            }
-            
-            const labels = data.chart_data.map(item => item.date);
-            const portfolioData = data.chart_data.map(item => item.portfolio);
-            const sp500Data = data.chart_data.map(item => item.sp500);
-            
-            chart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [
-                        {
-                            label: username + "'s Portfolio",
-                            data: portfolioData,
-                            borderColor: '#28a745',
-                            backgroundColor: 'rgba(40, 167, 69, 0.1)',
-                            borderWidth: 3,
-                            fill: false,
-                            tension: 0.1,
-                            pointRadius: 0,
-                            pointHoverRadius: 4
-                        },
-                        {
-                            label: 'S&P 500',
-                            data: sp500Data,
-                            borderColor: '#6c757d',
-                            backgroundColor: 'rgba(108, 117, 125, 0.1)',
-                            borderWidth: 2,
-                            fill: false,
-                            tension: 0.1,
-                            borderDash: [5, 5],
-                            pointRadius: 0,
-                            pointHoverRadius: 4
-                        }
-                    ]
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                interaction: { intersect: false, mode: 'index' },
+                plugins: {
+                    legend: {
+                        display: true, position: 'top', align: 'end',
+                        labels: { color: '#94a3b8', boxWidth: 12, font: { size: 11 } }
+                    },
+                    tooltip: {
+                        backgroundColor: '#1e293b', titleColor: '#f1f5f9', bodyColor: '#cbd5e1',
+                        borderColor: 'rgba(255,255,255,0.1)', borderWidth: 1, padding: 10,
+                        callbacks: { label: c => c.dataset.label + ': ' + (c.parsed.y >= 0 ? '+' : '') + c.parsed.y.toFixed(2) + '%' }
+                    }
                 },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    interaction: {
-                        intersect: false,
-                        mode: 'index'
+                scales: {
+                    x: {
+                        display: true, grid: { display: false },
+                        ticks: { color: '#64748b', font: { size: 10 }, maxTicksLimit: 8 }
                     },
-                    plugins: {
-                        legend: {
-                            position: 'top',
-                            align: 'end'
-                        },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    return context.dataset.label + ': ' + (context.parsed.y >= 0 ? '+' : '') + context.parsed.y.toFixed(2) + '%';
-                                }
-                            }
-                        }
-                    },
-                    scales: {
-                        x: {
-                            type: 'category',
-                            display: true,
-                            title: {
-                                display: true,
-                                text: 'Date'
-                            },
-                            grid: {
-                                display: false
-                            }
-                        },
-                        y: {
-                            display: true,
-                            title: {
-                                display: true,
-                                text: 'Return (%)'
-                            },
-                            ticks: {
-                                callback: function(value) {
-                                    return (value >= 0 ? '+' : '') + value.toFixed(1) + '%';
-                                }
-                            }
-                        }
+                    y: {
+                        display: true,
+                        grid: { color: 'rgba(255,255,255,0.04)' },
+                        ticks: { color: '#64748b', font: { size: 10 }, callback: v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%' }
                     }
                 }
-            });
-        }
-        
-        // Load initial chart
-        loadChart('1D');
-    </script>
+            }
+        });
+    }
+
+    loadChart('1D');
+</script>
 </body>
 </html>

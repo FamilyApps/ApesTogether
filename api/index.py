@@ -25847,6 +25847,44 @@ def public_portfolio_view(slug):
         except Exception as e:
             logger.error(f"Error fetching leaderboard positions: {str(e)}")
         
+        # Industry mix — cache-first from UserPortfolioStats
+        industry_mix = {}
+        large_cap_pct = 0.0
+        try:
+            from models import UserPortfolioStats
+            stats = UserPortfolioStats.query.filter_by(user_id=user.id).first()
+            if stats:
+                if stats.industry_mix and isinstance(stats.industry_mix, dict):
+                    industry_mix = stats.industry_mix
+                large_cap_pct = float(stats.large_cap_percent) if stats.large_cap_percent else 0.0
+        except Exception:
+            pass
+        # Fallback: live compute if cache empty
+        if not industry_mix:
+            try:
+                from leaderboard_utils import calculate_industry_mix, calculate_portfolio_cap_percentages
+                industry_mix = calculate_industry_mix(user.id) or {}
+                _, large_cap_pct = calculate_portfolio_cap_percentages(user.id)
+                large_cap_pct = float(large_cap_pct) if large_cap_pct else 0.0
+            except Exception:
+                pass
+        
+        # Account age
+        account_age_days = 0
+        if user.created_at:
+            account_age_days = (datetime.utcnow() - user.created_at).days
+        
+        # Subscriber count
+        subscriber_count = Subscription.query.filter_by(
+            subscribed_to_id=user.id, status='active'
+        ).count()
+        
+        # Best performance return for OG meta description
+        best_period = ''
+        best_return = 0.0
+        if leaderboard_positions:
+            best_period = min(leaderboard_positions, key=leaderboard_positions.get)
+        
         return render_template('public_portfolio.html',
             username=user.username,
             current_value=current_value,
@@ -25860,6 +25898,10 @@ def public_portfolio_view(slug):
             num_stocks=num_stocks,
             avg_trades_per_week=avg_trades_per_week,
             leaderboard_positions=leaderboard_positions,
+            industry_mix=industry_mix,
+            large_cap_pct=round(large_cap_pct, 1),
+            account_age_days=account_age_days,
+            subscriber_count=subscriber_count,
             stripe_public_key=app.config.get('STRIPE_PUBLIC_KEY', '')
         )
     
