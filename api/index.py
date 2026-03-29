@@ -6753,6 +6753,338 @@ async function runAll() {
     return html, 200, {'Content-Type': 'text/html'}
 
 
+def _fast_generate_chart(user_id, period, db, text, logger):
+    """Fast raw-SQL chart generator with O(n) Modified Dietz for all periods.
+    
+    Modified Dietz: Return = (V_end - V_start - CF_net) / (V_start + W * CF_net)
+    where CF_net = max_cash_deployed_end - max_cash_deployed_start
+    and W = time-weighted factor for when capital was deployed.
+    
+    O(n) trick: accumulate weighted_cf incrementally as we walk snapshots,
+    instead of re-scanning all prior snapshots per point (which was O(n²)).
+    
+    Returns Chart.js-compatible dict or None if no data.
+    """
+    import time as _time
+    from datetime import datetime, date, timedelta
+    from zoneinfo import ZoneInfo
+    
+    _t0 = _time.time()
+    MARKET_TZ = ZoneInfo('America/New_York')
+    today = datetime.now(MARKET_TZ).date()
+    
+    # Find most recent market day
+    end_date = today
+    while end_date.weekday() >= 5:
+        end_date -= timedelta(days=1)
+    
+    # Calculate start_date based on period
+    p = period.upper()
+    if p == '1D':
+        start_date = end_date
+    elif p == '5D':
+        d, n = end_date - timedelta(days=1), 4
+        while n > 0:
+            if d.weekday() < 5: n -= 1
+            d -= timedelta(days=1)
+        start_date = d + timedelta(days=1)
+    elif p == '1M':
+        start_date = end_date - timedelta(days=30)
+    elif p == '3M':
+        start_date = end_date - timedelta(days=90)
+    elif p == 'YTD':
+        start_date = date(end_date.year, 1, 1)
+    elif p == '1Y':
+        start_date = end_date - timedelta(days=365)
+    elif p == '5Y':
+        start_date = end_date - timedelta(days=365*5)
+    elif p == 'MAX':
+        r = db.session.execute(text(
+            "SELECT MIN(date) FROM portfolio_snapshot WHERE user_id = :uid"
+        ), {'uid': user_id}).scalar()
+        start_date = r if r else end_date
+    else:
+        return None
+    
+    logger.info(f"[FAST-CHART] user={user_id} period={period} range={start_date}..{end_date}")
+    
+    is_intraday = p in ('1D', '5D')
+    
+    # ── Helper: O(n) Modified Dietz per chart point ──
+    # Given a list of (label, total_value, max_cash_deployed, point_date_or_ts) tuples,
+    # produce (labels[], portfolio_pcts[]) using incremental Modified Dietz.
+    def _modified_dietz_points(points):
+        """points: list of (label, total_value, max_cash_deployed, date_for_weighting)
+        Returns (labels, portfolio_pcts)"""
+        if not points:
+            return [], []
+        
+        # Find first non-zero baseline
+        baseline_idx = None
+        for i, (lbl, val, mcd, dt) in enumerate(points):
+            if val > 0:
+                baseline_idx = i
+                break
+        if baseline_idx is None:
+            return [], []
+        
+        _, V_start, mcd_start, dt_start = points[baseline_idx]
+        
+        labels_out = []
+        pcts_out = []
+        
+        # Track running weighted CF incrementally
+        prev_mcd = mcd_start
+        running_weighted_cf = 0.0
+        
+        for i in range(baseline_idx, len(points)):
+            lbl, V_end, mcd_now, dt_now = points[i]
+            if V_end <= 0:
+                continue
+            
+            # Capital added at this point
+            capital_added = mcd_now - prev_mcd
+            
+            # Accumulate weighted CF: weight = fraction of period remaining
+            if capital_added > 0:
+                total_period = (points[-1][3] - dt_start).total_seconds() if hasattr(dt_start, 'hour') else (points[-1][3] - dt_start).days
+                elapsed = (dt_now - dt_start).total_seconds() if hasattr(dt_start, 'hour') else (dt_now - dt_start).days
+                if total_period > 0:
+                    remaining_frac = 1.0 - (elapsed / total_period)
+                else:
+                    remaining_frac = 0.0
+                running_weighted_cf += capital_added * remaining_frac
+            
+            prev_mcd = mcd_now
+            
+            # Modified Dietz for this point
+            CF_net = mcd_now - mcd_start
+            
+            if CF_net <= 0:
+                # No net capital added — simple percentage
+                pct = ((V_end - V_start) / V_start) * 100 if V_start > 0 else 0.0
+            else:
+                # W = running_weighted_cf / CF_net (time-weighted factor)
+                W = running_weighted_cf / CF_net if CF_net > 0 else 0.5
+                denominator = V_start + (W * CF_net)
+                if denominator > 0:
+                    pct = ((V_end - V_start - CF_net) / denominator) * 100
+                else:
+                    pct = 0.0
+            
+            labels_out.append(lbl)
+            pcts_out.append(round(pct, 2))
+        
+        return labels_out, pcts_out
+    
+    # ── Fetch data and build chart ──
+    labels = []
+    portfolio_data = []
+    sp500_data_points = []
+    
+    if is_intraday:
+        # Query 1: intraday snapshots
+        _tq = _time.time()
+        rows = db.session.execute(text("""
+            SELECT timestamp, total_value, max_cash_deployed
+            FROM portfolio_snapshot_intraday
+            WHERE user_id = :uid AND timestamp >= :start AND timestamp <= :end
+            ORDER BY timestamp ASC
+        """), {
+            'uid': user_id,
+            'start': datetime.combine(start_date, datetime.min.time()),
+            'end': datetime.combine(end_date, datetime.max.time())
+        }).fetchall()
+        logger.info(f"[FAST-CHART] intraday query: {round(_time.time()-_tq,2)}s, {len(rows)} rows")
+        
+        if not rows:
+            # Fallback: daily snapshots for 1D with no intraday
+            prev_day = start_date - timedelta(days=1)
+            while prev_day.weekday() >= 5:
+                prev_day -= timedelta(days=1)
+            rows = db.session.execute(text("""
+                SELECT date, total_value, max_cash_deployed
+                FROM portfolio_snapshot
+                WHERE user_id = :uid AND date >= :start AND date <= :end
+                ORDER BY date ASC
+            """), {'uid': user_id, 'start': prev_day, 'end': end_date}).fetchall()
+            logger.info(f"[FAST-CHART] daily fallback: {len(rows)} rows")
+            
+            if not rows:
+                return None
+            
+            # Build points for Modified Dietz (date-based weighting)
+            points = []
+            for row in rows:
+                d = row[0]
+                val = float(row[1]) if row[1] else 0
+                mcd = float(row[2]) if row[2] else 0
+                lbl = d.strftime('%b %d') if hasattr(d, 'strftime') else str(d)
+                points.append((lbl, val, mcd, d))
+            
+            labels, portfolio_data = _modified_dietz_points(points)
+        else:
+            # Filter to valid 15-min intervals
+            valid_minutes = set()
+            for h in range(9, 17):
+                for m in [0, 15, 30, 45]:
+                    if h == 9 and m < 30: continue
+                    if h == 16 and m > 0: continue
+                    valid_minutes.add((h, m))
+            
+            points = []
+            for row in rows:
+                ts = row[0]
+                if ts.tzinfo is None:
+                    ts_et = ts.replace(tzinfo=ZoneInfo('UTC')).astimezone(MARKET_TZ)
+                else:
+                    ts_et = ts.astimezone(MARKET_TZ)
+                
+                if (ts_et.hour, ts_et.minute) not in valid_minutes:
+                    continue
+                
+                val = float(row[1]) if row[1] else 0
+                mcd = float(row[2]) if row[2] else 0
+                lbl = ts_et.strftime('%I:%M %p')
+                points.append((lbl, val, mcd, ts))  # ts for time-based weighting
+            
+            labels, portfolio_data = _modified_dietz_points(points)
+        
+        if not labels:
+            return None
+        
+        # Query 2: SPY intraday data
+        _tq3 = _time.time()
+        spy_rows = db.session.execute(text("""
+            SELECT timestamp, close_price FROM market_data
+            WHERE ticker = 'SPY_INTRADAY' AND date >= :start AND date <= :end
+              AND timestamp IS NOT NULL
+            ORDER BY timestamp ASC
+        """), {'start': start_date, 'end': end_date}).fetchall()
+        logger.info(f"[FAST-CHART] SPY intraday: {round(_time.time()-_tq3,2)}s, {len(spy_rows)} rows")
+        
+        if spy_rows:
+            spy_baseline = float(spy_rows[0][1])
+            spy_pcts = []
+            for sr in spy_rows:
+                sv = float(sr[1])
+                spy_pcts.append(round(((sv - spy_baseline) / spy_baseline) * 100, 2) if spy_baseline > 0 else 0)
+            # Resample to match portfolio point count
+            if len(spy_pcts) >= len(labels):
+                step = max(1, len(spy_pcts) // max(1, len(labels)))
+                sp500_data_points = spy_pcts[::step][:len(labels)]
+            else:
+                sp500_data_points = spy_pcts
+            # Pad/trim to exact length
+            while len(sp500_data_points) < len(labels):
+                sp500_data_points.append(sp500_data_points[-1] if sp500_data_points else 0)
+            sp500_data_points = sp500_data_points[:len(labels)]
+        else:
+            # Fallback: daily SPY
+            spy_row = db.session.execute(text("""
+                SELECT close_price FROM market_data
+                WHERE ticker = 'SPY_SP500' AND date >= :start AND date <= :end
+                ORDER BY date ASC LIMIT 2
+            """), {'start': start_date - timedelta(days=3), 'end': end_date}).fetchall()
+            if len(spy_row) >= 2:
+                sb, se = float(spy_row[0][0]), float(spy_row[-1][0])
+                spy_ret = round(((se - sb) / sb) * 100, 2) if sb > 0 else 0
+                sp500_data_points = [round(spy_ret * i / max(1, len(labels)-1), 2) for i in range(len(labels))]
+            else:
+                sp500_data_points = [0] * len(labels)
+    
+    else:
+        # Non-intraday: single JOIN query for daily snapshots + SPY
+        _tq = _time.time()
+        rows = db.session.execute(text("""
+            SELECT s.date, s.total_value, s.max_cash_deployed,
+                   COALESCE(m.close_price, 0) as spy_price
+            FROM portfolio_snapshot s
+            LEFT JOIN market_data m ON m.ticker = 'SPY_SP500' AND m.date = s.date
+            WHERE s.user_id = :uid AND s.date >= :start AND s.date <= :end
+            ORDER BY s.date ASC
+        """), {'uid': user_id, 'start': start_date, 'end': end_date}).fetchall()
+        logger.info(f"[FAST-CHART] daily+spy join: {round(_time.time()-_tq,2)}s, {len(rows)} rows")
+        
+        if not rows:
+            return None
+        
+        # Sample for long periods to keep charts readable
+        max_pts = 60 if p == '5Y' else 50 if p == '1Y' else 40 if p in ('YTD', '3M') else 100
+        step = max(1, len(rows) // max_pts)
+        sampled = list(rows[::step])
+        if rows[-1] not in sampled:
+            sampled.append(rows[-1])
+        
+        # Build points for Modified Dietz
+        points = []
+        for row in sampled:
+            d = row[0]
+            val = float(row[1]) if row[1] else 0
+            mcd = float(row[2]) if row[2] else 0
+            if p == '5Y':
+                lbl = d.strftime("%b '%y")
+            elif p in ('1Y', 'YTD', '3M'):
+                lbl = d.strftime('%b %d')
+            else:
+                lbl = f"{d.month}/{d.day}"
+            points.append((lbl, val, mcd, d))
+        
+        labels, portfolio_data = _modified_dietz_points(points)
+        
+        # S&P 500: simple % from sampled rows (no capital flows for benchmark)
+        spy_baseline = None
+        for row in sampled:
+            spy = float(row[3]) if row[3] else 0
+            if spy > 0 and spy_baseline is None:
+                spy_baseline = spy
+            if spy_baseline and spy > 0:
+                sp500_data_points.append(round(((spy - spy_baseline) / spy_baseline) * 100, 2))
+            else:
+                sp500_data_points.append(0)
+        
+        # Align lengths (sampled may have skipped zero-value portfolio points)
+        while len(sp500_data_points) < len(labels):
+            sp500_data_points.append(sp500_data_points[-1] if sp500_data_points else 0)
+        # Trim if portfolio skipped some zero-value rows
+        sp500_data_points = sp500_data_points[:len(labels)]
+        
+        if not labels:
+            return None
+    
+    # Summary returns = last chart point values
+    portfolio_return = portfolio_data[-1] if portfolio_data else 0
+    sp500_return = sp500_data_points[-1] if sp500_data_points else 0
+    
+    total_time = round(_time.time() - _t0, 2)
+    logger.info(f"[FAST-CHART] user={user_id} period={period} DONE in {total_time}s: {len(labels)} pts, return={portfolio_return}%")
+    
+    return {
+        'labels': labels,
+        'datasets': [
+            {
+                'label': 'Your Portfolio',
+                'data': portfolio_data,
+                'borderColor': 'rgb(40, 167, 69)',
+                'backgroundColor': 'rgba(40, 167, 69, 0.1)',
+                'tension': 0.1,
+                'fill': False
+            },
+            {
+                'label': 'S&P 500',
+                'data': sp500_data_points,
+                'borderColor': 'rgb(108, 117, 125)',
+                'backgroundColor': 'rgba(108, 117, 125, 0.1)',
+                'tension': 0.1,
+                'fill': False,
+                'borderDash': [5, 5]
+            }
+        ],
+        'portfolio_return': portfolio_return,
+        'sp500_return': sp500_return
+    }
+
+
 @app.route('/admin/cache-backfill-task')
 @admin_required
 def cache_backfill_task():
@@ -6778,11 +7110,13 @@ def cache_backfill_task():
     try:
         if task_type == 'chart':
             from models import UserPortfolioChartCache
-            from leaderboard_utils import generate_chart_from_snapshots
             
             logger.info(f"[BACKFILL] chart: user={user_id} period={period} — generating...")
             t0 = time.time()
-            chart_data = db_retry(lambda: generate_chart_from_snapshots(user_id, period), max_retries=2)
+            
+            # Fast raw-SQL chart generator — replaces slow ORM-based generate_chart_from_snapshots
+            # Does everything in 2 queries with simple % math instead of 4+ ORM queries + O(n²) Modified Dietz
+            chart_data = db_retry(lambda: _fast_generate_chart(user_id, period, db, text, logger), max_retries=2)
             gen_time = round(time.time() - t0, 2)
             logger.info(f"[BACKFILL] chart: generate took {gen_time}s, got data={chart_data is not None}")
             
