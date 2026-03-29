@@ -4267,6 +4267,7 @@ def bot_revenue_summary():
         for row in gifted_rows:
             user = User.query.get(row.portfolio_user_id)
             username = user.username if user else f'user_{row.portfolio_user_id}'
+            is_bot = user and user.role == 'agent'
             
             # Count real subs for this user
             real_for_user = 0
@@ -4278,15 +4279,18 @@ def bot_revenue_summary():
             except Exception:
                 pass
             
+            gifted_for_user = row.bonus_subscriber_count or 0
+            total_for_user = real_for_user + gifted_for_user
             influencers.append({
                 'user_id': row.portfolio_user_id,
                 'username': username,
+                'is_company_bot': is_bot,
                 'real_subs': real_for_user,
-                'gifted_subs': row.bonus_subscriber_count or 0,
-                'total_subs': real_for_user + (row.bonus_subscriber_count or 0),
-                'real_payout': round(real_for_user * influencer_pay, 2),
-                'gifted_payout': round((row.bonus_subscriber_count or 0) * influencer_pay, 2),
-                'total_payout': round((real_for_user + (row.bonus_subscriber_count or 0)) * influencer_pay, 2),
+                'gifted_subs': gifted_for_user,
+                'total_subs': total_for_user,
+                'real_payout': 0.0 if is_bot else round(real_for_user * influencer_pay, 2),
+                'gifted_payout': 0.0 if is_bot else round(gifted_for_user * influencer_pay, 2),
+                'total_payout': 0.0 if is_bot else round(total_for_user * influencer_pay, 2),
             })
         
         # Also include users with real subs but no gifted record
@@ -4332,6 +4336,7 @@ def bot_revenue_summary():
         bot_real_subs = sum(i['real_subs'] for i in influencers if i.get('is_company_bot'))
         bot_gifted_subs = sum(i['gifted_subs'] for i in influencers if i.get('is_company_bot'))
         human_real_subs = real_subs - bot_real_subs
+        human_gifted_subs = total_gifted - bot_gifted_subs  # Only gifted to non-bot users generate payout
         
         bot_revenue = {
             'real_subs': bot_real_subs,
@@ -4350,9 +4355,9 @@ def bot_revenue_summary():
             'store_fees': round(real_subs * store_fee, 2),
             'platform_revenue': round(real_subs * platform_cut, 2),
             'influencer_payouts_real': round(human_real_subs * influencer_pay, 2),
-            'influencer_payouts_gifted': round(total_gifted * influencer_pay, 2),
-            'company_obligation': round(total_gifted * influencer_pay, 2),
-            'total_payout_obligation': round((human_real_subs + total_gifted) * influencer_pay, 2),
+            'influencer_payouts_gifted': round(human_gifted_subs * influencer_pay, 2),
+            'company_obligation': round(human_gifted_subs * influencer_pay, 2),
+            'total_payout_obligation': round((human_real_subs + human_gifted_subs) * influencer_pay, 2),
             'bot_revenue': bot_revenue,
             'per_sub': {
                 'price': price,
