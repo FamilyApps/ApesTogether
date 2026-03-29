@@ -153,9 +153,12 @@ def calculate_portfolio_cap_percentages(user_id):
     # Calculate proportional values based on purchase prices and existing stock info
     total_purchase_value = sum(stock.quantity * stock.purchase_price for stock in stocks)
     
+    # Batch-load all StockInfo records in ONE query (avoids N+1 per-stock queries)
+    tickers = [stock.ticker.upper() for stock in stocks]
+    all_stock_info = {si.ticker: si for si in StockInfo.query.filter(StockInfo.ticker.in_(tickers)).all()} if tickers else {}
+    
     for stock in stocks:
-        # Get stock info (should already exist from previous population)
-        stock_info = StockInfo.query.filter_by(ticker=stock.ticker.upper()).first()
+        stock_info = all_stock_info.get(stock.ticker.upper())
         
         if total_purchase_value > 0:
             # Calculate proportional value based on purchase weight
@@ -1244,8 +1247,12 @@ def calculate_industry_mix(user_id):
     industry_values = {}
     total_purchase_value = sum(stock.quantity * stock.purchase_price for stock in stocks)
     
+    # Batch-load all StockInfo records in ONE query (avoids N+1 per-stock queries)
+    tickers = [stock.ticker.upper() for stock in stocks]
+    all_stock_info = {si.ticker: si for si in StockInfo.query.filter(StockInfo.ticker.in_(tickers)).all()} if tickers else {}
+    
     for stock in stocks:
-        stock_info = StockInfo.query.filter_by(ticker=stock.ticker.upper()).first()
+        stock_info = all_stock_info.get(stock.ticker.upper())
         
         if total_purchase_value > 0:
             stock_purchase_value = stock.quantity * stock.purchase_price
