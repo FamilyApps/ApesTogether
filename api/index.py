@@ -6664,7 +6664,7 @@ function addError(label, data) {
   if (data.task) detail += '<b>Task:</b> ' + esc(JSON.stringify(data.task)) + '<br>';
   if (data.error) detail += '<b>Error:</b> ' + esc(data.error) + '<br>';
   log.innerHTML += '<div class="log-err">[' + new Date().toLocaleTimeString() + '] ' + esc(label) + ': ' + esc(data.error || 'Unknown error') +
-    ' <a href="#" style="color:#90caf9;font-size:11px" onclick="toggleDetail(\'' + id + '\');return false">[show details]</a>' +
+    ' <a href="#" style="color:#90caf9;font-size:11px" onclick="toggleDetail(&apos;' + id + '&apos;);return false">[show details]</a>' +
     '<div id="' + id + '" style="display:none;background:#1a0a0a;padding:8px;border-radius:6px;margin:4px 0;border:1px solid #c62828">' + detail + '</div></div>';
   log.scrollTop = log.scrollHeight;
 }
