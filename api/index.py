@@ -1551,7 +1551,7 @@ def stock_comparison():
 @app.route('/profile/<username>')
 @login_required
 def profile(username):
-    """Display a user's profile page."""
+    """Redirect to the new public portfolio page at /p/<slug>."""
     # Redirect to own dashboard if viewing self
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
@@ -1561,44 +1561,13 @@ def profile(username):
 
     user_to_view = User.query.filter_by(username=username).first_or_404()
 
-    # Check if the current user has an active subscription to this profile
-    subscription = Subscription.query.filter_by(
-        subscriber_id=current_user.id,
-        subscribed_to_id=user_to_view.id,
-        status='active'
-    ).first()
+    # Ensure user has a portfolio slug, generate one if missing
+    if not user_to_view.portfolio_slug:
+        user_to_view.portfolio_slug = generate_portfolio_slug()
+        db.session.commit()
 
-    portfolio_data = None
-    if subscription:
-        # If subscribed, fetch portfolio data to display
-        stocks = Stock.query.filter_by(user_id=user_to_view.id).all()
-        total_value = 0
-        stock_details = []
-        # Get all tickers for batch processing
-        tickers = [stock.ticker for stock in stocks]
-        batch_prices = get_batch_stock_data(tickers)
-        
-        for stock in stocks:
-            ticker_upper = stock.ticker.upper()
-            price = batch_prices.get(ticker_upper)
-            
-            if price is not None:
-                value = stock.quantity * price
-                total_value += value
-                stock_details.append({'ticker': stock.ticker, 'quantity': stock.quantity, 'price': price, 'value': value})
-        portfolio_data = {
-            'stocks': stock_details,
-            'total_value': total_value
-        }
-
-    return render_template_with_defaults(
-        'profile.html',
-        user_to_view=user_to_view,
-        subscription=subscription,
-        portfolio_data=portfolio_data,
-        price=user_to_view.subscription_price,
-        stripe_public_key=app.config['STRIPE_PUBLIC_KEY']
-    )
+    # Redirect to the redesigned public portfolio page
+    return redirect(f'/p/{user_to_view.portfolio_slug}')
 
 @app.route('/admin-panel')
 def admin_panel():
