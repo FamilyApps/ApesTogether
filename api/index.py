@@ -558,6 +558,15 @@ try:
         """Execute fn(), retrying on SSL/connection errors with fresh DB session."""
         last_error = None
         for attempt in range(max_retries + 1):
+            # Ensure clean session at the START of every attempt (including first)
+            if attempt > 0:
+                for cleanup_fn in [db.session.close, db.session.rollback, db.session.remove, db.engine.dispose]:
+                    try:
+                        cleanup_fn()
+                    except Exception:
+                        pass
+                import time as _time
+                _time.sleep(1)
             try:
                 return fn()
             except Exception as e:
@@ -579,19 +588,7 @@ try:
                     app._last_request_had_db_error = True
                 if is_connection_error and attempt < max_retries:
                     logger.warning(f"DB connection error (attempt {attempt+1}/{max_retries+1}): {e}")
-                    try:
-                        db.session.rollback()
-                    except Exception:
-                        pass
-                    try:
-                        db.session.remove()
-                    except Exception:
-                        pass
-                    try:
-                        db.engine.dispose()
-                    except Exception:
-                        pass
-                    continue
+                    continue  # cleanup happens at top of next iteration
                 raise last_error
     
     # Store on app so blueprints can access it
@@ -7110,24 +7107,6 @@ def cache_backfill_task():
     except Exception:
         pass
     
-    # Override the global 15s statement_timeout for backfill tasks (they can take longer)
-    try:
-        db.session.execute(text("SET statement_timeout = '55s'"))
-    except Exception:
-        # If SET fails (stale/broken session), clean up fully so queries start fresh
-        try:
-            db.session.rollback()
-        except Exception:
-            pass
-        try:
-            db.session.remove()
-        except Exception:
-            pass
-        try:
-            db.engine.dispose()
-        except Exception:
-            pass
-    
     try:
         if task_type == 'chart':
             from models import UserPortfolioChartCache
@@ -7137,7 +7116,10 @@ def cache_backfill_task():
             
             # Fast raw-SQL chart generator — replaces slow ORM-based generate_chart_from_snapshots
             # Does everything in 2 queries with simple % math instead of 4+ ORM queries + O(n²) Modified Dietz
-            chart_data = db_retry(lambda: _fast_generate_chart(user_id, period, db, text, logger), max_retries=2)
+            def _gen_chart():
+                db.session.execute(text("SET statement_timeout = '55s'"))
+                return _fast_generate_chart(user_id, period, db, text, logger)
+            chart_data = db_retry(_gen_chart, max_retries=3)
             gen_time = round(time.time() - t0, 2)
             logger.info(f"[BACKFILL] chart: generate took {gen_time}s, got data={chart_data is not None}")
             
@@ -7181,7 +7163,10 @@ def cache_backfill_task():
             for category in categories:
                 logger.info(f"[BACKFILL] leaderboard: period={period} category={category}")
                 t0 = time.time()
-                leaderboard_data = db_retry(lambda cat=category: calculate_leaderboard_data(period, 20, cat), max_retries=2)
+                def _calc_lb(cat=category):
+                    db.session.execute(text("SET statement_timeout = '55s'"))
+                    return calculate_leaderboard_data(period, 20, cat)
+                leaderboard_data = db_retry(_calc_lb, max_retries=3)
                 calc_time = round(time.time() - t0, 2)
                 entry_count = len(leaderboard_data) if leaderboard_data else 0
                 logger.info(f"[BACKFILL] leaderboard: {category} calc={calc_time}s entries={entry_count}")
@@ -7221,7 +7206,10 @@ def cache_backfill_task():
             
             logger.info(f"[BACKFILL] stats: user={user_id}")
             t0 = time.time()
-            stats_data = db_retry(lambda: calculate_user_portfolio_stats(user_id), max_retries=2)
+            def _calc_stats():
+                db.session.execute(text("SET statement_timeout = '55s'"))
+                return calculate_user_portfolio_stats(user_id)
+            stats_data = db_retry(_calc_stats, max_retries=3)
             calc_time = round(time.time() - t0, 2)
             logger.info(f"[BACKFILL] stats: calc={calc_time}s industry_mix={stats_data.get('industry_mix')}")
             
