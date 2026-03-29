@@ -334,19 +334,13 @@ def get_leaderboard_data(period='YTD', limit=20, category='all', use_auth_suffix
     # LEGACY FORMAT: period_category (no suffix)
     cache_key = f"{period}_{category}"
     
-    # Try modern auth-aware cache first if requested
-    if use_auth_suffix:
-        # Try _auth suffix first (most routes use this)
-        auth_cache_key = f"{cache_key}_auth"
-        cache_entry = LeaderboardCache.query.filter_by(period=auth_cache_key).first()
-        
-        # Fallback to _anon if _auth not found
-        if not cache_entry:
-            anon_cache_key = f"{cache_key}_anon"
-            cache_entry = LeaderboardCache.query.filter_by(period=anon_cache_key).first()
-    else:
-        # Try exact cache key (legacy or backward compatibility)
-        cache_entry = LeaderboardCache.query.filter_by(period=cache_key).first()
+    # Try all cache key formats: plain, _auth, _anon
+    # The backfill writes _auth/_anon suffixed keys, so we must always check those
+    cache_entry = LeaderboardCache.query.filter_by(period=cache_key).first()
+    if not cache_entry:
+        cache_entry = LeaderboardCache.query.filter_by(period=f"{cache_key}_auth").first()
+    if not cache_entry:
+        cache_entry = LeaderboardCache.query.filter_by(period=f"{cache_key}_anon").first()
     
     if cache_entry:
         # Return cached data with chart data included
@@ -602,66 +596,86 @@ def generate_user_portfolio_chart(user_id, period):
         
         if period == '1D':
             # For 1D charts, use intraday snapshots with proper time formatting
-            from models import PortfolioSnapshotIntraday
+            from models import PortfolioSnapshotIntraday, MarketData
             from sqlalchemy import func, and_, cast, Date
             
-            # CRITICAL: Query intraday snapshots using ET date extraction
-            # Timestamps are TZ-aware (ET), so we extract the date portion in ET
-            intraday_snapshots = PortfolioSnapshotIntraday.query.filter(
-                and_(
-                    PortfolioSnapshotIntraday.user_id == user_id,
-                    # Cast timestamp to date for comparison (timestamp is already in ET)
-                    cast(PortfolioSnapshotIntraday.timestamp, Date) == today
-                )
-            ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
+            # Try today first, then fall back to last trading day with data
+            target_date = today
+            intraday_snapshots = []
+            for attempt in range(5):  # Check up to 5 days back (covers weekends + holidays)
+                intraday_snapshots = PortfolioSnapshotIntraday.query.filter(
+                    and_(
+                        PortfolioSnapshotIntraday.user_id == user_id,
+                        cast(PortfolioSnapshotIntraday.timestamp, Date) == target_date
+                    )
+                ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
+                
+                if intraday_snapshots:
+                    break
+                target_date -= timedelta(days=1)
             
-            logger.info(f"Found {len(intraday_snapshots)} intraday snapshots for user {user_id} on {today} (ET)")
+            logger.info(f"Found {len(intraday_snapshots)} intraday snapshots for user {user_id} on {target_date} (ET)")
             
             if not intraday_snapshots:
-                logger.warning(f"No intraday snapshots found for user {user_id} on {today} (ET)")
-                # Fallback to daily snapshot if no intraday data
-                daily_snapshot = PortfolioSnapshot.query.filter_by(
-                    user_id=user_id, 
-                    date=today
-                ).first()
-                
-                if daily_snapshot:
-                    logger.info(f"Using daily snapshot fallback for user {user_id}")
-                    chart_data = {
-                        'labels': [today.strftime('%Y-%m-%d')],
-                        'datasets': [{
-                            'label': 'Portfolio Value',
-                            'data': [float(daily_snapshot.total_value)],
-                            'borderColor': 'rgb(75, 192, 192)',
-                            'backgroundColor': 'rgba(75, 192, 192, 0.2)',
-                            'tension': 0.1
-                        }],
-                        'period': period,
-                        'user_id': user_id,
-                        'generated_at': datetime.now(MARKET_TZ).isoformat()
-                    }
-                    return chart_data
-                else:
-                    logger.warning(f"No daily snapshot found either for user {user_id} on {today} (ET)")
-                    return None
+                logger.warning(f"No intraday snapshots found for user {user_id} in last 5 days")
+                return None
             
-            # Format intraday chart data with proper time labels (convert to ET)
-            # Timestamps are already TZ-aware in ET, just format them
+            # Build percentage-return chart (same format as backfill cache)
+            first_value = float(intraday_snapshots[0].total_value)
             labels = []
+            portfolio_pcts = []
             for snapshot in intraday_snapshots:
-                # Ensure timestamp is in ET
                 ts_et = snapshot.timestamp.astimezone(MARKET_TZ) if snapshot.timestamp.tzinfo else snapshot.timestamp.replace(tzinfo=MARKET_TZ)
-                labels.append(ts_et.strftime('%H:%M'))
+                labels.append(ts_et.strftime('%I:%M %p'))
+                if first_value > 0:
+                    pct = ((float(snapshot.total_value) - first_value) / first_value) * 100
+                else:
+                    pct = 0.0
+                portfolio_pcts.append(round(pct, 2))
+            
+            # Get S&P 500 intraday data for same date
+            sp500_pcts = []
+            spy_data = MarketData.query.filter(
+                MarketData.ticker == 'SPY_INTRADAY',
+                MarketData.date == target_date,
+                MarketData.timestamp.isnot(None)
+            ).order_by(MarketData.timestamp.asc()).all()
+            
+            if spy_data:
+                spy_base = float(spy_data[0].close_price)
+                if spy_base > 0:
+                    spy_all = [round(((float(s.close_price) - spy_base) / spy_base) * 100, 2) for s in spy_data]
+                    # Resample to match portfolio point count
+                    if len(spy_all) >= len(labels):
+                        step = max(1, len(spy_all) // max(1, len(labels)))
+                        sp500_pcts = [spy_all[i * step] for i in range(len(labels))]
+                    else:
+                        sp500_pcts = spy_all + [spy_all[-1]] * (len(labels) - len(spy_all))
+            
+            if not sp500_pcts:
+                sp500_pcts = [0.0] * len(labels)
             
             chart_data = {
                 'labels': labels,
-                'datasets': [{
-                    'label': 'Portfolio Value',
-                    'data': [float(snapshot.total_value) for snapshot in intraday_snapshots],
-                    'borderColor': 'rgb(75, 192, 192)',
-                    'backgroundColor': 'rgba(75, 192, 192, 0.2)',
-                    'tension': 0.1
-                }],
+                'datasets': [
+                    {
+                        'label': 'Your Portfolio',
+                        'data': portfolio_pcts,
+                        'borderColor': 'rgb(40, 167, 69)',
+                        'backgroundColor': 'rgba(40, 167, 69, 0.1)',
+                        'tension': 0.1,
+                        'fill': False
+                    },
+                    {
+                        'label': 'S&P 500',
+                        'data': sp500_pcts,
+                        'borderColor': 'rgb(108, 117, 125)',
+                        'backgroundColor': 'rgba(108, 117, 125, 0.1)',
+                        'tension': 0.1,
+                        'fill': False,
+                        'borderDash': [5, 5]
+                    }
+                ],
                 'period': period,
                 'user_id': user_id,
                 'generated_at': datetime.now().isoformat()
@@ -1208,17 +1222,61 @@ def get_user_leaderboard_positions(user_id, top_n=20):
     """
     Get a user's leaderboard positions across all time periods (if they're in top N).
     Returns dict of {period: position} for periods where user ranks in top N.
+    Applies Active Edge filtering to match mobile leaderboard rankings.
     """
-    positions = {}
-    periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y']
+    from models import Transaction
+    from datetime import datetime, timedelta
     
-    for period in periods:
-        leaderboard_data = get_leaderboard_data(period, limit=top_n)
+    positions = {}
+    # Display labels: use 1W instead of 5D to match mobile convention
+    period_map = {'1D': '1D', '5D': '1W', '1M': '1M', '3M': '3M', 'YTD': 'YTD', '1Y': '1Y'}
+    
+    # Period-aware minimum account age (same as mobile Active Edge)
+    min_age_for_period = {
+        '1D': 1, '5D': 5, '1M': 7, '3M': 14, 'YTD': 14, '1Y': 30
+    }
+    
+    for period, display_label in period_map.items():
+        leaderboard_data = get_leaderboard_data(period, limit=100)
+        if not leaderboard_data:
+            continue
         
-        # Find user's position in this leaderboard
-        for idx, entry in enumerate(leaderboard_data, 1):
+        # Apply Active Edge filtering (same logic as mobile_api.py)
+        filtered = []
+        for entry in leaderboard_data:
+            uid = entry.get('user_id')
+            if not uid:
+                continue
+            
+            # Must have traded within last 60 days
+            last_trade = Transaction.query.filter_by(user_id=uid)\
+                .order_by(Transaction.timestamp.desc()).first()
+            if not last_trade or (datetime.utcnow() - last_trade.timestamp).days > 60:
+                continue
+            
+            # Must have at least 2 trades total
+            total_trades = Transaction.query.filter_by(user_id=uid).count()
+            if total_trades < 2:
+                continue
+            
+            # Period-aware minimum age
+            u = User.query.get(uid)
+            if u and u.created_at:
+                account_age = (datetime.utcnow() - u.created_at).days
+                min_age = min_age_for_period.get(period, 1)
+                if account_age < min_age:
+                    continue
+            
+            filtered.append(entry)
+        
+        # Sort filtered entries by performance descending
+        filtered.sort(key=lambda x: x.get('performance_percent', 0), reverse=True)
+        
+        # Find user's position in filtered list
+        for idx, entry in enumerate(filtered, 1):
             if entry.get('user_id') == user_id:
-                positions[period] = idx
+                if idx <= top_n:
+                    positions[display_label] = idx
                 break
     
     return positions

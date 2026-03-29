@@ -6936,6 +6936,26 @@ def _fast_generate_chart(user_id, period, db, text, logger):
         }).fetchall()
         logger.info(f"[FAST-CHART] intraday query: {round(_time.time()-_tq,2)}s, {len(rows)} rows")
         
+        # For 1D: if no intraday data for target date, try previous trading days
+        if not rows and p == '1D':
+            for day_back in range(1, 6):
+                check_date = end_date - timedelta(days=day_back)
+                if check_date.weekday() >= 5:
+                    continue
+                rows = db.session.execute(text("""
+                    SELECT timestamp, total_value, max_cash_deployed
+                    FROM portfolio_snapshot_intraday
+                    WHERE user_id = :uid AND timestamp >= :start AND timestamp <= :end
+                    ORDER BY timestamp ASC
+                """), {
+                    'uid': user_id,
+                    'start': datetime.combine(check_date, datetime.min.time()),
+                    'end': datetime.combine(check_date, datetime.max.time())
+                }).fetchall()
+                if rows:
+                    logger.info(f"[FAST-CHART] 1D fallback to {check_date}: {len(rows)} intraday rows")
+                    break
+        
         if not rows:
             # Fallback: daily snapshots for 1D with no intraday
             prev_day = start_date - timedelta(days=1)

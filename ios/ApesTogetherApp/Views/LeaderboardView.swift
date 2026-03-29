@@ -778,6 +778,10 @@ class LeaderboardViewModel: ObservableObject {
             entries = response.entries
             sp500Return = response.sp500Return ?? 0.0
             availableIndustries = response.availableIndustries
+        } catch is CancellationError {
+            // Silently ignore — happens naturally during pull-to-refresh
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            // Silently ignore — iOS cancels in-flight request on refresh
         } catch {
             self.error = error.localizedDescription
         }

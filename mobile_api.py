@@ -961,16 +961,10 @@ def get_leaderboard():
                 datasets = chart_data_raw.get('datasets', [])
                 if datasets and len(datasets) > 0:
                     raw_vals = datasets[0].get('data', [])
-                    # Convert absolute values to percentage returns for sparkline
+                    # Chart data already contains cumulative % returns (Modified Dietz)
+                    # Use directly — do NOT re-compute percentage-of-percentage
                     if raw_vals and len(raw_vals) >= 2:
-                        base = raw_vals[0]
-                        if base and float(base) > 0:
-                            sparkline_points = [
-                                round(((float(v) - float(base)) / float(base)) * 100, 2)
-                                for v in raw_vals
-                            ]
-                        else:
-                            sparkline_points = raw_vals
+                        sparkline_points = [round(float(v), 2) for v in raw_vals]
             
             # ── Active Edge filter ──
             if active_edge:
