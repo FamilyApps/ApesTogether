@@ -837,7 +837,7 @@ def get_leaderboard():
     - industry: filter by industry name (default: all)
     - frequency: day_trader, moderate, any (default: any)
     """
-    from models import User, Stock, Transaction, UserPortfolioStats, PortfolioSnapshot, MarketData, Subscription
+    from models import db, User, Stock, Transaction, UserPortfolioStats, PortfolioSnapshot, MarketData, Subscription
     from datetime import datetime, timedelta, date as dt_date
     import json as json_module
     
@@ -947,40 +947,99 @@ def get_leaderboard():
             'YTD': 14, '1Y': 30
         }
         
+        # ── Pre-fetch data in bulk to avoid N+1 queries at scale ──
+        # Batch-load users, industry stats, and last trades for all raw_data entries
+        raw_user_ids = [e.get('user_id') for e in (raw_data or []) if e.get('user_id')]
+        
+        # Batch load users (single query)
+        users_map = {}
+        if raw_user_ids:
+            users_list = User.query.filter(User.id.in_(raw_user_ids)).all()
+            users_map = {u.id: u for u in users_list}
+        
+        # Batch load industry mix from UserPortfolioStats (single query)
+        industry_stats_map = {}
+        if raw_user_ids:
+            stats_list = UserPortfolioStats.query.filter(UserPortfolioStats.user_id.in_(raw_user_ids)).all()
+            for s in stats_list:
+                if s.industry_mix and isinstance(s.industry_mix, dict):
+                    industry_stats_map[s.user_id] = s.industry_mix
+        
+        # Batch load last trade dates (single query using subquery)
+        from sqlalchemy import func as sqla_func
+        last_trade_map = {}
+        if raw_user_ids:
+            last_trades = db.session.query(
+                Transaction.user_id,
+                sqla_func.max(Transaction.timestamp).label('last_ts')
+            ).filter(
+                Transaction.user_id.in_(raw_user_ids)
+            ).group_by(Transaction.user_id).all()
+            last_trade_map = {uid: ts for uid, ts in last_trades}
+        
+        # Batch load total trade counts for Active Edge (single query)
+        total_trade_map = {}
+        if active_edge and raw_user_ids:
+            trade_counts = db.session.query(
+                Transaction.user_id,
+                sqla_func.count(Transaction.id).label('cnt')
+            ).filter(
+                Transaction.user_id.in_(raw_user_ids)
+            ).group_by(Transaction.user_id).all()
+            total_trade_map = {uid: cnt for uid, cnt in trade_counts}
+        
+        # Batch load unique stock counts (single query)
+        stock_count_map = {}
+        if raw_user_ids:
+            stock_counts = db.session.query(
+                Stock.user_id,
+                sqla_func.count(Stock.id).label('cnt')
+            ).filter(
+                Stock.user_id.in_(raw_user_ids)
+            ).group_by(Stock.user_id).all()
+            stock_count_map = {uid: cnt for uid, cnt in stock_counts}
+        
+        # Batch load subscriber counts (single query)
+        sub_count_map = {}
+        if raw_user_ids:
+            sub_counts = db.session.query(
+                Subscription.subscribed_to_id,
+                sqla_func.count(Subscription.id).label('cnt')
+            ).filter(
+                Subscription.subscribed_to_id.in_(raw_user_ids),
+                Subscription.status == 'active'
+            ).group_by(Subscription.subscribed_to_id).all()
+            sub_count_map = {uid: cnt for uid, cnt in sub_counts}
+        
         for entry in (raw_data or []):
             user_id = entry.get('user_id')
-            user = User.query.get(user_id) if user_id else None
+            user = users_map.get(user_id)
             if not user:
                 continue
             
-            # ── Compute trades per week directly from Transaction table ──
-            thirty_days_ago = datetime.utcnow() - timedelta(days=30)
-            recent_trade_count = Transaction.query.filter(
-                Transaction.user_id == user_id,
-                Transaction.timestamp >= thirty_days_ago
-            ).count()
-            avg_trades_per_week = round((recent_trade_count / 30.0) * 7, 1)
+            # Prefer cached values from calculate_leaderboard_data; fallback to live
+            avg_trades_per_week = entry.get('avg_trades_per_week')
+            if avg_trades_per_week is None:
+                thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+                recent_trade_count = Transaction.query.filter(
+                    Transaction.user_id == user_id,
+                    Transaction.timestamp >= thirty_days_ago
+                ).count()
+                avg_trades_per_week = round((recent_trade_count / 30.0) * 7, 1)
             
-            # Unique stock count
-            unique_stocks = Stock.query.filter_by(user_id=user_id).count()
+            # Unique stock count (from batch-loaded map)
+            unique_stocks = stock_count_map.get(user_id, 0)
             
-            # Large cap percent
+            # Large cap percent (from cache)
             large_cap_pct = entry.get('large_cap_percent', 0.0)
             
-            # Account age
+            # Account age (computed from user object — no extra query)
             account_age_days = 0
             if user.created_at:
                 account_age_days = (datetime.utcnow() - user.created_at).days
             
-            # Industry mix — cache-first from UserPortfolioStats (updated at market close)
-            industry_mix = {}
-            try:
-                stats = UserPortfolioStats.query.filter_by(user_id=user_id).first()
-                if stats and stats.industry_mix and isinstance(stats.industry_mix, dict):
-                    industry_mix = stats.industry_mix
-            except Exception:
-                pass
-            # Thin fallback: live compute only if cache is empty (new user)
+            # Industry mix (from batch-loaded stats)
+            industry_mix = industry_stats_map.get(user_id, {})
             if not industry_mix:
                 try:
                     from leaderboard_utils import calculate_industry_mix
@@ -991,37 +1050,36 @@ def get_leaderboard():
             for ind_name in industry_mix.keys():
                 available_industries.add(ind_name)
             
-            # Last trade
-            last_trade = Transaction.query.filter_by(user_id=user_id)\
-                .order_by(Transaction.timestamp.desc()).first()
-            last_trade_date = last_trade.timestamp.isoformat() if last_trade else None
+            # Last trade (from batch-loaded map)
+            last_trade_ts = last_trade_map.get(user_id)
+            last_trade_date = last_trade_ts.isoformat() if last_trade_ts else None
             
-            # Subscriber count (compute directly)
+            # Subscriber count (prefer cached, then batch-loaded map)
             sub_count = entry.get('subscriber_count', 0)
             if sub_count == 0:
-                sub_count = Subscription.query.filter_by(
-                    subscribed_to_id=user_id, status='active'
-                ).count()
+                sub_count = sub_count_map.get(user_id, 0)
             
-            # Extract sparkline from chart_data if available
-            sparkline_points = []
-            chart_data_raw = entry.get('chart_data')
-            if chart_data_raw:
-                datasets = chart_data_raw.get('datasets', [])
-                if datasets and len(datasets) > 0:
-                    raw_vals = datasets[0].get('data', [])
-                    # Chart data already contains cumulative % returns (Modified Dietz)
-                    # Use directly — do NOT re-compute percentage-of-percentage
-                    if raw_vals and len(raw_vals) >= 2:
-                        sparkline_points = [round(float(v), 2) for v in raw_vals]
+            # Use pre-computed sparkline from cache (populated by calculate_leaderboard_data
+            # using the same calculate_portfolio_performance as the portfolio chart endpoint)
+            sparkline_points = entry.get('sparkline_data') or []
+            
+            # Fallback: extract from chart_data if sparkline not pre-computed
+            if not sparkline_points:
+                chart_data_raw = entry.get('chart_data')
+                if chart_data_raw:
+                    datasets = chart_data_raw.get('datasets', [])
+                    if datasets and len(datasets) > 0:
+                        raw_vals = datasets[0].get('data', [])
+                        if raw_vals and len(raw_vals) >= 2:
+                            sparkline_points = [round(float(v), 2) for v in raw_vals]
             
             # ── Active Edge filter ──
             if active_edge:
                 # Must have traded within last 60 days
-                if not last_trade or (datetime.utcnow() - last_trade.timestamp).days > 60:
+                if not last_trade_ts or (datetime.utcnow() - last_trade_ts).days > 60:
                     continue
                 # Must have at least 2 trades total
-                total_trades = Transaction.query.filter_by(user_id=user_id).count()
+                total_trades = total_trade_map.get(user_id, 0)
                 if total_trades < 2:
                     continue
                 # Period-aware minimum age
@@ -1032,7 +1090,6 @@ def get_leaderboard():
             # ── Sector filter (supports comma-separated multi-select) ──
             if industry_filter and industry_filter != 'all':
                 requested_sectors = [s.strip() for s in industry_filter.split(',')]
-                # User must have at least one of the selected sectors
                 if not any(sector in industry_mix for sector in requested_sectors):
                     continue
             
@@ -1074,48 +1131,12 @@ def get_leaderboard():
             else:
                 e['rank_change'] = 0  # new entry or no previous data
         
-        # ── Override return_percent and sparkline with live performance calculator ──
-        # Uses the SAME function as the portfolio chart endpoint for consistency.
-        # Only runs for top N entries (max 20) so cost is bounded.
-        top_entries = leaderboard[:limit]
-        try:
-            from performance_calculator import calculate_portfolio_performance, get_period_dates
-            perf_period = cache_period  # Use the same period mapping (e.g. 1W -> 5D)
-            
-            for entry in top_entries:
-                try:
-                    uid = entry['user']['id']
-                    start_d, end_d = get_period_dates(perf_period, user_id=uid)
-                    result = calculate_portfolio_performance(
-                        uid, start_d, end_d,
-                        include_chart_data=True, period=perf_period
-                    )
-                    if result:
-                        live_return = result.get('portfolio_return', 0.0)
-                        entry['return_percent'] = round(live_return, 2)
-                        
-                        # Extract sparkline from chart_data (portfolio % returns)
-                        chart_pts = result.get('chart_data') or []
-                        if chart_pts:
-                            sparkline = [round(pt.get('portfolio', 0) or 0, 2) for pt in chart_pts]
-                            entry['sparkline_data'] = sparkline[-20:]
-                except Exception as e_perf:
-                    logger.warning(f"Live perf calc failed for user {entry['user']['id']}: {e_perf}")
-                    # Keep the cached value as fallback
-        except Exception as e_import:
-            logger.warning(f"Performance calculator import failed, using cached values: {e_import}")
-        
-        # Re-sort after live overrides (values may have changed)
-        top_entries.sort(key=lambda x: x['return_percent'], reverse=True)
-        for i, e in enumerate(top_entries):
-            e['rank'] = i + 1
-        
         return jsonify({
             'period': period,
             'category': category,
             'sp500_return': round(sp500_return_for_period, 2),
             'available_industries': sorted(list(available_industries)),
-            'entries': top_entries
+            'entries': leaderboard[:limit]
         })
         
     except Exception as e:

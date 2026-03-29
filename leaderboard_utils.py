@@ -460,8 +460,13 @@ def get_last_market_day():
 
 def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
     """
-    Calculate leaderboard data using CACHED performance from UserPortfolioChartCache
-    This ensures leaderboard shows EXACTLY the same performance as user's dashboard
+    Calculate leaderboard data using calculate_portfolio_performance (single source of truth).
+    
+    This uses the SAME Modified Dietz calculation as the portfolio chart endpoint,
+    guaranteeing that leaderboard %, sparklines, and portfolio page all match exactly.
+    
+    Called at cache-build time (market close cron) — runs once, not per request.
+    For 10k users this is ~10k calls but it's a background job with no latency constraints.
     
     Args:
         period: Time period for performance calculation
@@ -470,7 +475,7 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
     """
     from datetime import datetime, date, timedelta
     import json
-    from models import UserPortfolioChartCache
+    from performance_calculator import calculate_portfolio_performance, get_period_dates
     
     # Get today's date for calculating recent trades
     today = get_last_market_day()
@@ -487,43 +492,38 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
         if not latest_snapshot:
             continue
         
-        # Get performance from UserPortfolioChartCache (SAME SOURCE AS DASHBOARD)
-        chart_cache = UserPortfolioChartCache.query.filter_by(
-            user_id=user.id, 
-            period=period
-        ).first()
-        
-        if not chart_cache:
-            # No cached data for this period, skip user
-            continue
-        
+        # Use the SAME performance calculator as the portfolio chart endpoint
         try:
-            # Extract performance from cached chart data (same format as dashboard)
-            cached_data = json.loads(chart_cache.chart_data)
-            datasets = cached_data.get('datasets', [])
-            
-            if not datasets or len(datasets) == 0:
+            start_date, end_date = get_period_dates(period, user_id=user.id)
+            result = calculate_portfolio_performance(
+                user.id, start_date, end_date,
+                include_chart_data=True, period=period
+            )
+            if not result:
                 continue
             
-            # Portfolio performance is the last value in the first dataset
-            portfolio_dataset = datasets[0].get('data', [])
-            if not portfolio_dataset:
+            performance_percent = result.get('portfolio_return', 0.0)
+            if performance_percent is None:
                 continue
             
-            # This is the EXACT same value shown on the user's dashboard
-            performance_percent = portfolio_dataset[-1] if portfolio_dataset else 0.0
-            
-        except (json.JSONDecodeError, KeyError, IndexError) as e:
-            logger.warning(f"Error parsing chart cache for user {user.id}: {e}")
+            # Pre-compute sparkline from chart_data (portfolio % returns)
+            chart_pts = result.get('chart_data') or []
+            sparkline = []
+            if chart_pts:
+                sparkline = [round(pt.get('portfolio', 0) or 0, 2) for pt in chart_pts]
+                sparkline = sparkline[-20:]  # Keep last 20 points for mobile
+                
+        except Exception as e:
+            logger.warning(f"Performance calc failed for user {user.id} period {period}: {e}")
             continue
         
         # Calculate market cap percentages using existing stock info
         small_cap_percent, large_cap_percent = calculate_portfolio_cap_percentages(user.id)
         
         # Apply category filter
-        if category == 'small_cap' and small_cap_percent < 60:  # Must be 60%+ small cap focused
+        if category == 'small_cap' and small_cap_percent < 60:
             continue
-        elif category == 'large_cap' and large_cap_percent < 60:  # Must be 60%+ large cap focused
+        elif category == 'large_cap' and large_cap_percent < 60:
             continue
         
         # Calculate subscriber count
@@ -533,7 +533,7 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
             status='active'
         ).count()
         
-        # Calculate average trades per day (last 30 days)
+        # Calculate average trades per week (last 30 days)
         from models import Transaction
         thirty_days_ago = today - timedelta(days=30)
         recent_trades = Transaction.query.filter(
@@ -541,16 +541,10 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
             Transaction.timestamp >= thirty_days_ago
         ).count()
         avg_trades_per_day = round(recent_trades / 30, 1)
-        
-        # Convert to trades per week for display
         avg_trades_per_week = round(avg_trades_per_day * 7, 1)
         
         # Get current portfolio value from latest snapshot
         current_value = latest_snapshot.total_value if latest_snapshot else 0.0
-        
-        # Ensure all numeric values are properly typed - only include users with real data
-        if current_value is None or performance_percent is None:
-            continue  # Skip users without real portfolio data
             
         portfolio_value = float(current_value)
         performance_percent = float(performance_percent)
@@ -562,6 +556,7 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
             'user_id': user.id,
             'username': user.username,
             'performance_percent': round(performance_percent, 2),
+            'sparkline_data': sparkline,
             'small_cap_percent': round(small_cap_percent, 2),
             'large_cap_percent': round(large_cap_percent, 2),
             'portfolio_value': round(portfolio_value, 2),
