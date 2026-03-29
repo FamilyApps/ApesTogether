@@ -2386,6 +2386,15 @@ def bot_list_users():
                 sub_counts[uid] = cnt
         except Exception:
             pass
+        # Also include gifted (admin) subscribers
+        try:
+            from models import AdminSubscription
+            for asub in AdminSubscription.query.all():
+                bonus = asub.bonus_subscriber_count or 0
+                if bonus > 0:
+                    sub_counts[asub.portfolio_user_id] = sub_counts.get(asub.portfolio_user_id, 0) + bonus
+        except Exception:
+            pass
         
         user_list = []
         for u in users:
