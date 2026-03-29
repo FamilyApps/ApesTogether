@@ -379,11 +379,12 @@ try:
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
         'poolclass': NullPool,
         'connect_args': {
-            'connect_timeout': 10,
+            'connect_timeout': 5,
             'keepalives': 1,
-            'keepalives_idle': 10,
-            'keepalives_interval': 5,
+            'keepalives_idle': 5,
+            'keepalives_interval': 2,
             'keepalives_count': 3,
+            'options': '-c statement_timeout=15000',  # 15s — queries on broken connections fail fast
         },
     }
     
@@ -7104,6 +7105,12 @@ def cache_backfill_task():
     # Release any stale connection from previous request
     try:
         db.session.remove()
+    except Exception:
+        pass
+    
+    # Override the global 15s statement_timeout for backfill tasks (they can take longer)
+    try:
+        db.session.execute(text("SET statement_timeout = '55s'"))
     except Exception:
         pass
     
