@@ -884,6 +884,28 @@ def admin_required(f):
     """)
     return decorated_function
 
+def admin_2fa_required(f):
+    """Decorator: requires admin login + 2FA verification (admin_2fa_verified session flag).
+    Use this for endpoints that expose sensitive data (bot info, user data) or mutate state."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # First check admin login
+        email = session.get('email', '')
+        if not email:
+            try:
+                if current_user.is_authenticated:
+                    email = getattr(current_user, 'email', '')
+            except Exception:
+                pass
+        if email != ADMIN_EMAIL:
+            return jsonify({'error': 'admin_login_required'}), 403
+        # Then check 2FA
+        if not session.get('admin_2fa_verified'):
+            return jsonify({'error': '2fa_required', 'message': 'Visit /admin-panel and complete 2FA first'}), 401
+        return f(*args, **kwargs)
+    decorated_function.__name__ = f.__name__
+    return decorated_function
+
 # Simple HTML template for the home page
 HOME_HTML = """
 <!DOCTYPE html>
@@ -1617,7 +1639,7 @@ def admin_panel_auth_status():
 
 
 @app.route('/admin/subscription-analytics')
-@admin_required
+@admin_2fa_required
 def admin_subscription_analytics():
     """Admin dashboard for subscription analytics"""
     # Check if user is admin
@@ -2936,7 +2958,7 @@ def delete_stock(stock_id):
 
 
 @app.route('/admin/transactions')
-@admin_required
+@admin_2fa_required
 def admin_transactions():
     """Admin route to view transactions"""
     try:
@@ -3159,7 +3181,7 @@ def admin_transactions():
     """, transactions=transactions, filtered_transactions=filtered_transactions, unique_users=unique_users, unique_symbols=unique_symbols, user_filter=user_filter, symbol_filter=symbol_filter, type_filter=type_filter)
 
 @app.route('/admin/stocks')
-@admin_required
+@admin_2fa_required
 def admin_stocks():
     """Admin route to view stocks"""
     try:
@@ -3416,7 +3438,7 @@ def internal_error(error):
     """), 500
 
 @app.route('/admin/transactions/<int:transaction_id>/edit', methods=['GET', 'POST'])
-@admin_required
+@admin_2fa_required
 def admin_edit_transaction(transaction_id):
     """Admin route to edit a transaction"""
     # Get transaction by ID from database
@@ -3591,7 +3613,7 @@ def admin_edit_transaction(transaction_id):
     """, transaction=transaction)
 
 @app.route('/admin/stocks/<int:stock_id>/edit', methods=['GET', 'POST'])
-@admin_required
+@admin_2fa_required
 def admin_edit_stock(stock_id):
     """Admin route to edit a stock"""
     # Get stock by ID from database
@@ -3806,7 +3828,7 @@ def debug_info():
 
 
 @app.route('/admin/metrics')
-@admin_required
+@admin_2fa_required
 def admin_metrics():
     """Get platform health metrics for admin dashboard"""
     try:
@@ -3822,7 +3844,7 @@ def admin_metrics():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/update-metrics')
-@admin_required
+@admin_2fa_required
 def admin_update_metrics():
     """Manually update platform metrics"""
     try:
@@ -4154,7 +4176,7 @@ def cron_daily_snapshots():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/create-tables')
-@admin_required
+@admin_2fa_required
 def create_tables():
     """Create all database tables"""
     try:
@@ -4283,7 +4305,7 @@ def create_tables():
 
 
 @app.route('/admin/manual-intraday-collection')
-@admin_required  
+@admin_2fa_required  
 def manual_intraday_collection():
     """Admin endpoint to manually trigger intraday collection"""
     
@@ -4803,7 +4825,7 @@ def market_close_cron():
         return error_response, 500
 
 @app.route('/admin/trigger-market-close-backfill', methods=['GET', 'POST'])
-@admin_required
+@admin_2fa_required
 def admin_trigger_market_close_backfill():
     """Admin endpoint to manually trigger market close pipeline for specific date (backfill missing snapshots)"""
     try:
@@ -5118,7 +5140,7 @@ def admin_trigger_market_close_backfill():
 
 
 @app.route('/admin/historical-price-backfill-batch', methods=['GET', 'POST'])
-@admin_required
+@admin_2fa_required
 def admin_historical_price_backfill_batch():
     """Admin endpoint to backfill historical prices in small batches to avoid Vercel timeout"""
     try:
@@ -6283,7 +6305,7 @@ def collect_intraday_data():
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
 @app.route('/admin/check-intraday-data')
-@admin_required
+@admin_2fa_required
 def check_intraday_data():
     """Check intraday data for last 7 trading days - shows ALL snapshots and missing intervals"""
     try:
@@ -6391,7 +6413,7 @@ def check_intraday_data():
 
 
 @app.route('/admin/fix-ticker', methods=['POST'])
-@admin_required
+@admin_2fa_required
 def admin_fix_ticker():
     """Fix incorrect ticker symbol for a user's stock"""
     try:
@@ -6801,7 +6823,7 @@ def public_portfolio_performance(slug, period):
 
 
 @app.route('/admin/rebuild-user-cache/<int:user_id>', methods=['GET'])
-@admin_required
+@admin_2fa_required
 def admin_rebuild_user_cache(user_id):
     """Rebuild chart caches for a single user (avoids timeout)"""
     try:
@@ -6967,7 +6989,7 @@ def admin_rebuild_user_cache(user_id):
         }), 500
 
 @app.route('/admin/rebuild-all-caches', methods=['GET'])
-@admin_required
+@admin_2fa_required
 def admin_rebuild_all_caches():
     """UI page to rebuild caches for all users sequentially"""
     try:
@@ -7070,7 +7092,7 @@ def admin_rebuild_all_caches():
 
 
 @app.route('/admin/populate-portfolio-stats', methods=['GET', 'POST'])
-@admin_required
+@admin_2fa_required
 def admin_populate_portfolio_stats():
     """
     One-time population of portfolio stats for all users
@@ -7158,7 +7180,7 @@ def admin_populate_portfolio_stats():
 
 
 @app.route('/admin/find-user-id', methods=['GET'])
-@admin_required
+@admin_2fa_required
 def admin_find_user_id():
     """Find user_id by username or email"""
     try:
@@ -7203,7 +7225,7 @@ def admin_find_user_id():
 
 
 @app.route('/admin/trigger-chart-cache-generation', methods=['GET', 'POST'])
-@admin_required
+@admin_2fa_required
 def admin_trigger_chart_cache_generation():
     """
     Manually trigger chart cache generation for all users
@@ -7332,7 +7354,7 @@ def admin_check_chart_caches():
         }), 500
 
 @app.route('/admin/view-all-portfolio-stats', methods=['GET'])
-@admin_required
+@admin_2fa_required
 def admin_view_all_portfolio_stats():
     """
     View portfolio stats for all users (for verification)
