@@ -186,6 +186,38 @@ def is_market_holiday(check_date=None):
     
     return check_date in holidays
 
+def verify_cron_request(secret_env_var='CRON_SECRET'):
+    """Verify that a cron request is authorized.
+    
+    GET requests: must have x-vercel-cron: 1 header (set by Vercel cron scheduler)
+    POST requests: must have Authorization: Bearer <secret> header
+    
+    Returns None if authorized, or a (jsonify response, status_code) tuple if not.
+    """
+    if request.method == 'GET':
+        if request.headers.get('x-vercel-cron') == '1':
+            return None  # Authorized — Vercel cron
+        logger.warning(f"Unauthorized GET cron attempt on {request.path} (missing x-vercel-cron header)")
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    # POST: require Bearer token or Cron Secret header
+    expected_token = os.environ.get(secret_env_var)
+    if not expected_token:
+        logger.error(f"{secret_env_var} not configured")
+        return jsonify({'error': 'Server configuration error'}), 500
+    
+    auth_header = request.headers.get('Authorization', '')
+    cron_secret = request.headers.get('X-Cron-Secret', '')
+    
+    is_bearer = auth_header.startswith('Bearer ') and auth_header[7:] == expected_token
+    is_cron_header = cron_secret and cron_secret == expected_token
+    
+    if not (is_bearer or is_cron_header):
+        logger.warning(f"Unauthorized POST cron attempt on {request.path}")
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    return None  # Authorized
+
 # =============================================================================
 
 # Initialize Flask app
