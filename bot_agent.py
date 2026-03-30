@@ -18,7 +18,7 @@ Usage:
     python bot_agent.py refresh                            # Refresh market data only
 
 Environment:
-    ADMIN_API_KEY          - Required
+    CRON_SECRET             - Required
     API_BASE_URL           - Optional, defaults to https://apestogether.ai/api/mobile
     ALPHA_VANTAGE_API_KEY  - Required for news sentiment
     FINNHUB_API_KEY        - Optional, enables social sentiment
@@ -529,10 +529,10 @@ Examples:
         sys.exit(0)
 
     # Validate admin key (not needed for refresh)
-    admin_key = os.environ.get('ADMIN_API_KEY', '')
-    if not admin_key and args.command != 'refresh':
-        print("❌ ADMIN_API_KEY environment variable not set")
-        print("   Set it: $env:ADMIN_API_KEY='your_key_here'  (PowerShell)")
+    cron_secret = os.environ.get('CRON_SECRET', '')
+    if not cron_secret and args.command != 'refresh':
+        print("❌ CRON_SECRET environment variable not set")
+        print("   Set it: $env:CRON_SECRET='your_key_here'  (PowerShell)")
         sys.exit(1)
 
     print(f"\n🦍 Apes Together Bot Agent v2")
