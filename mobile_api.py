@@ -1085,10 +1085,9 @@ def get_leaderboard():
             if sub_count == 0:
                 sub_count = sub_count_map.get(user_id, 0)
             
-            # Use pre-computed sparklines from cache (populated by calculate_leaderboard_data
+            # Use pre-computed sparkline from cache (populated by calculate_leaderboard_data
             # using the same calculate_portfolio_performance as the portfolio chart endpoint)
             sparkline_points = entry.get('sparkline_data') or []
-            sp500_sparkline_points = entry.get('sp500_sparkline_data') or []
             
             # Fallback: extract from chart_data if sparkline not pre-computed
             if not sparkline_points:
@@ -1100,9 +1099,14 @@ def get_leaderboard():
                         if raw_vals and len(raw_vals) >= 2:
                             sparkline_points = [round(float(v), 2) for v in raw_vals]
             
-            # Fallback S&P sparkline to global if not cached per-user
-            if not sp500_sparkline_points:
-                sp500_sparkline_points = sp500_sparkline_global
+            # S&P sparkline is always full-period (same for all users, no trimming).
+            # Portfolio sparkline is left-padded with null so it aligns to the right
+            # of the S&P line — the user's line "appears" when their account was created.
+            sp500_len = len(sp500_sparkline_global)
+            if sparkline_points and sp500_len > len(sparkline_points):
+                pad = [None] * (sp500_len - len(sparkline_points))
+                sparkline_points = pad + sparkline_points
+            sp500_sparkline_points = sp500_sparkline_global
             
             # ── Active Edge filter ──
             if active_edge:
