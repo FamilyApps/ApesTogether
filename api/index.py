@@ -7458,3 +7458,36 @@ def admin_view_all_portfolio_stats():
             'details': 'Check server logs'
         }), 500
 
+
+@app.route('/api/debug/user-snapshots/<int:user_id>', methods=['POST'])
+def debug_user_snapshots(user_id):
+    """TEMPORARY diagnostic endpoint - remove after debugging bobford00"""
+    auth_error = verify_cron_request()
+    if auth_error:
+        return auth_error
+    from models import PortfolioSnapshot, User
+    user = User.query.get(user_id)
+    snaps = PortfolioSnapshot.query.filter_by(user_id=user_id)\
+        .order_by(PortfolioSnapshot.date.asc()).all()
+    data = []
+    prev_val = None
+    for s in snaps:
+        pct_change = None
+        if prev_val and prev_val > 0:
+            pct_change = round(((float(s.total_value) - prev_val) / prev_val) * 100, 2)
+        data.append({
+            'date': s.date.isoformat(),
+            'total_value': float(s.total_value) if s.total_value else 0,
+            'stock_value': float(s.stock_value) if s.stock_value else 0,
+            'cash_proceeds': float(s.cash_proceeds) if s.cash_proceeds else 0,
+            'max_cash_deployed': float(s.max_cash_deployed) if s.max_cash_deployed else 0,
+            'pct_change_from_prev': pct_change
+        })
+        prev_val = float(s.total_value) if s.total_value else 0
+    return jsonify({
+        'user_id': user_id,
+        'username': user.username if user else 'unknown',
+        'snapshot_count': len(data),
+        'snapshots': data
+    })
+
