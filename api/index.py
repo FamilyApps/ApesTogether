@@ -4710,6 +4710,12 @@ def market_close_cron():
             # Charts are now generated ON-DEMAND (not pre-generated here)
             # This dramatically reduces market-close cron execution time
             try:
+                # Ensure clean session state (dividend phase may have left it dirty)
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+                
                 logger.info("PHASE 2: Updating leaderboard JSON cache...")
                 results['pipeline_phases'].append('leaderboard_started')
                 
@@ -4721,6 +4727,12 @@ def market_close_cron():
                 logger.info(f"PHASE 2 Complete: {updated_count} leaderboard entries updated (JSON only)")
                 
                 # PHASE 2.25: Update Portfolio Stats (unique stocks, trades/week, cap mix, industry mix, subscribers)
+                # Ensure clean session state before stats loop
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+                
                 logger.info("PHASE 2.25: Updating portfolio stats for all users...")
                 results['pipeline_phases'].append('portfolio_stats_started')
                 
@@ -4753,6 +4765,12 @@ def market_close_cron():
                             error_msg = f"Error updating stats for user {user.id}: {str(e)}"
                             results['errors'].append(error_msg)
                             logger.error(error_msg)
+                            # CRITICAL: rollback to clear PostgreSQL's aborted transaction state
+                            # Without this, every subsequent user query fails with InFailedSqlTransaction
+                            try:
+                                db.session.rollback()
+                            except Exception:
+                                pass
                     
                     results['portfolio_stats_updated'] = stats_updated
                     results['pipeline_phases'].append('portfolio_stats_completed')

@@ -515,6 +515,11 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
                 
         except Exception as e:
             logger.warning(f"Performance calc failed for user {user.id} period {period}: {e}")
+            # Rollback to clear PostgreSQL's aborted transaction state
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
             continue
         
         # Calculate market cap percentages using existing stock info
