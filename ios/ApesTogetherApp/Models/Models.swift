@@ -39,8 +39,8 @@ struct LeaderboardEntry: Codable, Identifiable {
     let returnPercent: Double
     let subscriberCount: Int
     let subscriptionPrice: Double
-    let sparklineData: [Double]?
-    let sp500SparklineData: [Double]?
+    let sparklineData: [Double?]?
+    let sp500SparklineData: [Double?]?
     let avgTradesPerWeek: Double?
     let uniqueStocks: Int?
     let largeCapPct: Double?

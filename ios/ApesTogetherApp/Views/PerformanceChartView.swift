@@ -211,28 +211,40 @@ struct PerformanceChartView: View {
 // MARK: - Sparkline (for Leaderboard rows)
 
 struct SparklineView: View {
-    let dataPoints: [Double]
-    var sp500Points: [Double] = []
+    let dataPoints: [Double?]
+    var sp500Points: [Double?] = []
     let isPositive: Bool
     
+    private var validPortfolioPoints: [(index: Int, value: Double)] {
+        dataPoints.enumerated().compactMap { index, value in
+            value.map { (index: index, value: $0) }
+        }
+    }
+    
+    private var validSP500Points: [(index: Int, value: Double)] {
+        sp500Points.enumerated().compactMap { index, value in
+            value.map { (index: index, value: $0) }
+        }
+    }
+    
     var body: some View {
-        if dataPoints.count >= 2 {
+        if validPortfolioPoints.count >= 2 {
             Chart {
-                ForEach(Array(dataPoints.enumerated()), id: \.offset) { index, value in
+                ForEach(validPortfolioPoints, id: \.index) { point in
                     LineMark(
-                        x: .value("Index", index),
-                        y: .value("Value", value),
+                        x: .value("Index", point.index),
+                        y: .value("Value", point.value),
                         series: .value("S", "Portfolio")
                     )
                     .foregroundStyle(isPositive ? Color.gains : Color.losses)
                     .lineStyle(StrokeStyle(lineWidth: 1.5))
                     .interpolationMethod(.linear)
                 }
-                if sp500Points.count >= 2 {
-                    ForEach(Array(sp500Points.enumerated()), id: \.offset) { index, value in
+                if validSP500Points.count >= 2 {
+                    ForEach(validSP500Points, id: \.index) { point in
                         LineMark(
-                            x: .value("Index", index),
-                            y: .value("Value", value),
+                            x: .value("Index", point.index),
+                            y: .value("Value", point.value),
                             series: .value("S", "SP500")
                         )
                         .foregroundStyle(Color.textMuted.opacity(0.4))
