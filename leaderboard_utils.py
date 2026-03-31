@@ -506,12 +506,15 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
             if performance_percent is None:
                 continue
             
-            # Pre-compute sparkline from chart_data (portfolio % returns)
+            # Pre-compute sparklines from chart_data (portfolio + S&P 500 % returns)
             chart_pts = result.get('chart_data') or []
             sparkline = []
+            sp500_sparkline = []
             if chart_pts:
                 sparkline = [round(pt.get('portfolio', 0) or 0, 2) for pt in chart_pts]
+                sp500_sparkline = [round(pt.get('sp500', 0) or 0, 2) for pt in chart_pts]
                 sparkline = sparkline[-20:]  # Keep last 20 points for mobile
+                sp500_sparkline = sp500_sparkline[-20:]
                 
         except Exception as e:
             logger.warning(f"Performance calc failed for user {user.id} period {period}: {e}")
@@ -564,6 +567,7 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
             'username': user.username,
             'performance_percent': round(performance_percent, 2),
             'sparkline_data': sparkline,
+            'sp500_sparkline_data': sp500_sparkline,
             'small_cap_percent': round(small_cap_percent, 2),
             'large_cap_percent': round(large_cap_percent, 2),
             'portfolio_value': round(portfolio_value, 2),

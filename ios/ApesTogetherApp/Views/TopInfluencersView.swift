@@ -319,6 +319,7 @@ struct InfluencerRow: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
+        .contentShape(Rectangle())
     }
     
     private func shortenIndustry(_ name: String) -> String {

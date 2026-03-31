@@ -35,6 +35,18 @@ struct PortfolioDetailView: View {
                                 .padding(.horizontal, 16)
                         }
                         
+                        // ── Leaderboard Badges ──
+                        if let badges = portfolio.leaderboardBadges, !badges.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(badges) { badge in
+                                        LeaderboardBadgePill(badge: badge)
+                                    }
+                                }
+                                .padding(.horizontal, 16)
+                            }
+                        }
+                        
                         // ── Performance Chart Card ──
                         PerformanceChartView(
                             chartData: viewModel.chartData,
@@ -48,18 +60,6 @@ struct PortfolioDetailView: View {
                             portfolioLabel: portfolio.isOwner ? "Your Portfolio" : portfolio.owner.username
                         )
                         .padding(.horizontal, 16)
-                        
-                        // ── Leaderboard Badges ──
-                        if let badges = portfolio.leaderboardBadges, !badges.isEmpty {
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 8) {
-                                    ForEach(badges) { badge in
-                                        LeaderboardBadgePill(badge: badge)
-                                    }
-                                }
-                                .padding(.horizontal, 16)
-                            }
-                        }
                         
                         // ── Stats Grid (non-owner view) ──
                         if !portfolio.isOwner {

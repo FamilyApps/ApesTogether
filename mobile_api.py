@@ -1085,9 +1085,10 @@ def get_leaderboard():
             if sub_count == 0:
                 sub_count = sub_count_map.get(user_id, 0)
             
-            # Use pre-computed sparkline from cache (populated by calculate_leaderboard_data
+            # Use pre-computed sparklines from cache (populated by calculate_leaderboard_data
             # using the same calculate_portfolio_performance as the portfolio chart endpoint)
             sparkline_points = entry.get('sparkline_data') or []
+            sp500_sparkline_points = entry.get('sp500_sparkline_data') or []
             
             # Fallback: extract from chart_data if sparkline not pre-computed
             if not sparkline_points:
@@ -1098,6 +1099,10 @@ def get_leaderboard():
                         raw_vals = datasets[0].get('data', [])
                         if raw_vals and len(raw_vals) >= 2:
                             sparkline_points = [round(float(v), 2) for v in raw_vals]
+            
+            # Fallback S&P sparkline to global if not cached per-user
+            if not sp500_sparkline_points:
+                sp500_sparkline_points = sp500_sparkline_global
             
             # ── Active Edge filter ──
             if active_edge:
@@ -1136,7 +1141,7 @@ def get_leaderboard():
                 'subscriber_count': sub_count,
                 'subscription_price': entry.get('subscription_price', 9.00),
                 'sparkline_data': sparkline_points[-20:] if sparkline_points else [],
-                'sp500_sparkline_data': sp500_sparkline_global[-20:] if sp500_sparkline_global else [],
+                'sp500_sparkline_data': sp500_sparkline_points[-20:] if sp500_sparkline_points else [],
                 'avg_trades_per_week': avg_trades_per_week,
                 'unique_stocks': unique_stocks,
                 'large_cap_pct': round(large_cap_pct, 1),
