@@ -7492,6 +7492,29 @@ def debug_user_snapshots(user_id):
         db.session.commit()
         return jsonify({'success': True, 'deleted': target_date})
     
+    elif action == 'view_holdings':
+        stocks = Stock.query.filter_by(user_id=user_id).all()
+        holdings = []
+        total_cost_basis = 0.0
+        for s in stocks:
+            cost = float(s.quantity or 0) * float(s.purchase_price or 0)
+            total_cost_basis += cost
+            holdings.append({
+                'ticker': s.ticker,
+                'quantity': float(s.quantity or 0),
+                'purchase_price': float(s.purchase_price) if s.purchase_price else None,
+                'cost_basis': round(cost, 2)
+            })
+        return jsonify({
+            'user_id': user_id,
+            'username': user.username,
+            'current_max_cash_deployed': float(user.max_cash_deployed or 0),
+            'current_cash_proceeds': float(user.cash_proceeds or 0),
+            'holdings': holdings,
+            'total_cost_basis': round(total_cost_basis, 2),
+            'transaction_count': Transaction.query.filter_by(user_id=user_id).count()
+        })
+    
     elif action == 'fix_cash':
         # Calculate what max_cash_deployed SHOULD be
         # Method 1: Replay transactions (works for bot accounts)
