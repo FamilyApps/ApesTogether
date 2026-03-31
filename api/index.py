@@ -7515,6 +7515,29 @@ def debug_user_snapshots(user_id):
             'transaction_count': Transaction.query.filter_by(user_id=user_id).count()
         })
     
+    elif action == 'set_cash':
+        # Manually set max_cash_deployed to a specific value (for admin-seeded accounts with null purchase_price)
+        mcd_val = request.args.get('mcd')
+        if not mcd_val:
+            return jsonify({'error': 'mcd param required (e.g. ?action=set_cash&mcd=9482.50)'}), 400
+        max_cash_deployed = float(mcd_val)
+        old_mcd = float(user.max_cash_deployed or 0)
+        
+        user.max_cash_deployed = max_cash_deployed
+        
+        # Backfill ALL snapshots
+        snaps = PortfolioSnapshot.query.filter_by(user_id=user_id).all()
+        for s in snaps:
+            s.max_cash_deployed = max_cash_deployed
+        
+        db.session.commit()
+        return jsonify({
+            'success': True,
+            'old_max_cash_deployed': old_mcd,
+            'new_max_cash_deployed': max_cash_deployed,
+            'snapshots_updated': len(snaps)
+        })
+    
     elif action == 'fix_cash':
         # Calculate what max_cash_deployed SHOULD be
         # Method 1: Replay transactions (works for bot accounts)
