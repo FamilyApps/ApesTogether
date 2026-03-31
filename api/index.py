@@ -6344,6 +6344,28 @@ def collect_intraday_data():
             results['errors'].append(error_msg)
             logger.error(error_msg)
         
+        # Step 4: Rebuild 1D leaderboard cache (so leaderboard reflects live intraday data)
+        try:
+            leaderboard_start = time.time()
+            remaining_time = 55 - (time.time() - start_time)  # Leave 5s buffer before Vercel 60s timeout
+            
+            if remaining_time > 10:  # Only attempt if we have at least 10s left
+                from leaderboard_utils import update_leaderboard_cache
+                lb_count = update_leaderboard_cache(periods=['1D'])
+                leaderboard_time = round(time.time() - leaderboard_start, 2)
+                results['leaderboard_1d_rebuilt'] = True
+                results['leaderboard_1d_entries'] = lb_count
+                results['leaderboard_1d_time'] = leaderboard_time
+                logger.info(f"1D leaderboard cache rebuilt: {lb_count} entries in {leaderboard_time}s")
+            else:
+                results['leaderboard_1d_rebuilt'] = False
+                results['leaderboard_1d_skipped_reason'] = f'Insufficient time ({remaining_time:.0f}s remaining)'
+                logger.warning(f"Skipped 1D leaderboard rebuild - only {remaining_time:.0f}s remaining")
+        except Exception as e:
+            results['leaderboard_1d_rebuilt'] = False
+            results['leaderboard_1d_error'] = str(e)
+            logger.error(f"1D leaderboard rebuild failed: {e}")
+        
         # Add execution timing
         execution_time = time.time() - start_time
         results['execution_time_seconds'] = round(execution_time, 2)
