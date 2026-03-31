@@ -7486,12 +7486,15 @@ def debug_user_snapshots(user_id):
             from datetime import date as date_cls
             parts = target_date.split('-')
             d = date_cls(int(parts[0]), int(parts[1]), int(parts[2]))
-            snap = PortfolioSnapshot.query.filter_by(user_id=user_id, date=d).first()
-            if not snap:
-                return jsonify({'error': f'No snapshot found for {d}'}), 404
-            db.session.delete(snap)
+            # Use direct SQL to avoid ORM session conflicts in serverless
+            result = db.session.execute(
+                db.text("DELETE FROM portfolio_snapshot WHERE user_id = :uid AND date = :d"),
+                {'uid': user_id, 'd': d}
+            )
             db.session.commit()
-            return jsonify({'success': True, 'deleted': target_date})
+            if result.rowcount == 0:
+                return jsonify({'error': f'No snapshot found for {d}'}), 404
+            return jsonify({'success': True, 'deleted': target_date, 'rows_deleted': result.rowcount})
         except Exception as e:
             db.session.rollback()
             import traceback
@@ -7521,27 +7524,33 @@ def debug_user_snapshots(user_id):
         })
     
     elif action == 'set_cash':
-        # Manually set max_cash_deployed to a specific value (for admin-seeded accounts with null purchase_price)
-        mcd_val = request.args.get('mcd')
-        if not mcd_val:
-            return jsonify({'error': 'mcd param required (e.g. ?action=set_cash&mcd=9482.50)'}), 400
-        max_cash_deployed = float(mcd_val)
-        old_mcd = float(user.max_cash_deployed or 0)
-        
-        user.max_cash_deployed = max_cash_deployed
-        
-        # Backfill ALL snapshots
-        snaps = PortfolioSnapshot.query.filter_by(user_id=user_id).all()
-        for s in snaps:
-            s.max_cash_deployed = max_cash_deployed
-        
-        db.session.commit()
-        return jsonify({
-            'success': True,
-            'old_max_cash_deployed': old_mcd,
-            'new_max_cash_deployed': max_cash_deployed,
-            'snapshots_updated': len(snaps)
-        })
+        try:
+            mcd_val = request.args.get('mcd')
+            if not mcd_val:
+                return jsonify({'error': 'mcd param required (e.g. ?action=set_cash&mcd=9482.50)'}), 400
+            max_cash_deployed = float(mcd_val)
+            old_mcd = float(user.max_cash_deployed or 0)
+            
+            # Use direct SQL to avoid ORM session conflicts in serverless
+            db.session.execute(
+                db.text("UPDATE \"user\" SET max_cash_deployed = :mcd WHERE id = :uid"),
+                {'mcd': max_cash_deployed, 'uid': user_id}
+            )
+            result = db.session.execute(
+                db.text("UPDATE portfolio_snapshot SET max_cash_deployed = :mcd WHERE user_id = :uid"),
+                {'mcd': max_cash_deployed, 'uid': user_id}
+            )
+            db.session.commit()
+            return jsonify({
+                'success': True,
+                'old_max_cash_deployed': old_mcd,
+                'new_max_cash_deployed': max_cash_deployed,
+                'snapshots_updated': result.rowcount
+            })
+        except Exception as e:
+            db.session.rollback()
+            import traceback
+            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
     
     elif action == 'fix_cash':
         # Calculate what max_cash_deployed SHOULD be
