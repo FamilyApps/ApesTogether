@@ -7479,18 +7479,23 @@ def debug_user_snapshots(user_id):
     action = request.args.get('action', 'view')
     
     if action == 'delete_snap':
-        target_date = request.args.get('date')
-        if not target_date:
-            return jsonify({'error': 'date param required (YYYY-MM-DD)'}), 400
-        from datetime import date as date_cls
-        parts = target_date.split('-')
-        d = date_cls(int(parts[0]), int(parts[1]), int(parts[2]))
-        snap = PortfolioSnapshot.query.filter_by(user_id=user_id, date=d).first()
-        if not snap:
-            return jsonify({'error': f'No snapshot found for {d}'}), 404
-        db.session.delete(snap)
-        db.session.commit()
-        return jsonify({'success': True, 'deleted': target_date})
+        try:
+            target_date = request.args.get('date')
+            if not target_date:
+                return jsonify({'error': 'date param required (YYYY-MM-DD)'}), 400
+            from datetime import date as date_cls
+            parts = target_date.split('-')
+            d = date_cls(int(parts[0]), int(parts[1]), int(parts[2]))
+            snap = PortfolioSnapshot.query.filter_by(user_id=user_id, date=d).first()
+            if not snap:
+                return jsonify({'error': f'No snapshot found for {d}'}), 404
+            db.session.delete(snap)
+            db.session.commit()
+            return jsonify({'success': True, 'deleted': target_date})
+        except Exception as e:
+            db.session.rollback()
+            import traceback
+            return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
     
     elif action == 'view_holdings':
         stocks = Stock.query.filter_by(user_id=user_id).all()
