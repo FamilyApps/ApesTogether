@@ -7461,12 +7461,97 @@ def admin_view_all_portfolio_stats():
 
 @app.route('/api/debug/user-snapshots/<int:user_id>', methods=['POST'])
 def debug_user_snapshots(user_id):
-    """TEMPORARY diagnostic endpoint - remove after debugging bobford00"""
+    """TEMPORARY diagnostic/fix endpoint - remove after debugging bobford00
+    
+    Query params:
+      ?action=view          - View snapshots (default)
+      ?action=delete_snap&date=2026-02-27  - Delete a specific snapshot
+      ?action=fix_cash       - Fix max_cash_deployed from holdings + backfill snapshots
+    """
     auth_error = verify_cron_request()
     if auth_error:
         return auth_error
-    from models import PortfolioSnapshot, User
+    from models import PortfolioSnapshot, User, Stock, Transaction
     user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
+    action = request.args.get('action', 'view')
+    
+    if action == 'delete_snap':
+        target_date = request.args.get('date')
+        if not target_date:
+            return jsonify({'error': 'date param required (YYYY-MM-DD)'}), 400
+        from datetime import date as date_cls
+        parts = target_date.split('-')
+        d = date_cls(int(parts[0]), int(parts[1]), int(parts[2]))
+        snap = PortfolioSnapshot.query.filter_by(user_id=user_id, date=d).first()
+        if not snap:
+            return jsonify({'error': f'No snapshot found for {d}'}), 404
+        db.session.delete(snap)
+        db.session.commit()
+        return jsonify({'success': True, 'deleted': target_date})
+    
+    elif action == 'fix_cash':
+        # Calculate what max_cash_deployed SHOULD be
+        # Method 1: Replay transactions (works for bot accounts)
+        txns = Transaction.query.filter_by(user_id=user_id)\
+            .order_by(Transaction.timestamp.asc()).all()
+        
+        if txns:
+            # Replay transactions to compute correct values
+            cash_proceeds = 0.0
+            max_cash_deployed = 0.0
+            for txn in txns:
+                val = float(txn.quantity) * float(txn.price)
+                if txn.transaction_type in ('buy', 'initial'):
+                    if cash_proceeds >= val:
+                        cash_proceeds -= val
+                    else:
+                        new_capital = val - cash_proceeds
+                        cash_proceeds = 0
+                        max_cash_deployed += new_capital
+                elif txn.transaction_type == 'sell':
+                    cash_proceeds += val
+                elif txn.transaction_type == 'dividend':
+                    cash_proceeds += val
+            source = 'transactions'
+        else:
+            # No transactions — compute from current holdings (admin-seeded accounts)
+            stocks = Stock.query.filter_by(user_id=user_id).all()
+            max_cash_deployed = sum(
+                float(s.quantity) * float(s.purchase_price)
+                for s in stocks if s.quantity > 0 and s.purchase_price
+            )
+            cash_proceeds = float(user.cash_proceeds or 0)
+            source = 'holdings'
+        
+        old_mcd = float(user.max_cash_deployed or 0)
+        old_cp = float(user.cash_proceeds or 0)
+        
+        # Update User record
+        user.max_cash_deployed = max_cash_deployed
+        user.cash_proceeds = cash_proceeds
+        
+        # Backfill ALL snapshots with corrected max_cash_deployed
+        snaps = PortfolioSnapshot.query.filter_by(user_id=user_id).all()
+        for s in snaps:
+            s.max_cash_deployed = max_cash_deployed
+            s.cash_proceeds = cash_proceeds
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'source': source,
+            'old_max_cash_deployed': old_mcd,
+            'old_cash_proceeds': old_cp,
+            'new_max_cash_deployed': max_cash_deployed,
+            'new_cash_proceeds': cash_proceeds,
+            'snapshots_updated': len(snaps)
+        })
+    
+    # Default: view
     snaps = PortfolioSnapshot.query.filter_by(user_id=user_id)\
         .order_by(PortfolioSnapshot.date.asc()).all()
     data = []
@@ -7487,6 +7572,8 @@ def debug_user_snapshots(user_id):
     return jsonify({
         'user_id': user_id,
         'username': user.username if user else 'unknown',
+        'user_max_cash_deployed': float(user.max_cash_deployed or 0),
+        'user_cash_proceeds': float(user.cash_proceeds or 0),
         'snapshot_count': len(data),
         'snapshots': data
     })
