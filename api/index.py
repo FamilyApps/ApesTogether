@@ -4497,6 +4497,7 @@ def market_close_cron():
             }), 200
         
         results = {
+            'code_version': 'v3-session-remove',
             'timestamp': current_time.isoformat(),
             'market_date_et': today_et.isoformat(),
             'timezone': 'America/New_York',
@@ -4710,9 +4711,11 @@ def market_close_cron():
             # Charts are now generated ON-DEMAND (not pre-generated here)
             # This dramatically reduces market-close cron execution time
             try:
-                # Ensure clean session state (dividend phase may have left it dirty)
+                # Nuclear session reset — db.session.remove() drops the scoped session entirely
+                # and ensures a fresh connection for Phase 2. This is necessary because
+                # prior phases (dividends) may leave PostgreSQL in an aborted transaction state.
                 try:
-                    db.session.rollback()
+                    db.session.remove()
                 except Exception:
                     pass
                 
@@ -4727,9 +4730,9 @@ def market_close_cron():
                 logger.info(f"PHASE 2 Complete: {updated_count} leaderboard entries updated (JSON only)")
                 
                 # PHASE 2.25: Update Portfolio Stats (unique stocks, trades/week, cap mix, industry mix, subscribers)
-                # Ensure clean session state before stats loop
+                # Fresh session for stats phase
                 try:
-                    db.session.rollback()
+                    db.session.remove()
                 except Exception:
                     pass
                 
@@ -4765,10 +4768,9 @@ def market_close_cron():
                             error_msg = f"Error updating stats for user {user.id}: {str(e)}"
                             results['errors'].append(error_msg)
                             logger.error(error_msg)
-                            # CRITICAL: rollback to clear PostgreSQL's aborted transaction state
-                            # Without this, every subsequent user query fails with InFailedSqlTransaction
+                            # Nuclear reset to clear PostgreSQL's aborted transaction state
                             try:
-                                db.session.rollback()
+                                db.session.remove()
                             except Exception:
                                 pass
                     
