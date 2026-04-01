@@ -7845,6 +7845,184 @@ def audit_cash_deployed():
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
+@app.route('/api/admin/recalc-mcd', methods=['POST'])
+def recalc_mcd():
+    """
+    Full MCD recalculation: replay ALL transactions per user chronologically,
+    then update every PortfolioSnapshot and PortfolioSnapshotIntraday with
+    the correct historical max_cash_deployed and cash_proceeds as of that date.
+    
+    ?mode=audit  (default) — dry run, shows what would change
+    ?mode=fix    — actually updates DB
+    ?user_id=5   — optional, only recalc one user
+    """
+    try:
+        auth_error = verify_cron_request()
+        if auth_error:
+            return auth_error
+        
+        from models import User, Transaction, PortfolioSnapshot, PortfolioSnapshotIntraday, Stock
+        from datetime import date as dt_date
+        
+        mode = request.args.get('mode', 'audit')
+        single_user_id = request.args.get('user_id')
+        
+        if single_user_id:
+            users = User.query.filter_by(id=int(single_user_id)).all()
+        else:
+            users = User.query.all()
+        
+        results = []
+        total_snapshots_fixed = 0
+        total_intraday_fixed = 0
+        total_users_fixed = 0
+        
+        for user in users:
+            user_result = {
+                'user_id': user.id,
+                'username': user.username,
+                'old_mcd': float(user.max_cash_deployed or 0),
+                'old_cp': float(user.cash_proceeds or 0),
+            }
+            
+            # Get all transactions sorted chronologically
+            txns = Transaction.query.filter_by(user_id=user.id)\
+                .order_by(Transaction.timestamp.asc()).all()
+            
+            valid_txns = [t for t in txns if t.transaction_type and 
+                         t.transaction_type.lower() in ('buy', 'sell', 'initial', 'dividend')]
+            
+            if not valid_txns:
+                # No valid transactions — use holdings cost as MCD
+                stocks = Stock.query.filter_by(user_id=user.id).all()
+                holdings_cost = sum(
+                    float(s.quantity or 0) * float(s.purchase_price or 0)
+                    for s in stocks if (s.quantity or 0) > 0 and (s.purchase_price or 0) > 0
+                )
+                final_mcd = holdings_cost
+                final_cp = float(user.cash_proceeds or 0)
+                
+                # Build a single-entry timeline: MCD was always this value
+                mcd_timeline = [(dt_date.min, final_mcd, final_cp)]
+                user_result['source'] = 'holdings_only'
+                user_result['transaction_count'] = 0
+            else:
+                # Replay transactions and build a timeline of (date, mcd, cp) values
+                mcd = 0.0
+                cp = 0.0
+                mcd_timeline = []  # list of (date, mcd, cp) after each transaction
+                
+                for txn in valid_txns:
+                    val = float(txn.quantity) * float(txn.price)
+                    tt = txn.transaction_type.lower()
+                    
+                    if tt in ('buy', 'initial'):
+                        if cp >= val:
+                            cp -= val
+                        else:
+                            new_capital = val - cp
+                            cp = 0
+                            mcd += new_capital
+                    elif tt == 'sell':
+                        cp += val
+                    elif tt == 'dividend':
+                        cp += val
+                    
+                    txn_date = txn.timestamp.date() if txn.timestamp else dt_date.min
+                    mcd_timeline.append((txn_date, mcd, cp))
+                
+                final_mcd = mcd
+                final_cp = cp
+                user_result['source'] = 'transaction_replay'
+                user_result['transaction_count'] = len(valid_txns)
+            
+            user_result['new_mcd'] = round(final_mcd, 2)
+            user_result['new_cp'] = round(final_cp, 2)
+            user_result['mcd_changed'] = abs(user_result['old_mcd'] - final_mcd) > 0.01
+            user_result['cp_changed'] = abs(user_result['old_cp'] - final_cp) > 0.01
+            
+            # Now update snapshots with correct historical values
+            snapshots = PortfolioSnapshot.query.filter_by(user_id=user.id)\
+                .order_by(PortfolioSnapshot.date.asc()).all()
+            intraday_snaps = PortfolioSnapshotIntraday.query.filter_by(user_id=user.id)\
+                .order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
+            
+            snap_fixes = 0
+            intraday_fixes = 0
+            
+            # Helper: find MCD/CP as of a given date from the timeline
+            # (use the last transaction on or before that date)
+            def get_mcd_cp_as_of(target_date):
+                best_mcd, best_cp = 0.0, 0.0
+                for txn_date, txn_mcd, txn_cp in mcd_timeline:
+                    if txn_date <= target_date:
+                        best_mcd = txn_mcd
+                        best_cp = txn_cp
+                    else:
+                        break
+                return best_mcd, best_cp
+            
+            # Update daily snapshots
+            for snap in snapshots:
+                hist_mcd, hist_cp = get_mcd_cp_as_of(snap.date)
+                old_snap_mcd = float(snap.max_cash_deployed or 0)
+                old_snap_cp = float(snap.cash_proceeds or 0)
+                
+                if abs(old_snap_mcd - hist_mcd) > 0.01 or abs(old_snap_cp - hist_cp) > 0.01:
+                    snap_fixes += 1
+                    if mode == 'fix':
+                        snap.max_cash_deployed = hist_mcd
+                        snap.cash_proceeds = hist_cp
+            
+            # Update intraday snapshots
+            for isnap in intraday_snaps:
+                isnap_date = isnap.timestamp.date() if isnap.timestamp else dt_date.min
+                hist_mcd, hist_cp = get_mcd_cp_as_of(isnap_date)
+                old_isnap_mcd = float(isnap.max_cash_deployed or 0)
+                old_isnap_cp = float(isnap.cash_proceeds or 0)
+                
+                if abs(old_isnap_mcd - hist_mcd) > 0.01 or abs(old_isnap_cp - hist_cp) > 0.01:
+                    intraday_fixes += 1
+                    if mode == 'fix':
+                        isnap.max_cash_deployed = hist_mcd
+                        isnap.cash_proceeds = hist_cp
+            
+            user_result['daily_snapshots_total'] = len(snapshots)
+            user_result['daily_snapshots_to_fix'] = snap_fixes
+            user_result['intraday_snapshots_total'] = len(intraday_snaps)
+            user_result['intraday_snapshots_to_fix'] = intraday_fixes
+            
+            needs_fix = user_result['mcd_changed'] or user_result['cp_changed'] or snap_fixes > 0 or intraday_fixes > 0
+            user_result['needs_fix'] = needs_fix
+            
+            if needs_fix:
+                total_users_fixed += 1
+                total_snapshots_fixed += snap_fixes
+                total_intraday_fixed += intraday_fixes
+            
+            if mode == 'fix' and needs_fix:
+                user.max_cash_deployed = final_mcd
+                user.cash_proceeds = final_cp
+            
+            results.append(user_result)
+        
+        if mode == 'fix':
+            db.session.commit()
+        
+        return jsonify({
+            'mode': mode,
+            'total_users': len(users),
+            'users_needing_fix': total_users_fixed,
+            'daily_snapshots_to_fix': total_snapshots_fixed,
+            'intraday_snapshots_to_fix': total_intraday_fixed,
+            'users': results
+        })
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
 @app.route('/api/admin/diagnose-leaderboard', methods=['POST'])
 def diagnose_leaderboard():
     """Diagnostic endpoint to test leaderboard calculation in isolation"""
