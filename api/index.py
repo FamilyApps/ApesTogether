@@ -7848,6 +7848,22 @@ def diagnose_leaderboard():
         period = request.args.get('period', 'YTD')
         diag = {'period': period, 'users': [], 'session_test': None, 'first_error': None}
         
+        # Test 0: List all cache keys
+        try:
+            from models import LeaderboardCache
+            import json as diag_json
+            all_caches = LeaderboardCache.query.all()
+            diag['cache_keys'] = [
+                {
+                    'key': c.period,
+                    'generated_at': c.generated_at.isoformat() if c.generated_at else None,
+                    'entry_count': len(diag_json.loads(c.leaderboard_data)) if c.leaderboard_data else 0
+                }
+                for c in all_caches
+            ]
+        except Exception as e:
+            diag['cache_keys_error'] = str(e)
+        
         # Test 1: Is the DB connection healthy?
         try:
             from sqlalchemy import text
