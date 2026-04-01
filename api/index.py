@@ -4497,7 +4497,7 @@ def market_close_cron():
             }), 200
         
         results = {
-            'code_version': 'v4-diagnose',
+            'code_version': 'v5-lb-errors',
             'timestamp': current_time.isoformat(),
             'market_date_et': today_et.isoformat(),
             'timezone': 'America/New_York',
@@ -4727,6 +4727,11 @@ def market_close_cron():
                 updated_count = update_leaderboard_cache()
                 results['leaderboard_updated'] = True
                 results['leaderboard_entries_updated'] = updated_count
+                
+                # Surface any leaderboard calculation errors
+                lb_errors = getattr(update_leaderboard_cache, '_last_errors', [])
+                if lb_errors:
+                    results['leaderboard_errors'] = lb_errors
                 
                 results['pipeline_phases'].append('leaderboard_completed')
                 logger.info(f"PHASE 2 Complete: {updated_count} leaderboard entries updated (JSON only)")

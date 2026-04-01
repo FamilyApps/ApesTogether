@@ -817,10 +817,17 @@ def update_leaderboard_cache(periods=None):
     
     categories = ['all', 'small_cap', 'large_cap']
     updated_count = 0
+    _lb_errors = []
     
     for period in periods:
         for category in categories:
             try:
+                # Ensure clean session before each period/category calculation
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+                
                 print(f"Processing leaderboard cache for {period}_{category}...")
                 
                 leaderboard_data = calculate_leaderboard_data(period, 20, category)
@@ -867,13 +874,24 @@ def update_leaderboard_cache(periods=None):
                 print(f"  ✓ Leaderboard cache saved for {cache_key}")
                 
             except Exception as e:
+                err_msg = f"{period}_{category}: {str(e)[:200]}"
+                _lb_errors.append(err_msg)
                 print(f"Error updating leaderboard cache for {period}_{category}: {str(e)}")
                 import traceback
                 print(f"Full traceback: {traceback.format_exc()}")
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
                 continue
     
     print(f"\n=== LEADERBOARD CACHE UPDATE COMPLETE ===")
     print(f"Updated {updated_count} leaderboard cache entries (JSON only, no chart pre-gen)")
+    if _lb_errors:
+        print(f"Leaderboard errors: {_lb_errors}")
+    
+    # Attach errors as attribute so caller can inspect
+    update_leaderboard_cache._last_errors = _lb_errors
     
     return updated_count
 
