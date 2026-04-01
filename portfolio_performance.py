@@ -136,24 +136,13 @@ class PortfolioPerformanceCalculator:
                 response = requests.get(url, timeout=10)
                 data = response.json()
                 
-                # CRITICAL: Log the full response for debugging
-                logger.info(f"📡 Bulk Quotes API Response Keys: {list(data.keys())}")
-                
-                # Log first quote sample for debugging
-                if 'data' in data and data['data']:
-                    logger.info(f"📡 Sample Quote (first ticker): {data['data'][0]}")
-                
                 # Parse bulk quotes response
-                if 'data' in data:
+                if 'data' in data and data['data']:
                     prices_extracted = 0
                     for quote in data['data']:
                         ticker = quote.get('symbol', '').upper()
-                        # REALTIME_BULK_QUOTES uses 'price' field, not 'close'
-                        price_str = quote.get('price', '0')
-                        
-                        # Log first few quotes for debugging
-                        if len(result) < 3:
-                            logger.info(f"📡 Processing {ticker}: raw price='{price_str}'")
+                        # REALTIME_BULK_QUOTES returns 'close' field for the price
+                        price_str = quote.get('close', '0')
                         
                         try:
                             price = float(price_str)
