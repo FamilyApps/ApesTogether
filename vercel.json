@@ -39,7 +39,7 @@
     },
     {
       "path": "/api/cron/market-close", 
-      "schedule": "5 21 * * 1-5"
+      "schedule": "5 20 * * 1-5"
     },
     {
       "path": "/api/cron/cleanup-intraday-data",
