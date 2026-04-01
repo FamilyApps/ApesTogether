@@ -7692,6 +7692,106 @@ def debug_user_snapshots(user_id):
     })
 
 
+@app.route('/api/admin/audit-cash-deployed', methods=['POST'])
+def audit_cash_deployed():
+    """Bulk audit and fix max_cash_deployed for all users.
+    
+    Query params:
+      ?mode=audit  - Dry run: show what WOULD change (default)
+      ?mode=fix    - Apply fixes: update User + backfill all snapshots
+    """
+    try:
+        auth_error = verify_cron_request()
+        if auth_error:
+            return auth_error
+        
+        from models import User, Stock, Transaction, PortfolioSnapshot
+        
+        mode = request.args.get('mode', 'audit')
+        users = User.query.all()
+        audit_results = []
+        fixed_count = 0
+        
+        for user in users:
+            entry = {
+                'user_id': user.id,
+                'username': user.username,
+                'current_max_cash_deployed': float(user.max_cash_deployed or 0),
+                'current_cash_proceeds': float(user.cash_proceeds or 0),
+            }
+            
+            # Replay transactions to compute correct values
+            txns = Transaction.query.filter_by(user_id=user.id)\
+                .order_by(Transaction.timestamp.asc()).all()
+            
+            if txns:
+                cash_proceeds = 0.0
+                max_cash_deployed = 0.0
+                for txn in txns:
+                    val = float(txn.quantity) * float(txn.price)
+                    if txn.transaction_type in ('buy', 'initial'):
+                        if cash_proceeds >= val:
+                            cash_proceeds -= val
+                        else:
+                            new_capital = val - cash_proceeds
+                            cash_proceeds = 0
+                            max_cash_deployed += new_capital
+                    elif txn.transaction_type == 'sell':
+                        cash_proceeds += val
+                    elif txn.transaction_type == 'dividend':
+                        cash_proceeds += val
+                entry['source'] = 'transactions'
+                entry['transaction_count'] = len(txns)
+            else:
+                # No transactions — compute from current holdings (admin-seeded)
+                stocks = Stock.query.filter_by(user_id=user.id).all()
+                max_cash_deployed = sum(
+                    float(s.quantity) * float(s.purchase_price)
+                    for s in stocks if s.quantity and s.quantity > 0 and s.purchase_price
+                )
+                cash_proceeds = float(user.cash_proceeds or 0)
+                entry['source'] = 'holdings'
+                entry['stock_count'] = len(stocks)
+            
+            entry['computed_max_cash_deployed'] = round(max_cash_deployed, 2)
+            entry['computed_cash_proceeds'] = round(cash_proceeds, 2)
+            entry['mcd_changed'] = abs(float(user.max_cash_deployed or 0) - max_cash_deployed) > 0.01
+            entry['cp_changed'] = abs(float(user.cash_proceeds or 0) - cash_proceeds) > 0.01
+            entry['needs_fix'] = entry['mcd_changed'] or entry['cp_changed']
+            
+            if mode == 'fix' and entry['needs_fix']:
+                # Update User record
+                user.max_cash_deployed = max_cash_deployed
+                user.cash_proceeds = cash_proceeds
+                
+                # Backfill ALL snapshots
+                snaps = PortfolioSnapshot.query.filter_by(user_id=user.id).all()
+                for s in snaps:
+                    s.max_cash_deployed = max_cash_deployed
+                    s.cash_proceeds = cash_proceeds
+                entry['snapshots_updated'] = len(snaps)
+                fixed_count += 1
+            
+            audit_results.append(entry)
+        
+        if mode == 'fix':
+            db.session.commit()
+        
+        needs_fix_count = sum(1 for r in audit_results if r['needs_fix'])
+        
+        return jsonify({
+            'mode': mode,
+            'total_users': len(users),
+            'needs_fix': needs_fix_count,
+            'fixed': fixed_count if mode == 'fix' else 0,
+            'users': audit_results
+        })
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
 @app.route('/api/admin/diagnose-leaderboard', methods=['POST'])
 def diagnose_leaderboard():
     """Diagnostic endpoint to test leaderboard calculation in isolation"""
