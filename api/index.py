@@ -7883,9 +7883,14 @@ def diagnose_leaderboard():
                 for row in daily_counts
             ]
             
-            # Total intraday snapshots ever
+            # Total intraday snapshots ever + date range
             total_intraday = PortfolioSnapshotIntraday.query.count()
             diag['total_intraday_snapshots'] = total_intraday
+            
+            earliest = PortfolioSnapshotIntraday.query.order_by(PortfolioSnapshotIntraday.timestamp.asc()).first()
+            latest = PortfolioSnapshotIntraday.query.order_by(PortfolioSnapshotIntraday.timestamp.desc()).first()
+            diag['intraday_earliest'] = earliest.timestamp.isoformat() if earliest else None
+            diag['intraday_latest'] = latest.timestamp.isoformat() if latest else None
             
         except Exception as e:
             diag['snapshot_diag_error'] = str(e)
