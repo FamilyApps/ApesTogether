@@ -132,7 +132,7 @@ class PortfolioPerformanceCalculator:
                 initial_result_count = len(result)  # Track how many we had before this chunk
                 
                 # Use REALTIME_BULK_QUOTES for premium tier (up to 100 symbols)
-                url = f'https://www.alphavantage.co/query?function=REALTIME_BULK_QUOTES&symbol={symbols_str}&apikey={api_key}'
+                url = f'https://www.alphavantage.co/query?function=REALTIME_BULK_QUOTES&symbol={symbols_str}&entitlement=realtime&apikey={api_key}'
                 response = requests.get(url, timeout=10)
                 data = response.json()
                 

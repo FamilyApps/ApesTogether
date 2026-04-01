@@ -6276,43 +6276,26 @@ def collect_intraday_data():
                 results['errors'].append("Batch API returned no prices")
                 logger.error("❌ Batch API failed - no prices returned")
                 
-                # FALLBACK: Fetch SPY individually to ensure S&P 500 data is always collected
-                logger.info("🔄 Attempting SPY fallback fetch...")
-                try:
-                    spy_data = calculator.get_stock_data('SPY')
-                    if spy_data and spy_data.get('price'):
-                        spy_price = spy_data['price']
-                        sp500_value = spy_price * 10
-                        
-                        from models import MarketData
-                        market_data = MarketData(
-                            ticker='SPY_INTRADAY',
-                            date=today_et,
-                            timestamp=current_time,
-                            close_price=sp500_value
-                        )
-                        db.session.add(market_data)
-                        results['spy_data_collected'] = True
-                        results['spy_fallback_used'] = True
-                        logger.info(f"✅ SPY Fallback Success: ${spy_price} (S&P 500: ${sp500_value})")
-                    else:
-                        logger.error("❌ SPY fallback also failed")
-                except Exception as spy_error:
-                    logger.error(f"❌ SPY fallback error: {str(spy_error)}")
-        
-        except Exception as e:
-            error_msg = f"Batch API error: {str(e)}"
-            results['errors'].append(error_msg)
-            logger.error(error_msg)
-            
-            # FALLBACK: Fetch SPY individually even on batch exception
-            logger.info("🔄 Attempting SPY fallback fetch after batch exception...")
-            try:
-                spy_data = calculator.get_stock_data('SPY')
-                if spy_data and spy_data.get('price'):
-                    spy_price = spy_data['price']
+                # FALLBACK: Fetch each unique ticker individually (once), populating the cache
+                # This avoids redundant per-user API calls in calculate_portfolio_value_with_cash
+                logger.info(f"🔄 Fetching {len(unique_tickers)} tickers individually...")
+                fallback_fetched = 0
+                for ticker in unique_tickers:
+                    try:
+                        data = calculator.get_stock_data(ticker)
+                        if data and data.get('price'):
+                            batch_prices[ticker] = data['price']
+                            fallback_fetched += 1
+                    except Exception:
+                        pass
+                logger.info(f"✅ Individual fallback: {fallback_fetched}/{len(unique_tickers)} tickers fetched")
+                results['fallback_fetched'] = fallback_fetched
+                results['spy_fallback_used'] = True
+                
+                # Store SPY data
+                if 'SPY' in batch_prices:
+                    spy_price = batch_prices['SPY']
                     sp500_value = spy_price * 10
-                    
                     from models import MarketData
                     market_data = MarketData(
                         ticker='SPY_INTRADAY',
@@ -6322,12 +6305,38 @@ def collect_intraday_data():
                     )
                     db.session.add(market_data)
                     results['spy_data_collected'] = True
-                    results['spy_fallback_used'] = True
-                    logger.info(f"✅ SPY Fallback Success: ${spy_price} (S&P 500: ${sp500_value})")
-                else:
-                    logger.error("❌ SPY fallback also failed")
-            except Exception as spy_error:
-                logger.error(f"❌ SPY fallback error: {str(spy_error)}")
+        
+        except Exception as e:
+            error_msg = f"Batch API error: {str(e)}"
+            results['errors'].append(error_msg)
+            logger.error(error_msg)
+            
+            # FALLBACK: Fetch tickers individually on exception too
+            logger.info(f"🔄 Fetching {len(unique_tickers)} tickers individually after exception...")
+            fallback_fetched = 0
+            for ticker in unique_tickers:
+                try:
+                    data = calculator.get_stock_data(ticker)
+                    if data and data.get('price'):
+                        batch_prices[ticker] = data['price']
+                        fallback_fetched += 1
+                except Exception:
+                    pass
+            results['fallback_fetched'] = fallback_fetched
+            results['spy_fallback_used'] = True
+            
+            if 'SPY' in batch_prices:
+                spy_price = batch_prices['SPY']
+                sp500_value = spy_price * 10
+                from models import MarketData
+                market_data = MarketData(
+                    ticker='SPY_INTRADAY',
+                    date=today_et,
+                    timestamp=current_time,
+                    close_price=sp500_value
+                )
+                db.session.add(market_data)
+                results['spy_data_collected'] = True
         
         # Step 3: Calculate portfolio values (now using CACHED data from batch call)
         # All stock prices are already in cache - no additional API calls needed!
