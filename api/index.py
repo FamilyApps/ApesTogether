@@ -4497,7 +4497,7 @@ def market_close_cron():
             }), 200
         
         results = {
-            'code_version': 'v3-session-remove',
+            'code_version': 'v4-diagnose',
             'timestamp': current_time.isoformat(),
             'market_date_et': today_et.isoformat(),
             'timezone': 'America/New_York',
@@ -4711,11 +4711,13 @@ def market_close_cron():
             # Charts are now generated ON-DEMAND (not pre-generated here)
             # This dramatically reduces market-close cron execution time
             try:
-                # Nuclear session reset — db.session.remove() drops the scoped session entirely
-                # and ensures a fresh connection for Phase 2. This is necessary because
-                # prior phases (dividends) may leave PostgreSQL in an aborted transaction state.
+                # Force-dispose ALL pooled connections and reset the ORM session.
+                # db.session.rollback() and db.session.remove() are insufficient when
+                # the underlying PostgreSQL connection is in an aborted transaction state.
+                # db.engine.dispose() drops every connection in the pool, forcing new ones.
                 try:
                     db.session.remove()
+                    db.engine.dispose()
                 except Exception:
                     pass
                 
@@ -4730,9 +4732,10 @@ def market_close_cron():
                 logger.info(f"PHASE 2 Complete: {updated_count} leaderboard entries updated (JSON only)")
                 
                 # PHASE 2.25: Update Portfolio Stats (unique stocks, trades/week, cap mix, industry mix, subscribers)
-                # Fresh session for stats phase
+                # Fresh connections for stats phase
                 try:
                     db.session.remove()
+                    db.engine.dispose()
                 except Exception:
                     pass
                 
@@ -4768,11 +4771,14 @@ def market_close_cron():
                             error_msg = f"Error updating stats for user {user.id}: {str(e)}"
                             results['errors'].append(error_msg)
                             logger.error(error_msg)
-                            # Nuclear reset to clear PostgreSQL's aborted transaction state
                             try:
-                                db.session.remove()
+                                db.session.rollback()
                             except Exception:
-                                pass
+                                try:
+                                    db.session.remove()
+                                    db.engine.dispose()
+                                except Exception:
+                                    pass
                     
                     results['portfolio_stats_updated'] = stats_updated
                     results['pipeline_phases'].append('portfolio_stats_completed')
@@ -7680,3 +7686,88 @@ def debug_user_snapshots(user_id):
         'snapshots': data
     })
 
+
+@app.route('/api/admin/diagnose-leaderboard', methods=['POST'])
+def diagnose_leaderboard():
+    """Diagnostic endpoint to test leaderboard calculation in isolation"""
+    try:
+        auth_error = verify_cron_request()
+        if auth_error:
+            return auth_error
+        
+        from models import User, PortfolioSnapshot
+        from performance_calculator import calculate_portfolio_performance, get_period_dates
+        
+        period = request.args.get('period', 'YTD')
+        diag = {'period': period, 'users': [], 'session_test': None, 'first_error': None}
+        
+        # Test 1: Is the DB connection healthy?
+        try:
+            from sqlalchemy import text
+            with db.engine.connect() as conn:
+                result = conn.execute(text("SELECT 1"))
+                diag['session_test'] = 'OK'
+        except Exception as e:
+            diag['session_test'] = f'FAILED: {e}'
+        
+        # Test 2: Can we query users?
+        try:
+            users = User.query.all()
+            diag['user_count'] = len(users)
+        except Exception as e:
+            diag['user_query_error'] = str(e)
+            return jsonify(diag), 500
+        
+        # Test 3: Try performance calc for each user
+        for user in users:
+            user_diag = {'user_id': user.id, 'username': user.username}
+            try:
+                snap = PortfolioSnapshot.query.filter_by(user_id=user.id)\
+                    .order_by(PortfolioSnapshot.date.desc()).first()
+                user_diag['has_snapshot'] = snap is not None
+                if not snap:
+                    diag['users'].append(user_diag)
+                    continue
+                user_diag['latest_snapshot_date'] = snap.date.isoformat()
+                user_diag['latest_value'] = float(snap.total_value) if snap.total_value else 0
+                user_diag['max_cash_deployed'] = float(snap.max_cash_deployed) if snap.max_cash_deployed else 0
+            except Exception as e:
+                user_diag['snapshot_error'] = str(e)[:300]
+                if not diag['first_error']:
+                    diag['first_error'] = f"Snapshot query user {user.id}: {e}"
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+                diag['users'].append(user_diag)
+                continue
+            
+            try:
+                start_date, end_date = get_period_dates(period, user_id=user.id)
+                user_diag['start_date'] = str(start_date)
+                user_diag['end_date'] = str(end_date)
+                
+                result = calculate_portfolio_performance(
+                    user.id, start_date, end_date,
+                    include_chart_data=False, period=period
+                )
+                if result:
+                    user_diag['performance'] = round(result.get('portfolio_return', 0), 2)
+                    user_diag['status'] = 'OK'
+                else:
+                    user_diag['status'] = 'NO_RESULT'
+            except Exception as e:
+                user_diag['perf_error'] = str(e)[:300]
+                user_diag['status'] = 'ERROR'
+                if not diag['first_error']:
+                    diag['first_error'] = f"Perf calc user {user.id}: {e}"
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+            
+            diag['users'].append(user_diag)
+        
+        return jsonify(diag), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500

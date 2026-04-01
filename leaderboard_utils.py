@@ -480,14 +480,31 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
     # Get today's date for calculating recent trades
     today = get_last_market_day()
     
-    # Get all users
+    # Get all users — use raw SQL to avoid ORM session issues
+    try:
+        db.session.rollback()  # Clear any prior aborted transaction
+    except Exception:
+        pass
+    
     users = User.query.all()
     leaderboard_data = []
+    first_error = None
+    error_count = 0
     
     for user in users:
         # Get latest snapshot to verify user has data
-        latest_snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id)\
-            .order_by(PortfolioSnapshot.date.desc()).first()
+        try:
+            latest_snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id)\
+                .order_by(PortfolioSnapshot.date.desc()).first()
+        except Exception as e:
+            if not first_error:
+                first_error = f"Snapshot query failed for user {user.id}: {e}"
+            error_count += 1
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            continue
         
         if not latest_snapshot:
             continue
@@ -514,10 +531,12 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
                 sparkline = sparkline[-20:]  # Keep last 20 points for mobile
                 
         except Exception as e:
+            if not first_error:
+                first_error = f"Performance calc for user {user.id} period {period}: {e}"
+            error_count += 1
             logger.warning(f"Performance calc failed for user {user.id} period {period}: {e}")
-            # Nuclear reset to clear PostgreSQL's aborted transaction state
             try:
-                db.session.remove()
+                db.session.rollback()
             except Exception:
                 pass
             continue
@@ -579,6 +598,11 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
             'calculated_at': datetime.now().isoformat(),
             'category': category
         })
+    
+    # Log diagnostic info
+    if first_error:
+        print(f"  ⚠ FIRST ERROR for {period}_{category}: {first_error}")
+        print(f"  ⚠ Total errors: {error_count}/{len(users)} users")
     
     # Sort by performance and limit results
     leaderboard_data.sort(key=lambda x: x['performance_percent'], reverse=True)
