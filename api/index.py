@@ -8048,11 +8048,9 @@ def recalc_mcd():
             if mode == 'fix' and needs_fix:
                 user.max_cash_deployed = final_mcd
                 user.cash_proceeds = final_cp
+                db.session.commit()  # Commit per-user to avoid Vercel timeout
             
             results.append(user_result)
-        
-        if mode == 'fix':
-            db.session.commit()
         
         return jsonify({
             'mode': mode,
