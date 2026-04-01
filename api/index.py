@@ -7940,15 +7940,23 @@ def recalc_mcd():
                         initial_mcd += qty * pp
                         price_details[ticker] = {'qty': round(qty, 4), 'price': round(pp, 2), 'value': round(qty * pp, 2), 'source': 'purchase_price'}
             
-            # Step 4: Replay ALL transactions from the initial seeded MCD
+            # Step 4: Replay transactions from the initial seeded MCD
+            # IMPORTANT: Skip 'initial' transactions — they represent the seeded stock adds
+            # already captured in seeded MCD via historical prices. Only 'buy' (real post-creation
+            # trades), 'sell', and 'dividend' should modify MCD/CP.
             mcd = initial_mcd
             cp = 0.0
             mcd_timeline = [(creation_date, mcd, cp)]
+            initial_skipped = 0
             
             for txn in valid_txns:
                 val = float(txn.quantity) * float(txn.price)
                 tt = txn.transaction_type.lower()
-                if tt in ('buy', 'initial'):
+                if tt == 'initial':
+                    # Already counted in seeded MCD — skip
+                    initial_skipped += 1
+                    continue
+                elif tt == 'buy':
                     if cp >= val:
                         cp -= val
                     else:
@@ -7971,6 +7979,7 @@ def recalc_mcd():
             if price_details:
                 user_result['price_details'] = price_details
             user_result['transaction_count'] = len(valid_txns)
+            user_result['initial_txns_skipped'] = initial_skipped
             
             user_result['new_mcd'] = round(final_mcd, 2)
             user_result['new_cp'] = round(final_cp, 2)
