@@ -939,22 +939,17 @@ def get_leaderboard():
             pass
         
         # ── Compute S&P 500 return for this period directly from MarketData ──
+        # Uses the SAME date range as the performance calculator so sparklines align
         sp500_return_for_period = 0.0
         sp500_sparkline_global = []
         try:
-            today = dt_date.today()
-            period_days_map = {
-                '1D': 1, '1W': 7, '1M': 30, '3M': 90,
-                'YTD': (today - dt_date(today.year, 1, 1)).days or 1,
-                '1Y': 365
-            }
-            days_back = period_days_map.get(period, 7)
-            start_date = today - timedelta(days=days_back + 5)  # pad for weekends
+            from performance_calculator import get_period_dates
+            sp_start, sp_end = get_period_dates(cache_period)
             
             sp500_records = MarketData.query.filter(
                 MarketData.ticker == 'SPY_SP500',
-                MarketData.date >= start_date,
-                MarketData.date <= today
+                MarketData.date >= sp_start,
+                MarketData.date <= sp_end
             ).order_by(MarketData.date.asc()).all()
             
             if sp500_records and len(sp500_records) >= 2:
@@ -1114,7 +1109,7 @@ def get_leaderboard():
                         if raw_vals and len(raw_vals) >= 2:
                             sparkline_points = [round(float(v), 2) for v in raw_vals]
             
-            # S&P sparkline is always full-period (same for all users, no trimming).
+            # S&P sparkline is always full-period length (same for all users).
             # Portfolio sparkline is left-padded with null so it aligns to the right
             # of the S&P line — the user's line "appears" when their account was created.
             sp500_len = len(sp500_sparkline_global)
