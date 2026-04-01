@@ -7724,34 +7724,56 @@ def audit_cash_deployed():
             txns = Transaction.query.filter_by(user_id=user.id)\
                 .order_by(Transaction.timestamp.asc()).all()
             
-            if txns:
+            # Check if transactions have valid transaction_type
+            # Bot trading code used wrong column name (type= instead of transaction_type=)
+            # so many bot transactions have transaction_type=NULL
+            valid_txns = [t for t in txns if t.transaction_type in ('buy', 'sell', 'initial', 'dividend', 'BUY', 'SELL')]
+            
+            if valid_txns:
                 cash_proceeds = 0.0
                 max_cash_deployed = 0.0
-                for txn in txns:
+                for txn in valid_txns:
                     val = float(txn.quantity) * float(txn.price)
-                    if txn.transaction_type in ('buy', 'initial'):
+                    tt = (txn.transaction_type or '').lower()
+                    if tt in ('buy', 'initial'):
                         if cash_proceeds >= val:
                             cash_proceeds -= val
                         else:
                             new_capital = val - cash_proceeds
                             cash_proceeds = 0
                             max_cash_deployed += new_capital
-                    elif txn.transaction_type == 'sell':
+                    elif tt == 'sell':
                         cash_proceeds += val
-                    elif txn.transaction_type == 'dividend':
+                    elif tt == 'dividend':
                         cash_proceeds += val
                 entry['source'] = 'transactions'
                 entry['transaction_count'] = len(txns)
+                entry['valid_transaction_count'] = len(valid_txns)
+                entry['null_type_count'] = len(txns) - len(valid_txns)
             else:
-                # No transactions — compute from current holdings (admin-seeded)
+                # No valid transactions — compute from current holdings
+                # This covers admin-seeded accounts AND bot accounts with NULL transaction_type
                 stocks = Stock.query.filter_by(user_id=user.id).all()
-                max_cash_deployed = sum(
-                    float(s.quantity) * float(s.purchase_price)
-                    for s in stocks if s.quantity and s.quantity > 0 and s.purchase_price
-                )
+                stock_details = []
+                max_cash_deployed = 0.0
+                for s in stocks:
+                    qty = float(s.quantity or 0)
+                    pp = float(s.purchase_price or 0)
+                    cost = qty * pp
+                    if qty > 0:
+                        max_cash_deployed += cost
+                    stock_details.append({
+                        'ticker': s.ticker,
+                        'quantity': qty,
+                        'purchase_price': pp,
+                        'cost_basis': round(cost, 2)
+                    })
                 cash_proceeds = float(user.cash_proceeds or 0)
                 entry['source'] = 'holdings'
                 entry['stock_count'] = len(stocks)
+                entry['stock_details'] = stock_details
+                if txns:
+                    entry['note'] = f'{len(txns)} transactions exist but all have NULL transaction_type (bot bug)'
             
             entry['computed_max_cash_deployed'] = round(max_cash_deployed, 2)
             entry['computed_cash_proceeds'] = round(cash_proceeds, 2)
