@@ -7708,6 +7708,10 @@ def audit_cash_deployed():
         from models import User, Stock, Transaction, PortfolioSnapshot
         
         mode = request.args.get('mode', 'audit')
+        # Skip specific users whose MCD was manually set (e.g. bobford00 has purchase_price=0 stocks)
+        skip_ids_str = request.args.get('skip_users', '')
+        skip_ids = set(int(x) for x in skip_ids_str.split(',') if x.strip().isdigit())
+        
         users = User.query.all()
         audit_results = []
         fixed_count = 0
@@ -7720,16 +7724,29 @@ def audit_cash_deployed():
                 'current_cash_proceeds': float(user.cash_proceeds or 0),
             }
             
+            if user.id in skip_ids:
+                entry['skipped'] = True
+                entry['needs_fix'] = False
+                audit_results.append(entry)
+                continue
+            
             # Replay transactions to compute correct values
             txns = Transaction.query.filter_by(user_id=user.id)\
                 .order_by(Transaction.timestamp.asc()).all()
             
-            # Check if transactions have valid transaction_type
-            # Bot trading code used wrong column name (type= instead of transaction_type=)
-            # so many bot transactions have transaction_type=NULL
+            # Classify transactions by type
             valid_txns = [t for t in txns if t.transaction_type in ('buy', 'sell', 'initial', 'dividend', 'BUY', 'SELL')]
+            buy_txns = [t for t in valid_txns if (t.transaction_type or '').lower() in ('buy', 'initial')]
+            sell_txns = [t for t in valid_txns if (t.transaction_type or '').lower() == 'sell']
             
-            if valid_txns:
+            stocks = Stock.query.filter_by(user_id=user.id).all()
+            holdings_cost = sum(
+                float(s.quantity or 0) * float(s.purchase_price or 0)
+                for s in stocks if (s.quantity or 0) > 0 and (s.purchase_price or 0) > 0
+            )
+            
+            if buy_txns:
+                # STRATEGY 1: Full transaction replay (user has buy/initial transactions)
                 cash_proceeds = 0.0
                 max_cash_deployed = 0.0
                 for txn in valid_txns:
@@ -7746,34 +7763,37 @@ def audit_cash_deployed():
                         cash_proceeds += val
                     elif tt == 'dividend':
                         cash_proceeds += val
-                entry['source'] = 'transactions'
+                entry['source'] = 'transaction_replay'
                 entry['transaction_count'] = len(txns)
                 entry['valid_transaction_count'] = len(valid_txns)
-                entry['null_type_count'] = len(txns) - len(valid_txns)
+                entry['buy_count'] = len(buy_txns)
+                entry['sell_count'] = len(sell_txns)
+                
+            elif sell_txns and not buy_txns:
+                # STRATEGY 2: Seeded bot with sells only (no buy/initial transactions)
+                # MCD = current holdings cost + total sell proceeds
+                # (initial capital = what's still held + what was sold)
+                total_sell_proceeds = sum(
+                    float(t.quantity) * float(t.price) for t in sell_txns
+                )
+                max_cash_deployed = holdings_cost + total_sell_proceeds
+                cash_proceeds = total_sell_proceeds  # sells generated cash proceeds
+                entry['source'] = 'holdings_plus_sells'
+                entry['holdings_cost'] = round(holdings_cost, 2)
+                entry['total_sell_proceeds'] = round(total_sell_proceeds, 2)
+                entry['sell_count'] = len(sell_txns)
+                if txns and not valid_txns:
+                    entry['null_type_count'] = len(txns)
+                    
             else:
-                # No valid transactions — compute from current holdings
-                # This covers admin-seeded accounts AND bot accounts with NULL transaction_type
-                stocks = Stock.query.filter_by(user_id=user.id).all()
-                stock_details = []
-                max_cash_deployed = 0.0
-                for s in stocks:
-                    qty = float(s.quantity or 0)
-                    pp = float(s.purchase_price or 0)
-                    cost = qty * pp
-                    if qty > 0:
-                        max_cash_deployed += cost
-                    stock_details.append({
-                        'ticker': s.ticker,
-                        'quantity': qty,
-                        'purchase_price': pp,
-                        'cost_basis': round(cost, 2)
-                    })
+                # STRATEGY 3: Pure holdings (no transactions at all, or all NULL type)
+                max_cash_deployed = holdings_cost
                 cash_proceeds = float(user.cash_proceeds or 0)
-                entry['source'] = 'holdings'
+                entry['source'] = 'holdings_only'
                 entry['stock_count'] = len(stocks)
-                entry['stock_details'] = stock_details
+                entry['holdings_cost'] = round(holdings_cost, 2)
                 if txns:
-                    entry['note'] = f'{len(txns)} transactions exist but all have NULL transaction_type (bot bug)'
+                    entry['note'] = f'{len(txns)} transactions with NULL transaction_type (bot bug)'
             
             entry['computed_max_cash_deployed'] = round(max_cash_deployed, 2)
             entry['computed_cash_proceeds'] = round(cash_proceeds, 2)

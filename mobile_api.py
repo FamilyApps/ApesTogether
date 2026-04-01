@@ -788,12 +788,15 @@ def add_stocks():
     if len(stocks_list) > 50:
         return jsonify({'error': 'batch_too_large', 'max_stocks_per_request': 50}), 400
     
+    from cash_tracking import process_transaction
+    
     added_count = 0
     errors = []
     
     for item in stocks_list:
         ticker = item.get('ticker', '').strip().upper()
         quantity = item.get('quantity')
+        price = item.get('purchase_price') or item.get('price') or 0
         
         if not ticker or not quantity:
             errors.append(f"Missing ticker or quantity")
@@ -801,6 +804,7 @@ def add_stocks():
         
         try:
             quantity = float(quantity)
+            price = float(price)
             if quantity <= 0:
                 errors.append(f"Invalid quantity for {ticker}")
                 continue
@@ -812,15 +816,25 @@ def add_stocks():
             # Check if user already has this stock
             existing = Stock.query.filter_by(user_id=g.user_id, ticker=ticker).first()
             if existing:
+                total_cost = (existing.purchase_price * existing.quantity) + (price * quantity)
                 existing.quantity += quantity
+                existing.purchase_price = total_cost / existing.quantity if existing.quantity > 0 else price
             else:
                 stock = Stock(
                     ticker=ticker,
                     quantity=quantity,
-                    purchase_price=0.0,
+                    purchase_price=price,
                     user_id=g.user_id
                 )
                 db.session.add(stock)
+            
+            # Track cash deployed
+            if price > 0:
+                process_transaction(
+                    db, g.user_id, ticker, quantity, price, 'initial',
+                    timestamp=datetime.utcnow()
+                )
+            
             added_count += 1
         except Exception as e:
             logger.error(f"Error adding stock {ticker}: {e}")
@@ -1802,7 +1816,10 @@ def execute_trade():
         return jsonify({'error': 'type_must_be_buy_or_sell'}), 400
     
     try:
+        from cash_tracking import process_transaction
+        
         existing = Stock.query.filter_by(user_id=g.user_id, ticker=ticker).first()
+        position_before_qty = existing.quantity if existing and trade_type == 'sell' else None
         
         if trade_type == 'sell':
             if not existing or existing.quantity < quantity:
@@ -1828,19 +1845,12 @@ def execute_trade():
                 )
                 db.session.add(stock)
         
-        # Record the transaction
-        try:
-            transaction = Transaction(
-                ticker=ticker,
-                quantity=quantity,
-                price=price,
-                transaction_type=trade_type.upper(),
-                user_id=g.user_id,
-                timestamp=datetime.utcnow()
-            )
-            db.session.add(transaction)
-        except Exception as tx_err:
-            logger.warning(f"Failed to record transaction: {tx_err}")
+        # Record transaction + update cash tracking (max_cash_deployed, cash_proceeds)
+        process_transaction(
+            db, g.user_id, ticker, quantity, price, trade_type,
+            timestamp=datetime.utcnow(),
+            position_before_qty=position_before_qty
+        )
         
         db.session.commit()
         
@@ -2150,6 +2160,8 @@ def bot_add_stocks():
         return jsonify({'error': 'user_id_and_stocks_required'}), 400
     
     try:
+        from cash_tracking import process_transaction
+        
         user = User.query.get(user_id)
         if not user:
             return jsonify({'error': 'user_not_found'}), 404
@@ -2165,7 +2177,9 @@ def bot_add_stocks():
             
             existing = Stock.query.filter_by(user_id=user_id, ticker=ticker).first()
             if existing:
+                total_cost = (existing.purchase_price * existing.quantity) + (price * quantity)
                 existing.quantity += quantity
+                existing.purchase_price = total_cost / existing.quantity if existing.quantity > 0 else price
             else:
                 stock = Stock(
                     ticker=ticker,
@@ -2174,10 +2188,21 @@ def bot_add_stocks():
                     user_id=user_id
                 )
                 db.session.add(stock)
+            
+            # Track cash deployed for this initial buy
+            process_transaction(
+                db, user_id, ticker, quantity, price, 'initial',
+                timestamp=datetime.utcnow()
+            )
             added += 1
         
         db.session.commit()
-        return jsonify({'success': True, 'added_count': added})
+        return jsonify({
+            'success': True,
+            'added_count': added,
+            'max_cash_deployed': float(user.max_cash_deployed or 0),
+            'cash_proceeds': float(user.cash_proceeds or 0)
+        })
         
     except Exception as e:
         db.session.rollback()
@@ -2405,7 +2430,10 @@ def bot_execute_trade():
         return jsonify({'error': 'type_must_be_buy_or_sell'}), 400
     
     try:
+        from cash_tracking import process_transaction
+        
         existing = Stock.query.filter_by(user_id=user_id, ticker=ticker).first()
+        position_before_qty = existing.quantity if existing and trade_type == 'sell' else None
         
         if trade_type == 'sell':
             if not existing or existing.quantity < quantity:
@@ -2422,15 +2450,12 @@ def bot_execute_trade():
                 stock = Stock(ticker=ticker, quantity=quantity, purchase_price=price, user_id=user_id)
                 db.session.add(stock)
         
-        try:
-            transaction = Transaction(
-                ticker=ticker, quantity=quantity, price=price,
-                transaction_type=trade_type.upper(), user_id=user_id,
-                timestamp=datetime.utcnow()
-            )
-            db.session.add(transaction)
-        except Exception:
-            pass
+        # Record transaction + update cash tracking (max_cash_deployed, cash_proceeds)
+        process_transaction(
+            db, user_id, ticker, quantity, price, trade_type,
+            timestamp=datetime.utcnow(),
+            position_before_qty=position_before_qty
+        )
         
         db.session.commit()
         
@@ -2902,34 +2927,33 @@ def bot_trade_cron():
                         results['decisions'].append(decision_info)
                         continue
                     
-                    # Execute trade via the existing bot execute-trade endpoint logic
+                    # Execute trade via process_transaction (cash tracking + transaction record)
                     try:
+                        from cash_tracking import process_transaction as pt_func
                         action = d['action']
                         ticker = d['ticker']
                         quantity = d.get('quantity', 1)
                         price = d.get('price', 0)
                         
                         if action == 'buy':
-                            from models import Transaction
                             stock = Stock.query.filter_by(user_id=bot.id, ticker=ticker).first()
                             if stock:
+                                total_cost = (stock.quantity * stock.purchase_price) + (price * quantity)
                                 stock.quantity += quantity
-                                stock.purchase_price = price
+                                stock.purchase_price = total_cost / stock.quantity if stock.quantity > 0 else price
                             else:
                                 stock = Stock(user_id=bot.id, ticker=ticker, quantity=quantity, purchase_price=price)
                                 db.session.add(stock)
                             
-                            tx = Transaction(user_id=bot.id, ticker=ticker, quantity=quantity,
-                                           price=price, transaction_type='buy')
-                            db.session.add(tx)
+                            pt_func(db, bot.id, ticker, quantity, price, 'buy', timestamp=datetime.utcnow())
                             
                         elif action == 'sell':
                             stock = Stock.query.filter_by(user_id=bot.id, ticker=ticker).first()
                             if stock and stock.quantity >= quantity:
+                                pos_before = stock.quantity
                                 stock.quantity -= quantity
-                                tx = Transaction(user_id=bot.id, ticker=ticker, quantity=quantity,
-                                               price=price, transaction_type='sell')
-                                db.session.add(tx)
+                                pt_func(db, bot.id, ticker, quantity, price, 'sell',
+                                       timestamp=datetime.utcnow(), position_before_qty=pos_before)
                             else:
                                 decision_info['status'] = 'skipped_insufficient_shares'
                                 results['decisions'].append(decision_info)
