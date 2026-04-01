@@ -973,9 +973,10 @@ def get_leaderboard():
         available_industries = set()
         
         # Period-aware age thresholds for Active Edge
+        # Keep low — 2-trade minimum + 60-day recency are the real quality filters
         min_age_for_period = {
-            '1D': 1, '1W': 5, '1M': 7, '3M': 14,
-            'YTD': 14, '1Y': 30
+            '1D': 0, '1W': 1, '1M': 1, '3M': 1,
+            'YTD': 1, '1Y': 1
         }
         
         # ── Pre-fetch data in bulk to avoid N+1 queries at scale ──
@@ -1124,13 +1125,17 @@ def get_leaderboard():
             
             # ── Active Edge filter ──
             if active_edge:
-                # Must have traded within last 60 days
-                if not last_trade_ts or (datetime.utcnow() - last_trade_ts).days > 60:
-                    continue
-                # Must have at least 2 trades total
                 total_trades = total_trade_map.get(user_id, 0)
-                if total_trades < 2:
+                stocks_held = stock_count_map.get(user_id, 0)
+                
+                # Must have some activity: either trades or stocks in portfolio
+                if total_trades == 0 and stocks_held == 0:
                     continue
+                
+                # Must have traded within 60 days OR currently hold stocks
+                if stocks_held == 0 and (not last_trade_ts or (datetime.utcnow() - last_trade_ts).days > 60):
+                    continue
+                
                 # Period-aware minimum age
                 min_age = min_age_for_period.get(period, 1)
                 if account_age_days < min_age:
