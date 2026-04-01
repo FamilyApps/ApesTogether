@@ -2920,7 +2920,7 @@ def bot_trade_cron():
                                 db.session.add(stock)
                             
                             tx = Transaction(user_id=bot.id, ticker=ticker, quantity=quantity,
-                                           price=price, type='buy', notes=f'Bot wave {wave}')
+                                           price=price, transaction_type='buy')
                             db.session.add(tx)
                             
                         elif action == 'sell':
@@ -2928,7 +2928,7 @@ def bot_trade_cron():
                             if stock and stock.quantity >= quantity:
                                 stock.quantity -= quantity
                                 tx = Transaction(user_id=bot.id, ticker=ticker, quantity=quantity,
-                                               price=price, type='sell', notes=f'Bot wave {wave}')
+                                               price=price, transaction_type='sell')
                                 db.session.add(tx)
                             else:
                                 decision_info['status'] = 'skipped_insufficient_shares'
