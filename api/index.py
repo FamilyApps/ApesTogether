@@ -7848,10 +7848,50 @@ def diagnose_leaderboard():
         period = request.args.get('period', 'YTD')
         diag = {'period': period, 'users': [], 'session_test': None, 'first_error': None}
         
-        # Test 0: List all cache keys
+        # Test 0: Snapshot diagnostics (intraday + daily)
         try:
-            from models import LeaderboardCache
+            from models import LeaderboardCache, PortfolioSnapshotIntraday, PortfolioSnapshot as PS
+            from sqlalchemy import func as sqla_func, text
             import json as diag_json
+            
+            # Count intraday snapshots per day (last 7 days)
+            seven_days_ago = datetime.utcnow() - timedelta(days=7)
+            intraday_counts = db.session.query(
+                sqla_func.date(PortfolioSnapshotIntraday.timestamp).label('day'),
+                sqla_func.count(PortfolioSnapshotIntraday.id).label('cnt'),
+                sqla_func.count(sqla_func.distinct(PortfolioSnapshotIntraday.user_id)).label('users')
+            ).filter(
+                PortfolioSnapshotIntraday.timestamp >= seven_days_ago
+            ).group_by(sqla_func.date(PortfolioSnapshotIntraday.timestamp))\
+             .order_by(sqla_func.date(PortfolioSnapshotIntraday.timestamp).desc()).all()
+            
+            diag['intraday_snapshots_by_day'] = [
+                {'date': str(row.day), 'count': row.cnt, 'users': row.users}
+                for row in intraday_counts
+            ]
+            
+            # Count daily snapshots per day (last 7 days)
+            daily_counts = db.session.query(
+                PS.date.label('day'),
+                sqla_func.count(PS.id).label('cnt')
+            ).filter(
+                PS.date >= (get_market_date() - timedelta(days=7))
+            ).group_by(PS.date).order_by(PS.date.desc()).all()
+            
+            diag['daily_snapshots_by_day'] = [
+                {'date': str(row.day), 'count': row.cnt}
+                for row in daily_counts
+            ]
+            
+            # Total intraday snapshots ever
+            total_intraday = PortfolioSnapshotIntraday.query.count()
+            diag['total_intraday_snapshots'] = total_intraday
+            
+        except Exception as e:
+            diag['snapshot_diag_error'] = str(e)
+        
+        # Test 0b: List all cache keys
+        try:
             all_caches = LeaderboardCache.query.all()
             diag['cache_keys'] = [
                 {
