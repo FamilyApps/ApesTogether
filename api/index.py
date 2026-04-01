@@ -7896,94 +7896,81 @@ def recalc_mcd():
             
             stocks = Stock.query.filter_by(user_id=user.id).all()
             
-            if buy_txns:
-                # === STRATEGY 1: Full transaction replay (has buy/initial records) ===
-                mcd = 0.0
-                cp = 0.0
-                mcd_timeline = []
-                
-                for txn in valid_txns:
-                    val = float(txn.quantity) * float(txn.price)
-                    tt = txn.transaction_type.lower()
-                    
-                    if tt in ('buy', 'initial'):
-                        if cp >= val:
-                            cp -= val
-                        else:
-                            new_capital = val - cp
-                            cp = 0
-                            mcd += new_capital
-                    elif tt == 'sell':
-                        cp += val
-                    elif tt == 'dividend':
-                        cp += val
-                    
-                    txn_date = txn.timestamp.date() if txn.timestamp else dt_date.min
-                    mcd_timeline.append((txn_date, mcd, cp))
-                
-                final_mcd = mcd
-                final_cp = cp
-                user_result['source'] = 'transaction_replay'
-                user_result['transaction_count'] = len(valid_txns)
+            # === UNIFIED STRATEGY for all users ===
+            # Step 1: Determine creation date
+            from portfolio_performance import PortfolioPerformanceCalculator
+            calc = PortfolioPerformanceCalculator()
+            creation_date = (user.created_at.date() if user.created_at 
+                            else (stocks[0].purchase_date.date() if stocks and stocks[0].purchase_date 
+                                  else dt_date.today()))
             
-            else:
-                # === STRATEGY 2: Seeded bot — no buy/initial transactions ===
-                # Reconstruct original seeded holdings:
-                #   original_qty = current_qty + total_qty_sold
-                # Then look up historical price on account creation date
-                
-                from portfolio_performance import PortfolioPerformanceCalculator
-                calc = PortfolioPerformanceCalculator()
-                creation_date = (user.created_at.date() if user.created_at 
-                                else (stocks[0].purchase_date.date() if stocks and stocks[0].purchase_date 
-                                      else dt_date.today()))
-                
-                # Reconstruct original holdings: current + sold
-                original_holdings = {}
-                for s in stocks:
-                    if s.quantity and s.quantity > 0:
-                        original_holdings[s.ticker.upper()] = float(s.quantity)
-                for txn in sell_txns:
-                    tk = txn.ticker.upper()
+            # Step 2: Reconstruct ORIGINAL seeded holdings on creation date
+            # original = current_holdings + total_sold - total_bought (after creation)
+            # This reverses all transactions to find what was seeded
+            original_holdings = {}
+            for s in stocks:
+                if s.quantity and s.quantity > 0:
+                    original_holdings[s.ticker.upper()] = float(s.quantity)
+            for txn in valid_txns:
+                tk = txn.ticker.upper()
+                tt = txn.transaction_type.lower()
+                if tt == 'sell':
+                    # Selling reduces current holdings, so original had more
                     original_holdings[tk] = original_holdings.get(tk, 0) + float(txn.quantity)
-                
-                # Look up historical prices on creation date
-                initial_mcd = 0.0
-                price_details = {}
-                for ticker, qty in original_holdings.items():
-                    hist_price = calc.get_historical_price(ticker, creation_date)
-                    if hist_price and hist_price > 0:
-                        initial_mcd += qty * hist_price
-                        price_details[ticker] = {'qty': qty, 'price': round(hist_price, 2), 'value': round(qty * hist_price, 2)}
+                elif tt in ('buy', 'initial'):
+                    # Buying increases current holdings, so original had less
+                    original_holdings[tk] = original_holdings.get(tk, 0) - float(txn.quantity)
+            
+            # Remove tickers with qty <= 0 (stock was entirely bought after creation)
+            original_holdings = {k: v for k, v in original_holdings.items() if v > 0.001}
+            
+            # Step 3: Look up historical prices on creation date for seeded stocks
+            initial_mcd = 0.0
+            price_details = {}
+            for ticker, qty in original_holdings.items():
+                hist_price = calc.get_historical_price(ticker, creation_date)
+                if hist_price and hist_price > 0:
+                    initial_mcd += qty * hist_price
+                    price_details[ticker] = {'qty': round(qty, 4), 'price': round(hist_price, 2), 'value': round(qty * hist_price, 2)}
+                else:
+                    # Fallback: use purchase_price from Stock table
+                    stock_obj = next((s for s in stocks if s.ticker.upper() == ticker), None)
+                    pp = float(stock_obj.purchase_price) if stock_obj and stock_obj.purchase_price else 0
+                    if pp > 0:
+                        initial_mcd += qty * pp
+                        price_details[ticker] = {'qty': round(qty, 4), 'price': round(pp, 2), 'value': round(qty * pp, 2), 'source': 'purchase_price'}
+            
+            # Step 4: Replay ALL transactions from the initial seeded MCD
+            mcd = initial_mcd
+            cp = 0.0
+            mcd_timeline = [(creation_date, mcd, cp)]
+            
+            for txn in valid_txns:
+                val = float(txn.quantity) * float(txn.price)
+                tt = txn.transaction_type.lower()
+                if tt in ('buy', 'initial'):
+                    if cp >= val:
+                        cp -= val
                     else:
-                        # Fallback: use purchase_price from Stock table
-                        stock_obj = next((s for s in stocks if s.ticker.upper() == ticker), None)
-                        pp = float(stock_obj.purchase_price) if stock_obj and stock_obj.purchase_price else 0
-                        if pp > 0:
-                            initial_mcd += qty * pp
-                            price_details[ticker] = {'qty': qty, 'price': round(pp, 2), 'value': round(qty * pp, 2), 'source': 'purchase_price'}
-                
-                # Now replay sells/dividends from that initial MCD
-                mcd = initial_mcd
-                cp = 0.0
-                mcd_timeline = [(creation_date, mcd, cp)]
-                
-                for txn in valid_txns:
-                    val = float(txn.quantity) * float(txn.price)
-                    tt = txn.transaction_type.lower()
-                    if tt == 'sell':
-                        cp += val
-                    elif tt == 'dividend':
-                        cp += val
-                    txn_date = txn.timestamp.date() if txn.timestamp else dt_date.min
-                    mcd_timeline.append((txn_date, mcd, cp))
-                
-                final_mcd = mcd
-                final_cp = cp
-                user_result['source'] = 'seeded_bot_historical_prices'
-                user_result['creation_date'] = str(creation_date)
+                        new_capital = val - cp
+                        cp = 0
+                        mcd += new_capital
+                elif tt == 'sell':
+                    cp += val
+                elif tt == 'dividend':
+                    cp += val
+                txn_date = txn.timestamp.date() if txn.timestamp else dt_date.min
+                mcd_timeline.append((txn_date, mcd, cp))
+            
+            final_mcd = mcd
+            final_cp = cp
+            user_result['source'] = 'unified_replay'
+            user_result['creation_date'] = str(creation_date)
+            user_result['seeded_holdings'] = len(original_holdings)
+            user_result['seeded_mcd'] = round(initial_mcd, 2)
+            if price_details:
                 user_result['price_details'] = price_details
-                user_result['transaction_count'] = len(valid_txns)
+            user_result['transaction_count'] = len(valid_txns)
             
             user_result['new_mcd'] = round(final_mcd, 2)
             user_result['new_cp'] = round(final_cp, 2)
