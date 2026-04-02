@@ -8098,6 +8098,14 @@ def apply_mcd():
         if not data or 'users' not in data:
             return jsonify({'error': 'POST body must contain "users" array'}), 400
         
+        from sqlalchemy import text
+        
+        # Start with a completely clean session
+        _nuke_session()
+        
+        # Override statement timeout to 60s for this heavy-write endpoint
+        db.session.execute(text("SET statement_timeout = '60s'"))
+        
         results = []
         for entry in data['users']:
             uid = entry['user_id']
@@ -8111,14 +8119,11 @@ def apply_mcd():
                 d = dt_date.fromisoformat(item[0])
                 parsed_timeline.append((d, float(item[1]), float(item[2])))
             
-            # Use raw SQL to guarantee writes persist (ORM objects can detach with NullPool)
-            from sqlalchemy import text
-            
             # Get current values for reporting
-            user_row = db_retry(lambda: db.session.execute(
+            user_row = db.session.execute(
                 text("SELECT username, max_cash_deployed, cash_proceeds FROM \"user\" WHERE id = :uid"),
                 {'uid': uid}
-            ).fetchone())
+            ).fetchone()
             if not user_row:
                 results.append({'user_id': uid, 'error': 'not found'})
                 continue
