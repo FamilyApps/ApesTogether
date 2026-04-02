@@ -156,8 +156,34 @@ class PortfolioPerformanceCalculator:
                             logger.warning(f"Invalid price for {ticker}: {price_str}")
                     
                     logger.info(f"✅ Bulk Quotes API: Fetched {len(chunk)} tickers, extracted {prices_extracted} valid prices")
+                    
+                    # Log bulk API call
+                    try:
+                        from models import AlphaVantageAPILog, db as _db
+                        api_log = AlphaVantageAPILog(
+                            endpoint='REALTIME_BULK_QUOTES',
+                            symbol=f'BULK({len(chunk)})',
+                            response_status='success',
+                            response_time_ms=None
+                        )
+                        _db.session.add(api_log)
+                        _db.session.commit()
+                    except Exception:
+                        pass
                 else:
                     logger.warning(f"❌ Bulk Quotes API failed - Response: {data}")
+                    try:
+                        from models import AlphaVantageAPILog, db as _db
+                        api_log = AlphaVantageAPILog(
+                            endpoint='REALTIME_BULK_QUOTES',
+                            symbol=f'BULK({len(chunk)})',
+                            response_status='error',
+                            response_time_ms=None
+                        )
+                        _db.session.add(api_log)
+                        _db.session.commit()
+                    except Exception:
+                        pass
             
             return result
             
