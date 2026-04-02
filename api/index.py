@@ -7867,10 +7867,11 @@ def recalc_mcd():
         mode = request.args.get('mode', 'audit')
         single_user_id = request.args.get('user_id')
         
+        # Use db_retry to handle stale SSL connections on Vercel cold starts
         if single_user_id:
-            users = User.query.filter_by(id=int(single_user_id)).all()
+            users = db_retry(lambda: User.query.filter_by(id=int(single_user_id)).all())
         else:
-            users = User.query.all()
+            users = db_retry(lambda: User.query.all())
         
         results = []
         total_snapshots_fixed = 0
@@ -7886,15 +7887,16 @@ def recalc_mcd():
             }
             
             # Get all transactions sorted chronologically
-            txns = Transaction.query.filter_by(user_id=user.id)\
-                .order_by(Transaction.timestamp.asc()).all()
+            uid = user.id
+            txns = db_retry(lambda: Transaction.query.filter_by(user_id=uid)\
+                .order_by(Transaction.timestamp.asc()).all())
             
             valid_txns = [t for t in txns if t.transaction_type and 
                          t.transaction_type.lower() in ('buy', 'sell', 'initial', 'dividend')]
             buy_txns = [t for t in valid_txns if t.transaction_type.lower() in ('buy', 'initial')]
             sell_txns = [t for t in valid_txns if t.transaction_type.lower() == 'sell']
             
-            stocks = Stock.query.filter_by(user_id=user.id).all()
+            stocks = db_retry(lambda: Stock.query.filter_by(user_id=uid).all())
             
             # === UNIFIED STRATEGY for all users ===
             # Step 1: Determine creation date
@@ -7987,10 +7989,10 @@ def recalc_mcd():
             user_result['cp_changed'] = abs(user_result['old_cp'] - final_cp) > 0.01
             
             # Now update snapshots with correct historical values
-            snapshots = PortfolioSnapshot.query.filter_by(user_id=user.id)\
-                .order_by(PortfolioSnapshot.date.asc()).all()
-            intraday_snaps = PortfolioSnapshotIntraday.query.filter_by(user_id=user.id)\
-                .order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
+            snapshots = db_retry(lambda: PortfolioSnapshot.query.filter_by(user_id=uid)\
+                .order_by(PortfolioSnapshot.date.asc()).all())
+            intraday_snaps = db_retry(lambda: PortfolioSnapshotIntraday.query.filter_by(user_id=uid)\
+                .order_by(PortfolioSnapshotIntraday.timestamp.asc()).all())
             
             snap_fixes = 0
             intraday_fixes = 0
@@ -8048,7 +8050,7 @@ def recalc_mcd():
             if mode == 'fix' and needs_fix:
                 user.max_cash_deployed = final_mcd
                 user.cash_proceeds = final_cp
-                db.session.commit()  # Commit per-user to avoid Vercel timeout
+                db_retry(lambda: db.session.commit())  # Commit per-user to avoid Vercel timeout
             
             results.append(user_result)
         
