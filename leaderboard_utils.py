@@ -458,36 +458,33 @@ def get_last_market_day():
     else:
         return today  # Monday-Friday
 
-def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
+def _compute_all_user_metrics(period='YTD'):
     """
-    Calculate leaderboard data using calculate_portfolio_performance (single source of truth).
+    Compute performance metrics for ALL users in a single pass.
     
-    This uses the SAME Modified Dietz calculation as the portfolio chart endpoint,
-    guaranteeing that leaderboard %, sparklines, and portfolio page all match exactly.
+    This is the O(n) single-pass core: loops users once, computes performance,
+    cap percentages, subscriber count, and trade frequency for each.
+    Returns the full list (unfiltered, unsorted) so callers can filter by category.
     
-    Called at cache-build time (market close cron) — runs once, not per request.
-    For 10k users this is ~10k calls but it's a background job with no latency constraints.
-    
-    Args:
-        period: Time period for performance calculation
-        limit: Number of top users to return
-        category: 'all', 'small_cap', or 'large_cap' for filtering
+    Called once per period by update_leaderboard_cache, then filtered 3x by category.
     """
     from datetime import datetime, date, timedelta
-    import json
     from performance_calculator import calculate_portfolio_performance, get_period_dates
+    from models import Subscription, Transaction
+    import time as _time
     
-    # Get today's date for calculating recent trades
+    _t0 = _time.time()
     today = get_last_market_day()
+    thirty_days_ago = today - timedelta(days=30)
     
-    # Get all users — use raw SQL to avoid ORM session issues
+    # Clean session before starting
     try:
-        db.session.rollback()  # Clear any prior aborted transaction
+        db.session.rollback()
     except Exception:
         pass
     
     users = User.query.all()
-    leaderboard_data = []
+    all_metrics = []
     first_error = None
     error_count = 0
     
@@ -509,7 +506,7 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
         if not latest_snapshot:
             continue
         
-        # Use the SAME performance calculator as the portfolio chart endpoint
+        # Performance calculation (single source of truth)
         try:
             start_date, end_date = get_period_dates(period, user_id=user.id)
             result = calculate_portfolio_performance(
@@ -541,17 +538,10 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
                 pass
             continue
         
-        # Calculate market cap percentages using existing stock info
+        # Cap percentages (computed once, used for category filtering)
         small_cap_percent, large_cap_percent = calculate_portfolio_cap_percentages(user.id)
         
-        # Apply category filter
-        if category == 'small_cap' and small_cap_percent < 60:
-            continue
-        elif category == 'large_cap' and large_cap_percent < 60:
-            continue
-        
-        # Calculate subscriber count (real + gifted)
-        from models import Subscription
+        # Subscriber count (real + gifted)
         subscriber_count = Subscription.query.filter_by(
             subscribed_to_id=user.id, 
             status='active'
@@ -564,9 +554,7 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
         except Exception:
             pass
         
-        # Calculate average trades per week (last 30 days)
-        from models import Transaction
-        thirty_days_ago = today - timedelta(days=30)
+        # Average trades per week (last 30 days)
         recent_trades = Transaction.query.filter(
             Transaction.user_id == user.id,
             Transaction.timestamp >= thirty_days_ago
@@ -574,39 +562,66 @@ def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
         avg_trades_per_day = round(recent_trades / 30, 1)
         avg_trades_per_week = round(avg_trades_per_day * 7, 1)
         
-        # Get current portfolio value from latest snapshot
-        current_value = latest_snapshot.total_value if latest_snapshot else 0.0
-            
-        portfolio_value = float(current_value)
+        # Portfolio value from latest snapshot
+        portfolio_value = float(latest_snapshot.total_value) if latest_snapshot else 0.0
         performance_percent = float(performance_percent)
-        small_cap_percent = float(small_cap_percent) if small_cap_percent is not None else 0.0
-        large_cap_percent = float(large_cap_percent) if large_cap_percent is not None else 0.0
+        small_cap_pct = float(small_cap_percent) if small_cap_percent is not None else 0.0
+        large_cap_pct = float(large_cap_percent) if large_cap_percent is not None else 0.0
         subscription_price = float(user.subscription_price) if user.subscription_price is not None else 4.0
         
-        leaderboard_data.append({
+        all_metrics.append({
             'user_id': user.id,
             'username': user.username,
             'performance_percent': round(performance_percent, 2),
             'sparkline_data': sparkline,
-            'small_cap_percent': round(small_cap_percent, 2),
-            'large_cap_percent': round(large_cap_percent, 2),
+            'small_cap_percent': round(small_cap_pct, 2),
+            'large_cap_percent': round(large_cap_pct, 2),
             'portfolio_value': round(portfolio_value, 2),
             'subscription_price': subscription_price,
             'subscriber_count': subscriber_count,
             'avg_trades_per_day': avg_trades_per_day,
             'avg_trades_per_week': avg_trades_per_week,
             'calculated_at': datetime.now().isoformat(),
-            'category': category
         })
     
-    # Log diagnostic info
+    elapsed = round(_time.time() - _t0, 2)
+    print(f"  Computed metrics for {len(all_metrics)}/{len(users)} users in {elapsed}s")
     if first_error:
-        print(f"  ⚠ FIRST ERROR for {period}_{category}: {first_error}")
+        print(f"  ⚠ FIRST ERROR for {period}: {first_error}")
         print(f"  ⚠ Total errors: {error_count}/{len(users)} users")
     
-    # Sort by performance and limit results
-    leaderboard_data.sort(key=lambda x: x['performance_percent'], reverse=True)
-    return leaderboard_data[:limit]
+    return all_metrics
+
+
+def _filter_and_sort(all_metrics, category='all', limit=20):
+    """
+    Filter precomputed user metrics by category and return top N sorted by performance.
+    O(n) filter + O(n log n) sort — no DB queries.
+    """
+    if category == 'small_cap':
+        filtered = [m for m in all_metrics if m['small_cap_percent'] >= 60]
+    elif category == 'large_cap':
+        filtered = [m for m in all_metrics if m['large_cap_percent'] >= 60]
+    else:
+        filtered = list(all_metrics)
+    
+    # Tag with category for backward compatibility
+    for entry in filtered:
+        entry = {**entry, 'category': category}
+    
+    filtered.sort(key=lambda x: x['performance_percent'], reverse=True)
+    return filtered[:limit]
+
+
+def calculate_leaderboard_data(period='YTD', limit=20, category='all'):
+    """
+    Calculate leaderboard data using calculate_portfolio_performance (single source of truth).
+    
+    LEGACY wrapper — kept for backward compatibility.
+    For efficient multi-category builds, use _compute_all_user_metrics + _filter_and_sort.
+    """
+    all_metrics = _compute_all_user_metrics(period)
+    return _filter_and_sort(all_metrics, category, limit)
 
 def generate_user_portfolio_chart(user_id, period):
     """
@@ -804,10 +819,14 @@ def update_leaderboard_cache(periods=None):
     Called at market close. Charts are NOT pre-generated here — they are generated
     on-demand via get_user_chart_data() when users view them.
     
+    OPTIMIZED: Computes user metrics ONCE per period, then filters by category.
+    Previous version computed metrics 3x per period (once per category).
+    
     Args:
         periods: List of periods to update. If None, updates all periods.
     """
     import json
+    import time as _time
     from datetime import datetime
     from models import db, LeaderboardCache
     from sqlalchemy import text
@@ -820,18 +839,34 @@ def update_leaderboard_cache(periods=None):
     _lb_errors = []
     
     for period in periods:
+        _tp = _time.time()
+        print(f"\n--- Computing metrics for period {period} ---")
+        
+        # Compute ALL user metrics ONCE per period
+        try:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            
+            all_metrics = _compute_all_user_metrics(period)
+        except Exception as e:
+            err_msg = f"{period}_compute: {str(e)[:200]}"
+            _lb_errors.append(err_msg)
+            print(f"Error computing metrics for {period}: {str(e)}")
+            import traceback
+            print(f"Full traceback: {traceback.format_exc()}")
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            continue
+        
+        # Filter by category and save to cache (no recomputation)
         for category in categories:
             try:
-                # Ensure clean session before each period/category calculation
-                try:
-                    db.session.rollback()
-                except Exception:
-                    pass
-                
-                print(f"Processing leaderboard cache for {period}_{category}...")
-                
-                leaderboard_data = calculate_leaderboard_data(period, 20, category)
-                print(f"  Calculated {len(leaderboard_data)} entries for {period}_{category}")
+                leaderboard_data = _filter_and_sort(all_metrics, category, 20)
+                print(f"  {period}_{category}: {len(leaderboard_data)} entries")
                 
                 if not leaderboard_data:
                     print(f"  ⚠ No leaderboard data for {period}_{category} - skipping")
@@ -841,7 +876,7 @@ def update_leaderboard_cache(periods=None):
                 leaderboard_data_json = json.dumps(leaderboard_data)
                 now = datetime.now()
                 
-                # Store JSON-only cache (no HTML pre-rendering)
+                # Store JSON-only cache
                 with db.engine.connect() as primary_conn:
                     with primary_conn.begin():
                         select_sql = text("SELECT id FROM leaderboard_cache WHERE period = :period")
@@ -876,7 +911,7 @@ def update_leaderboard_cache(periods=None):
             except Exception as e:
                 err_msg = f"{period}_{category}: {str(e)[:200]}"
                 _lb_errors.append(err_msg)
-                print(f"Error updating leaderboard cache for {period}_{category}: {str(e)}")
+                print(f"Error saving leaderboard cache for {period}_{category}: {str(e)}")
                 import traceback
                 print(f"Full traceback: {traceback.format_exc()}")
                 try:
@@ -884,6 +919,8 @@ def update_leaderboard_cache(periods=None):
                 except Exception:
                     pass
                 continue
+        
+        print(f"  Period {period} complete in {round(_time.time() - _tp, 2)}s")
     
     print(f"\n=== LEADERBOARD CACHE UPDATE COMPLETE ===")
     print(f"Updated {updated_count} leaderboard cache entries (JSON only, no chart pre-gen)")
