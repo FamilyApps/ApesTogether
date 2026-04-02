@@ -8422,12 +8422,20 @@ def diagnose_intraday():
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
-@app.route('/api/admin/run-migration', methods=['POST'])
+@app.route('/api/admin/run-migration', methods=['GET', 'POST'])
 def run_migration():
-    """One-time migration endpoint. Adds missing columns to existing tables."""
-    auth_error = verify_cron_request()
-    if auth_error:
-        return auth_error
+    """One-time migration endpoint. Adds missing columns to existing tables.
+    Accepts GET with ?secret=CRON_SECRET or POST with Authorization header."""
+    # Allow GET with ?secret= param for easy browser/PowerShell access
+    if request.method == 'GET':
+        expected = os.environ.get('CRON_SECRET')
+        provided = request.args.get('secret', '')
+        if not expected or provided != expected:
+            return jsonify({'error': 'Unauthorized — pass ?secret=YOUR_CRON_SECRET'}), 401
+    else:
+        auth_error = verify_cron_request()
+        if auth_error:
+            return auth_error
     
     results = []
     try:
