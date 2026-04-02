@@ -2781,13 +2781,14 @@ def alphavantage_usage():
 
         # Peak requests per minute over last 7 days
         # Group by truncated-to-minute timestamp, find the max count
+        from sqlalchemy import cast, Date, text as sa_text
         peak_rows = db.session.query(
-            func.date(AlphaVantageAPILog.timestamp).label('day'),
+            cast(AlphaVantageAPILog.timestamp, Date).label('day'),
             func.count().label('calls_in_min'),
         ).filter(
             AlphaVantageAPILog.timestamp >= seven_days_ago
         ).group_by(
-            func.strftime('%Y-%m-%d %H:%M', AlphaVantageAPILog.timestamp)
+            func.date_trunc('minute', AlphaVantageAPILog.timestamp)
         ).order_by(func.count().desc()).limit(20).all()
 
         # Build peak-per-day from the grouped results
