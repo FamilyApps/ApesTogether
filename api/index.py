@@ -8381,10 +8381,20 @@ def diagnose_intraday():
             stocks = Stock.query.filter_by(user_id=user.id).all()
             stock_info = [{'ticker': s.ticker, 'qty': float(s.quantity), 'purchase_price': float(s.purchase_price)} for s in stocks if s.quantity > 0]
             
+            from zoneinfo import ZoneInfo as _ZI
+            _UTC_TZ = _ZI('UTC')
+            _ET_TZ = _ZI('America/New_York')
+            
             snap_data = []
             for s in snaps:
+                # Timestamps stored in UTC; convert to ET for display
+                if s.timestamp:
+                    ts_et = s.timestamp.replace(tzinfo=_UTC_TZ).astimezone(_ET_TZ) if s.timestamp.tzinfo is None else s.timestamp.astimezone(_ET_TZ)
+                    time_str = ts_et.strftime('%I:%M %p ET')
+                else:
+                    time_str = '?'
                 snap_data.append({
-                    'time': s.timestamp.strftime('%I:%M %p') if s.timestamp else '?',
+                    'time': time_str,
                     'total_value': round(float(s.total_value), 2) if s.total_value else 0,
                     'stock_value': round(float(s.stock_value), 2) if s.stock_value else 0,
                     'cash_proceeds': round(float(s.cash_proceeds), 2) if s.cash_proceeds else 0,

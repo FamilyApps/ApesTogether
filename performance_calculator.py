@@ -133,29 +133,39 @@ def calculate_portfolio_performance(
                     continue
                 valid_minutes.add((hour, minute))
         
-        # Filter snapshots to only valid intervals in EST
+        # Filter snapshots to only valid intervals in ET
         MARKET_TZ = ZoneInfo('America/New_York')
+        UTC_TZ = ZoneInfo('UTC')
         filtered_intraday = []
         filtered_out = []
         
         for snap in intraday_snapshots:
             # Convert timestamp to ET
-            # NOTE: collect_intraday_data stores ET-naive timestamps (get_market_time()
-            # returns ET-aware, but PostgreSQL DateTime strips tzinfo and stores raw ET value).
-            # So naive timestamps here are ALREADY in ET — do NOT assume UTC.
+            # IMPORTANT: PostgreSQL DateTime (without timezone) stores UTC when given
+            # a timezone-aware datetime. get_market_time() returns ET-aware, but
+            # psycopg2 converts to UTC before storing in a naive column.
+            # So naive timestamps here are UTC — must convert to ET.
             if snap.timestamp.tzinfo is None:
-                # Treat as ET-naive (which is what the cron stores)
-                snap_time_est = snap.timestamp.replace(tzinfo=MARKET_TZ)
+                # Treat as UTC-naive, convert to ET
+                snap_time_est = snap.timestamp.replace(tzinfo=UTC_TZ).astimezone(MARKET_TZ)
             else:
                 snap_time_est = snap.timestamp.astimezone(MARKET_TZ)
             
-            # Check if this is a valid 15-minute interval
-            if (snap_time_est.hour, snap_time_est.minute) in valid_minutes:
+            # Check if this is within market hours (9:30 AM - 4:00 PM ET)
+            # Allow +/- 3 min tolerance for cron timing variance and force calls
+            snap_h, snap_m = snap_time_est.hour, snap_time_est.minute
+            in_market_hours = (
+                (snap_h == 9 and snap_m >= 27) or  # 9:27+ (tolerance for 9:30)
+                (10 <= snap_h <= 15) or             # 10:00 AM - 3:59 PM
+                (snap_h == 16 and snap_m <= 3)      # Up to 4:03 PM (tolerance for 4:00)
+            )
+            
+            if in_market_hours:
                 filtered_intraday.append(snap)
             else:
-                filtered_out.append(f"{snap_time_est.strftime('%H:%M')} ({snap_time_est.hour}, {snap_time_est.minute})")
+                filtered_out.append(f"{snap_time_est.strftime('%H:%M ET')} (stored as {snap.timestamp.strftime('%H:%M UTC')})")
         
-        logger.info(f"Filtered {len(intraday_snapshots)} intraday snapshots to {len(filtered_intraday)} valid 15-min intervals")
+        logger.info(f"Filtered {len(intraday_snapshots)} intraday snapshots to {len(filtered_intraday)} valid market-hours snapshots")
         if filtered_out:
             logger.info(f"Filtered OUT these times: {', '.join(filtered_out[:10])}")
         
@@ -165,7 +175,13 @@ def calculate_portfolio_performance(
             # Wrapper class to make intraday snapshots compatible with daily snapshot interface
             class IntradayWrapper:
                 def __init__(self, intraday_snap):
-                    self.date = intraday_snap.timestamp.date()
+                    # Timestamps are stored in UTC; convert to ET for date extraction
+                    ts = intraday_snap.timestamp
+                    if ts.tzinfo is None:
+                        ts_et = ts.replace(tzinfo=ZoneInfo('UTC')).astimezone(MARKET_TZ)
+                    else:
+                        ts_et = ts.astimezone(MARKET_TZ)
+                    self.date = ts_et.date()
                     self.timestamp = intraday_snap.timestamp
                     self.total_value = intraday_snap.total_value
                     self.stock_value = intraday_snap.stock_value or 0.0
@@ -458,11 +474,11 @@ def _generate_chart_points(
     
     if has_intraday:
         # For intraday periods (1D/5D): Generate point for each snapshot
-        from datetime import timezone as dt_timezone
+        from zoneinfo import ZoneInfo as _ZoneInfo
         
-        # Eastern Time is UTC-5 (EST) or UTC-4 (EDT)
-        # For now use UTC-4 for EDT (we're in daylight saving time through Nov 3)
-        ET = dt_timezone(timedelta(hours=-4))
+        # Use proper ZoneInfo for DST-safe ET conversion
+        ET = _ZoneInfo('America/New_York')
+        UTC_TZ = _ZoneInfo('UTC')
         
         _tloop = _time.time()
         for snapshot in snapshots:
@@ -472,12 +488,11 @@ def _generate_chart_points(
             # Format label with time for intraday (ensure Eastern Time), date only for daily close
             if hasattr(snapshot, 'is_intraday') and snapshot.is_intraday:
                 # Format timestamp as Eastern Time label
-                # NOTE: Database stores ET-naive timestamps (cron uses get_market_time()),
-                # so the raw value IS already in ET — no UTC→ET conversion needed.
+                # IMPORTANT: Database stores UTC (psycopg2 converts aware ET→UTC for naive column).
+                # Must convert back to ET for display.
                 ts = snapshot.timestamp
-                # Naive timestamps are already ET; just use directly for formatting
                 if ts.tzinfo is None:
-                    ts_et = ts  # Already ET
+                    ts_et = ts.replace(tzinfo=UTC_TZ).astimezone(ET)
                 else:
                     ts_et = ts.astimezone(ET)
                 date_str = ts_et.strftime('%I:%M %p')  # "09:30 AM" (compact for mobile)

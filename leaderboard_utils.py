@@ -680,8 +680,11 @@ def generate_user_portfolio_chart(user_id, period):
             first_value = float(intraday_snapshots[0].total_value)
             labels = []
             portfolio_pcts = []
+            from zoneinfo import ZoneInfo as _ZI
+            _UTC = _ZI('UTC')
             for snapshot in intraday_snapshots:
-                ts_et = snapshot.timestamp.astimezone(MARKET_TZ) if snapshot.timestamp.tzinfo else snapshot.timestamp.replace(tzinfo=MARKET_TZ)
+                # Timestamps stored in UTC; convert to ET for display
+                ts_et = snapshot.timestamp.astimezone(MARKET_TZ) if snapshot.timestamp.tzinfo else snapshot.timestamp.replace(tzinfo=_UTC).astimezone(MARKET_TZ)
                 labels.append(ts_et.strftime('%I:%M %p'))
                 if first_value > 0:
                     pct = ((float(snapshot.total_value) - first_value) / first_value) * 100
