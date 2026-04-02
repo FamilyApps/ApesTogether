@@ -189,18 +189,11 @@ def is_market_holiday(check_date=None):
 def verify_cron_request(secret_env_var='CRON_SECRET'):
     """Verify that a cron request is authorized.
     
-    GET requests: must have x-vercel-cron: 1 header (set by Vercel cron scheduler)
-    POST requests: must have Authorization: Bearer <secret> header
+    Vercel crons send GET requests with Authorization: Bearer <CRON_SECRET>.
+    Also accepts POST with Authorization or X-Cron-Secret headers.
     
     Returns None if authorized, or a (jsonify response, status_code) tuple if not.
     """
-    if request.method == 'GET':
-        if request.headers.get('x-vercel-cron') == '1':
-            return None  # Authorized — Vercel cron
-        logger.warning(f"Unauthorized GET cron attempt on {request.path} (missing x-vercel-cron header)")
-        return jsonify({'error': 'Unauthorized'}), 401
-    
-    # POST: require Bearer token or Cron Secret header
     expected_token = os.environ.get(secret_env_var)
     if not expected_token:
         logger.error(f"{secret_env_var} not configured")
@@ -211,12 +204,13 @@ def verify_cron_request(secret_env_var='CRON_SECRET'):
     
     is_bearer = auth_header.startswith('Bearer ') and auth_header[7:] == expected_token
     is_cron_header = cron_secret and cron_secret == expected_token
+    is_vercel_cron = request.headers.get('x-vercel-cron') == '1'
     
-    if not (is_bearer or is_cron_header):
-        logger.warning(f"Unauthorized POST cron attempt on {request.path}")
-        return jsonify({'error': 'Unauthorized'}), 401
+    if is_bearer or is_cron_header or is_vercel_cron:
+        return None  # Authorized
     
-    return None  # Authorized
+    logger.warning(f"Unauthorized {request.method} cron attempt on {request.path}")
+    return jsonify({'error': 'Unauthorized'}), 401
 
 # =============================================================================
 
