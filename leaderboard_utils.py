@@ -505,7 +505,6 @@ def _compute_all_user_metrics(period='YTD'):
             continue
         
         if not latest_snapshot:
-            print(f"  SKIP {user.username}: no snapshots")
             skipped.append({'username': user.username, 'reason': 'no_snapshots'})
             continue
         
@@ -517,13 +516,11 @@ def _compute_all_user_metrics(period='YTD'):
                 include_chart_data=True, period=period
             )
             if not result:
-                print(f"  SKIP {user.username}: calculate_portfolio_performance returned None")
                 skipped.append({'username': user.username, 'reason': 'perf_returned_none', 'dates': f'{start_date} to {end_date}'})
                 continue
             
             performance_percent = result.get('portfolio_return', 0.0)
             if performance_percent is None:
-                print(f"  SKIP {user.username}: portfolio_return is None")
                 skipped.append({'username': user.username, 'reason': 'portfolio_return_none'})
                 continue
             
