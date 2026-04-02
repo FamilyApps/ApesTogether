@@ -8524,6 +8524,25 @@ def run_migration():
                 db.session.rollback()
                 results.append(f"{table}.{column}: ERROR - {str(e)}")
         
+        # Step 3: Enable RLS on all public tables
+        rls_results = []
+        try:
+            all_tables = db.session.execute(text(
+                "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+            )).fetchall()
+            for (tbl,) in all_tables:
+                try:
+                    db.session.execute(text(f'ALTER TABLE "{tbl}" ENABLE ROW LEVEL SECURITY'))
+                    db.session.commit()
+                    rls_results.append(f"{tbl}: RLS enabled")
+                except Exception as e:
+                    db.session.rollback()
+                    rls_results.append(f"{tbl}: RLS error - {str(e)}")
+            results.append({'rls': rls_results})
+        except Exception as e:
+            db.session.rollback()
+            results.append(f"RLS step error: {str(e)}")
+        
         return jsonify({'success': True, 'results': results})
     except Exception as e:
         import traceback
