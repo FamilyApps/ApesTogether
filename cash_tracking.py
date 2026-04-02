@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # Push notification integration flag - set to True when Firebase is configured
 PUSH_NOTIFICATIONS_ENABLED = True
 
-def process_transaction(db, user_id, ticker, quantity, price, transaction_type, timestamp=None, position_before_qty=None):
+def process_transaction(db, user_id, ticker, quantity, price, transaction_type, timestamp=None, position_before_qty=None, price_source=None):
     """
     Process a transaction and update user's cash tracking fields.
     
@@ -48,6 +48,7 @@ def process_transaction(db, user_id, ticker, quantity, price, transaction_type, 
         price: Price per share
         transaction_type: 'buy', 'sell', or 'initial'
         timestamp: Transaction timestamp (default: now)
+        price_source: Where the price came from ('cached', 'bulk_api', 'single_api', 'manual', 'email')
     
     Returns:
         dict with updated max_cash_deployed and cash_proceeds
@@ -111,7 +112,8 @@ def process_transaction(db, user_id, ticker, quantity, price, transaction_type, 
         quantity=quantity,
         price=price,
         transaction_type=transaction_type,
-        timestamp=timestamp or datetime.utcnow()
+        timestamp=timestamp or datetime.utcnow(),
+        price_source=price_source
     )
     db.session.add(transaction)
     

@@ -1149,6 +1149,7 @@ const SystemHealth = ({ api }) => {
           { key: 'ticker', label: 'Ticker', render: v => <span style={{ fontWeight: 600 }}>{v}</span> },
           { key: 'quantity', label: 'Qty' },
           { key: 'value', label: 'Value', render: v => `$${(v || 0).toFixed(2)}` },
+          { key: 'price_source', label: 'Source', render: v => <Badge text={v || '—'} color={v === 'bulk_api' ? 'var(--green)' : v === 'cached' ? 'var(--blue)' : v === 'single_api' ? 'var(--yellow)' : v === 'manual' ? 'var(--accent)' : v === 'email' ? 'var(--purple, #a855f7)' : 'var(--text-muted)'} /> },
         ]} data={trades?.trades || []} />
         {trades && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10 }}>Showing {trades.trades?.length || 0} of {trades.total || 0} total trades</div>}
       </Card>

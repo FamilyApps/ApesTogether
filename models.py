@@ -83,6 +83,7 @@ class Transaction(db.Model):
     price = db.Column(db.Float, nullable=False)
     transaction_type = db.Column(db.String(10), nullable=False)  # 'buy' or 'sell'
     timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    price_source = db.Column(db.String(20), nullable=True)  # 'cached', 'bulk_api', 'single_api', 'manual', 'email'
     
     # Relationship with User
     

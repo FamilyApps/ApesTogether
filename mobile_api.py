@@ -4963,6 +4963,7 @@ def bot_trade_history():
                 'type': txn.transaction_type,
                 'timestamp': txn.timestamp.isoformat() if txn.timestamp else None,
                 'value': round(txn.quantity * txn.price, 2) if txn.price else 0,
+                'price_source': getattr(txn, 'price_source', None) or '—',
             })
         
         return jsonify({
