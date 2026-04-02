@@ -4928,41 +4928,91 @@ def bot_cron_health():
         
         jobs = []
         
-        # Market Close
+        # Helper: determine if today is a weekday (market day)
+        is_weekday = now.weekday() < 5  # Mon-Fri
+        
+        # Helper: get last market day
+        def get_last_market_day():
+            d = today
+            if now.hour < 21:  # Before 9 PM UTC (5 PM ET) — market close hasn't run yet today
+                d = d - timedelta(days=1)
+            while d.weekday() >= 5:  # Skip weekends
+                d -= timedelta(days=1)
+            return d
+        
+        last_market_day = get_last_market_day()
+        
+        # Market Close — should have a snapshot for the last market day
         snap_date = last_snap.date.isoformat() if last_snap else None
-        snap_stale = last_snap and (today - last_snap.date).days > 2
+        if last_snap:
+            days_since = (last_market_day - last_snap.date).days
+            if days_since <= 0:
+                snap_status = 'ok'
+            elif days_since <= 1:
+                snap_status = 'warning'  # Missed 1 day
+            else:
+                snap_status = 'error'    # Missed 2+ days
+        else:
+            snap_status = 'error'
         jobs.append({
             'name': 'Market Close Snapshots',
-            'schedule': '4:30 PM ET weekdays',
+            'schedule': '4:05 PM ET weekdays',
             'last_run': snap_date,
-            'status': 'error' if snap_stale else ('ok' if last_snap else 'unknown'),
+            'status': snap_status,
         })
         
-        # Intraday Collection
+        # Intraday Collection — should run every 15 min during market hours
         intraday_ts = last_intraday.timestamp.isoformat() if last_intraday and hasattr(last_intraday, 'timestamp') and last_intraday.timestamp else None
+        if last_intraday and last_intraday.timestamp:
+            # During market hours (Mon-Fri 13:30-20:00 UTC), stale if >30 min old
+            hours_since = (now - last_intraday.timestamp).total_seconds() / 3600
+            in_market_hours = is_weekday and 13.5 <= now.hour + now.minute/60 <= 20.5
+            if in_market_hours:
+                intraday_status = 'ok' if hours_since < 0.5 else ('warning' if hours_since < 1 else 'error')
+            else:
+                # Outside market hours — ok if last run was today or last market day
+                intraday_status = 'ok' if last_intraday.timestamp.date() >= last_market_day else 'warning'
+        else:
+            intraday_status = 'error' if is_weekday else 'unknown'
         jobs.append({
             'name': 'Intraday Collection',
-            'schedule': 'Every 30min during market hours',
+            'schedule': 'Every 15min during market hours',
             'last_run': intraday_ts,
-            'status': 'ok' if intraday_ts else 'unknown',
+            'status': intraday_status,
         })
         
-        # Bot Trading Waves
+        # Bot Trading Waves — should trade on market days
         bot_ts = last_bot_trade.timestamp.isoformat() if last_bot_trade and last_bot_trade.timestamp else None
+        if last_bot_trade and last_bot_trade.timestamp:
+            days_since_trade = (today - last_bot_trade.timestamp.date()).days
+            if days_since_trade <= 0:
+                bot_status = 'ok'
+            elif days_since_trade <= 1:
+                # Only warn on weekdays (no trades expected on weekends)
+                bot_status = 'ok' if not is_weekday else 'warning'
+            else:
+                bot_status = 'error'
+        else:
+            bot_status = 'error' if is_weekday else 'unknown'
         jobs.append({
             'name': 'Bot Trading Waves',
             'schedule': '9:45, 10:45, 1:15, 3:30 ET',
             'last_run': bot_ts,
-            'status': 'ok' if bot_ts else 'unknown',
+            'status': bot_status,
         })
         
         # Pending Trade Retry
         routed_ts = last_routed.routed_at.isoformat() if last_routed and last_routed.routed_at else None
+        if last_routed and last_routed.routed_at:
+            days_since_route = (today - last_routed.routed_at.date()).days
+            pending_status = 'ok' if days_since_route <= 3 else 'warning'
+        else:
+            pending_status = 'unknown'
         jobs.append({
             'name': 'Pending Trade Retry',
             'schedule': 'Every 5min (Google Apps Script)',
             'last_run': routed_ts,
-            'status': 'ok' if routed_ts else 'unknown',
+            'status': pending_status,
         })
         
         return jsonify({'jobs': jobs, 'server_time': now.isoformat()})
