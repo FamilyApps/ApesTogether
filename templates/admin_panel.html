@@ -920,6 +920,7 @@ const UsersPage = ({ api }) => {
 const PlatformGrowth = ({ api }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [clickFilter, setClickFilter] = useState('all'); // 'all', 'apple', 'android'
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -934,9 +935,21 @@ const PlatformGrowth = ({ api }) => {
   const s = data?.summary || {};
   const signups = data?.daily_signups || [];
   const trades = data?.trade_volume || [];
+  const pageViews = data?.page_views || [];
+  const linkClicks = data?.link_clicks || [];
   const maxNew = Math.max(...signups.map(r => r.new), 1);
   const maxCum = Math.max(...signups.map(r => r.cumulative), 1);
   const maxTrade = Math.max(...trades.map(r => r.trades), 1);
+  const maxPV = Math.max(...pageViews.map(r => r.views), 1);
+  const maxLC = Math.max(...linkClicks.map(r => clickFilter === 'apple' ? r.apple : clickFilter === 'android' ? r.android : r.total), 1);
+
+  const FilterBtn = ({ value, label }) => (
+    <button onClick={() => setClickFilter(value)} style={{
+      padding: '3px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 11, cursor: 'pointer',
+      background: clickFilter === value ? 'var(--accent)' : 'var(--bg-elevated)',
+      color: clickFilter === value ? '#fff' : 'var(--text-secondary)', fontWeight: clickFilter === value ? 600 : 400,
+    }}>{label}</button>
+  );
 
   return (
     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -948,15 +961,25 @@ const PlatformGrowth = ({ api }) => {
         <Btn small variant="secondary" onClick={load}>{Icons.refresh} Refresh</Btn>
       </div>
 
-      {/* Summary cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
+      {/* Summary cards — row 1: Users */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
         <MetricCard label="Total Users" value={s.total_users || 0} color="var(--accent)" />
-        <MetricCard label="Humans" value={s.humans || 0} color="var(--blue)" />
+        <MetricCard label="Real Accounts" value={s.humans || 0} color="var(--blue)" />
         <MetricCard label="Bots" value={s.bots || 0} color="var(--yellow, #f59e0b)" />
-        <MetricCard label="Unique Tickers" value={s.unique_tickers || 0} color="var(--text-primary)" />
-        <MetricCard label="Total Trades" value={s.total_trades || 0} color="var(--green)" />
+        <MetricCard label="Active Traders (7d)" value={s.active_traders_7d || 0} color="var(--green)" />
+        <MetricCard label="Active Traders (30d)" value={s.active_traders_30d || 0} color="var(--green)" />
         <MetricCard label="Active Subs" value={s.active_subscriptions || 0} color="var(--accent)" />
-        <MetricCard label="Waitlist" value={s.waitlist || 0} color="var(--blue)" />
+      </div>
+
+      {/* Summary cards — row 2: Engagement */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
+        <MetricCard label="Total Trades" value={s.total_trades || 0} color="var(--text-primary)" />
+        <MetricCard label="Unique Tickers" value={s.unique_tickers || 0} color="var(--text-primary)" />
+        <MetricCard label="Page Views (all)" value={s.total_page_views || 0} color="var(--blue)" />
+        <MetricCard label="Unique Visitors (30d)" value={s.unique_visitors_30d || 0} color="var(--blue)" />
+        <MetricCard label="Apple Clicks" value={s.apple_clicks || 0} sub="App Store" color="var(--text-primary)" />
+        <MetricCard label="Android Clicks" value={s.android_clicks || 0} sub="Google Play" color="var(--green)" />
+        <MetricCard label="Waitlist" value={s.waitlist || 0} color="var(--accent)" />
       </div>
 
       {/* Cumulative user growth line chart */}
@@ -965,21 +988,18 @@ const PlatformGrowth = ({ api }) => {
         {signups.length === 0 ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No data yet</div> : (
           <div style={{ position: 'relative', height: 180 }}>
             <svg width="100%" height="100%" viewBox={`0 0 ${signups.length * 24} 180`} preserveAspectRatio="none" style={{ overflow: 'visible' }}>
-              {/* Cumulative total line */}
               <polyline fill="none" stroke="var(--accent)" strokeWidth="2"
                 points={signups.map((r, i) => `${i * 24},${180 - (r.cumulative / maxCum) * 160}`).join(' ')} />
-              {/* Humans area */}
               <polyline fill="none" stroke="var(--blue)" strokeWidth="1.5" strokeDasharray="4 2"
                 points={signups.map((r, i) => `${i * 24},${180 - (r.cum_humans / maxCum) * 160}`).join(' ')} />
-              {/* Bots area */}
               <polyline fill="none" stroke="var(--yellow, #f59e0b)" strokeWidth="1.5" strokeDasharray="4 2"
                 points={signups.map((r, i) => `${i * 24},${180 - (r.cum_bots / maxCum) * 160}`).join(' ')} />
             </svg>
             <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>
               <span><span style={{ display: 'inline-block', width: 12, height: 2, background: 'var(--accent)', marginRight: 4, verticalAlign: 'middle' }}></span>Total</span>
-              <span><span style={{ display: 'inline-block', width: 12, height: 2, background: 'var(--blue)', marginRight: 4, verticalAlign: 'middle', borderTop: '1px dashed var(--blue)' }}></span>Humans</span>
-              <span><span style={{ display: 'inline-block', width: 12, height: 2, background: 'var(--yellow, #f59e0b)', marginRight: 4, verticalAlign: 'middle', borderTop: '1px dashed var(--yellow, #f59e0b)' }}></span>Bots</span>
-              <span style={{ marginLeft: 'auto' }}>{signups.length > 0 ? signups[0].date.slice(5) : ''} → {signups.length > 0 ? signups[signups.length - 1].date.slice(5) : ''}</span>
+              <span><span style={{ display: 'inline-block', width: 12, height: 2, background: 'var(--blue)', marginRight: 4, verticalAlign: 'middle' }}></span>Humans</span>
+              <span><span style={{ display: 'inline-block', width: 12, height: 2, background: 'var(--yellow, #f59e0b)', marginRight: 4, verticalAlign: 'middle' }}></span>Bots</span>
+              <span style={{ marginLeft: 'auto' }}>{signups[0]?.date?.slice(5)} → {signups[signups.length - 1]?.date?.slice(5)}</span>
             </div>
           </div>
         )}
@@ -987,14 +1007,14 @@ const PlatformGrowth = ({ api }) => {
 
       {/* Daily signups bar chart */}
       <Card>
-        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Daily Signups</div>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Daily Signups (New Real Accounts vs Bots)</div>
         {signups.length === 0 ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No data yet</div> : (
           <div style={{ display: 'flex', gap: 3, alignItems: 'flex-end', height: 100, overflow: 'hidden' }}>
             {signups.slice(-60).map((row, i) => {
               const pct = (row.new / maxNew) * 100;
               const humanPct = row.new > 0 ? (row.humans / row.new) * 100 : 0;
               return (
-                <div key={i} title={`${row.date}: ${row.new} (${row.humans}h + ${row.bots}b)`}
+                <div key={i} title={`${row.date}: ${row.new} (${row.humans} real + ${row.bots} bots)`}
                   style={{ flex: 1, minWidth: 4, maxWidth: 16, height: `${Math.max(pct, 4)}%`, borderRadius: 2, position: 'relative', overflow: 'hidden', cursor: 'default' }}>
                   <div style={{ position: 'absolute', bottom: 0, width: '100%', height: `${humanPct}%`, background: 'var(--blue)', borderRadius: '0 0 2px 2px' }} />
                   <div style={{ position: 'absolute', top: 0, width: '100%', height: `${100 - humanPct}%`, background: 'var(--yellow, #f59e0b)', borderRadius: '2px 2px 0 0' }} />
@@ -1004,24 +1024,63 @@ const PlatformGrowth = ({ api }) => {
           </div>
         )}
         <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>
-          <span><span style={{ display: 'inline-block', width: 8, height: 8, background: 'var(--blue)', borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }}></span>Humans</span>
+          <span><span style={{ display: 'inline-block', width: 8, height: 8, background: 'var(--blue)', borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }}></span>Real Accounts</span>
           <span><span style={{ display: 'inline-block', width: 8, height: 8, background: 'var(--yellow, #f59e0b)', borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }}></span>Bots</span>
           <span style={{ marginLeft: 'auto' }}>Last {Math.min(signups.length, 60)} days</span>
         </div>
       </Card>
 
-      {/* Trade volume chart (last 30 days) */}
-      <Card>
-        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Trade Volume (30 days)</div>
-        {trades.length === 0 ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No trades yet</div> : (
-          <div style={{ display: 'flex', gap: 4, alignItems: 'flex-end', height: 100 }}>
-            {trades.map((row, i) => {
-              const pct = (row.trades / maxTrade) * 100;
-              return (
+      {/* Two-column: Trade volume + Page views */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Card>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Trade Volume (30d)</div>
+          {trades.length === 0 ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No trades yet</div> : (
+            <div style={{ display: 'flex', gap: 3, alignItems: 'flex-end', height: 90 }}>
+              {trades.map((row, i) => (
                 <div key={i} title={`${row.date}: ${row.trades} trades`}
                   style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                  <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{row.trades > 0 ? row.trades : ''}</div>
-                  <div style={{ width: '100%', height: `${Math.max(pct, 3)}%`, background: 'var(--accent)', borderRadius: 3, transition: 'height .3s' }} />
+                  <div style={{ width: '100%', height: `${Math.max((row.trades / maxTrade) * 100, 3)}%`, background: 'var(--accent)', borderRadius: 3 }} />
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+        <Card>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Landing Page Views (30d)</div>
+          {pageViews.length === 0 ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No data yet — tracking starts now</div> : (
+            <div style={{ display: 'flex', gap: 3, alignItems: 'flex-end', height: 90 }}>
+              {pageViews.map((row, i) => (
+                <div key={i} title={`${row.date}: ${row.views} views (${row.unique} unique)`}
+                  style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                  <div style={{ width: '100%', height: `${Math.max((row.views / maxPV) * 100, 3)}%`, background: 'var(--blue)', borderRadius: 3 }} />
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {/* Link clicks chart with Apple/Android filter */}
+      <Card>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>App Store Link Clicks (30d)</div>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <FilterBtn value="all" label="All" />
+            <FilterBtn value="apple" label="Apple" />
+            <FilterBtn value="android" label="Android" />
+          </div>
+        </div>
+        {linkClicks.length === 0 ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No clicks yet — tracking starts now</div> : (
+          <div style={{ display: 'flex', gap: 4, alignItems: 'flex-end', height: 100 }}>
+            {linkClicks.map((row, i) => {
+              const val = clickFilter === 'apple' ? row.apple : clickFilter === 'android' ? row.android : row.total;
+              const pct = (val / maxLC) * 100;
+              const barColor = clickFilter === 'apple' ? 'var(--text-primary)' : clickFilter === 'android' ? 'var(--green)' : 'var(--accent)';
+              return (
+                <div key={i} title={`${row.date}: ${row.total} total (${row.apple} Apple, ${row.android} Android)`}
+                  style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                  <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{val > 0 ? val : ''}</div>
+                  <div style={{ width: '100%', height: `${Math.max(pct, 3)}%`, background: barColor, borderRadius: 3, transition: 'height .3s' }} />
                   {i % 5 === 0 && <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{row.date.slice(5)}</div>}
                 </div>
               );

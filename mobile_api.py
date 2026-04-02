@@ -2795,8 +2795,17 @@ def platform_growth():
         except Exception:
             waitlist_count = 0
 
-        # Trade volume by day (last 30 days)
+        # Active traders (users who made a trade in last 7d / 30d)
+        seven_days_ago = datetime.utcnow() - timedelta(days=7)
         thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+        active_traders_7d = db.session.query(
+            func.count(func.distinct(Transaction.user_id))
+        ).filter(Transaction.timestamp >= seven_days_ago).scalar() or 0
+        active_traders_30d = db.session.query(
+            func.count(func.distinct(Transaction.user_id))
+        ).filter(Transaction.timestamp >= thirty_days_ago).scalar() or 0
+
+        # Trade volume by day (last 30 days)
         trade_daily = db.session.query(
             cast(Transaction.timestamp, Date).label('day'),
             func.count().label('count'),
@@ -2806,6 +2815,54 @@ def platform_growth():
 
         trade_volume = [{'date': str(r.day), 'trades': r.count} for r in trade_daily]
 
+        # --- Page views by day (last 30 days) ---
+        page_views_daily = []
+        total_page_views = 0
+        unique_visitors = 0
+        try:
+            from models import PageView
+            pv_daily = db.session.query(
+                cast(PageView.created_at, Date).label('day'),
+                func.count().label('views'),
+                func.count(func.distinct(PageView.ip_hash)).label('unique'),
+            ).filter(PageView.created_at >= thirty_days_ago)\
+             .group_by(cast(PageView.created_at, Date))\
+             .order_by(cast(PageView.created_at, Date)).all()
+            page_views_daily = [{'date': str(r.day), 'views': r.views, 'unique': r.unique} for r in pv_daily]
+            total_page_views = db.session.query(func.count()).select_from(PageView).scalar() or 0
+            unique_visitors = db.session.query(func.count(func.distinct(PageView.ip_hash))).filter(
+                PageView.created_at >= thirty_days_ago
+            ).scalar() or 0
+        except Exception:
+            pass
+
+        # --- Link clicks by day with platform breakdown (last 30 days) ---
+        link_clicks_daily = []
+        total_apple_clicks = 0
+        total_android_clicks = 0
+        try:
+            from models import LinkClick
+            lc_daily = db.session.query(
+                cast(LinkClick.created_at, Date).label('day'),
+                func.count().label('total'),
+                func.sum(case((LinkClick.platform == 'apple', 1), else_=0)).label('apple'),
+                func.sum(case((LinkClick.platform == 'android', 1), else_=0)).label('android'),
+            ).filter(LinkClick.created_at >= thirty_days_ago)\
+             .group_by(cast(LinkClick.created_at, Date))\
+             .order_by(cast(LinkClick.created_at, Date)).all()
+            link_clicks_daily = [
+                {'date': str(r.day), 'total': r.total, 'apple': int(r.apple or 0), 'android': int(r.android or 0)}
+                for r in lc_daily
+            ]
+            total_apple_clicks = db.session.query(func.count()).select_from(LinkClick).filter(
+                LinkClick.platform == 'apple'
+            ).scalar() or 0
+            total_android_clicks = db.session.query(func.count()).select_from(LinkClick).filter(
+                LinkClick.platform == 'android'
+            ).scalar() or 0
+        except Exception:
+            pass
+
         return jsonify({
             'summary': {
                 'total_users': total_users,
@@ -2814,10 +2871,18 @@ def platform_growth():
                 'unique_tickers': unique_tickers,
                 'total_trades': total_trades,
                 'active_subscriptions': active_subs,
+                'active_traders_7d': active_traders_7d,
+                'active_traders_30d': active_traders_30d,
                 'waitlist': waitlist_count,
+                'total_page_views': total_page_views,
+                'unique_visitors_30d': unique_visitors,
+                'apple_clicks': total_apple_clicks,
+                'android_clicks': total_android_clicks,
             },
             'daily_signups': daily_signups,
             'trade_volume': trade_volume,
+            'page_views': page_views_daily,
+            'link_clicks': link_clicks_daily,
         })
     except Exception as e:
         logger.error(f"Platform growth error: {e}")

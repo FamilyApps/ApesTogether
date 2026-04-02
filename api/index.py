@@ -2052,6 +2052,60 @@ def waitlist_count():
     except Exception:
         return jsonify({'count': 0})
 
+@app.route('/api/track/pageview', methods=['POST'])
+def track_pageview():
+    """Log a landing page visit (called from frontend JS)"""
+    try:
+        from models import PageView, db as _db
+        import hashlib
+        data = request.get_json(silent=True) or {}
+        ip_raw = request.headers.get('X-Forwarded-For', request.remote_addr or '')
+        ip_hash = hashlib.sha256(ip_raw.encode()).hexdigest()[:16] if ip_raw else None
+        pv = PageView(
+            page=data.get('page', '/')[:100],
+            referrer=(request.referrer or data.get('referrer', ''))[:500] or None,
+            utm_source=data.get('utm_source', '')[:100] or None,
+            utm_medium=data.get('utm_medium', '')[:100] or None,
+            utm_campaign=data.get('utm_campaign', '')[:100] or None,
+            user_agent=(request.headers.get('User-Agent', ''))[:500] or None,
+            ip_hash=ip_hash,
+        )
+        _db.session.add(pv)
+        _db.session.commit()
+        return jsonify({'ok': True}), 201
+    except Exception as e:
+        logger.warning(f"Pageview track error: {e}")
+        return jsonify({'ok': False}), 200  # Don't error out client
+
+
+@app.route('/api/track/linkclick', methods=['POST'])
+def track_linkclick():
+    """Log an app store link click (called from frontend JS)"""
+    try:
+        from models import LinkClick, db as _db
+        import hashlib
+        data = request.get_json(silent=True) or {}
+        platform = data.get('platform', 'unknown')[:20]
+        if platform not in ('apple', 'android'):
+            platform = 'unknown'
+        ip_raw = request.headers.get('X-Forwarded-For', request.remote_addr or '')
+        ip_hash = hashlib.sha256(ip_raw.encode()).hexdigest()[:16] if ip_raw else None
+        lc = LinkClick(
+            platform=platform,
+            source_page=data.get('source_page', '/')[:100] or None,
+            utm_source=data.get('utm_source', '')[:100] or None,
+            utm_campaign=data.get('utm_campaign', '')[:100] or None,
+            user_agent=(request.headers.get('User-Agent', ''))[:500] or None,
+            ip_hash=ip_hash,
+        )
+        _db.session.add(lc)
+        _db.session.commit()
+        return jsonify({'ok': True}), 201
+    except Exception as e:
+        logger.warning(f"Link click track error: {e}")
+        return jsonify({'ok': False}), 200
+
+
 @app.route('/admin/waitlist')
 @admin_required
 def admin_waitlist():

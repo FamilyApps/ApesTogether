@@ -834,6 +834,41 @@ class MobileSubscription(db.Model):
         return f"<MobileSubscription sub={self.subscriber_id}->owner={self.subscribed_to_id} status={self.status}>"
 
 
+class PageView(db.Model):
+    """Landing page visit tracking"""
+    __tablename__ = 'page_view'
+
+    id = db.Column(db.Integer, primary_key=True)
+    page = db.Column(db.String(100), nullable=False, default='/')  # e.g. '/', '/register', '/leaderboard'
+    referrer = db.Column(db.String(500), nullable=True)
+    utm_source = db.Column(db.String(100), nullable=True)
+    utm_medium = db.Column(db.String(100), nullable=True)
+    utm_campaign = db.Column(db.String(100), nullable=True)
+    user_agent = db.Column(db.String(500), nullable=True)
+    ip_hash = db.Column(db.String(64), nullable=True)  # SHA-256 hash for unique visitor approx
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<PageView {self.page} {self.created_at}>"
+
+
+class LinkClick(db.Model):
+    """App store link click tracking"""
+    __tablename__ = 'link_click'
+
+    id = db.Column(db.Integer, primary_key=True)
+    platform = db.Column(db.String(20), nullable=False)  # 'apple', 'android'
+    source_page = db.Column(db.String(100), nullable=True)  # page the click came from
+    utm_source = db.Column(db.String(100), nullable=True)
+    utm_campaign = db.Column(db.String(100), nullable=True)
+    user_agent = db.Column(db.String(500), nullable=True)
+    ip_hash = db.Column(db.String(64), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<LinkClick {self.platform} {self.created_at}>"
+
+
 class BetaWaitlist(db.Model):
     """Beta waitlist signups from the landing page"""
     __tablename__ = 'beta_waitlist'

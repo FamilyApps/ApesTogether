@@ -431,6 +431,42 @@ async function submitWaitlist(e, formId) {
     }
     return false;
 }
+// ── Analytics: pageview + link click tracking ──
+(function() {
+    var params = new URLSearchParams(window.location.search);
+    fetch('/api/track/pageview', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            page: window.location.pathname,
+            referrer: document.referrer || '',
+            utm_source: params.get('utm_source') || '',
+            utm_medium: params.get('utm_medium') || '',
+            utm_campaign: params.get('utm_campaign') || ''
+        })
+    }).catch(function(){});
+
+    document.addEventListener('click', function(e) {
+        var link = e.target.closest('a[href]');
+        if (!link) return;
+        var href = link.href || '';
+        var platform = null;
+        if (href.indexOf('apple.com') !== -1 || href.indexOf('apps.apple') !== -1 || href.indexOf('itunes') !== -1) platform = 'apple';
+        else if (href.indexOf('play.google') !== -1 || href.indexOf('google.com/store') !== -1) platform = 'android';
+        if (platform) {
+            fetch('/api/track/linkclick', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    platform: platform,
+                    source_page: window.location.pathname,
+                    utm_source: params.get('utm_source') || '',
+                    utm_campaign: params.get('utm_campaign') || ''
+                })
+            }).catch(function(){});
+        }
+    });
+})();
 </script>
 </body>
 </html>
