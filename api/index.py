@@ -8532,6 +8532,7 @@ def run_migration():
             )).fetchall()
             for (tbl,) in all_tables:
                 try:
+                    db.session.execute(text("SET statement_timeout = '30s'"))
                     db.session.execute(text(f'ALTER TABLE "{tbl}" ENABLE ROW LEVEL SECURITY'))
                     db.session.commit()
                     rls_results.append(f"{tbl}: RLS enabled")
