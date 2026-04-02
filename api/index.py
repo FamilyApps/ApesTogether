@@ -8111,16 +8111,21 @@ def apply_mcd():
                 d = dt_date.fromisoformat(item[0])
                 parsed_timeline.append((d, float(item[1]), float(item[2])))
             
-            # Update User record
-            user = db_retry(lambda: User.query.get(uid))
-            if not user:
+            # Use raw SQL to guarantee writes persist (ORM objects can detach with NullPool)
+            from sqlalchemy import text
+            
+            # Get current values for reporting
+            user_row = db_retry(lambda: db.session.execute(
+                text("SELECT username, max_cash_deployed, cash_proceeds FROM \"user\" WHERE id = :uid"),
+                {'uid': uid}
+            ).fetchone())
+            if not user_row:
                 results.append({'user_id': uid, 'error': 'not found'})
                 continue
             
-            old_mcd = float(user.max_cash_deployed or 0)
-            old_cp = float(user.cash_proceeds or 0)
-            user.max_cash_deployed = new_mcd
-            user.cash_proceeds = new_cp
+            username = user_row[0]
+            old_mcd = float(user_row[1] or 0)
+            old_cp = float(user_row[2] or 0)
             
             # Helper: find MCD/CP as of a given date
             def get_as_of(target_date):
@@ -8135,33 +8140,48 @@ def apply_mcd():
                         break
                 return best_mcd, best_cp
             
-            # Update daily snapshots
-            _uid = uid  # capture for lambda
-            snapshots = db_retry(lambda: PortfolioSnapshot.query.filter_by(user_id=_uid)\
-                .order_by(PortfolioSnapshot.date.asc()).all())
+            # Update User record
+            db.session.execute(
+                text("UPDATE \"user\" SET max_cash_deployed = :mcd, cash_proceeds = :cp WHERE id = :uid"),
+                {'mcd': new_mcd, 'cp': new_cp, 'uid': uid}
+            )
+            
+            # Get daily snapshots and update each with correct historical values
+            snap_rows = db.session.execute(
+                text("SELECT id, date FROM portfolio_snapshot WHERE user_id = :uid ORDER BY date ASC"),
+                {'uid': uid}
+            ).fetchall()
             snap_fixed = 0
-            for snap in snapshots:
-                hist_mcd, hist_cp = get_as_of(snap.date)
-                snap.max_cash_deployed = hist_mcd
-                snap.cash_proceeds = hist_cp
+            for row in snap_rows:
+                snap_id, snap_date = row[0], row[1]
+                hist_mcd, hist_cp = get_as_of(snap_date)
+                db.session.execute(
+                    text("UPDATE portfolio_snapshot SET max_cash_deployed = :mcd, cash_proceeds = :cp WHERE id = :sid"),
+                    {'mcd': hist_mcd, 'cp': hist_cp, 'sid': snap_id}
+                )
                 snap_fixed += 1
             
-            # Update intraday snapshots
-            intraday_snaps = db_retry(lambda: PortfolioSnapshotIntraday.query.filter_by(user_id=_uid)\
-                .order_by(PortfolioSnapshotIntraday.timestamp.asc()).all())
+            # Get intraday snapshots and update each
+            isnap_rows = db.session.execute(
+                text("SELECT id, timestamp FROM portfolio_snapshot_intraday WHERE user_id = :uid ORDER BY timestamp ASC"),
+                {'uid': uid}
+            ).fetchall()
             intraday_fixed = 0
-            for isnap in intraday_snaps:
-                isnap_date = isnap.timestamp.date() if isnap.timestamp else dt_date.min
+            for row in isnap_rows:
+                isnap_id, isnap_ts = row[0], row[1]
+                isnap_date = isnap_ts.date() if isnap_ts else dt_date.min
                 hist_mcd, hist_cp = get_as_of(isnap_date)
-                isnap.max_cash_deployed = hist_mcd
-                isnap.cash_proceeds = hist_cp
+                db.session.execute(
+                    text("UPDATE portfolio_snapshot_intraday SET max_cash_deployed = :mcd, cash_proceeds = :cp WHERE id = :sid"),
+                    {'mcd': hist_mcd, 'cp': hist_cp, 'sid': isnap_id}
+                )
                 intraday_fixed += 1
             
-            db_retry(lambda: db.session.commit())
+            db.session.commit()
             
             results.append({
                 'user_id': uid,
-                'username': user.username,
+                'username': username,
                 'old_mcd': old_mcd,
                 'old_cp': old_cp,
                 'new_mcd': new_mcd,
