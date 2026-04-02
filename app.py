@@ -828,27 +828,6 @@ def create_portfolio_snapshot():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/admin/run-migration')
-def run_migration():
-    """One-time migration endpoint - remove after use"""
-    try:
-        # Check if user is admin
-        if not (current_user.is_authenticated and 
-                (current_user.email == ADMIN_EMAIL or current_user.username == ADMIN_USERNAME)):
-            return jsonify({'error': 'Admin access required'}), 403
-        
-        # Create the new tables
-        from models import db, User, Stock, Subscription, Transaction, PortfolioSnapshot, MarketData, SubscriptionTier, TradeLimit, SMSNotification, StockInfo, LeaderboardEntry
-        from subscription_utils import update_user_subscription_price, update_trade_limit_count, check_trade_limit_exceeded, get_subscription_tier_info
-        db.create_all()
-        
-        return jsonify({
-            'success': True, 
-            'message': 'Migration completed successfully. New tables created.'
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
 
 if __name__ == '__main__':
     # In development, run with debug mode
