@@ -8347,3 +8347,66 @@ def diagnose_leaderboard():
         return jsonify(diag), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/diagnose-intraday', methods=['POST'])
+def diagnose_intraday():
+    """Check intraday snapshot values for today — are values actually changing?"""
+    try:
+        auth_error = verify_cron_request()
+        if auth_error:
+            return auth_error
+        
+        from models import User, PortfolioSnapshotIntraday, Stock
+        from sqlalchemy import cast, Date, and_
+        
+        today_et = get_market_date()
+        
+        diag = {'date': str(today_et), 'users': []}
+        
+        users = User.query.all()
+        for user in users:
+            # Get all intraday snapshots for today
+            snaps = PortfolioSnapshotIntraday.query.filter(
+                and_(
+                    PortfolioSnapshotIntraday.user_id == user.id,
+                    cast(PortfolioSnapshotIntraday.timestamp, Date) == today_et
+                )
+            ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
+            
+            if not snaps:
+                continue
+            
+            # Get user's stocks
+            stocks = Stock.query.filter_by(user_id=user.id).all()
+            stock_info = [{'ticker': s.ticker, 'qty': float(s.quantity), 'purchase_price': float(s.purchase_price)} for s in stocks if s.quantity > 0]
+            
+            snap_data = []
+            for s in snaps:
+                snap_data.append({
+                    'time': s.timestamp.strftime('%I:%M %p') if s.timestamp else '?',
+                    'total_value': round(float(s.total_value), 2) if s.total_value else 0,
+                    'stock_value': round(float(s.stock_value), 2) if s.stock_value else 0,
+                    'cash_proceeds': round(float(s.cash_proceeds), 2) if s.cash_proceeds else 0,
+                    'mcd': round(float(s.max_cash_deployed), 2) if s.max_cash_deployed else 0,
+                })
+            
+            # Check if values are actually changing
+            values = [s['total_value'] for s in snap_data]
+            all_same = len(set(values)) <= 1
+            
+            diag['users'].append({
+                'username': user.username,
+                'user_id': user.id,
+                'stocks': stock_info[:5],  # First 5 stocks
+                'stock_count': len(stock_info),
+                'snapshot_count': len(snap_data),
+                'snapshots': snap_data,
+                'values_changing': not all_same,
+                'value_range': [min(values), max(values)] if values else [],
+            })
+        
+        return jsonify(diag), 200
+    except Exception as e:
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
