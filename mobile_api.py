@@ -946,20 +946,69 @@ def get_leaderboard():
             from performance_calculator import get_period_dates
             sp_start, sp_end = get_period_dates(cache_period)
             
-            sp500_records = MarketData.query.filter(
-                MarketData.ticker == 'SPY_SP500',
-                MarketData.date >= sp_start,
-                MarketData.date <= sp_end
-            ).order_by(MarketData.date.asc()).all()
-            
-            if sp500_records and len(sp500_records) >= 2:
-                base_val = float(sp500_records[0].close_price)
-                if base_val > 0:
-                    sp500_sparkline_global = [
-                        round(((float(r.close_price) - base_val) / base_val) * 100, 2)
-                        for r in sp500_records
-                    ]
-                    sp500_return_for_period = sp500_sparkline_global[-1]
+            if cache_period in ('1D', '5D'):
+                # For intraday periods: use SPY_INTRADAY (collected every 15 min)
+                sp500_records = MarketData.query.filter(
+                    MarketData.ticker == 'SPY_INTRADAY',
+                    MarketData.date >= sp_start,
+                    MarketData.date <= sp_end,
+                    MarketData.timestamp.isnot(None)
+                ).order_by(MarketData.timestamp.asc()).all()
+                
+                if sp500_records and len(sp500_records) >= 2:
+                    base_val = float(sp500_records[0].close_price)
+                    if base_val > 0:
+                        sp500_sparkline_global = [
+                            round(((float(r.close_price) - base_val) / base_val) * 100, 2)
+                            for r in sp500_records
+                        ]
+                        sp500_return_for_period = sp500_sparkline_global[-1]
+                elif sp500_records and len(sp500_records) == 1:
+                    # Only 1 intraday point — use previous close as baseline
+                    prev_day = sp_start - timedelta(days=1)
+                    while prev_day.weekday() >= 5:
+                        prev_day -= timedelta(days=1)
+                    prev_close = MarketData.query.filter(
+                        MarketData.ticker == 'SPY_SP500',
+                        MarketData.date == prev_day
+                    ).first()
+                    if prev_close and float(prev_close.close_price) > 0:
+                        base_val = float(prev_close.close_price)
+                        curr_val = float(sp500_records[0].close_price)
+                        sp500_return_for_period = round(((curr_val - base_val) / base_val) * 100, 2)
+                        sp500_sparkline_global = [0.0, sp500_return_for_period]
+                
+                # Fallback to daily SPY_SP500 if no intraday data
+                if not sp500_sparkline_global:
+                    sp500_records = MarketData.query.filter(
+                        MarketData.ticker == 'SPY_SP500',
+                        MarketData.date >= sp_start,
+                        MarketData.date <= sp_end
+                    ).order_by(MarketData.date.asc()).all()
+                    if sp500_records and len(sp500_records) >= 2:
+                        base_val = float(sp500_records[0].close_price)
+                        if base_val > 0:
+                            sp500_sparkline_global = [
+                                round(((float(r.close_price) - base_val) / base_val) * 100, 2)
+                                for r in sp500_records
+                            ]
+                            sp500_return_for_period = sp500_sparkline_global[-1]
+            else:
+                # For longer periods: use daily SPY_SP500 close
+                sp500_records = MarketData.query.filter(
+                    MarketData.ticker == 'SPY_SP500',
+                    MarketData.date >= sp_start,
+                    MarketData.date <= sp_end
+                ).order_by(MarketData.date.asc()).all()
+                
+                if sp500_records and len(sp500_records) >= 2:
+                    base_val = float(sp500_records[0].close_price)
+                    if base_val > 0:
+                        sp500_sparkline_global = [
+                            round(((float(r.close_price) - base_val) / base_val) * 100, 2)
+                            for r in sp500_records
+                        ]
+                        sp500_return_for_period = sp500_sparkline_global[-1]
         except Exception as e:
             logger.warning(f"S&P 500 lookup failed: {e}")
         

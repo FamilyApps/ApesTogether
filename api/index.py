@@ -8420,3 +8420,39 @@ def diagnose_intraday():
     except Exception as e:
         import traceback
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
+@app.route('/api/admin/run-migration', methods=['POST'])
+def run_migration():
+    """One-time migration endpoint. Adds missing columns to existing tables."""
+    auth_error = verify_cron_request()
+    if auth_error:
+        return auth_error
+    
+    results = []
+    try:
+        from sqlalchemy import text
+        
+        migrations = [
+            ("stock_transaction", "price_source", "ALTER TABLE stock_transaction ADD COLUMN price_source VARCHAR(20)"),
+        ]
+        
+        for table, column, sql in migrations:
+            try:
+                # Check if column already exists
+                check = db.session.execute(text(
+                    f"SELECT column_name FROM information_schema.columns WHERE table_name='{table}' AND column_name='{column}'"
+                ))
+                if check.fetchone():
+                    results.append(f"{table}.{column}: already exists")
+                else:
+                    db.session.execute(text(sql))
+                    db.session.commit()
+                    results.append(f"{table}.{column}: ADDED")
+            except Exception as e:
+                db.session.rollback()
+                results.append(f"{table}.{column}: ERROR - {str(e)}")
+        
+        return jsonify({'success': True, 'results': results})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
