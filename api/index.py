@@ -8488,15 +8488,29 @@ def run_migration():
     
     results = []
     try:
-        from sqlalchemy import text
+        from sqlalchemy import text, inspect
         
-        migrations = [
+        # Step 1: Create any missing tables (e.g. dividend, pending_trade)
+        inspector = inspect(db.engine)
+        existing_tables = set(inspector.get_table_names())
+        
+        # Get all model tables
+        model_tables = set(db.metadata.tables.keys())
+        missing_tables = model_tables - existing_tables
+        
+        if missing_tables:
+            db.create_all()
+            results.append(f"Created missing tables: {', '.join(sorted(missing_tables))}")
+        else:
+            results.append("All tables already exist")
+        
+        # Step 2: Add missing columns to existing tables
+        column_migrations = [
             ("stock_transaction", "price_source", "ALTER TABLE stock_transaction ADD COLUMN price_source VARCHAR(20)"),
         ]
         
-        for table, column, sql in migrations:
+        for table, column, sql in column_migrations:
             try:
-                # Check if column already exists
                 check = db.session.execute(text(
                     f"SELECT column_name FROM information_schema.columns WHERE table_name='{table}' AND column_name='{column}'"
                 ))
@@ -8512,4 +8526,5 @@ def run_migration():
         
         return jsonify({'success': True, 'results': results})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
