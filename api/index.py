@@ -7982,6 +7982,8 @@ def recalc_mcd():
                 user_result['price_details'] = price_details
             user_result['transaction_count'] = len(valid_txns)
             user_result['initial_txns_skipped'] = initial_skipped
+            # Include timeline for apply-mcd endpoint
+            user_result['timeline'] = [[str(d), round(m, 2), round(c, 2)] for d, m, c in mcd_timeline]
             
             user_result['new_mcd'] = round(final_mcd, 2)
             user_result['new_cp'] = round(final_cp, 2)
@@ -8062,6 +8064,113 @@ def recalc_mcd():
             'intraday_snapshots_to_fix': total_intraday_fixed,
             'users': results
         })
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
+@app.route('/api/admin/apply-mcd', methods=['POST'])
+def apply_mcd():
+    """
+    Lightweight fix endpoint: accepts precomputed MCD/CP values from the audit
+    and applies them to User records + all snapshots. No API calls needed.
+    
+    POST body JSON: {
+        "users": [
+            {"user_id": 2, "mcd": 9664.22, "cp": 0, "timeline": [["2026-03-18", 9664.22, 0]]}
+        ]
+    }
+    
+    The timeline is a list of [date_str, mcd, cp] entries sorted chronologically.
+    Each snapshot gets the MCD/CP from the last timeline entry on or before its date.
+    If no timeline is provided, all snapshots get the same mcd/cp values.
+    """
+    try:
+        auth_error = verify_cron_request()
+        if auth_error:
+            return auth_error
+        
+        from models import User, PortfolioSnapshot, PortfolioSnapshotIntraday
+        from datetime import date as dt_date
+        
+        data = request.get_json()
+        if not data or 'users' not in data:
+            return jsonify({'error': 'POST body must contain "users" array'}), 400
+        
+        results = []
+        for entry in data['users']:
+            uid = entry['user_id']
+            new_mcd = float(entry['mcd'])
+            new_cp = float(entry['cp'])
+            timeline = entry.get('timeline', [])
+            
+            # Parse timeline into (date, mcd, cp) tuples
+            parsed_timeline = []
+            for item in timeline:
+                d = dt_date.fromisoformat(item[0])
+                parsed_timeline.append((d, float(item[1]), float(item[2])))
+            
+            # Update User record
+            user = db_retry(lambda: User.query.get(uid))
+            if not user:
+                results.append({'user_id': uid, 'error': 'not found'})
+                continue
+            
+            old_mcd = float(user.max_cash_deployed or 0)
+            old_cp = float(user.cash_proceeds or 0)
+            user.max_cash_deployed = new_mcd
+            user.cash_proceeds = new_cp
+            
+            # Helper: find MCD/CP as of a given date
+            def get_as_of(target_date):
+                if not parsed_timeline:
+                    return new_mcd, new_cp
+                best_mcd, best_cp = 0.0, 0.0
+                for txn_date, txn_mcd, txn_cp in parsed_timeline:
+                    if txn_date <= target_date:
+                        best_mcd = txn_mcd
+                        best_cp = txn_cp
+                    else:
+                        break
+                return best_mcd, best_cp
+            
+            # Update daily snapshots
+            _uid = uid  # capture for lambda
+            snapshots = db_retry(lambda: PortfolioSnapshot.query.filter_by(user_id=_uid)\
+                .order_by(PortfolioSnapshot.date.asc()).all())
+            snap_fixed = 0
+            for snap in snapshots:
+                hist_mcd, hist_cp = get_as_of(snap.date)
+                snap.max_cash_deployed = hist_mcd
+                snap.cash_proceeds = hist_cp
+                snap_fixed += 1
+            
+            # Update intraday snapshots
+            intraday_snaps = db_retry(lambda: PortfolioSnapshotIntraday.query.filter_by(user_id=_uid)\
+                .order_by(PortfolioSnapshotIntraday.timestamp.asc()).all())
+            intraday_fixed = 0
+            for isnap in intraday_snaps:
+                isnap_date = isnap.timestamp.date() if isnap.timestamp else dt_date.min
+                hist_mcd, hist_cp = get_as_of(isnap_date)
+                isnap.max_cash_deployed = hist_mcd
+                isnap.cash_proceeds = hist_cp
+                intraday_fixed += 1
+            
+            db_retry(lambda: db.session.commit())
+            
+            results.append({
+                'user_id': uid,
+                'username': user.username,
+                'old_mcd': old_mcd,
+                'old_cp': old_cp,
+                'new_mcd': new_mcd,
+                'new_cp': new_cp,
+                'daily_fixed': snap_fixed,
+                'intraday_fixed': intraday_fixed,
+            })
+        
+        return jsonify({'results': results})
     except Exception as e:
         db.session.rollback()
         import traceback
