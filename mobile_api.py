@@ -2851,36 +2851,15 @@ def alphavantage_usage():
         return jsonify({'error': str(e)}), 500
 
 
-@mobile_api.route('/admin/bot/trade', methods=['POST'])
-@require_cron_secret
-@with_db_retry
-def bot_trade_cron():
+def _execute_bot_trade_wave(wave, dry_run=False):
     """
-    Trigger bot trading for a specific wave. Designed to be called by an external
-    scheduler (GitHub Actions, cron) at staggered times during market hours.
+    Core bot trading logic for a specific wave. Called by both the POST endpoint
+    and the Vercel cron GET wrapper.
     
-    POST body (JSON):
-        wave: int (1-4) — which trading wave to execute
-        dry_run: bool (optional, default false)
-    
-    Wave schedule (ET):
-        Wave 1: ~9:45 AM   (market open traders)
-        Wave 2: ~10:45 AM  (mid-morning traders)
-        Wave 3: ~1:15 PM   (afternoon traders)
-        Wave 4: ~3:30 PM   (close traders)
-    
-    Each bot is assigned preferred waves in its strategy profile.
-    Not all bots trade every day (frequency + patience controls).
+    Returns a dict with trade results.
     """
     import random
     from datetime import timedelta
-    
-    data = request.get_json() or {}
-    wave = data.get('wave')
-    dry_run = data.get('dry_run', False)
-    
-    if not wave or wave not in [1, 2, 3, 4]:
-        return jsonify({'error': 'wave required (1-4)'}), 400
     
     try:
         from models import db, User, Stock
@@ -2888,7 +2867,7 @@ def bot_trade_cron():
         # Get active bot users
         bots = User.query.filter_by(role='agent', bot_active=True).all()
         if not bots:
-            return jsonify({'success': True, 'message': 'No active bots', 'trades': 0})
+            return {'success': True, 'message': 'No active bots', 'trades': 0}
         
         results = {
             'wave': wave,
@@ -3019,11 +2998,35 @@ def bot_trade_cron():
                 results['errors'].append(f'Bot {bot.id}: {str(e)}')
                 logger.error(f"Bot trade error for {bot.id}: {e}")
         
-        return jsonify(results)
+        return results
         
     except Exception as e:
-        logger.error(f"Bot trade cron error: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Bot trade wave {wave} error: {e}")
+        return {'error': str(e)}
+
+
+@mobile_api.route('/admin/bot/trade', methods=['POST'])
+@require_cron_secret
+@with_db_retry
+def bot_trade_cron():
+    """
+    Trigger bot trading for a specific wave via POST.
+    
+    POST body (JSON):
+        wave: int (1-4) — which trading wave to execute
+        dry_run: bool (optional, default false)
+    """
+    data = request.get_json() or {}
+    wave = data.get('wave')
+    dry_run = data.get('dry_run', False)
+    
+    if not wave or wave not in [1, 2, 3, 4]:
+        return jsonify({'error': 'wave required (1-4)'}), 400
+    
+    result = _execute_bot_trade_wave(wave, dry_run)
+    if 'error' in result:
+        return jsonify(result), 500
+    return jsonify(result)
 
 
 @mobile_api.route('/admin/dividend', methods=['POST'])

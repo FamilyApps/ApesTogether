@@ -5578,6 +5578,55 @@ def cleanup_intraday_data_cron():
         logger.error(f"Automated cleanup error: {str(e)}")
         return jsonify({'error': f'Cleanup error: {str(e)}'}), 500
 
+@app.route('/api/cron/bot-trade-wave', methods=['GET', 'POST'])
+def bot_trade_wave_cron():
+    """
+    Vercel cron wrapper for bot trading waves.
+    Determines which wave to run based on current ET time:
+        Wave 1: 9:30-10:29 AM ET  (market open traders)
+        Wave 2: 10:30-12:59 PM ET (mid-morning traders)
+        Wave 3: 1:00-2:59 PM ET   (afternoon traders)
+        Wave 4: 3:00-4:00 PM ET   (close traders)
+    """
+    try:
+        auth_error = verify_cron_request()
+        if auth_error:
+            return auth_error
+        
+        from zoneinfo import ZoneInfo
+        now_et = datetime.now(ZoneInfo('America/New_York'))
+        hour, minute = now_et.hour, now_et.minute
+        
+        # Determine wave from current ET time
+        if hour == 9 and minute >= 30 or hour == 10 and minute < 30:
+            wave = 1
+        elif (hour == 10 and minute >= 30) or hour == 11 or hour == 12:
+            wave = 2
+        elif hour == 13 or hour == 14:
+            wave = 3
+        elif hour == 15 or (hour == 16 and minute == 0):
+            wave = 4
+        else:
+            return jsonify({
+                'success': True,
+                'message': f'Outside market hours ({now_et.strftime("%I:%M %p ET")}), skipping',
+                'trades': 0
+            })
+        
+        logger.info(f"🤖 Bot trade wave {wave} triggered at {now_et.strftime('%I:%M %p ET')}")
+        
+        from mobile_api import _execute_bot_trade_wave
+        result = _execute_bot_trade_wave(wave)
+        if 'error' in result:
+            return jsonify(result), 500
+        return jsonify(result)
+    
+    except Exception as e:
+        logger.error(f"Bot trade wave cron error: {e}")
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
 @app.route('/api/cron/auto-create-bots', methods=['POST', 'GET'])
 def auto_create_bots_cron():
     """Daily cron endpoint to auto-create bot accounts per admin settings."""

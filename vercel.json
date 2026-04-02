@@ -46,6 +46,22 @@
       "schedule": "0 6 * * 0"
     },
     {
+      "path": "/api/cron/bot-trade-wave",
+      "schedule": "45 13 * * 1-5"
+    },
+    {
+      "path": "/api/cron/bot-trade-wave",
+      "schedule": "45 14 * * 1-5"
+    },
+    {
+      "path": "/api/cron/bot-trade-wave",
+      "schedule": "15 17 * * 1-5"
+    },
+    {
+      "path": "/api/cron/bot-trade-wave",
+      "schedule": "30 19 * * 1-5"
+    },
+    {
       "path": "/api/cron/auto-create-bots",
       "schedule": "0 2 * * *"
     }
