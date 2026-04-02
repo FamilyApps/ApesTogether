@@ -2740,6 +2740,90 @@ def bot_dashboard():
         return jsonify({'error': 'dashboard_failed'}), 500
 
 
+@mobile_api.route('/admin/platform-growth', methods=['GET'])
+@require_admin_2fa
+@with_db_retry
+def platform_growth():
+    """Platform growth metrics: daily signups, cumulative users, human vs bot breakdown."""
+    from models import db, User, Subscription, Transaction, BetaWaitlist
+    from sqlalchemy import func, cast, Date, case
+
+    try:
+        # --- User growth by day ---
+        user_daily = db.session.query(
+            cast(User.created_at, Date).label('day'),
+            func.count().label('total'),
+            func.sum(case((User.created_by == 'system', 1), else_=0)).label('bots'),
+            func.sum(case((User.created_by != 'system', 1), else_=0)).label('humans'),
+        ).filter(User.created_at.isnot(None))\
+         .group_by(cast(User.created_at, Date))\
+         .order_by(cast(User.created_at, Date)).all()
+
+        daily_signups = []
+        cumulative = 0
+        cum_humans = 0
+        cum_bots = 0
+        for row in user_daily:
+            cumulative += row.total
+            cum_humans += int(row.humans or 0)
+            cum_bots += int(row.bots or 0)
+            daily_signups.append({
+                'date': str(row.day),
+                'new': row.total,
+                'humans': int(row.humans or 0),
+                'bots': int(row.bots or 0),
+                'cumulative': cumulative,
+                'cum_humans': cum_humans,
+                'cum_bots': cum_bots,
+            })
+
+        # --- Summary stats ---
+        total_users = User.query.count()
+        total_bots = User.query.filter_by(created_by='system').count()
+        total_humans = total_users - total_bots
+        from models import Stock
+        unique_tickers = db.session.query(func.count(func.distinct(Stock.ticker))).scalar() or 0
+
+        total_trades = Transaction.query.count()
+
+        # Active subscriptions
+        active_subs = Subscription.query.filter_by(status='active').count()
+
+        # Waitlist count
+        try:
+            waitlist_count = BetaWaitlist.query.count()
+        except Exception:
+            waitlist_count = 0
+
+        # Trade volume by day (last 30 days)
+        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+        trade_daily = db.session.query(
+            cast(Transaction.timestamp, Date).label('day'),
+            func.count().label('count'),
+        ).filter(Transaction.timestamp >= thirty_days_ago)\
+         .group_by(cast(Transaction.timestamp, Date))\
+         .order_by(cast(Transaction.timestamp, Date)).all()
+
+        trade_volume = [{'date': str(r.day), 'trades': r.count} for r in trade_daily]
+
+        return jsonify({
+            'summary': {
+                'total_users': total_users,
+                'humans': total_humans,
+                'bots': total_bots,
+                'unique_tickers': unique_tickers,
+                'total_trades': total_trades,
+                'active_subscriptions': active_subs,
+                'waitlist': waitlist_count,
+            },
+            'daily_signups': daily_signups,
+            'trade_volume': trade_volume,
+        })
+    except Exception as e:
+        logger.error(f"Platform growth error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @mobile_api.route('/admin/alphavantage/usage', methods=['GET'])
 @require_admin_2fa
 @with_db_retry
