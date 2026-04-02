@@ -485,6 +485,7 @@ def _compute_all_user_metrics(period='YTD'):
     
     users = User.query.all()
     all_metrics = []
+    skipped = []  # Track why users are skipped for diagnostics
     first_error = None
     error_count = 0
     
@@ -505,6 +506,7 @@ def _compute_all_user_metrics(period='YTD'):
         
         if not latest_snapshot:
             print(f"  SKIP {user.username}: no snapshots")
+            skipped.append({'username': user.username, 'reason': 'no_snapshots'})
             continue
         
         # Performance calculation (single source of truth)
@@ -516,11 +518,13 @@ def _compute_all_user_metrics(period='YTD'):
             )
             if not result:
                 print(f"  SKIP {user.username}: calculate_portfolio_performance returned None")
+                skipped.append({'username': user.username, 'reason': 'perf_returned_none', 'dates': f'{start_date} to {end_date}'})
                 continue
             
             performance_percent = result.get('portfolio_return', 0.0)
             if performance_percent is None:
                 print(f"  SKIP {user.username}: portfolio_return is None")
+                skipped.append({'username': user.username, 'reason': 'portfolio_return_none'})
                 continue
             
             # Pre-compute sparkline from chart_data (portfolio % returns)
@@ -535,6 +539,7 @@ def _compute_all_user_metrics(period='YTD'):
                 first_error = f"Performance calc for user {user.id} period {period}: {e}"
             error_count += 1
             logger.warning(f"Performance calc failed for user {user.id} period {period}: {e}")
+            skipped.append({'username': user.username, 'reason': 'exception', 'error': str(e)[:200]})
             try:
                 db.session.rollback()
             except Exception:
@@ -590,8 +595,13 @@ def _compute_all_user_metrics(period='YTD'):
     elapsed = round(_time.time() - _t0, 2)
     print(f"  Computed metrics for {len(all_metrics)}/{len(users)} users in {elapsed}s")
     if first_error:
-        print(f"  ⚠ FIRST ERROR for {period}: {first_error}")
-        print(f"  ⚠ Total errors: {error_count}/{len(users)} users")
+        print(f"  \u26a0 FIRST ERROR for {period}: {first_error}")
+        print(f"  \u26a0 Total errors: {error_count}/{len(users)} users")
+    
+    # Attach diagnostics as attribute so callers can inspect
+    all_metrics = list(all_metrics)  # Ensure it's a plain list
+    _compute_all_user_metrics._last_skipped = skipped
+    _compute_all_user_metrics._last_elapsed = elapsed
     
     return all_metrics
 
