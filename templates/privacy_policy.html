@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}Privacy Policy - Stock Portfolio Tracker{% endblock %}
+{% block title %}Privacy Policy - Apes Together{% endblock %}
 
 {% block content %}
 <div class="container mt-4">
     <div class="row justify-content-center">
         <div class="col-lg-10">
             <h1 class="mb-4">Privacy Policy</h1>
-            <p class="text-muted"><strong>Effective Date:</strong> September 1, 2025</p>
+            <p class="text-muted"><strong>Effective Date:</strong> April 3, 2026</p>
             
             <div class="legal-content">
                 <h2>1. Information We Collect</h2>
@@ -102,13 +102,16 @@
                 </ul>
 
                 <h2>5. Data Security</h2>
-                <p>We implement appropriate security measures to protect your information:</p>
+                <p>We implement reasonable technical and organizational security measures to protect your information:</p>
                 <ul>
-                    <li>Encryption of sensitive financial and tax data</li>
+                    <li>SSL/TLS encryption for all data in transit</li>
+                    <li>Encrypted database connections (sslmode=require)</li>
+                    <li>Secure password hashing (PBKDF2-SHA256)</li>
+                    <li>Environment-variable-based secrets management (no hardcoded credentials)</li>
                     <li>Secure storage of W-9 and payment information</li>
-                    <li>Regular security audits and updates</li>
                     <li>Limited access to personal information</li>
                 </ul>
+                <p>However, no method of transmission over the internet or electronic storage is completely secure, and the Company cannot guarantee absolute security of personal information.</p>
 
                 <h2>6. Your Rights and Choices</h2>
                 
@@ -152,7 +155,7 @@
                 <h2>11. Contact Information</h2>
                 <p>For privacy-related questions or requests:<br><br>
                 Family Apps LLC<br>
-                Email: <a href="mailto:privacy@apestogether.ai">privacy@apestogether.ai</a></p>
+                Email: <a href="mailto:support@apestogether.ai">support@apestogether.ai</a></p>
 
                 <div class="alert alert-info mt-4">
                     <strong>By using our Service, you consent to the collection and use of information as described in this Privacy Policy.</strong>

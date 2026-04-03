@@ -1296,6 +1296,69 @@ def update_notification_settings():
         return jsonify({'error': 'update_failed'}), 500
 
 
+@mobile_api.route('/notifications/history', methods=['GET'])
+@require_auth
+def notification_history():
+    """
+    Get notification history for the authenticated user.
+    Combines email (NotificationLog) and push (PushNotificationLog) records.
+    Query params: ?limit=50&offset=0
+    """
+    from models import NotificationLog, PushNotificationLog, User
+    from sqlalchemy import desc
+
+    limit = min(int(request.args.get('limit', 50)), 100)
+    offset = int(request.args.get('offset', 0))
+
+    try:
+        # Email notifications received
+        email_logs = NotificationLog.query.filter_by(
+            user_id=g.user_id
+        ).order_by(desc(NotificationLog.created_at)).limit(limit + offset).all()
+
+        # Push notifications received
+        push_logs = PushNotificationLog.query.filter_by(
+            user_id=g.user_id
+        ).order_by(desc(PushNotificationLog.created_at)).limit(limit + offset).all()
+
+        # Merge and sort by created_at descending
+        combined = []
+        for log in email_logs:
+            trader = User.query.get(log.portfolio_owner_id)
+            combined.append({
+                'id': f'email-{log.id}',
+                'type': 'email',
+                'trader_username': trader.username if trader else 'Unknown',
+                'status': log.status,
+                'created_at': log.created_at.isoformat() if log.created_at else None,
+            })
+        for log in push_logs:
+            trader = User.query.get(log.portfolio_owner_id)
+            combined.append({
+                'id': f'push-{log.id}',
+                'type': 'push',
+                'title': log.title,
+                'body': log.body,
+                'trader_username': trader.username if trader else 'Unknown',
+                'status': log.status,
+                'created_at': log.created_at.isoformat() if log.created_at else None,
+                'data': log.data_payload,
+            })
+
+        combined.sort(key=lambda x: x.get('created_at') or '', reverse=True)
+        page = combined[offset:offset + limit]
+
+        return jsonify({
+            'notifications': page,
+            'total': len(combined),
+            'limit': limit,
+            'offset': offset,
+        })
+    except Exception as e:
+        logger.error(f"Notification history error: {e}")
+        return jsonify({'error': 'fetch_failed'}), 500
+
+
 @mobile_api.route('/user/preferences', methods=['GET'])
 @require_auth
 def get_user_preferences():
