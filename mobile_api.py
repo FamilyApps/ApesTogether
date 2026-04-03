@@ -3112,6 +3112,66 @@ def alphavantage_usage():
 
         tickers = [{'symbol': r.symbol, 'count': r.count} for r in ticker_rows]
 
+        # ── Latency metrics (response_time_ms) ──────────────────────────
+        # Today's avg/p95 for calls that have response_time_ms logged
+        latency_today = db.session.query(
+            func.avg(AlphaVantageAPILog.response_time_ms).label('avg_ms'),
+            func.max(AlphaVantageAPILog.response_time_ms).label('max_ms'),
+            func.min(AlphaVantageAPILog.response_time_ms).label('min_ms'),
+            func.count(AlphaVantageAPILog.response_time_ms).label('measured'),
+        ).filter(
+            AlphaVantageAPILog.timestamp >= today_start,
+            AlphaVantageAPILog.response_time_ms.isnot(None)
+        ).first()
+
+        # P95 approximation: get the 95th percentile value
+        measured_count = int(latency_today.measured or 0)
+        p95_ms = None
+        if measured_count > 0:
+            p95_offset = max(int(measured_count * 0.95) - 1, 0)
+            p95_row = db.session.query(
+                AlphaVantageAPILog.response_time_ms
+            ).filter(
+                AlphaVantageAPILog.timestamp >= today_start,
+                AlphaVantageAPILog.response_time_ms.isnot(None)
+            ).order_by(AlphaVantageAPILog.response_time_ms.asc()).offset(p95_offset).limit(1).first()
+            p95_ms = p95_row[0] if p95_row else None
+
+        # Per-endpoint latency breakdown (today)
+        endpoint_latency_rows = db.session.query(
+            AlphaVantageAPILog.endpoint,
+            func.avg(AlphaVantageAPILog.response_time_ms).label('avg_ms'),
+            func.count().label('total'),
+            func.sum(db.case(
+                (AlphaVantageAPILog.response_status != 'success', 1),
+                else_=0
+            )).label('errors'),
+        ).filter(
+            AlphaVantageAPILog.timestamp >= today_start,
+            AlphaVantageAPILog.response_time_ms.isnot(None)
+        ).group_by(AlphaVantageAPILog.endpoint).all()
+
+        endpoint_latency = [{
+            'endpoint': r.endpoint,
+            'avg_ms': round(float(r.avg_ms), 1) if r.avg_ms else None,
+            'total': r.total,
+            'errors': int(r.errors or 0),
+            'error_rate': round((int(r.errors or 0) / r.total) * 100, 1) if r.total > 0 else 0,
+        } for r in endpoint_latency_rows]
+
+        # 7-day latency trend (daily avg response time)
+        daily_latency_rows = db.session.query(
+            func.date(AlphaVantageAPILog.timestamp).label('day'),
+            func.avg(AlphaVantageAPILog.response_time_ms).label('avg_ms'),
+        ).filter(
+            AlphaVantageAPILog.timestamp >= seven_days_ago,
+            AlphaVantageAPILog.response_time_ms.isnot(None)
+        ).group_by(func.date(AlphaVantageAPILog.timestamp)).order_by(
+            func.date(AlphaVantageAPILog.timestamp).desc()
+        ).all()
+
+        daily_latency = [{'date': str(r.day), 'avg_ms': round(float(r.avg_ms), 1)} for r in daily_latency_rows]
+
         return jsonify({
             'plan': 'Premium ($99.99/mo)',
             'rate_limit': {'per_minute': 150, 'daily': 'unlimited'},
@@ -3122,6 +3182,15 @@ def alphavantage_usage():
             'daily_history': daily,
             'top_endpoints': endpoints,
             'top_tickers': tickers,
+            'latency': {
+                'avg_ms': round(float(latency_today.avg_ms), 1) if latency_today.avg_ms else None,
+                'p95_ms': p95_ms,
+                'max_ms': int(latency_today.max_ms) if latency_today.max_ms else None,
+                'min_ms': int(latency_today.min_ms) if latency_today.min_ms else None,
+                'measured_calls': measured_count,
+                'by_endpoint': endpoint_latency,
+                'daily_trend': daily_latency,
+            },
         })
     except Exception as e:
         logger.error(f"AlphaVantage usage error: {e}")

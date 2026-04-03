@@ -1220,6 +1220,62 @@ const AlphaVantageUsage = ({ api }) => {
         )}
       </Card>
 
+      {/* Latency metrics */}
+      {(() => {
+        const lat = d.latency || {};
+        const byEp = lat.by_endpoint || [];
+        const trend = lat.daily_trend || [];
+        const maxTrend = Math.max(...trend.map(r => r.avg_ms), 1);
+        const avgColor = (lat.avg_ms || 0) > 2000 ? 'var(--red)' : (lat.avg_ms || 0) > 800 ? 'var(--yellow)' : 'var(--green)';
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontSize: 16, fontWeight: 600 }}>Response Latency</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
+              <MetricCard label="Avg Response" value={lat.avg_ms ? `${lat.avg_ms}ms` : '—'} color={avgColor} />
+              <MetricCard label="P95" value={lat.p95_ms ? `${lat.p95_ms}ms` : '—'} color="var(--yellow)" />
+              <MetricCard label="Max" value={lat.max_ms ? `${lat.max_ms}ms` : '—'} color="var(--red)" />
+              <MetricCard label="Min" value={lat.min_ms ? `${lat.min_ms}ms` : '—'} color="var(--accent)" />
+              <MetricCard label="Measured Calls" value={lat.measured_calls || 0} color="var(--blue)" />
+            </div>
+            {byEp.length > 0 && (
+              <Card>
+                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>Latency by Endpoint</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {byEp.map((ep, i) => (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+                      <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{ep.endpoint}</span>
+                      <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                        <span style={{ color: (ep.avg_ms || 0) > 2000 ? 'var(--red)' : 'var(--text-primary)' }}>{ep.avg_ms ? `${ep.avg_ms}ms` : '—'}</span>
+                        <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{ep.total} calls</span>
+                        {ep.error_rate > 0 && <Badge text={`${ep.error_rate}% err`} color="var(--red)" />}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
+            {trend.length > 0 && (
+              <Card>
+                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>7-Day Avg Latency</div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', height: 80 }}>
+                  {trend.slice().reverse().map((row, i) => {
+                    const pct = (row.avg_ms / maxTrend) * 100;
+                    const barColor = row.avg_ms > 2000 ? 'var(--red)' : row.avg_ms > 800 ? 'var(--yellow)' : 'var(--accent)';
+                    return (
+                      <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{Math.round(row.avg_ms)}ms</div>
+                        <div style={{ width: '100%', height: `${Math.max(pct, 6)}%`, background: barColor, borderRadius: 4 }} />
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{row.date?.slice(5)}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Card>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Top tickers and endpoints */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Card>
