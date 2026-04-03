@@ -2824,12 +2824,15 @@ def platform_growth():
             pass
 
         # ── Build continuous daily series (fill gaps with zeros) ──
-        if daily:
-            min_date = min(daily.keys())
-            max_date = str(datetime.utcnow().date())
+        # Always cover at least 1 year back so every time range filter works
+        if True:
+            today = datetime.utcnow().date()
+            one_year_ago = today - timedelta(days=365)
+            earliest_data = min(daily.keys()) if daily else str(today)
+            start_str = min(earliest_data, str(one_year_ago))
             series = []
-            current = datetime.strptime(min_date, '%Y-%m-%d').date()
-            end = datetime.strptime(max_date, '%Y-%m-%d').date()
+            current = datetime.strptime(start_str, '%Y-%m-%d').date()
+            end = today
             zero_row = {
                 'signups': 0, 'real_signups': 0, 'bot_signups': 0,
                 'trades': 0, 'active_traders': 0,
@@ -2843,8 +2846,6 @@ def platform_growth():
                 entry['date'] = d
                 series.append(entry)
                 current += timedelta(days=1)
-        else:
-            series = []
 
         return jsonify({'series': series})
     except Exception as e:
