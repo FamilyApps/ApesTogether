@@ -102,7 +102,7 @@ struct ReferralPreviewView: View {
                 // CTA
                 VStack(spacing: 16) {
                     if !authManager.isAuthenticated {
-                        Text("Sign in to subscribe for $9/mo")
+                        Text("Sign in to start your free trial")
                             .font(.subheadline)
                             .foregroundColor(.textSecondary)
                         

@@ -82,7 +82,7 @@ struct PortfolioDetailView: View {
                                     HStack(spacing: 6) {
                                         Image(systemName: "crown.fill")
                                             .font(.system(size: 13))
-                                        Text("Subscribe $\(String(format: "%.0f", portfolio.subscriptionPrice))/mo")
+                                        Text("Try Free, then $\(String(format: "%.0f", portfolio.subscriptionPrice))/mo")
                                             .font(.system(size: 14, weight: .bold))
                                     }
                                     .frame(maxWidth: .infinity)
@@ -951,7 +951,7 @@ struct BlurredHoldingsTeaser: View {
                     HStack(spacing: 6) {
                         Image(systemName: "crown.fill")
                             .font(.system(size: 13))
-                        Text("Subscribe for $\(String(format: "%.0f", subscriptionPrice))/mo")
+                        Text("Start Free Trial — then $\(String(format: "%.0f", subscriptionPrice))/mo")
                             .font(.system(size: 15, weight: .bold))
                     }
                     .foregroundColor(.white)

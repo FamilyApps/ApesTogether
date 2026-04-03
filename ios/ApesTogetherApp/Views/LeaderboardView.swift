@@ -698,7 +698,7 @@ struct LeaderboardCard: View {
                     HStack(spacing: 5) {
                         Image(systemName: "bell.fill")
                             .font(.system(size: 11))
-                        Text("Subscribe $9/mo")
+                        Text("Try Free")
                             .font(.system(size: 12, weight: .bold))
                     }
                     .foregroundColor(.appBackground)
