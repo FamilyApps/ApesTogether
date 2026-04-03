@@ -927,44 +927,98 @@ struct BlurredHoldingsTeaser: View {
             .opacity(0.4)
             
             // Overlay CTA
-            VStack(spacing: 14) {
+            VStack(spacing: 16) {
                 ZStack {
                     Circle()
                         .fill(Color.primaryAccent.opacity(0.15))
                         .frame(width: 56, height: 56)
-                    Image(systemName: "lock.fill")
+                    Image(systemName: "bell.badge.fill")
                         .font(.system(size: 24))
                         .foregroundColor(.primaryAccent)
                 }
                 
-                Text("See Full Holdings")
+                Text("See every trade, instantly")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(.textPrimary)
                 
-                Text("Subscribe to view \(username)'s exact positions, trade alerts, and full history.")
-                    .font(.system(size: 13))
-                    .foregroundColor(.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 260)
+                // Benefits list
+                VStack(alignment: .leading, spacing: 6) {
+                    benefitRow("Real-time buy & sell alerts")
+                    benefitRow("Full position details & history")
+                    benefitRow("Exact holdings breakdown")
+                }
+                .frame(maxWidth: 240)
                 
+                // Trial timeline
+                VStack(spacing: 4) {
+                    HStack(spacing: 0) {
+                        VStack(spacing: 2) {
+                            Circle().fill(Color.primaryAccent).frame(width: 8, height: 8)
+                            Text("Today").font(.system(size: 10, weight: .semibold)).foregroundColor(.primaryAccent)
+                            Text("Free").font(.system(size: 9)).foregroundColor(.textSecondary)
+                        }
+                        Rectangle().fill(Color.primaryAccent.opacity(0.3)).frame(height: 2)
+                        VStack(spacing: 2) {
+                            Circle().fill(Color.textSecondary.opacity(0.5)).frame(width: 8, height: 8)
+                            Text("Day 30").font(.system(size: 10, weight: .semibold)).foregroundColor(.textSecondary)
+                            Text("$\(String(format: "%.0f", subscriptionPrice))/mo").font(.system(size: 9)).foregroundColor(.textSecondary)
+                        }
+                    }
+                    .frame(maxWidth: 200)
+                    
+                    Text("Cancel anytime — we'll remind you before the trial ends")
+                        .font(.system(size: 10))
+                        .foregroundColor(.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 4)
+                }
+                .padding(.vertical, 8)
+                
+                // CTA button
                 Button(action: onSubscribe) {
                     HStack(spacing: 6) {
                         Image(systemName: "crown.fill")
                             .font(.system(size: 13))
-                        Text("Start Free Trial — then $\(String(format: "%.0f", subscriptionPrice))/mo")
-                            .font(.system(size: 15, weight: .bold))
+                        Text("Start Free Trial")
+                            .font(.system(size: 16, weight: .bold))
                     }
                     .foregroundColor(.white)
-                    .padding(.vertical, 13)
-                    .padding(.horizontal, 28)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
                     .background(Color.primaryAccent)
                     .cornerRadius(12)
                 }
                 .disabled(isProcessing)
+                .padding(.horizontal, 16)
+                
+                // Price disclosure (Apple requirement: most prominent)
+                Text("1 month free, then $\(String(format: "%.0f", subscriptionPrice))/month")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.textSecondary)
+                
+                // Legal links
+                HStack(spacing: 12) {
+                    Link("Terms of Use", destination: URL(string: "https://apestogether.ai/terms-of-service")!)
+                    Text("·").foregroundColor(.textSecondary)
+                    Link("Privacy Policy", destination: URL(string: "https://apestogether.ai/privacy-policy")!)
+                }
+                .font(.system(size: 10))
+                .foregroundColor(.textSecondary)
             }
             .padding(.vertical, 20)
         }
         .cardStyle()
+    }
+    
+    private func benefitRow(_ text: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 14))
+                .foregroundColor(.primaryAccent)
+            Text(text)
+                .font(.system(size: 13))
+                .foregroundColor(.textPrimary)
+        }
     }
 }
 

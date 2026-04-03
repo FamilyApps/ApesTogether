@@ -18,7 +18,7 @@ _global_sends_this_hour = 0
 _global_hour_reset = 0
 
 MAX_EMAILS_PER_USER_PER_DAY = 50
-MAX_EMAILS_PER_HOUR_GLOBAL = 500   # SendGrid free tier = 100/day; paid = much higher
+MAX_EMAILS_PER_HOUR_GLOBAL = 1600  # SendGrid Essentials 50K/mo ≈ 1,667/day ≈ safe hourly burst
 CIRCUIT_BREAKER_FAILURES = 5       # consecutive failures before tripping
 _consecutive_failures = 0
 _circuit_open_until = 0
