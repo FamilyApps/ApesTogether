@@ -2744,146 +2744,94 @@ def bot_dashboard():
 @require_admin_2fa
 @with_db_retry
 def platform_growth():
-    """Platform growth metrics: daily signups, cumulative users, human vs bot breakdown."""
-    from models import db, User, Subscription, Transaction, BetaWaitlist
+    """Unified daily time series for all platform growth metrics."""
+    from models import db, User, Subscription, Transaction
     from sqlalchemy import func, cast, Date, case
+    from collections import defaultdict
 
     try:
-        # --- User growth by day ---
-        user_daily = db.session.query(
+        daily = defaultdict(lambda: {
+            'signups': 0, 'real_signups': 0, 'bot_signups': 0,
+            'trades': 0, 'active_traders': 0,
+            'page_views': 0, 'unique_visitors': 0,
+            'portfolio_clicks': 0,
+            'apple_clicks': 0, 'android_clicks': 0,
+        })
+
+        # ── Signups by day ──
+        for row in db.session.query(
             cast(User.created_at, Date).label('day'),
             func.count().label('total'),
             func.sum(case((User.created_by == 'system', 1), else_=0)).label('bots'),
             func.sum(case((User.created_by != 'system', 1), else_=0)).label('humans'),
         ).filter(User.created_at.isnot(None))\
-         .group_by(cast(User.created_at, Date))\
-         .order_by(cast(User.created_at, Date)).all()
+         .group_by(cast(User.created_at, Date)).all():
+            d = str(row.day)
+            daily[d]['signups'] = row.total
+            daily[d]['real_signups'] = int(row.humans or 0)
+            daily[d]['bot_signups'] = int(row.bots or 0)
 
-        daily_signups = []
-        cumulative = 0
-        cum_humans = 0
-        cum_bots = 0
-        for row in user_daily:
-            cumulative += row.total
-            cum_humans += int(row.humans or 0)
-            cum_bots += int(row.bots or 0)
-            daily_signups.append({
-                'date': str(row.day),
-                'new': row.total,
-                'humans': int(row.humans or 0),
-                'bots': int(row.bots or 0),
-                'cumulative': cumulative,
-                'cum_humans': cum_humans,
-                'cum_bots': cum_bots,
-            })
-
-        # --- Summary stats ---
-        total_users = User.query.count()
-        total_bots = User.query.filter_by(created_by='system').count()
-        total_humans = total_users - total_bots
-        from models import Stock
-        unique_tickers = db.session.query(func.count(func.distinct(Stock.ticker))).scalar() or 0
-
-        total_trades = Transaction.query.count()
-
-        # Active subscriptions
-        active_subs = Subscription.query.filter_by(status='active').count()
-
-        # Waitlist count
-        try:
-            waitlist_count = BetaWaitlist.query.count()
-        except Exception:
-            waitlist_count = 0
-
-        # Active traders (users who made a trade in last 7d / 30d)
-        seven_days_ago = datetime.utcnow() - timedelta(days=7)
-        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
-        active_traders_7d = db.session.query(
-            func.count(func.distinct(Transaction.user_id))
-        ).filter(Transaction.timestamp >= seven_days_ago).scalar() or 0
-        active_traders_30d = db.session.query(
-            func.count(func.distinct(Transaction.user_id))
-        ).filter(Transaction.timestamp >= thirty_days_ago).scalar() or 0
-
-        # Trade volume by day (last 30 days)
-        trade_daily = db.session.query(
+        # ── Trades + active traders by day ──
+        for row in db.session.query(
             cast(Transaction.timestamp, Date).label('day'),
             func.count().label('count'),
-        ).filter(Transaction.timestamp >= thirty_days_ago)\
-         .group_by(cast(Transaction.timestamp, Date))\
-         .order_by(cast(Transaction.timestamp, Date)).all()
+            func.count(func.distinct(Transaction.user_id)).label('traders'),
+        ).filter(Transaction.timestamp.isnot(None))\
+         .group_by(cast(Transaction.timestamp, Date)).all():
+            d = str(row.day)
+            daily[d]['trades'] = row.count
+            daily[d]['active_traders'] = row.traders
 
-        trade_volume = [{'date': str(r.day), 'trades': r.count} for r in trade_daily]
-
-        # --- Page views by day (last 30 days) ---
-        page_views_daily = []
-        total_page_views = 0
-        unique_visitors = 0
+        # ── Page views (landing = page '/') + unique visitors ──
         try:
             from models import PageView
-            pv_daily = db.session.query(
+            for row in db.session.query(
                 cast(PageView.created_at, Date).label('day'),
                 func.count().label('views'),
                 func.count(func.distinct(PageView.ip_hash)).label('unique'),
-            ).filter(PageView.created_at >= thirty_days_ago)\
-             .group_by(cast(PageView.created_at, Date))\
-             .order_by(cast(PageView.created_at, Date)).all()
-            page_views_daily = [{'date': str(r.day), 'views': r.views, 'unique': r.unique} for r in pv_daily]
-            total_page_views = db.session.query(func.count()).select_from(PageView).scalar() or 0
-            unique_visitors = db.session.query(func.count(func.distinct(PageView.ip_hash))).filter(
-                PageView.created_at >= thirty_days_ago
-            ).scalar() or 0
+            ).filter(PageView.page == '/')\
+             .group_by(cast(PageView.created_at, Date)).all():
+                d = str(row.day)
+                daily[d]['page_views'] = row.views
+                daily[d]['unique_visitors'] = row.unique
         except Exception:
             pass
 
-        # --- Link clicks by day with platform breakdown (last 30 days) ---
-        link_clicks_daily = []
-        total_apple_clicks = 0
-        total_android_clicks = 0
+        # ── Shared portfolio link clicks (page starts with '/p/') ──
+        try:
+            from models import PageView as PV2
+            for row in db.session.query(
+                cast(PV2.created_at, Date).label('day'),
+                func.count().label('clicks'),
+            ).filter(PV2.page.like('/p/%'))\
+             .group_by(cast(PV2.created_at, Date)).all():
+                daily[str(row.day)]['portfolio_clicks'] = row.clicks
+        except Exception:
+            pass
+
+        # ── App store link clicks by platform ──
         try:
             from models import LinkClick
-            lc_daily = db.session.query(
+            for row in db.session.query(
                 cast(LinkClick.created_at, Date).label('day'),
-                func.count().label('total'),
                 func.sum(case((LinkClick.platform == 'apple', 1), else_=0)).label('apple'),
                 func.sum(case((LinkClick.platform == 'android', 1), else_=0)).label('android'),
-            ).filter(LinkClick.created_at >= thirty_days_ago)\
-             .group_by(cast(LinkClick.created_at, Date))\
-             .order_by(cast(LinkClick.created_at, Date)).all()
-            link_clicks_daily = [
-                {'date': str(r.day), 'total': r.total, 'apple': int(r.apple or 0), 'android': int(r.android or 0)}
-                for r in lc_daily
-            ]
-            total_apple_clicks = db.session.query(func.count()).select_from(LinkClick).filter(
-                LinkClick.platform == 'apple'
-            ).scalar() or 0
-            total_android_clicks = db.session.query(func.count()).select_from(LinkClick).filter(
-                LinkClick.platform == 'android'
-            ).scalar() or 0
+            ).group_by(cast(LinkClick.created_at, Date)).all():
+                d = str(row.day)
+                daily[d]['apple_clicks'] = int(row.apple or 0)
+                daily[d]['android_clicks'] = int(row.android or 0)
         except Exception:
             pass
 
-        return jsonify({
-            'summary': {
-                'total_users': total_users,
-                'humans': total_humans,
-                'bots': total_bots,
-                'unique_tickers': unique_tickers,
-                'total_trades': total_trades,
-                'active_subscriptions': active_subs,
-                'active_traders_7d': active_traders_7d,
-                'active_traders_30d': active_traders_30d,
-                'waitlist': waitlist_count,
-                'total_page_views': total_page_views,
-                'unique_visitors_30d': unique_visitors,
-                'apple_clicks': total_apple_clicks,
-                'android_clicks': total_android_clicks,
-            },
-            'daily_signups': daily_signups,
-            'trade_volume': trade_volume,
-            'page_views': page_views_daily,
-            'link_clicks': link_clicks_daily,
-        })
+        # ── Build sorted series ──
+        sorted_dates = sorted(daily.keys())
+        series = []
+        for dt in sorted_dates:
+            entry = daily[dt].copy()
+            entry['date'] = dt
+            series.append(entry)
+
+        return jsonify({'series': series})
     except Exception as e:
         logger.error(f"Platform growth error: {e}")
         return jsonify({'error': str(e)}), 500

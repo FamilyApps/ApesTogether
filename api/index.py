@@ -6758,6 +6758,21 @@ def public_portfolio_view(slug):
             </body></html>
             """, 404
         
+        # Track shared portfolio link click
+        try:
+            from models import PageView, db as _db
+            import hashlib as _hl
+            _ip = request.headers.get('X-Forwarded-For', request.remote_addr or '')
+            _db.session.add(PageView(
+                page=f'/p/{slug}',
+                referrer=(request.referrer or '')[:500] or None,
+                user_agent=(request.headers.get('User-Agent', ''))[:500] or None,
+                ip_hash=_hl.sha256(_ip.encode()).hexdigest()[:16] if _ip else None,
+            ))
+            _db.session.commit()
+        except Exception:
+            pass
+
         # Check if user account is deleted (GDPR)
         if user.deleted_at:
             return """

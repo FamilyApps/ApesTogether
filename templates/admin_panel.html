@@ -917,177 +917,222 @@ const UsersPage = ({ api }) => {
 };
 
 // ─── Page: Platform Growth ──────────────────────────────────────────────────
+const METRICS = [
+  { key: 'signups',          label: 'Daily Signups',        color: '#8b5cf6' },
+  { key: 'real_signups',     label: 'New Real Accounts',    color: '#3b82f6' },
+  { key: 'bot_signups',      label: 'New Bots',             color: '#f59e0b' },
+  { key: 'trades',           label: 'Daily Trades',         color: '#10b981' },
+  { key: 'active_traders',   label: 'Active Traders',       color: '#06b6d4' },
+  { key: 'page_views',       label: 'Landing Page Views',   color: '#ec4899' },
+  { key: 'unique_visitors',  label: 'Unique Visitors',      color: '#f97316' },
+  { key: 'portfolio_clicks', label: 'Shared Portfolio Clicks', color: '#14b8a6' },
+  { key: 'apple_clicks',     label: 'Apple Link Clicks',    color: '#a1a1aa' },
+  { key: 'android_clicks',   label: 'Android Link Clicks',  color: '#22c55e' },
+];
+
+const RANGES = [
+  { key: '1W', label: '1W', days: 7 },
+  { key: '1M', label: '1M', days: 30 },
+  { key: '3M', label: '3M', days: 90 },
+  { key: 'YTD', label: 'YTD', days: null },
+  { key: '1Y', label: '1Y', days: 365 },
+];
+
 const PlatformGrowth = ({ api }) => {
-  const [data, setData] = useState(null);
+  const [rawData, setRawData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [clickFilter, setClickFilter] = useState('all'); // 'all', 'apple', 'android'
+  const [active, setActive] = useState({ signups: true, trades: true });
+  const [range, setRange] = useState('3M');
+  const [hoverIdx, setHoverIdx] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setData(await api('/admin/platform-growth')); } catch (e) { console.error(e); }
+    try { setRawData(await api('/admin/platform-growth')); } catch (e) { console.error(e); }
     setLoading(false);
   }, [api]);
 
   useEffect(() => { load(); }, [load]);
 
-  if (loading && !data) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}><Spinner /></div>;
+  // Filter data by selected time range
+  const series = useMemo(() => {
+    if (!rawData?.series) return [];
+    const all = rawData.series;
+    if (!all.length) return [];
+    const r = RANGES.find(x => x.key === range);
+    let cutoff;
+    if (r.key === 'YTD') {
+      cutoff = new Date().getFullYear() + '-01-01';
+    } else {
+      const d = new Date();
+      d.setDate(d.getDate() - r.days);
+      cutoff = d.toISOString().slice(0, 10);
+    }
+    return all.filter(row => row.date >= cutoff);
+  }, [rawData, range]);
 
-  const s = data?.summary || {};
-  const signups = data?.daily_signups || [];
-  const trades = data?.trade_volume || [];
-  const pageViews = data?.page_views || [];
-  const linkClicks = data?.link_clicks || [];
-  const maxNew = Math.max(...signups.map(r => r.new), 1);
-  const maxCum = Math.max(...signups.map(r => r.cumulative), 1);
-  const maxTrade = Math.max(...trades.map(r => r.trades), 1);
-  const maxPV = Math.max(...pageViews.map(r => r.views), 1);
-  const maxLC = Math.max(...linkClicks.map(r => clickFilter === 'apple' ? r.apple : clickFilter === 'android' ? r.android : r.total), 1);
+  const activeKeys = useMemo(() => METRICS.filter(m => active[m.key]), [active]);
 
-  const FilterBtn = ({ value, label }) => (
-    <button onClick={() => setClickFilter(value)} style={{
-      padding: '3px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 11, cursor: 'pointer',
-      background: clickFilter === value ? 'var(--accent)' : 'var(--bg-elevated)',
-      color: clickFilter === value ? '#fff' : 'var(--text-secondary)', fontWeight: clickFilter === value ? 600 : 400,
-    }}>{label}</button>
-  );
+  // Compute per-metric max for independent Y-axis scaling
+  const maxVals = useMemo(() => {
+    const out = {};
+    for (const m of METRICS) {
+      out[m.key] = Math.max(...series.map(r => r[m.key] || 0), 1);
+    }
+    return out;
+  }, [series]);
+
+  const toggle = (key) => setActive(prev => ({ ...prev, [key]: !prev[key] }));
+
+  if (loading && !rawData) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}><Spinner /></div>;
+
+  const W = 900, H = 300, PAD = 20;
+  const plotW = W - PAD * 2, plotH = H - PAD * 2;
 
   return (
     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h2 style={{ fontSize: 20, fontWeight: 700 }}>Platform Growth</h2>
-          <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>User acquisition, engagement &amp; trade activity</p>
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Toggle metrics below, hover to inspect, filter by time range</p>
         </div>
         <Btn small variant="secondary" onClick={load}>{Icons.refresh} Refresh</Btn>
       </div>
 
-      {/* Summary cards — row 1: Users */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
-        <MetricCard label="Total Users" value={s.total_users || 0} color="var(--accent)" />
-        <MetricCard label="Real Accounts" value={s.humans || 0} color="var(--blue)" />
-        <MetricCard label="Bots" value={s.bots || 0} color="var(--yellow, #f59e0b)" />
-        <MetricCard label="Active Traders (7d)" value={s.active_traders_7d || 0} color="var(--green)" />
-        <MetricCard label="Active Traders (30d)" value={s.active_traders_30d || 0} color="var(--green)" />
-        <MetricCard label="Active Subs" value={s.active_subscriptions || 0} color="var(--accent)" />
+      {/* Time range selector */}
+      <div style={{ display: 'flex', gap: 6 }}>
+        {RANGES.map(r => (
+          <button key={r.key} onClick={() => setRange(r.key)} style={{
+            padding: '5px 14px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            background: range === r.key ? 'var(--accent)' : 'var(--bg-elevated)',
+            color: range === r.key ? '#fff' : 'var(--text-secondary)',
+            transition: 'all .15s',
+          }}>{r.label}</button>
+        ))}
       </div>
 
-      {/* Summary cards — row 2: Engagement */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
-        <MetricCard label="Total Trades" value={s.total_trades || 0} color="var(--text-primary)" />
-        <MetricCard label="Unique Tickers" value={s.unique_tickers || 0} color="var(--text-primary)" />
-        <MetricCard label="Page Views (all)" value={s.total_page_views || 0} color="var(--blue)" />
-        <MetricCard label="Unique Visitors (30d)" value={s.unique_visitors_30d || 0} color="var(--blue)" />
-        <MetricCard label="Apple Clicks" value={s.apple_clicks || 0} sub="App Store" color="var(--text-primary)" />
-        <MetricCard label="Android Clicks" value={s.android_clicks || 0} sub="Google Play" color="var(--green)" />
-        <MetricCard label="Waitlist" value={s.waitlist || 0} color="var(--accent)" />
+      {/* Metric toggles */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {METRICS.map(m => (
+          <button key={m.key} onClick={() => toggle(m.key)} style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '5px 12px', borderRadius: 8, fontSize: 12, cursor: 'pointer',
+            border: active[m.key] ? `2px solid ${m.color}` : '1px solid var(--border)',
+            background: active[m.key] ? `${m.color}18` : 'var(--bg-elevated)',
+            color: active[m.key] ? m.color : 'var(--text-muted)',
+            fontWeight: active[m.key] ? 600 : 400,
+            transition: 'all .15s',
+          }}>
+            <span style={{ width: 10, height: 10, borderRadius: 3, background: active[m.key] ? m.color : 'var(--border)', flexShrink: 0 }} />
+            {m.label}
+          </button>
+        ))}
       </div>
 
-      {/* Cumulative user growth line chart */}
-      <Card>
-        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Cumulative Users</div>
-        {signups.length === 0 ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No data yet</div> : (
-          <div style={{ position: 'relative', height: 180 }}>
-            <svg width="100%" height="100%" viewBox={`0 0 ${signups.length * 24} 180`} preserveAspectRatio="none" style={{ overflow: 'visible' }}>
-              <polyline fill="none" stroke="var(--accent)" strokeWidth="2"
-                points={signups.map((r, i) => `${i * 24},${180 - (r.cumulative / maxCum) * 160}`).join(' ')} />
-              <polyline fill="none" stroke="var(--blue)" strokeWidth="1.5" strokeDasharray="4 2"
-                points={signups.map((r, i) => `${i * 24},${180 - (r.cum_humans / maxCum) * 160}`).join(' ')} />
-              <polyline fill="none" stroke="var(--yellow, #f59e0b)" strokeWidth="1.5" strokeDasharray="4 2"
-                points={signups.map((r, i) => `${i * 24},${180 - (r.cum_bots / maxCum) * 160}`).join(' ')} />
+      {/* Unified chart */}
+      <Card style={{ padding: 16 }}>
+        {series.length === 0 ? <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: 40 }}>No data for this time range</div> : (
+          <div style={{ position: 'relative' }}>
+            <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="auto" preserveAspectRatio="xMidYMid meet"
+              style={{ overflow: 'visible' }}
+              onMouseLeave={() => setHoverIdx(null)}
+              onMouseMove={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const x = (e.clientX - rect.left) / rect.width * W;
+                const idx = Math.round((x - PAD) / plotW * (series.length - 1));
+                setHoverIdx(Math.max(0, Math.min(series.length - 1, idx)));
+              }}>
+              {/* Grid lines */}
+              {[0, 0.25, 0.5, 0.75, 1].map(f => (
+                <line key={f} x1={PAD} x2={W - PAD} y1={PAD + plotH * (1 - f)} y2={PAD + plotH * (1 - f)}
+                  stroke="var(--border)" strokeWidth="0.5" strokeDasharray={f === 0 ? '' : '4 4'} />
+              ))}
+
+              {/* Date labels */}
+              {series.map((row, i) => {
+                const step = Math.max(1, Math.floor(series.length / 8));
+                if (i % step !== 0 && i !== series.length - 1) return null;
+                const x = PAD + (i / Math.max(series.length - 1, 1)) * plotW;
+                return <text key={i} x={x} y={H - 2} textAnchor="middle" fontSize="9" fill="var(--text-muted)">{row.date.slice(5)}</text>;
+              })}
+
+              {/* Metric lines — each scaled to its own max */}
+              {activeKeys.map(m => {
+                const mx = maxVals[m.key];
+                const pts = series.map((row, i) => {
+                  const x = PAD + (i / Math.max(series.length - 1, 1)) * plotW;
+                  const y = PAD + plotH - ((row[m.key] || 0) / mx) * plotH;
+                  return `${x},${y}`;
+                }).join(' ');
+                return <polyline key={m.key} fill="none" stroke={m.color} strokeWidth="2" strokeLinejoin="round" points={pts} />;
+              })}
+
+              {/* Hover crosshair */}
+              {hoverIdx !== null && (
+                <line x1={PAD + (hoverIdx / Math.max(series.length - 1, 1)) * plotW}
+                  x2={PAD + (hoverIdx / Math.max(series.length - 1, 1)) * plotW}
+                  y1={PAD} y2={PAD + plotH} stroke="var(--text-muted)" strokeWidth="1" strokeDasharray="3 3" />
+              )}
+
+              {/* Hover dots */}
+              {hoverIdx !== null && activeKeys.map(m => {
+                const row = series[hoverIdx];
+                const x = PAD + (hoverIdx / Math.max(series.length - 1, 1)) * plotW;
+                const y = PAD + plotH - ((row[m.key] || 0) / maxVals[m.key]) * plotH;
+                return <circle key={m.key} cx={x} cy={y} r="4" fill={m.color} stroke="var(--bg-card)" strokeWidth="2" />;
+              })}
             </svg>
-            <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>
-              <span><span style={{ display: 'inline-block', width: 12, height: 2, background: 'var(--accent)', marginRight: 4, verticalAlign: 'middle' }}></span>Total</span>
-              <span><span style={{ display: 'inline-block', width: 12, height: 2, background: 'var(--blue)', marginRight: 4, verticalAlign: 'middle' }}></span>Humans</span>
-              <span><span style={{ display: 'inline-block', width: 12, height: 2, background: 'var(--yellow, #f59e0b)', marginRight: 4, verticalAlign: 'middle' }}></span>Bots</span>
-              <span style={{ marginLeft: 'auto' }}>{signups[0]?.date?.slice(5)} → {signups[signups.length - 1]?.date?.slice(5)}</span>
-            </div>
+
+            {/* Hover tooltip */}
+            {hoverIdx !== null && series[hoverIdx] && (
+              <div style={{
+                position: 'absolute', top: 8,
+                left: (hoverIdx / Math.max(series.length - 1, 1)) > 0.65 ? 'auto' : `${(hoverIdx / Math.max(series.length - 1, 1)) * 100 + 2}%`,
+                right: (hoverIdx / Math.max(series.length - 1, 1)) > 0.65 ? `${(1 - hoverIdx / Math.max(series.length - 1, 1)) * 100 + 2}%` : 'auto',
+                background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px',
+                fontSize: 12, boxShadow: '0 4px 20px rgba(0,0,0,0.3)', zIndex: 20, pointerEvents: 'none',
+                minWidth: 160,
+              }}>
+                <div style={{ fontWeight: 700, marginBottom: 6, color: 'var(--text-primary)' }}>{series[hoverIdx].date}</div>
+                {activeKeys.map(m => (
+                  <div key={m.key} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, padding: '2px 0' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 2, background: m.color, flexShrink: 0 }} />
+                      <span style={{ color: 'var(--text-secondary)' }}>{m.label}</span>
+                    </span>
+                    <span style={{ fontWeight: 600, color: m.color }}>{series[hoverIdx][m.key] || 0}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </Card>
 
-      {/* Daily signups bar chart */}
-      <Card>
-        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Daily Signups (New Real Accounts vs Bots)</div>
-        {signups.length === 0 ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No data yet</div> : (
-          <div style={{ display: 'flex', gap: 3, alignItems: 'flex-end', height: 100, overflow: 'hidden' }}>
-            {signups.slice(-60).map((row, i) => {
-              const pct = (row.new / maxNew) * 100;
-              const humanPct = row.new > 0 ? (row.humans / row.new) * 100 : 0;
-              return (
-                <div key={i} title={`${row.date}: ${row.new} (${row.humans} real + ${row.bots} bots)`}
-                  style={{ flex: 1, minWidth: 4, maxWidth: 16, height: `${Math.max(pct, 4)}%`, borderRadius: 2, position: 'relative', overflow: 'hidden', cursor: 'default' }}>
-                  <div style={{ position: 'absolute', bottom: 0, width: '100%', height: `${humanPct}%`, background: 'var(--blue)', borderRadius: '0 0 2px 2px' }} />
-                  <div style={{ position: 'absolute', top: 0, width: '100%', height: `${100 - humanPct}%`, background: 'var(--yellow, #f59e0b)', borderRadius: '2px 2px 0 0' }} />
+      {/* Active metrics legend with current period totals */}
+      {series.length > 0 && activeKeys.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
+          {activeKeys.map(m => {
+            const total = series.reduce((s, r) => s + (r[m.key] || 0), 0);
+            const avg = series.length ? (total / series.length).toFixed(1) : 0;
+            const last7 = series.slice(-7).reduce((s, r) => s + (r[m.key] || 0), 0);
+            const prev7 = series.slice(-14, -7).reduce((s, r) => s + (r[m.key] || 0), 0);
+            const trend = prev7 > 0 ? ((last7 - prev7) / prev7 * 100).toFixed(0) : (last7 > 0 ? '+100' : '0');
+            return (
+              <Card key={m.key} style={{ padding: '12px 14px', borderLeft: `3px solid ${m.color}` }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>{m.label}</div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: m.color }}>{total.toLocaleString()}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                  avg {avg}/day
+                  <span style={{ marginLeft: 8, color: Number(trend) >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
+                    {Number(trend) >= 0 ? '▲' : '▼'} {Math.abs(trend)}% vs prev 7d
+                  </span>
                 </div>
-              );
-            })}
-          </div>
-        )}
-        <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>
-          <span><span style={{ display: 'inline-block', width: 8, height: 8, background: 'var(--blue)', borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }}></span>Real Accounts</span>
-          <span><span style={{ display: 'inline-block', width: 8, height: 8, background: 'var(--yellow, #f59e0b)', borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }}></span>Bots</span>
-          <span style={{ marginLeft: 'auto' }}>Last {Math.min(signups.length, 60)} days</span>
+              </Card>
+            );
+          })}
         </div>
-      </Card>
-
-      {/* Two-column: Trade volume + Page views */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        <Card>
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Trade Volume (30d)</div>
-          {trades.length === 0 ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No trades yet</div> : (
-            <div style={{ display: 'flex', gap: 3, alignItems: 'flex-end', height: 90 }}>
-              {trades.map((row, i) => (
-                <div key={i} title={`${row.date}: ${row.trades} trades`}
-                  style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                  <div style={{ width: '100%', height: `${Math.max((row.trades / maxTrade) * 100, 3)}%`, background: 'var(--accent)', borderRadius: 3 }} />
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-        <Card>
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Landing Page Views (30d)</div>
-          {pageViews.length === 0 ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No data yet — tracking starts now</div> : (
-            <div style={{ display: 'flex', gap: 3, alignItems: 'flex-end', height: 90 }}>
-              {pageViews.map((row, i) => (
-                <div key={i} title={`${row.date}: ${row.views} views (${row.unique} unique)`}
-                  style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                  <div style={{ width: '100%', height: `${Math.max((row.views / maxPV) * 100, 3)}%`, background: 'var(--blue)', borderRadius: 3 }} />
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-      </div>
-
-      {/* Link clicks chart with Apple/Android filter */}
-      <Card>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>App Store Link Clicks (30d)</div>
-          <div style={{ display: 'flex', gap: 4 }}>
-            <FilterBtn value="all" label="All" />
-            <FilterBtn value="apple" label="Apple" />
-            <FilterBtn value="android" label="Android" />
-          </div>
-        </div>
-        {linkClicks.length === 0 ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No clicks yet — tracking starts now</div> : (
-          <div style={{ display: 'flex', gap: 4, alignItems: 'flex-end', height: 100 }}>
-            {linkClicks.map((row, i) => {
-              const val = clickFilter === 'apple' ? row.apple : clickFilter === 'android' ? row.android : row.total;
-              const pct = (val / maxLC) * 100;
-              const barColor = clickFilter === 'apple' ? 'var(--text-primary)' : clickFilter === 'android' ? 'var(--green)' : 'var(--accent)';
-              return (
-                <div key={i} title={`${row.date}: ${row.total} total (${row.apple} Apple, ${row.android} Android)`}
-                  style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                  <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{val > 0 ? val : ''}</div>
-                  <div style={{ width: '100%', height: `${Math.max(pct, 3)}%`, background: barColor, borderRadius: 3, transition: 'height .3s' }} />
-                  {i % 5 === 0 && <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{row.date.slice(5)}</div>}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Card>
+      )}
     </div>
   );
 };
