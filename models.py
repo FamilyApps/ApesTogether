@@ -41,6 +41,10 @@ class User(UserMixin, db.Model):
     phone_number = db.Column(db.String(20), nullable=True)  # E.164 format: +12125551234
     default_notification_method = db.Column(db.String(10), default='email')  # 'email' or 'sms'
     
+    # Notification preferences (both default ON)
+    email_notifications_enabled = db.Column(db.Boolean, default=True, server_default='true')
+    push_notifications_enabled = db.Column(db.Boolean, default=True, server_default='true')
+
     # Future-proofing for leaderboard filtering and admin controls
     leaderboard_eligible = db.Column(db.Boolean, default=True)  # Admin can exclude from leaderboards
     extra_data = db.Column('metadata', db.JSON, default=dict)  # Flexible storage for future fields

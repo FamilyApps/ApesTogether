@@ -121,14 +121,15 @@ def process_transaction(db, user_id, ticker, quantity, price, transaction_type, 
     # merge() updates the session's copy of the user with our changes
     db.session.merge(user)
     
+    # Calculate position percentage for sell notifications (shared by push + email)
+    position_pct = None
+    if transaction_type == 'sell' and position_before_qty and position_before_qty > 0:
+        position_pct = round((quantity / position_before_qty) * 100, 1)
+
     # Send push notifications to subscribers (Phase 1 - Mobile App)
     if PUSH_NOTIFICATIONS_ENABLED and transaction_type in ('buy', 'sell'):
         try:
             from push_notification_service import notify_subscribers_of_trade
-            # Calculate position percentage for sell notifications
-            position_pct = None
-            if transaction_type == 'sell' and position_before_qty and position_before_qty > 0:
-                position_pct = round((quantity / position_before_qty) * 100, 1)
             notification_result = notify_subscribers_of_trade(
                 db=db,
                 trader_user_id=user_id,
@@ -142,7 +143,21 @@ def process_transaction(db, user_id, ticker, quantity, price, transaction_type, 
         except Exception as e:
             # Don't fail the trade if notifications fail
             logger.warning(f"Failed to send trade notifications: {e}")
-    
+
+    # Send email trade confirmation to trader + email notifications to subscribers
+    if transaction_type in ('buy', 'sell'):
+        try:
+            from services.notification_utils import send_trade_confirmation_email, notify_subscribers_via_email
+            # Email confirmation to the trader (if they have email notifications on)
+            if getattr(user, 'email_notifications_enabled', True):
+                conf_result = send_trade_confirmation_email(user, transaction_type, ticker, quantity, price, position_pct)
+                logger.info(f"Trade confirmation email: {conf_result.get('status')}")
+            # Email notifications to subscribers
+            email_result = notify_subscribers_via_email(db, user_id, transaction_type, ticker, quantity, price, position_pct)
+            logger.info(f"Subscriber emails: {email_result.get('sent', 0)} sent, {email_result.get('failed', 0)} failed, {email_result.get('rate_limited', 0)} rate-limited")
+        except Exception as e:
+            logger.warning(f"Failed to send email notifications: {e}")
+
     return {
         'max_cash_deployed': user.max_cash_deployed,
         'cash_proceeds': user.cash_proceeds,

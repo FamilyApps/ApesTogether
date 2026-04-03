@@ -1296,6 +1296,106 @@ def update_notification_settings():
         return jsonify({'error': 'update_failed'}), 500
 
 
+@mobile_api.route('/user/preferences', methods=['GET'])
+@require_auth
+def get_user_preferences():
+    """Get user-level notification preferences and profile info."""
+    from models import db, User
+    try:
+        user = User.query.get(g.user_id)
+        if not user:
+            return jsonify({'error': 'user_not_found'}), 404
+        return jsonify({
+            'username': user.username,
+            'email': user.email,
+            'email_notifications_enabled': getattr(user, 'email_notifications_enabled', True),
+            'push_notifications_enabled': getattr(user, 'push_notifications_enabled', True),
+        })
+    except Exception as e:
+        logger.error(f"Get user preferences error: {e}")
+        return jsonify({'error': 'fetch_failed'}), 500
+
+
+@mobile_api.route('/user/preferences', methods=['PUT'])
+@require_auth
+def update_user_preferences():
+    """
+    Update user-level notification preferences.
+    Request body (all fields optional):
+    {
+        "email_notifications_enabled": true/false,
+        "push_notifications_enabled": true/false
+    }
+    """
+    from models import db, User
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'missing_request_body'}), 400
+
+    try:
+        user = User.query.get(g.user_id)
+        if not user:
+            return jsonify({'error': 'user_not_found'}), 404
+
+        if 'email_notifications_enabled' in data:
+            user.email_notifications_enabled = bool(data['email_notifications_enabled'])
+        if 'push_notifications_enabled' in data:
+            user.push_notifications_enabled = bool(data['push_notifications_enabled'])
+
+        db.session.commit()
+        return jsonify({
+            'success': True,
+            'email_notifications_enabled': user.email_notifications_enabled,
+            'push_notifications_enabled': user.push_notifications_enabled,
+        })
+    except Exception as e:
+        logger.error(f"Update user preferences error: {e}")
+        return jsonify({'error': 'update_failed'}), 500
+
+
+@mobile_api.route('/user/username', methods=['PUT'])
+@require_auth
+def update_username():
+    """
+    Change username. Validates uniqueness, length, and allowed characters.
+    Request body: { "username": "new-username" }
+    """
+    from models import db, User
+    import re
+
+    data = request.get_json()
+    if not data or not data.get('username'):
+        return jsonify({'error': 'username_required'}), 400
+
+    new_username = data['username'].strip().lower()
+
+    # Validation
+    if len(new_username) < 3 or len(new_username) > 30:
+        return jsonify({'error': 'username_must_be_3_to_30_characters'}), 400
+    if not re.match(r'^[a-z0-9][a-z0-9._-]*[a-z0-9]$', new_username):
+        return jsonify({'error': 'username_must_be_alphanumeric_with_hyphens_dots_underscores'}), 400
+
+    try:
+        user = User.query.get(g.user_id)
+        if not user:
+            return jsonify({'error': 'user_not_found'}), 404
+
+        if user.username == new_username:
+            return jsonify({'success': True, 'username': new_username})
+
+        existing = User.query.filter_by(username=new_username).first()
+        if existing:
+            return jsonify({'error': 'username_already_taken'}), 409
+
+        user.username = new_username
+        db.session.commit()
+        return jsonify({'success': True, 'username': user.username})
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Update username error: {e}")
+        return jsonify({'error': 'update_failed'}), 500
+
+
 # =============================================================================
 # Authentication Endpoints
 # =============================================================================
