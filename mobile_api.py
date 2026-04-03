@@ -2823,13 +2823,28 @@ def platform_growth():
         except Exception:
             pass
 
-        # ── Build sorted series ──
-        sorted_dates = sorted(daily.keys())
-        series = []
-        for dt in sorted_dates:
-            entry = daily[dt].copy()
-            entry['date'] = dt
-            series.append(entry)
+        # ── Build continuous daily series (fill gaps with zeros) ──
+        if daily:
+            min_date = min(daily.keys())
+            max_date = str(datetime.utcnow().date())
+            series = []
+            current = datetime.strptime(min_date, '%Y-%m-%d').date()
+            end = datetime.strptime(max_date, '%Y-%m-%d').date()
+            zero_row = {
+                'signups': 0, 'real_signups': 0, 'bot_signups': 0,
+                'trades': 0, 'active_traders': 0,
+                'page_views': 0, 'unique_visitors': 0,
+                'portfolio_clicks': 0,
+                'apple_clicks': 0, 'android_clicks': 0,
+            }
+            while current <= end:
+                d = str(current)
+                entry = daily.get(d, zero_row).copy()
+                entry['date'] = d
+                series.append(entry)
+                current += timedelta(days=1)
+        else:
+            series = []
 
         return jsonify({'series': series})
     except Exception as e:
