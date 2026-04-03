@@ -229,15 +229,8 @@ def authorize_google():
     user = User.query.filter_by(email=user_info['email']).first()
     
     if not user:
-        # Generate a unique random username
-        while True:
-            adjectives = ['clever', 'brave', 'sharp', 'wise', 'happy', 'lucky', 'sunny', 'proud', 'witty', 'gentle']
-            nouns = ['fox', 'lion', 'eagle', 'tiger', 'river', 'ocean', 'bear', 'wolf', 'horse', 'raven']
-            adjective = random.choice(adjectives)
-            noun = random.choice(nouns)
-            username = f"{adjective}-{noun}"
-            if not User.query.filter_by(username=username).first():
-                break
+        from username_generator import generate_unique_username
+        username = generate_unique_username()
 
         # Create new user
         user = User(
@@ -315,15 +308,8 @@ def authorize_apple():
     user = User.query.filter_by(email=user_info.get('email')).first()
     
     if not user:
-        # Generate a unique random username
-        while True:
-            adjectives = ['clever', 'brave', 'sharp', 'wise', 'happy', 'lucky', 'sunny', 'proud', 'witty', 'gentle']
-            nouns = ['fox', 'lion', 'eagle', 'tiger', 'river', 'ocean', 'bear', 'wolf', 'horse', 'raven']
-            adjective = random.choice(adjectives)
-            noun = random.choice(nouns)
-            username = f"{adjective}-{noun}"
-            if not User.query.filter_by(username=username).first():
-                break
+        from username_generator import generate_unique_username
+        username = generate_unique_username()
 
         # Create new user
         user = User(
