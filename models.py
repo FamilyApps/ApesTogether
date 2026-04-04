@@ -813,6 +813,29 @@ class PendingTrade(db.Model):
         return f"<PendingTrade {self.ticker} {self.action} status={self.status} batch={self.email_batch_id}>"
 
 
+class QueuedEmailTrade(db.Model):
+    """Email trades received outside market hours, queued for execution at next market open."""
+    __tablename__ = 'queued_email_trade'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    user_email = db.Column(db.String(255), nullable=False)
+    ticker = db.Column(db.String(10), nullable=False)
+    action = db.Column(db.String(10), nullable=False)  # 'buy' or 'sell'
+    quantity = db.Column(db.Float, nullable=False)
+    
+    status = db.Column(db.String(20), nullable=False, default='queued')  # 'queued', 'executed', 'failed', 'cancelled'
+    error_message = db.Column(db.Text, nullable=True)
+    
+    queued_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    executed_at = db.Column(db.DateTime, nullable=True)
+    
+    user = db.relationship('User', backref=db.backref('queued_trades', lazy='dynamic'))
+    
+    def __repr__(self):
+        return f"<QueuedEmailTrade {self.action} {self.quantity} {self.ticker} user={self.user_id} status={self.status}>"
+
+
 class MobileSubscription(db.Model):
     """Mobile app subscription linking - replaces Stripe-based Subscription for mobile"""
     __tablename__ = 'mobile_subscription'

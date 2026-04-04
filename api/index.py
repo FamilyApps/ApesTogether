@@ -4460,15 +4460,22 @@ def market_open_cron():
         
         logger.info(f"Market open cron job executed at {current_time.strftime('%Y-%m-%d %H:%M:%S %Z')} (ET date: {today_et})")
         
-        # For now, just log that market opened
-        # In the future, we could add market open initialization logic here
+        # Process queued after-hours email trades
+        queued_result = {'executed': 0, 'failed': 0, 'total': 0}
+        try:
+            from services.trading_email import process_queued_trades
+            queued_result = process_queued_trades()
+            logger.info(f"Queued email trades processed: {queued_result}")
+        except Exception as e:
+            logger.error(f"Error processing queued email trades: {e}")
         
         return jsonify({
             'success': True,
             'message': 'Market open processing completed',
             'timestamp': current_time.isoformat(),
             'market_date_et': today_et.isoformat(),
-            'timezone': 'America/New_York'
+            'timezone': 'America/New_York',
+            'queued_trades': queued_result,
         }), 200
     
     except Exception as e:
