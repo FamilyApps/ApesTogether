@@ -2073,41 +2073,6 @@ def vote_on_poll():
         return jsonify({'error': 'vote_failed'}), 500
 
 
-@mobile_api.route('/admin/poll/create', methods=['POST'])
-@require_admin_2fa
-@with_db_retry
-def create_poll():
-    """Create a new feature poll (deactivates any existing active poll)."""
-    import json as _json
-    from models import db, FeaturePoll
-
-    data = request.get_json()
-    if not data:
-        return jsonify({'error': 'missing_body'}), 400
-
-    question = data.get('question')
-    options = data.get('options')
-    if not question or not options or len(options) < 2:
-        return jsonify({'error': 'question_and_at_least_2_options_required'}), 400
-
-    try:
-        # Deactivate existing polls
-        FeaturePoll.query.filter_by(active=True).update({'active': False})
-
-        poll = FeaturePoll(
-            question=question,
-            options=_json.dumps(options),
-            active=True,
-        )
-        db.session.add(poll)
-        db.session.commit()
-        return jsonify({'success': True, 'poll_id': poll.id})
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Create poll error: {e}")
-        return jsonify({'error': 'create_failed'}), 500
-
-
 # =============================================================================
 # Trade Endpoints (Buy / Sell)
 # =============================================================================
@@ -2595,6 +2560,41 @@ def bot_set_cash():
         db.session.rollback()
         logger.error(f"Bot set cash error: {e}")
         return jsonify({'error': 'set_cash_failed'}), 500
+
+
+@mobile_api.route('/admin/poll/create', methods=['POST'])
+@require_admin_2fa
+@with_db_retry
+def create_poll():
+    """Create a new feature poll (deactivates any existing active poll)."""
+    import json as _json
+    from models import db, FeaturePoll
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'missing_body'}), 400
+
+    question = data.get('question')
+    options = data.get('options')
+    if not question or not options or len(options) < 2:
+        return jsonify({'error': 'question_and_at_least_2_options_required'}), 400
+
+    try:
+        # Deactivate existing polls
+        FeaturePoll.query.filter_by(active=True).update({'active': False})
+
+        poll = FeaturePoll(
+            question=question,
+            options=_json.dumps(options),
+            active=True,
+        )
+        db.session.add(poll)
+        db.session.commit()
+        return jsonify({'success': True, 'poll_id': poll.id})
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Create poll error: {e}")
+        return jsonify({'error': 'create_failed'}), 500
 
 
 @mobile_api.route('/admin/bot/scale-holdings', methods=['POST'])
