@@ -183,6 +183,17 @@ struct TradeSheetView: View {
                         .padding(.horizontal, 20)
                     }
                     
+                    // Email trading hint
+                    HStack(spacing: 6) {
+                        Image(systemName: "envelope")
+                            .font(.caption2)
+                            .foregroundColor(.textMuted)
+                        Text("You can also trade via email: **trade@apestogether.ai**")
+                            .font(.caption2)
+                            .foregroundColor(.textMuted)
+                    }
+                    .padding(.horizontal, 20)
+                    
                     // Submit button
                     Button {
                         submitTrade()
