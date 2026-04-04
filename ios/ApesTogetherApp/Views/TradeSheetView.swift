@@ -214,8 +214,9 @@ struct TradeSheetView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "envelope.fill")
                                 .font(.system(size: 11))
-                            Text("or submit this trade via email")
+                            Text("Submit trades via email")
                                 .font(.caption)
+                                .underline()
                         }
                         .foregroundColor(.primaryAccent)
                     }
