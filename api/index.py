@@ -4390,43 +4390,58 @@ def create_tables():
 @app.route('/admin/run-migration')
 @admin_2fa_required
 def run_migration():
-    """Add missing columns to existing tables (safe to run multiple times)."""
+    """Add missing columns to existing tables. Use ?step=N to run one at a time.
+    
+    Steps:
+      1 - email_notifications_enabled
+      2 - push_notifications_enabled
+      3 - phone_number
+      4 - default_notification_method
+      5 - leaderboard_eligible
+      6 - create all new tables
+    
+    No step param = show instructions.
+    """
     from models import db
-    results = []
     
-    # Each migration: (description, SQL)
-    migrations = [
-        # User table — notification preferences
-        ("user.email_notifications_enabled", "ALTER TABLE \"user\" ADD COLUMN email_notifications_enabled BOOLEAN DEFAULT true"),
-        ("user.push_notifications_enabled", "ALTER TABLE \"user\" ADD COLUMN push_notifications_enabled BOOLEAN DEFAULT true"),
-        # User table — phone / notification method
-        ("user.phone_number", "ALTER TABLE \"user\" ADD COLUMN phone_number VARCHAR(20)"),
-        ("user.default_notification_method", "ALTER TABLE \"user\" ADD COLUMN default_notification_method VARCHAR(10) DEFAULT 'email'"),
-        # User table — leaderboard eligible
-        ("user.leaderboard_eligible", "ALTER TABLE \"user\" ADD COLUMN leaderboard_eligible BOOLEAN DEFAULT true"),
-    ]
+    step = request.args.get('step', type=int)
     
-    for desc, sql in migrations:
+    migrations = {
+        1: ("user.email_notifications_enabled", "ALTER TABLE \"user\" ADD COLUMN email_notifications_enabled BOOLEAN DEFAULT true"),
+        2: ("user.push_notifications_enabled", "ALTER TABLE \"user\" ADD COLUMN push_notifications_enabled BOOLEAN DEFAULT true"),
+        3: ("user.phone_number", "ALTER TABLE \"user\" ADD COLUMN phone_number VARCHAR(20)"),
+        4: ("user.default_notification_method", "ALTER TABLE \"user\" ADD COLUMN default_notification_method VARCHAR(10) DEFAULT 'email'"),
+        5: ("user.leaderboard_eligible", "ALTER TABLE \"user\" ADD COLUMN leaderboard_eligible BOOLEAN DEFAULT true"),
+    }
+    
+    if not step:
+        return jsonify({
+            'instructions': 'Add ?step=1 through ?step=6 to run each migration individually',
+            'steps': {k: v[0] for k, v in migrations.items()},
+            'step_6': 'create_all_tables',
+        })
+    
+    if step == 6:
         try:
-            db.session.execute(db.text(sql))
-            db.session.commit()
-            results.append({'column': desc, 'status': 'added'})
+            db.create_all()
+            return jsonify({'success': True, 'step': 6, 'action': 'create_all_tables', 'status': 'ok'})
         except Exception as e:
-            db.session.rollback()
-            err = str(e)
-            if 'already exists' in err or 'duplicate column' in err.lower():
-                results.append({'column': desc, 'status': 'already_exists'})
-            else:
-                results.append({'column': desc, 'status': 'error', 'detail': err})
+            return jsonify({'success': False, 'step': 6, 'error': str(e)})
     
-    # Also create any new tables that don't exist yet
+    if step not in migrations:
+        return jsonify({'error': f'Invalid step {step}. Use 1-6.'}), 400
+    
+    desc, sql = migrations[step]
     try:
-        db.create_all()
-        results.append({'action': 'create_all_tables', 'status': 'ok'})
+        db.session.execute(db.text(sql))
+        db.session.commit()
+        return jsonify({'success': True, 'step': step, 'column': desc, 'status': 'added'})
     except Exception as e:
-        results.append({'action': 'create_all_tables', 'status': 'error', 'detail': str(e)})
-    
-    return jsonify({'success': True, 'migrations': results})
+        db.session.rollback()
+        err = str(e)
+        if 'already exists' in err or 'duplicate column' in err.lower():
+            return jsonify({'success': True, 'step': step, 'column': desc, 'status': 'already_exists'})
+        return jsonify({'success': False, 'step': step, 'column': desc, 'error': err})
 
 
 @app.route('/admin/manual-intraday-collection')
