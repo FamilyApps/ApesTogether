@@ -513,6 +513,14 @@ async def validate_and_save_purchase(
     
     db.session.commit()
     
+    # Check for milestone events (first subscriber, first payment)
+    try:
+        from services.milestone_emails import check_subscription_milestones
+        check_subscription_milestones(subscribed_to_id, subscriber_id)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Milestone check failed (non-fatal): {e}")
+    
     # Acknowledge Google purchase if needed
     if platform == 'google' and not result.get('acknowledged'):
         await service.acknowledge_google_purchase(purchase_token)

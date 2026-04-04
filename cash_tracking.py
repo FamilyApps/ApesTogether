@@ -158,11 +158,58 @@ def process_transaction(db, user_id, ticker, quantity, price, transaction_type, 
         except Exception as e:
             logger.warning(f"Failed to send email notifications: {e}")
 
+    # Check daily trade frequency cap (non-blocking, best-effort)
+    if transaction_type in ('buy', 'sell'):
+        try:
+            _check_daily_trade_cap(db, user_id, user)
+        except Exception as e:
+            logger.debug(f"Trade cap check failed (non-fatal): {e}")
+
     return {
         'max_cash_deployed': user.max_cash_deployed,
         'cash_proceeds': user.cash_proceeds,
         'transaction_value': transaction_value
     }
+
+
+DAILY_TRADE_CAP = 50  # Notify user when they hit this many trades/day
+_trade_cap_notified = set()  # In-memory set of (user_id, date_str) already notified
+
+def _check_daily_trade_cap(db, user_id, user):
+    """Send a one-time email when a user hits the daily trade cap."""
+    from datetime import date as date_type
+    today_str = date_type.today().isoformat()
+    key = (user_id, today_str)
+    if key in _trade_cap_notified:
+        return
+
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    trade_count = Transaction.query.filter(
+        Transaction.user_id == user_id,
+        Transaction.timestamp >= today_start,
+        Transaction.transaction_type.in_(['buy', 'sell'])
+    ).count()
+
+    if trade_count >= DAILY_TRADE_CAP:
+        _trade_cap_notified.add(key)
+        email = getattr(user, 'email', None)
+        if email and getattr(user, 'email_notifications_enabled', True):
+            try:
+                from services.notification_utils import send_email
+                send_email(
+                    email,
+                    f"Heads up: {trade_count} trades today",
+                    f"Hey {user.username or 'there'},\n\n"
+                    f"You've placed {trade_count} trades today. That's a lot of activity!\n\n"
+                    f"There's no hard limit, but high-frequency trading can affect your "
+                    f"portfolio performance metrics and generate a lot of notifications "
+                    f"for your subscribers.\n\n"
+                    f"— Apes Together"
+                )
+                logger.info(f"Daily trade cap email sent to user {user_id} ({trade_count} trades)")
+            except Exception as e:
+                logger.debug(f"Trade cap email failed: {e}")
+
 
 def calculate_portfolio_value_with_cash(user_id, target_date=None):
     """
