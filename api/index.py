@@ -4387,6 +4387,48 @@ def create_tables():
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
 
+@app.route('/admin/run-migration')
+@admin_2fa_required
+def run_migration():
+    """Add missing columns to existing tables (safe to run multiple times)."""
+    from models import db
+    results = []
+    
+    # Each migration: (description, SQL)
+    migrations = [
+        # User table — notification preferences
+        ("user.email_notifications_enabled", "ALTER TABLE \"user\" ADD COLUMN email_notifications_enabled BOOLEAN DEFAULT true"),
+        ("user.push_notifications_enabled", "ALTER TABLE \"user\" ADD COLUMN push_notifications_enabled BOOLEAN DEFAULT true"),
+        # User table — phone / notification method
+        ("user.phone_number", "ALTER TABLE \"user\" ADD COLUMN phone_number VARCHAR(20)"),
+        ("user.default_notification_method", "ALTER TABLE \"user\" ADD COLUMN default_notification_method VARCHAR(10) DEFAULT 'email'"),
+        # User table — leaderboard eligible
+        ("user.leaderboard_eligible", "ALTER TABLE \"user\" ADD COLUMN leaderboard_eligible BOOLEAN DEFAULT true"),
+    ]
+    
+    for desc, sql in migrations:
+        try:
+            db.session.execute(db.text(sql))
+            db.session.commit()
+            results.append({'column': desc, 'status': 'added'})
+        except Exception as e:
+            db.session.rollback()
+            err = str(e)
+            if 'already exists' in err or 'duplicate column' in err.lower():
+                results.append({'column': desc, 'status': 'already_exists'})
+            else:
+                results.append({'column': desc, 'status': 'error', 'detail': err})
+    
+    # Also create any new tables that don't exist yet
+    try:
+        db.create_all()
+        results.append({'action': 'create_all_tables', 'status': 'ok'})
+    except Exception as e:
+        results.append({'action': 'create_all_tables', 'status': 'error', 'detail': str(e)})
+    
+    return jsonify({'success': True, 'migrations': results})
+
+
 @app.route('/admin/manual-intraday-collection')
 @admin_2fa_required  
 def manual_intraday_collection():
