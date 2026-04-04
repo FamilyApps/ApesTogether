@@ -64,6 +64,19 @@ def _send_milestone_email(influencer, milestone, total_subs, real_count, gifted_
 
     username = influencer.username or 'there'
 
+    slug = influencer.portfolio_slug or ''
+    share_url = f"https://apestogether.ai/portfolio/{slug}" if slug else "https://apestogether.ai"
+    # Deep link into the app's Share Performance screen
+    app_deep_link = f"apestogether://share-performance"
+
+    share_cta = (
+        f"\n\n📣 Share your achievement! Open the app and tap Share Performance "
+        f"on your portfolio to post your results:\n"
+        f"  {app_deep_link}\n\n"
+        f"Or share your public portfolio link:\n"
+        f"  {share_url}\n"
+    )
+
     if milestone == 1:
         subject = "🎉 You got your first subscriber!"
         body = (
@@ -71,8 +84,9 @@ def _send_milestone_email(influencer, milestone, total_subs, real_count, gifted_
             f"Congratulations — someone just subscribed to follow your trades on Apes Together!\n\n"
             f"This is a big deal. Every great portfolio starts with subscriber #1.\n\n"
             f"Your subscribers will now see your trades in real time. Keep doing what you're doing, "
-            f"and the community will keep growing.\n\n"
-            f"— The Apes Together Team"
+            f"and the community will keep growing."
+            + share_cta
+            + f"\n— The Apes Together Team"
         )
     elif milestone == 10:
         subject = "🔥 10 subscribers! You're building momentum"
@@ -80,8 +94,9 @@ def _send_milestone_email(influencer, milestone, total_subs, real_count, gifted_
             f"Hey {username},\n\n"
             f"You just hit 10 subscribers on Apes Together. That's real traction.\n\n"
             f"10 people are now watching your trades and trusting your strategy. "
-            f"Keep sharing your moves — the next milestone is 25.\n\n"
-            f"— The Apes Together Team"
+            f"Keep sharing your moves — the next milestone is 25."
+            + share_cta
+            + f"\n— The Apes Together Team"
         )
     elif milestone == 25:
         subject = "⭐ 25 subscribers — you're in the top tier"
@@ -89,32 +104,36 @@ def _send_milestone_email(influencer, milestone, total_subs, real_count, gifted_
             f"Hey {username},\n\n"
             f"25 subscribers! You're one of the most-followed traders on the platform.\n\n"
             f"At this rate, you're building a real following. "
-            f"Your trades are making an impact.\n\n"
-            f"— The Apes Together Team"
+            f"Your trades are making an impact."
+            + share_cta
+            + f"\n— The Apes Together Team"
         )
     elif milestone == 50:
         subject = "🚀 50 subscribers!"
         body = (
             f"Hey {username},\n\n"
             f"Half a hundred subscribers are now following your trades. Incredible.\n\n"
-            f"You're in elite territory on Apes Together. Keep it up.\n\n"
-            f"— The Apes Together Team"
+            f"You're in elite territory on Apes Together. Keep it up."
+            + share_cta
+            + f"\n— The Apes Together Team"
         )
     elif milestone == 100:
         subject = "💯 100 subscribers — triple digits!"
         body = (
             f"Hey {username},\n\n"
             f"You just crossed 100 subscribers on Apes Together.\n\n"
-            f"100 people are following your every trade. That's a real community.\n\n"
-            f"— The Apes Together Team"
+            f"100 people are following your every trade. That's a real community."
+            + share_cta
+            + f"\n— The Apes Together Team"
         )
     else:
         subject = f"🏆 {milestone} subscribers!"
         body = (
             f"Hey {username},\n\n"
             f"You've reached {milestone} subscribers on Apes Together. "
-            f"That's an incredible milestone.\n\n"
-            f"— The Apes Together Team"
+            f"That's an incredible milestone."
+            + share_cta
+            + f"\n— The Apes Together Team"
         )
 
     result = send_email(email, subject, body)

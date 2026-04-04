@@ -200,10 +200,11 @@ def _check_daily_trade_cap(db, user_id, user):
                     email,
                     f"Heads up: {trade_count} trades today",
                     f"Hey {user.username or 'there'},\n\n"
-                    f"You've placed {trade_count} trades today. That's a lot of activity!\n\n"
-                    f"There's no hard limit, but high-frequency trading can affect your "
-                    f"portfolio performance metrics and generate a lot of notifications "
-                    f"for your subscribers.\n\n"
+                    f"You've placed {trade_count} trades today. Here are a few things to keep in mind:\n\n"
+                    f"• Rate limit: 20 trades per minute. Requests beyond this will be temporarily blocked.\n"
+                    f"• Stock prices are cached for 90 seconds, so rapid trades on the same ticker "
+                    f"will use the same price.\n"
+                    f"• Each trade generates a notification to all of your subscribers.\n\n"
                     f"— Apes Together"
                 )
                 logger.info(f"Daily trade cap email sent to user {user_id} ({trade_count} trades)")

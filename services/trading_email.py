@@ -40,21 +40,49 @@ def parse_trade_command(text):
     }
 
 
-def parse_email_trade(subject, body):
+def parse_email_trades(subject, body):
     """
-    Try to extract a trade command from the email subject first, then first body line.
-    Returns dict or None.
+    Extract one or more trade commands from the email.
+    Checks subject first, then every non-blank line of the body.
+    Returns list of dicts [{action, ticker, quantity}, ...] (may be empty).
     """
+    trades = []
+    seen = set()
+    # Subject line first
     if subject:
-        trade = parse_trade_command(subject.strip())
-        if trade:
-            return trade
+        t = parse_trade_command(subject.strip())
+        if t:
+            key = (t['action'], t['ticker'], t['quantity'])
+            if key not in seen:
+                trades.append(t)
+                seen.add(key)
+    # Then every body line
     if body:
-        first_line = body.strip().split('\n')[0]
-        trade = parse_trade_command(first_line)
-        if trade:
-            return trade
-    return None
+        for line in body.strip().split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            t = parse_trade_command(line)
+            if t:
+                key = (t['action'], t['ticker'], t['quantity'])
+                if key not in seen:
+                    trades.append(t)
+                    seen.add(key)
+    return trades
+
+
+_CANCEL_RE = re.compile(r'^\s*cancel\s*$', re.IGNORECASE)
+
+
+def is_cancel_request(subject, body):
+    """Check if the email is a CANCEL request for queued trades."""
+    if subject and _CANCEL_RE.match(subject.strip()):
+        return True
+    if body:
+        first_line = body.strip().split('\n')[0].strip()
+        if _CANCEL_RE.match(first_line):
+            return True
+    return False
 
 
 # ── Inbound email handler ────────────────────────────────────────────────────
@@ -62,6 +90,10 @@ def parse_email_trade(subject, body):
 def handle_inbound_email(from_email, subject, body):
     """
     Full inbound-email trade pipeline.
+    Supports:
+      - Single trade in subject: "BUY 10 TSLA"
+      - Multiple trades in body (one per line)
+      - CANCEL command to cancel all queued after-hours trades
 
     Args:
         from_email: sender address (already cleaned of display name)
@@ -87,24 +119,129 @@ def handle_inbound_email(from_email, subject, body):
         )
         return {'status': 'error', 'message': 'User not found'}
 
-    # ── 2. Parse command ────────────────────────────────────────────────────
-    trade = parse_email_trade(subject, body)
-    if not trade:
+    # ── 1b. Check for CANCEL command ─────────────────────────────────────
+    if is_cancel_request(subject, body):
+        return _handle_cancel(db, user, from_email, send_email)
+
+    # ── 2. Parse commands (supports multiple trades) ─────────────────────
+    trades = parse_email_trades(subject, body)
+    if not trades:
         send_email(
             from_email,
             "Trade Failed – Invalid Format",
             "Could not parse your trade command.\n\n"
-            "Format: BUY 10 TSLA  or  SELL 5 AAPL\n"
-            "Put the command in the subject line or the first line of the email body."
+            "Supported formats (one trade per line):\n"
+            "  BUY 10 TSLA\n"
+            "  SELL 5 AAPL\n"
+            "  BUY 20 MSFT\n\n"
+            "Put a single trade in the subject line, or multiple trades "
+            "in the email body (one per line).\n\n"
+            "To cancel queued after-hours trades, reply with CANCEL."
         )
         return {'status': 'error', 'message': 'Invalid command'}
 
-    action = trade['action']
-    ticker = trade['ticker']
-    quantity = trade['quantity']
-
     # ── 2b. Market hours check — queue if after-hours/weekend ────────────
     if not is_market_hours():
+        return _handle_after_hours(db, user, from_email, trades, send_email)
+
+    # ── 3. Fetch live prices for all tickers ─────────────────────────────
+    tickers = list({t['ticker'] for t in trades})
+    try:
+        from portfolio_performance import get_stock_prices
+        prices = get_stock_prices(tickers)
+    except Exception as e:
+        logger.error(f"Price fetch failed: {e}")
+        prices = {}
+
+    # ── 4. Execute each trade ────────────────────────────────────────────
+    results = []
+    for trade in trades:
+        result = _execute_single_trade(
+            db, user, from_email, trade, prices, process_transaction,
+            notify_subscribers_via_email, send_email
+        )
+        results.append(result)
+
+    # ── 5. Summary confirmation email ────────────────────────────────────
+    succeeded = [r for r in results if r['status'] == 'success']
+    failed = [r for r in results if r['status'] != 'success']
+
+    if len(trades) == 1 and succeeded:
+        # Single trade — already sent individual confirmation
+        pass
+    elif len(trades) > 1:
+        lines = []
+        for r in results:
+            t = r['trade']
+            qty_str = f"{int(t['quantity'])}" if t['quantity'] == int(t['quantity']) else f"{t['quantity']}"
+            if r['status'] == 'success':
+                lines.append(f"  ✅ {t['action'].upper()} {qty_str} {t['ticker']} @ ${r.get('price', 0):,.2f}")
+            else:
+                lines.append(f"  ❌ {t['action'].upper()} {qty_str} {t['ticker']} — {r.get('error', 'failed')}")
+        send_email(
+            from_email,
+            f"Batch Trade Results: {len(succeeded)} executed, {len(failed)} failed",
+            f"Your email contained {len(trades)} trades.\n\n"
+            + "\n".join(lines)
+            + "\n\n— Apes Together"
+        )
+
+    return {
+        'status': 'success' if succeeded else 'error',
+        'message': f'{len(succeeded)} executed, {len(failed)} failed',
+        'executed': len(succeeded),
+        'failed': len(failed),
+    }
+
+
+def _handle_cancel(db, user, from_email, send_email):
+    """Cancel all queued (pending) after-hours trades for this user."""
+    from models import QueuedEmailTrade
+
+    queued = QueuedEmailTrade.query.filter_by(
+        user_id=user.id, status='queued'
+    ).all()
+
+    if not queued:
+        send_email(
+            from_email,
+            "No Queued Trades to Cancel",
+            "You don't have any pending queued trades.\n\n— Apes Together"
+        )
+        return {'status': 'ok', 'message': 'No queued trades'}
+
+    cancelled = []
+    for qt in queued:
+        qt.status = 'cancelled'
+        qty_str = f"{int(qt.quantity)}" if qt.quantity == int(qt.quantity) else f"{qt.quantity}"
+        cancelled.append(f"  • {qt.action.upper()} {qty_str} {qt.ticker}")
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Cancel queued trades failed: {e}")
+        send_email(from_email, "Cancel Failed", f"An error occurred: {e}")
+        return {'status': 'error', 'message': str(e)}
+
+    send_email(
+        from_email,
+        f"Cancelled {len(cancelled)} Queued Trade{'s' if len(cancelled) != 1 else ''}",
+        f"The following queued trades have been cancelled:\n\n"
+        + "\n".join(cancelled)
+        + "\n\nThey will NOT execute at market open.\n\n— Apes Together"
+    )
+    logger.info(f"Cancelled {len(cancelled)} queued trades for {user.username}")
+    return {'status': 'cancelled', 'message': f'{len(cancelled)} trades cancelled'}
+
+
+def _handle_after_hours(db, user, from_email, trades, send_email):
+    """Queue multiple trades for after-hours execution."""
+    from models import QueuedEmailTrade
+
+    queued_lines = []
+    for trade in trades:
+        action, ticker, quantity = trade['action'], trade['ticker'], trade['quantity']
         try:
             queued = QueuedEmailTrade(
                 user_id=user.id,
@@ -114,41 +251,45 @@ def handle_inbound_email(from_email, subject, body):
                 quantity=quantity,
             )
             db.session.add(queued)
-            db.session.commit()
+            qty_str = f"{int(quantity)}" if quantity == int(quantity) else f"{quantity}"
+            queued_lines.append(f"  • {action.upper()} {qty_str} {ticker}")
             logger.info(f"Queued after-hours email trade: {user.username} {action} {quantity} {ticker}")
         except Exception as e:
-            db.session.rollback()
             logger.error(f"Failed to queue after-hours trade: {e}")
 
-        send_email(
-            from_email,
-            f"Trade Queued: {action.upper()} {int(quantity) if quantity == int(quantity) else quantity} {ticker}",
-            f"The market is currently closed.\n\n"
-            f"Your trade has been queued and will execute automatically at the next market open "
-            f"(Mon–Fri, 9:30 AM ET) using the live price at that time.\n\n"
-            f"Queued: {action.upper()} {int(quantity) if quantity == int(quantity) else quantity} {ticker}\n\n"
-            f"Reply CANCEL to cancel this queued trade."
-        )
-        return {'status': 'queued', 'message': 'Trade queued for market open'}
-
-    # ── 3. Fetch live price ─────────────────────────────────────────────────
     try:
-        from portfolio_performance import get_stock_prices
-        prices = get_stock_prices([ticker])
-        price = prices.get(ticker)
+        db.session.commit()
     except Exception as e:
-        logger.error(f"Price fetch failed for {ticker}: {e}")
-        price = None
+        db.session.rollback()
+        logger.error(f"Failed to commit queued trades: {e}")
+
+    send_email(
+        from_email,
+        f"{'Trade' if len(trades) == 1 else f'{len(trades)} Trades'} Queued for Market Open",
+        f"The market is currently closed.\n\n"
+        f"Your {'trade has' if len(trades) == 1 else 'trades have'} been queued and will "
+        f"execute automatically at the next market open "
+        f"(Mon–Fri, 9:30 AM ET) using live prices at that time.\n\n"
+        f"Queued:\n"
+        + "\n".join(queued_lines)
+        + "\n\nReply CANCEL to cancel all queued trades.\n\n— Apes Together"
+    )
+    return {'status': 'queued', 'message': f'{len(trades)} trades queued for market open'}
+
+
+def _execute_single_trade(db, user, from_email, trade, prices, process_transaction,
+                          notify_subscribers_via_email, send_email):
+    """Execute one trade and send notifications. Returns result dict."""
+    from models import Stock
+
+    action = trade['action']
+    ticker = trade['ticker']
+    quantity = trade['quantity']
+    price = prices.get(ticker)
 
     if not price:
-        send_email(
-            from_email,
-            f"Trade Failed – Price Unavailable for {ticker}",
-            f"Unable to fetch a live price for {ticker}. Please try again in a moment."
-        )
-        return {'status': 'error', 'message': 'Price fetch failed'}
+        return {'status': 'error', 'trade': trade, 'error': f'Price unavailable for {ticker}'}
 
-    # ── 4. Validate & execute ───────────────────────────────────────────────
     try:
         existing = Stock.query.filter_by(user_id=user.id, ticker=ticker).first()
         position_before_qty = existing.quantity if existing and action == 'sell' else None
@@ -156,18 +297,11 @@ def handle_inbound_email(from_email, subject, body):
         if action == 'sell':
             if not existing or existing.quantity < quantity:
                 available = existing.quantity if existing else 0
-                send_email(
-                    from_email,
-                    f"Trade Failed – Insufficient Shares of {ticker}",
-                    f"You tried to sell {quantity} shares of {ticker} but only hold {available}."
-                )
-                return {'status': 'error', 'message': 'Insufficient shares'}
-
+                return {'status': 'error', 'trade': trade, 'error': f'Insufficient shares ({available} held)'}
             existing.quantity -= quantity
             if existing.quantity == 0:
                 db.session.delete(existing)
         else:
-            # Buy
             if existing:
                 total_cost = (existing.purchase_price * existing.quantity) + (price * quantity)
                 existing.quantity += quantity
@@ -176,7 +310,6 @@ def handle_inbound_email(from_email, subject, body):
                 stock = Stock(ticker=ticker, quantity=quantity, purchase_price=price, user_id=user.id)
                 db.session.add(stock)
 
-        # Record transaction + cash tracking
         process_transaction(
             db, user.id, ticker, quantity, price, action,
             timestamp=datetime.utcnow(),
@@ -190,30 +323,29 @@ def handle_inbound_email(from_email, subject, body):
     except Exception as e:
         db.session.rollback()
         logger.error(f"Email trade execution failed: {e}")
-        send_email(from_email, "Trade Failed", f"An error occurred executing your trade: {e}")
-        return {'status': 'error', 'message': str(e)}
+        return {'status': 'error', 'trade': trade, 'error': str(e)}
 
-    # ── 5. Confirmation email ───────────────────────────────────────────────
+    # Confirmation + notifications
     total = quantity * price
     emoji = "📈" if action == 'buy' else "📉"
     position_pct = None
     if action == 'sell' and position_before_qty and position_before_qty > 0:
         position_pct = round((quantity / position_before_qty) * 100, 1)
 
+    qty_str = f"{int(quantity)}" if quantity == int(quantity) else f"{quantity}"
     send_email(
         from_email,
-        f"Trade Confirmed: {action.upper()} {int(quantity) if quantity == int(quantity) else quantity} {ticker}",
+        f"Trade Confirmed: {action.upper()} {qty_str} {ticker}",
         f"{emoji} Trade Confirmed\n\n"
         f"Action: {action.upper()}\n"
         f"Ticker: {ticker}\n"
-        f"Quantity: {int(quantity) if quantity == int(quantity) else quantity}\n"
+        f"Quantity: {qty_str}\n"
         f"Price: ${price:,.2f}\n"
         f"Total: ${total:,.2f}\n"
         + (f"Position sold: {position_pct}%\n" if position_pct else "")
-        + "\nExecuted via email."
+        + "\nExecuted via email.\n\n— Apes Together"
     )
 
-    # ── 6. Notify subscribers via email ─────────────────────────────────────
     try:
         notify_subscribers_via_email(
             db, user.id, action, ticker, quantity, price,
@@ -222,7 +354,6 @@ def handle_inbound_email(from_email, subject, body):
     except Exception as e:
         logger.warning(f"Subscriber email notification failed: {e}")
 
-    # ── 7. Notify subscribers via push ──────────────────────────────────────
     try:
         from push_notification_service import notify_subscribers_of_trade
         notify_subscribers_of_trade(
@@ -232,7 +363,7 @@ def handle_inbound_email(from_email, subject, body):
     except Exception as e:
         logger.warning(f"Subscriber push notification failed: {e}")
 
-    return {'status': 'success', 'message': 'Trade executed'}
+    return {'status': 'success', 'trade': trade, 'price': price}
 
 
 # ── Market-open queue processor ──────────────────────────────────────────────
