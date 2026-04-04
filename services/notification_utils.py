@@ -79,7 +79,7 @@ def _record_failure():
         logger.error(f"Email circuit breaker OPENED after {_consecutive_failures} consecutive failures")
 
 
-def send_email(to_email, subject, body, html_body=None, bcc=True):
+def send_email(to_email, subject, body, html_body=None, bcc=True, reply_to=None):
     """
     Send email via SendGrid API v3 with BCC and rate limiting.
 
@@ -89,6 +89,7 @@ def send_email(to_email, subject, body, html_body=None, bcc=True):
         body: Plain-text body
         html_body: Optional HTML body (sent alongside plain text)
         bcc: Whether to BCC the monitoring address (default True)
+        reply_to: Optional reply-to email address (e.g. trade@trade.apestogether.ai)
 
     Returns:
         dict with 'status' ('sent'|'rate_limited'|'circuit_open'|'failed'),
@@ -126,6 +127,8 @@ def send_email(to_email, subject, body, html_body=None, bcc=True):
             'from': {'email': from_email, 'name': FROM_NAME_DEFAULT},
             'content': content,
         }
+        if reply_to:
+            data['reply_to'] = {'email': reply_to}
 
         response = requests.post(
             'https://api.sendgrid.com/v3/mail/send',

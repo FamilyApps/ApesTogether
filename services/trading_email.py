@@ -104,9 +104,14 @@ def handle_inbound_email(from_email, subject, body):
         dict with 'status' and 'message'
     """
     from models import db, User, Stock, Transaction, QueuedEmailTrade
-    from services.notification_utils import send_email, notify_subscribers_via_email
+    from services.notification_utils import send_email as _send_email, notify_subscribers_via_email
     from cash_tracking import process_transaction
     from timezone_utils import is_market_hours
+
+    TRADE_REPLY_TO = 'trade@trade.apestogether.ai'
+    def send_email(to, subj, body, **kw):
+        kw.setdefault('reply_to', TRADE_REPLY_TO)
+        return _send_email(to, subj, body, **kw)
 
     # ── 1. Identify user ────────────────────────────────────────────────────
     user = User.query.filter_by(email=from_email).first()
@@ -377,8 +382,13 @@ def process_queued_trades():
         dict with counts: executed, failed, total
     """
     from models import db, QueuedEmailTrade, User, Stock
-    from services.notification_utils import send_email, notify_subscribers_via_email
+    from services.notification_utils import send_email as _send_email, notify_subscribers_via_email
     from cash_tracking import process_transaction
+
+    TRADE_REPLY_TO = 'trade@trade.apestogether.ai'
+    def send_email(to, subj, body, **kw):
+        kw.setdefault('reply_to', TRADE_REPLY_TO)
+        return _send_email(to, subj, body, **kw)
 
     queued = QueuedEmailTrade.query.filter_by(status='queued').all()
     if not queued:
