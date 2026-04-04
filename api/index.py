@@ -4406,12 +4406,29 @@ def run_migration():
     
     step = request.args.get('step', type=int)
     
+    # Each step: (description, [list of SQL statements])
+    # ADD COLUMN without DEFAULT is instant in PostgreSQL (no table rewrite).
+    # Then ALTER COLUMN SET DEFAULT sets default for future inserts only.
     migrations = {
-        1: ("user.email_notifications_enabled", "ALTER TABLE \"user\" ADD COLUMN email_notifications_enabled BOOLEAN DEFAULT true"),
-        2: ("user.push_notifications_enabled", "ALTER TABLE \"user\" ADD COLUMN push_notifications_enabled BOOLEAN DEFAULT true"),
-        3: ("user.phone_number", "ALTER TABLE \"user\" ADD COLUMN phone_number VARCHAR(20)"),
-        4: ("user.default_notification_method", "ALTER TABLE \"user\" ADD COLUMN default_notification_method VARCHAR(10) DEFAULT 'email'"),
-        5: ("user.leaderboard_eligible", "ALTER TABLE \"user\" ADD COLUMN leaderboard_eligible BOOLEAN DEFAULT true"),
+        1: ("user.email_notifications_enabled", [
+            "ALTER TABLE \"user\" ADD COLUMN email_notifications_enabled BOOLEAN",
+            "ALTER TABLE \"user\" ALTER COLUMN email_notifications_enabled SET DEFAULT true",
+        ]),
+        2: ("user.push_notifications_enabled", [
+            "ALTER TABLE \"user\" ADD COLUMN push_notifications_enabled BOOLEAN",
+            "ALTER TABLE \"user\" ALTER COLUMN push_notifications_enabled SET DEFAULT true",
+        ]),
+        3: ("user.phone_number", [
+            "ALTER TABLE \"user\" ADD COLUMN phone_number VARCHAR(20)",
+        ]),
+        4: ("user.default_notification_method", [
+            "ALTER TABLE \"user\" ADD COLUMN default_notification_method VARCHAR(10)",
+            "ALTER TABLE \"user\" ALTER COLUMN default_notification_method SET DEFAULT 'email'",
+        ]),
+        5: ("user.leaderboard_eligible", [
+            "ALTER TABLE \"user\" ADD COLUMN leaderboard_eligible BOOLEAN",
+            "ALTER TABLE \"user\" ALTER COLUMN leaderboard_eligible SET DEFAULT true",
+        ]),
     }
     
     if not step:
@@ -4431,17 +4448,25 @@ def run_migration():
     if step not in migrations:
         return jsonify({'error': f'Invalid step {step}. Use 1-6.'}), 400
     
-    desc, sql = migrations[step]
+    desc, sqls = migrations[step]
+    results = []
     try:
-        db.session.execute(db.text(sql))
-        db.session.commit()
-        return jsonify({'success': True, 'step': step, 'column': desc, 'status': 'added'})
+        for sql in sqls:
+            try:
+                db.session.execute(db.text(sql))
+                db.session.commit()
+                results.append({'sql': sql.split('"user" ')[-1], 'status': 'ok'})
+            except Exception as e:
+                db.session.rollback()
+                err = str(e)
+                if 'already exists' in err or 'duplicate column' in err.lower():
+                    results.append({'sql': sql.split('"user" ')[-1], 'status': 'already_exists'})
+                else:
+                    return jsonify({'success': False, 'step': step, 'column': desc, 'error': err, 'results_so_far': results})
+        return jsonify({'success': True, 'step': step, 'column': desc, 'results': results})
     except Exception as e:
         db.session.rollback()
-        err = str(e)
-        if 'already exists' in err or 'duplicate column' in err.lower():
-            return jsonify({'success': True, 'step': step, 'column': desc, 'status': 'already_exists'})
-        return jsonify({'success': False, 'step': step, 'column': desc, 'error': err})
+        return jsonify({'success': False, 'step': step, 'column': desc, 'error': str(e)})
 
 
 @app.route('/admin/manual-intraday-collection')
