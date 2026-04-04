@@ -4453,6 +4453,7 @@ def run_migration():
     try:
         for sql in sqls:
             try:
+                db.session.execute(db.text("SET statement_timeout = '60s'"))
                 db.session.execute(db.text(sql))
                 db.session.commit()
                 results.append({'sql': sql.split('"user" ')[-1], 'status': 'ok'})
