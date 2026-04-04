@@ -836,6 +836,40 @@ class QueuedEmailTrade(db.Model):
         return f"<QueuedEmailTrade {self.action} {self.quantity} {self.ticker} user={self.user_id} status={self.status}>"
 
 
+class FeaturePoll(db.Model):
+    """Admin-managed feature polls shown to users in the Portfolio tab."""
+    __tablename__ = 'feature_poll'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    question = db.Column(db.String(300), nullable=False)
+    options = db.Column(db.Text, nullable=False)  # JSON array of option strings
+    active = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    
+    votes = db.relationship('FeaturePollVote', backref='poll', lazy='dynamic')
+    
+    def __repr__(self):
+        return f"<FeaturePoll id={self.id} q={self.question[:40]}>"
+
+
+class FeaturePollVote(db.Model):
+    """A user's vote on a feature poll."""
+    __tablename__ = 'feature_poll_vote'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    poll_id = db.Column(db.Integer, db.ForeignKey('feature_poll.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    selected_option = db.Column(db.String(300), nullable=False)
+    voted_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    
+    __table_args__ = (
+        db.UniqueConstraint('poll_id', 'user_id', name='unique_poll_user_vote'),
+    )
+    
+    def __repr__(self):
+        return f"<FeaturePollVote poll={self.poll_id} user={self.user_id}>"
+
+
 class MobileSubscription(db.Model):
     """Mobile app subscription linking - replaces Stripe-based Subscription for mobile"""
     __tablename__ = 'mobile_subscription'

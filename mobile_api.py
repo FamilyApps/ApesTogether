@@ -1983,6 +1983,132 @@ def get_portfolio_chart(slug):
 
 
 # =============================================================================
+# Feature Poll Endpoints
+# =============================================================================
+
+@mobile_api.route('/poll/active', methods=['GET'])
+@require_auth
+@rate_limit(30)
+def get_active_poll():
+    """Get the current active feature poll (if any) and whether user already voted."""
+    import json as _json
+    from models import FeaturePoll, FeaturePollVote
+    from sqlalchemy import func
+
+    try:
+        poll = FeaturePoll.query.filter_by(active=True).order_by(FeaturePoll.created_at.desc()).first()
+        if not poll:
+            return jsonify({'poll': None})
+
+        options = _json.loads(poll.options)
+
+        # Check if user already voted
+        user_vote = FeaturePollVote.query.filter_by(poll_id=poll.id, user_id=g.user_id).first()
+
+        # Get vote counts per option
+        vote_rows = db.session.query(
+            FeaturePollVote.selected_option,
+            func.count().label('cnt')
+        ).filter_by(poll_id=poll.id).group_by(FeaturePollVote.selected_option).all()
+        vote_counts = {r.selected_option: r.cnt for r in vote_rows}
+        total_votes = sum(vote_counts.values())
+
+        results = [{'option': o, 'votes': vote_counts.get(o, 0)} for o in options]
+
+        return jsonify({
+            'poll': {
+                'id': poll.id,
+                'question': poll.question,
+                'options': options,
+                'total_votes': total_votes,
+                'results': results,
+                'user_voted': user_vote.selected_option if user_vote else None,
+            }
+        })
+    except Exception as e:
+        logger.error(f"Get active poll error: {e}")
+        return jsonify({'poll': None})
+
+
+@mobile_api.route('/poll/vote', methods=['POST'])
+@require_auth
+@rate_limit(10)
+def vote_on_poll():
+    """Submit a vote on the active poll."""
+    import json as _json
+    from models import db, FeaturePoll, FeaturePollVote
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'missing_body'}), 400
+
+    poll_id = data.get('poll_id')
+    selected = data.get('selected_option')
+    if not poll_id or not selected:
+        return jsonify({'error': 'poll_id_and_selected_option_required'}), 400
+
+    try:
+        poll = FeaturePoll.query.get(poll_id)
+        if not poll or not poll.active:
+            return jsonify({'error': 'poll_not_found'}), 404
+
+        options = _json.loads(poll.options)
+        if selected not in options:
+            return jsonify({'error': 'invalid_option'}), 400
+
+        existing = FeaturePollVote.query.filter_by(poll_id=poll_id, user_id=g.user_id).first()
+        if existing:
+            existing.selected_option = selected
+            existing.voted_at = datetime.utcnow()
+        else:
+            vote = FeaturePollVote(poll_id=poll_id, user_id=g.user_id, selected_option=selected)
+            db.session.add(vote)
+
+        db.session.commit()
+        return jsonify({'success': True, 'selected_option': selected})
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Poll vote error: {e}")
+        return jsonify({'error': 'vote_failed'}), 500
+
+
+@mobile_api.route('/admin/poll/create', methods=['POST'])
+@require_admin_2fa
+@with_db_retry
+def create_poll():
+    """Create a new feature poll (deactivates any existing active poll)."""
+    import json as _json
+    from models import db, FeaturePoll
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'missing_body'}), 400
+
+    question = data.get('question')
+    options = data.get('options')
+    if not question or not options or len(options) < 2:
+        return jsonify({'error': 'question_and_at_least_2_options_required'}), 400
+
+    try:
+        # Deactivate existing polls
+        FeaturePoll.query.filter_by(active=True).update({'active': False})
+
+        poll = FeaturePoll(
+            question=question,
+            options=_json.dumps(options),
+            active=True,
+        )
+        db.session.add(poll)
+        db.session.commit()
+        return jsonify({'success': True, 'poll_id': poll.id})
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Create poll error: {e}")
+        return jsonify({'error': 'create_failed'}), 500
+
+
+# =============================================================================
 # Trade Endpoints (Buy / Sell)
 # =============================================================================
 

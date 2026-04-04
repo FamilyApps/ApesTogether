@@ -120,6 +120,20 @@ class APIService {
         return try await get("/portfolio/\(slug)/chart?period=\(period)")
     }
     
+    // MARK: - Feature Poll
+    
+    func getActivePoll() async throws -> PollResponse {
+        return try await get("/poll/active")
+    }
+    
+    func voteOnPoll(pollId: Int, selectedOption: String) async throws -> PollVoteResponse {
+        let body: [String: Any] = [
+            "poll_id": pollId,
+            "selected_option": selectedOption
+        ]
+        return try await post("/poll/vote", body: body, authenticated: true)
+    }
+    
     // MARK: - Stock Price
     
     func getStockPrice(ticker: String) async throws -> StockPriceResponse {

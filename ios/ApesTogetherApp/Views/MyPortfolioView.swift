@@ -49,6 +49,8 @@ struct MyPortfolioView: View {
                             }
                             .padding(.horizontal, 16)
                             .padding(.bottom, 8)
+                            
+                            FeaturePollView()
                         }
                     } else {
                         Spacer()

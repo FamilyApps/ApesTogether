@@ -236,3 +236,31 @@ struct IndustryInfo: Codable, Identifiable {
     
     var id: String { name }
 }
+
+// MARK: - Feature Poll
+
+struct PollResponse: Codable {
+    let poll: PollData?
+}
+
+struct PollData: Codable, Identifiable {
+    let id: Int
+    let question: String
+    let options: [String]
+    let totalVotes: Int
+    let results: [PollOptionResult]
+    let userVoted: String?
+}
+
+struct PollOptionResult: Codable, Identifiable {
+    let option: String
+    let votes: Int
+    
+    var id: String { option }
+}
+
+struct PollVoteResponse: Codable {
+    let success: Bool?
+    let selectedOption: String?
+    let error: String?
+}
