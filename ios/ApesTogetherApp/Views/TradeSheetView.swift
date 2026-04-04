@@ -183,17 +183,6 @@ struct TradeSheetView: View {
                         .padding(.horizontal, 20)
                     }
                     
-                    // Email trading hint
-                    HStack(spacing: 6) {
-                        Image(systemName: "envelope")
-                            .font(.caption2)
-                            .foregroundColor(.textMuted)
-                        Text("You can also trade via email: **trade@apestogether.ai**")
-                            .font(.caption2)
-                            .foregroundColor(.textMuted)
-                    }
-                    .padding(.horizontal, 20)
-                    
                     // Submit button
                     Button {
                         submitTrade()
@@ -217,6 +206,19 @@ struct TradeSheetView: View {
                     }
                     .disabled(isSubmitting || showSuccess)
                     .padding(.horizontal, 20)
+                    
+                    // Email trading CTA — opens Mail.app with pre-filled trade
+                    Button {
+                        openEmailTrade()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "envelope.fill")
+                                .font(.system(size: 11))
+                            Text("or submit this trade via email")
+                                .font(.caption)
+                        }
+                        .foregroundColor(.primaryAccent)
+                    }
                     .padding(.bottom, 16)
                 }
             }
@@ -235,6 +237,33 @@ struct TradeSheetView: View {
             .onAppear {
                 fetchPrice()
             }
+        }
+    }
+    
+    private func openEmailTrade() {
+        let qty = quantity.isEmpty ? "___" : quantity
+        let subject = "\(tradeType.title.uppercased()) \(qty) \(ticker)"
+        let body = """
+        \(tradeType.title.uppercased()) \(qty) \(ticker)
+        
+        Tip: Put one trade per line to submit multiple trades at once.
+        Example:
+        BUY 10 AAPL
+        SELL 5 TSLA
+        BUY 20 MSFT
+        """
+        
+        let to = "trade@trade.apestogether.ai"
+        var components = URLComponents()
+        components.scheme = "mailto"
+        components.path = to
+        components.queryItems = [
+            URLQueryItem(name: "subject", value: subject),
+            URLQueryItem(name: "body", value: body),
+        ]
+        
+        if let url = components.url {
+            UIApplication.shared.open(url)
         }
     }
     

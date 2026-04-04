@@ -3,7 +3,7 @@ Email Trading Service
 Handles inbound emails for trade execution via SendGrid Inbound Parse.
 
 Flow:
-  1. User sends email to trade@apestogether.ai with subject like "BUY 10 TSLA"
+  1. User sends email to trade@trade.apestogether.ai with subject like "BUY 10 TSLA"
   2. SendGrid POSTs to /api/email/inbound
   3. We parse the command, fetch live price, execute via cash_tracking, notify subscribers
 """
