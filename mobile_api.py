@@ -2562,6 +2562,84 @@ def bot_set_cash():
         return jsonify({'error': 'set_cash_failed'}), 500
 
 
+@mobile_api.route('/admin/poll/list', methods=['GET'])
+@require_admin_or_cron
+@with_db_retry
+def list_polls():
+    """List all polls with vote counts."""
+    import json as _json
+    from models import FeaturePoll, FeaturePollVote
+    from sqlalchemy import func
+
+    try:
+        polls = FeaturePoll.query.order_by(FeaturePoll.created_at.desc()).all()
+
+        # Get vote counts per poll
+        vote_counts = {}
+        rows = db.session.query(
+            FeaturePollVote.poll_id,
+            FeaturePollVote.selected_option,
+            func.count().label('cnt')
+        ).group_by(FeaturePollVote.poll_id, FeaturePollVote.selected_option).all()
+        for r in rows:
+            if r.poll_id not in vote_counts:
+                vote_counts[r.poll_id] = {}
+            vote_counts[r.poll_id][r.selected_option] = r.cnt
+
+        result = []
+        for p in polls:
+            options = _json.loads(p.options)
+            vc = vote_counts.get(p.id, {})
+            total = sum(vc.values())
+            results = [{'option': o, 'votes': vc.get(o, 0)} for o in options]
+            result.append({
+                'id': p.id,
+                'question': p.question,
+                'options': options,
+                'active': p.active,
+                'created_at': p.created_at.isoformat() if p.created_at else None,
+                'total_votes': total,
+                'results': results,
+            })
+        return jsonify({'polls': result})
+    except Exception as e:
+        logger.error(f"List polls error: {e}")
+        return jsonify({'error': 'list_failed'}), 500
+
+
+@mobile_api.route('/admin/poll/toggle', methods=['POST'])
+@require_admin_2fa
+@with_db_retry
+def toggle_poll():
+    """Activate or deactivate a poll. Activating one deactivates all others."""
+    from models import db, FeaturePoll
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'missing_body'}), 400
+
+    poll_id = data.get('poll_id')
+    active = data.get('active')
+    if poll_id is None or active is None:
+        return jsonify({'error': 'poll_id_and_active_required'}), 400
+
+    try:
+        poll = FeaturePoll.query.get(poll_id)
+        if not poll:
+            return jsonify({'error': 'poll_not_found'}), 404
+
+        if active:
+            # Deactivate all others first
+            FeaturePoll.query.filter(FeaturePoll.id != poll_id).filter_by(active=True).update({'active': False})
+        poll.active = active
+        db.session.commit()
+        return jsonify({'success': True, 'poll_id': poll.id, 'active': poll.active})
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Toggle poll error: {e}")
+        return jsonify({'error': 'toggle_failed'}), 500
+
+
 @mobile_api.route('/admin/poll/create', methods=['POST'])
 @require_admin_2fa
 @with_db_retry
