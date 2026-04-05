@@ -4399,44 +4399,63 @@ def run_migration():
       4 - default_notification_method
       5 - leaderboard_eligible
       6 - create all new tables
+      all - run all steps 1-6 in sequence, skipping columns that already exist
     
     No step param = show instructions.
     """
     from models import db
     
-    step = request.args.get('step', type=int)
+    step = request.args.get('step')
     
-    # Each step: (description, [list of SQL statements])
-    # ADD COLUMN without DEFAULT is instant in PostgreSQL (no table rewrite).
-    # Then ALTER COLUMN SET DEFAULT sets default for future inserts only.
-    migrations = {
-        1: ("user.email_notifications_enabled", [
-            "ALTER TABLE \"user\" ADD COLUMN email_notifications_enabled BOOLEAN",
-            "ALTER TABLE \"user\" ALTER COLUMN email_notifications_enabled SET DEFAULT true",
-        ]),
-        2: ("user.push_notifications_enabled", [
-            "ALTER TABLE \"user\" ADD COLUMN push_notifications_enabled BOOLEAN",
-            "ALTER TABLE \"user\" ALTER COLUMN push_notifications_enabled SET DEFAULT true",
-        ]),
-        3: ("user.phone_number", [
-            "ALTER TABLE \"user\" ADD COLUMN phone_number VARCHAR(20)",
-        ]),
-        4: ("user.default_notification_method", [
-            "ALTER TABLE \"user\" ADD COLUMN default_notification_method VARCHAR(10)",
-            "ALTER TABLE \"user\" ALTER COLUMN default_notification_method SET DEFAULT 'email'",
-        ]),
-        5: ("user.leaderboard_eligible", [
-            "ALTER TABLE \"user\" ADD COLUMN leaderboard_eligible BOOLEAN",
-            "ALTER TABLE \"user\" ALTER COLUMN leaderboard_eligible SET DEFAULT true",
-        ]),
-    }
+    # Helper: check if column exists on a table
+    def column_exists(table, column):
+        result = db.session.execute(db.text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = :tbl AND column_name = :col"
+        ), {'tbl': table, 'col': column})
+        return result.fetchone() is not None
+    
+    # Each migration: (table, column, type, default_value_or_None)
+    column_migrations = [
+        ('user', 'email_notifications_enabled', 'BOOLEAN', 'true'),
+        ('user', 'push_notifications_enabled', 'BOOLEAN', 'true'),
+        ('user', 'phone_number', 'VARCHAR(20)', None),
+        ('user', 'default_notification_method', 'VARCHAR(10)', "'email'"),
+        ('user', 'leaderboard_eligible', 'BOOLEAN', 'true'),
+    ]
     
     if not step:
         return jsonify({
-            'instructions': 'Add ?step=1 through ?step=6 to run each migration individually',
-            'steps': {k: v[0] for k, v in migrations.items()},
+            'instructions': 'Add ?step=all to run everything, or ?step=1 through ?step=6 individually',
+            'steps': {i+1: f'{m[0]}.{m[1]}' for i, m in enumerate(column_migrations)},
             'step_6': 'create_all_tables',
         })
+    
+    # Run all steps
+    if step == 'all':
+        results = []
+        for i, (table, col, col_type, default) in enumerate(column_migrations):
+            if column_exists(table, col):
+                results.append({'step': i+1, 'column': f'{table}.{col}', 'status': 'already_exists'})
+            else:
+                try:
+                    db.session.execute(db.text(f'ALTER TABLE "{table}" ADD COLUMN {col} {col_type}'))
+                    if default is not None:
+                        db.session.execute(db.text(f'ALTER TABLE "{table}" ALTER COLUMN {col} SET DEFAULT {default}'))
+                    db.session.commit()
+                    results.append({'step': i+1, 'column': f'{table}.{col}', 'status': 'created'})
+                except Exception as e:
+                    db.session.rollback()
+                    results.append({'step': i+1, 'column': f'{table}.{col}', 'status': 'error', 'error': str(e)})
+        # Step 6: create_all
+        try:
+            db.create_all()
+            results.append({'step': 6, 'action': 'create_all_tables', 'status': 'ok'})
+        except Exception as e:
+            results.append({'step': 6, 'action': 'create_all_tables', 'status': 'error', 'error': str(e)})
+        return jsonify({'success': True, 'results': results})
+    
+    step = int(step) if step.isdigit() else 0
     
     if step == 6:
         try:
@@ -4445,29 +4464,22 @@ def run_migration():
         except Exception as e:
             return jsonify({'success': False, 'step': 6, 'error': str(e)})
     
-    if step not in migrations:
-        return jsonify({'error': f'Invalid step {step}. Use 1-6.'}), 400
+    if step < 1 or step > 5:
+        return jsonify({'error': f'Invalid step {step}. Use 1-6 or all.'}), 400
     
-    desc, sqls = migrations[step]
-    results = []
+    table, col, col_type, default = column_migrations[step - 1]
+    if column_exists(table, col):
+        return jsonify({'success': True, 'step': step, 'column': f'{table}.{col}', 'status': 'already_exists'})
+    
     try:
-        for sql in sqls:
-            try:
-                db.session.execute(db.text("SET statement_timeout = '60s'"))
-                db.session.execute(db.text(sql))
-                db.session.commit()
-                results.append({'sql': sql.split('"user" ')[-1], 'status': 'ok'})
-            except Exception as e:
-                db.session.rollback()
-                err = str(e)
-                if 'already exists' in err or 'duplicate column' in err.lower():
-                    results.append({'sql': sql.split('"user" ')[-1], 'status': 'already_exists'})
-                else:
-                    return jsonify({'success': False, 'step': step, 'column': desc, 'error': err, 'results_so_far': results})
-        return jsonify({'success': True, 'step': step, 'column': desc, 'results': results})
+        db.session.execute(db.text(f'ALTER TABLE "{table}" ADD COLUMN {col} {col_type}'))
+        if default is not None:
+            db.session.execute(db.text(f'ALTER TABLE "{table}" ALTER COLUMN {col} SET DEFAULT {default}'))
+        db.session.commit()
+        return jsonify({'success': True, 'step': step, 'column': f'{table}.{col}', 'status': 'created'})
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'step': step, 'column': desc, 'error': str(e)})
+        return jsonify({'success': False, 'step': step, 'column': f'{table}.{col}', 'error': str(e)})
 
 
 @app.route('/admin/manual-intraday-collection')
