@@ -1965,11 +1965,28 @@ def get_portfolio_chart(slug):
             except Exception as e:
                 logger.warning(f"S&P fallback failed: {e}")
         
+        # Compute leaderboard eligibility for this period
+        eligibility_info = {}
+        try:
+            from performance_calculator import get_leaderboard_eligibility
+            elig = get_leaderboard_eligibility(owner.id, period)
+            eligibility_info = {
+                'leaderboard_eligible': elig['eligible'],
+                'days_active': elig['days_active'],
+                'days_required': elig['days_required'],
+                'eligible_date': elig['eligible_date'].isoformat() if elig.get('eligible_date') else None,
+                'first_activity_date': elig['first_activity_date'].isoformat() if elig.get('first_activity_date') else None
+            }
+        except Exception as e:
+            logger.warning(f"Eligibility check failed for chart response: {e}")
+            eligibility_info = {'leaderboard_eligible': True}  # Default to eligible on error
+        
         return jsonify({
             'portfolio_return': round(portfolio_return, 2),
             'sp500_return': round(sp500_return, 2),
             'chart_data': chart_data,
-            'period': period
+            'period': period,
+            **eligibility_info
         })
         
     except Exception as e:
@@ -1978,7 +1995,8 @@ def get_portfolio_chart(slug):
             'portfolio_return': 0,
             'sp500_return': 0,
             'chart_data': [],
-            'period': period
+            'period': period,
+            'leaderboard_eligible': True  # Default on error
         })
 
 

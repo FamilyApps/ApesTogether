@@ -4036,12 +4036,28 @@ def get_portfolio_performance(period):
                 
                 logger.info(f"✅ Using cached chart: portfolio={portfolio_return}%, sp500={sp500_return}%, points={len(chart_data)}")
                 
+                # Add leaderboard eligibility info
+                eligibility_info = {}
+                try:
+                    from performance_calculator import get_leaderboard_eligibility
+                    elig = get_leaderboard_eligibility(user_id, period_upper)
+                    eligibility_info = {
+                        'leaderboard_eligible': elig['eligible'],
+                        'days_active': elig['days_active'],
+                        'days_required': elig['days_required'],
+                        'eligible_date': elig['eligible_date'].isoformat() if elig.get('eligible_date') else None,
+                        'first_activity_date': elig['first_activity_date'].isoformat() if elig.get('first_activity_date') else None
+                    }
+                except Exception:
+                    eligibility_info = {'leaderboard_eligible': True}
+                
                 return jsonify({
                     'portfolio_return': round(portfolio_return, 2),
                     'sp500_return': round(sp500_return, 2),
                     'chart_data': chart_data,
                     'period': period_upper,
-                    'from_cache': True
+                    'from_cache': True,
+                    **eligibility_info
                 })
                     
             except Exception as e:
@@ -4085,12 +4101,28 @@ def get_portfolio_performance(period):
                 'sp500': sp500_dataset[i] if i < len(sp500_dataset) else 0
             })
         
+        # Add leaderboard eligibility info
+        eligibility_info = {}
+        try:
+            from performance_calculator import get_leaderboard_eligibility
+            elig = get_leaderboard_eligibility(user_id, period_upper)
+            eligibility_info = {
+                'leaderboard_eligible': elig['eligible'],
+                'days_active': elig['days_active'],
+                'days_required': elig['days_required'],
+                'eligible_date': elig['eligible_date'].isoformat() if elig.get('eligible_date') else None,
+                'first_activity_date': elig['first_activity_date'].isoformat() if elig.get('first_activity_date') else None
+            }
+        except Exception:
+            eligibility_info = {'leaderboard_eligible': True}
+        
         performance_data = {
             'portfolio_return': chart_data_chartjs.get('portfolio_return', 0),
             'sp500_return': chart_data_chartjs.get('sp500_return', 0),
             'chart_data': chart_data,
             'period': period_upper,
-            'from_cache': False
+            'from_cache': False,
+            **eligibility_info
         }
         
         # Cache on-demand: Save to database for next time
@@ -4167,12 +4199,28 @@ def get_public_portfolio_performance(user_id, period):
                         portfolio_return = portfolio_dataset[-1] if portfolio_dataset else 0
                         sp500_return = sp500_dataset[-1] if sp500_dataset else 0
                         
+                        # Add eligibility info
+                        elig_info = {}
+                        try:
+                            from performance_calculator import get_leaderboard_eligibility
+                            elig = get_leaderboard_eligibility(user_id, period_upper)
+                            elig_info = {
+                                'leaderboard_eligible': elig['eligible'],
+                                'days_active': elig['days_active'],
+                                'days_required': elig['days_required'],
+                                'eligible_date': elig['eligible_date'].isoformat() if elig.get('eligible_date') else None,
+                                'first_activity_date': elig['first_activity_date'].isoformat() if elig.get('first_activity_date') else None
+                            }
+                        except Exception:
+                            elig_info = {'leaderboard_eligible': True}
+                        
                         return jsonify({
                             'portfolio_return': round(portfolio_return, 2),
                             'sp500_return': round(sp500_return, 2),
                             'chart_data': chart_data,
                             'period': period_upper,
-                            'from_cache': True
+                            'from_cache': True,
+                            **elig_info
                         })
             except Exception as e:
                 logger.warning(f"Failed to use cached chart data: {e}")
@@ -4183,6 +4231,18 @@ def get_public_portfolio_performance(user_id, period):
         
         logger.info(f"Performing live calculation for public portfolio user {user_id}, period {period_upper}")
         performance_data = calculator.get_performance_data(user_id, period_upper)
+        
+        # Add eligibility info to live calculation result
+        try:
+            from performance_calculator import get_leaderboard_eligibility
+            elig = get_leaderboard_eligibility(user_id, period_upper)
+            performance_data['leaderboard_eligible'] = elig['eligible']
+            performance_data['days_active'] = elig['days_active']
+            performance_data['days_required'] = elig['days_required']
+            performance_data['eligible_date'] = elig['eligible_date'].isoformat() if elig.get('eligible_date') else None
+            performance_data['first_activity_date'] = elig['first_activity_date'].isoformat() if elig.get('first_activity_date') else None
+        except Exception:
+            performance_data['leaderboard_eligible'] = True
         
         return jsonify(performance_data)
         

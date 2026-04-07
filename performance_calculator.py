@@ -36,6 +36,97 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def get_user_first_activity_date(user_id: int) -> Optional[date]:
+    """
+    Get the date a user first had assets (first non-zero portfolio snapshot).
+    
+    This is the canonical way to determine when a user became "active" for:
+    - Leaderboard eligibility (must be active for full period)
+    - S&P 500 comparison alignment (benchmark starts from user's active date)
+    - Chart data start date (charts begin from first activity)
+    
+    Returns None if user has never had a portfolio snapshot.
+    """
+    first_snapshot = PortfolioSnapshot.query.filter(
+        and_(
+            PortfolioSnapshot.user_id == user_id,
+            PortfolioSnapshot.total_value > 0
+        )
+    ).order_by(PortfolioSnapshot.date.asc()).first()
+    
+    return first_snapshot.date if first_snapshot else None
+
+
+def get_leaderboard_eligibility(user_id: int, period: str) -> dict:
+    """
+    Check if a user is eligible for a specific leaderboard period.
+    
+    Rules:
+    - User must have been active (had assets) for the ENTIRE duration of the period.
+    - e.g., 3M leaderboard requires 90+ days of activity.
+    - 1D and 5D have no minimum (anyone with data qualifies).
+    
+    Returns:
+        {
+            'eligible': bool,
+            'first_activity_date': date or None,
+            'days_active': int,
+            'days_required': int,
+            'eligible_date': date or None  # When user WILL be eligible (if not yet)
+        }
+    """
+    first_activity = get_user_first_activity_date(user_id)
+    
+    if not first_activity:
+        return {
+            'eligible': False,
+            'first_activity_date': None,
+            'days_active': 0,
+            'days_required': 0,
+            'eligible_date': None
+        }
+    
+    try:
+        from portfolio_performance import get_market_date
+    except ImportError:
+        from zoneinfo import ZoneInfo
+        MARKET_TZ = ZoneInfo('America/New_York')
+        def get_market_date():
+            return datetime.now(MARKET_TZ).date()
+    
+    today = get_market_date()
+    days_active = (today - first_activity).days
+    
+    # Minimum days required for each leaderboard period
+    period_requirements = {
+        '1D': 0,    # No minimum
+        '5D': 0,    # No minimum
+        '1W': 0,    # No minimum (alias for 5D)
+        '1M': 30,
+        '3M': 90,
+        'YTD': (today - date(today.year, 1, 1)).days,  # Must have been active since Jan 1
+        '1Y': 365,
+        '5Y': 365 * 5,
+        'MAX': 0,   # No minimum for MAX
+    }
+    
+    days_required = period_requirements.get(period.upper(), 0)
+    eligible = days_active >= days_required
+    
+    # Calculate when user will become eligible
+    eligible_date = None
+    if not eligible and days_required > 0:
+        eligible_date = first_activity + timedelta(days=days_required)
+    
+    return {
+        'eligible': eligible,
+        'first_activity_date': first_activity,
+        'days_active': days_active,
+        'days_required': days_required,
+        'eligible_date': eligible_date
+    }
+
+
 def calculate_portfolio_performance(
     user_id: int,
     start_date: date,
@@ -332,9 +423,13 @@ def calculate_portfolio_performance(
         logger.info(f"[PERF-TIMING] user={user_id} chart_points: {round(_time.time()-_tc,2)}s, {len(chart_data) if chart_data else 0} points")
     
     # Calculate S&P 500 benchmark (simple percentage, not time-weighted)
+    # IMPORTANT: Use user's actual start date (first snapshot), not period start.
+    # This ensures apples-to-apples comparison — if user has only been active 3 weeks,
+    # S&P return is also calculated over those same 3 weeks, not the full 3-month period.
+    sp500_start = first_snapshot.date if first_snapshot.date > start_date else start_date
     _ts = _time.time()
-    sp500_return = _calculate_sp500_benchmark(start_date, end_date)
-    logger.info(f"[PERF-TIMING] user={user_id} sp500_benchmark: {round(_time.time()-_ts,2)}s")
+    sp500_return = _calculate_sp500_benchmark(sp500_start, end_date)
+    logger.info(f"[PERF-TIMING] user={user_id} sp500_benchmark: {round(_time.time()-_ts,2)}s (sp500_start={sp500_start})")
     logger.info(f"[PERF-TIMING] user={user_id} TOTAL: {round(_time.time()-_t0,2)}s")
     
     return {
@@ -396,10 +491,12 @@ def _generate_chart_points(
     logger.debug(f"Chart baseline: ${baseline_value:.2f} on {baseline_date}")
     logger.info(f"[CHART-TIMING] snapshots_count={len(snapshots)}, baseline={baseline_date}")
     
-    # Get S&P 500 data for the FULL period (not just from user's join date)
-    # This ensures charts show S&P performance for entire period
+    # Get S&P 500 data for the full period timeline.
+    # S&P BASELINE is set from user's first snapshot date (not period start) so
+    # the % comparison is apples-to-apples with the user's actual trading window.
     # For 1D/5D: Use SPY_INTRADAY for intraday comparison, fallback to daily if unavailable
     # For longer periods: Use SPY_SP500 daily close
+    sp500_baseline_date = baseline_date  # User's first non-zero snapshot date
     _tsp = _time.time()
     if period in ['1D', '5D']:
         # Query intraday S&P 500 data
@@ -456,15 +553,26 @@ def _generate_chart_points(
         sp500_map = {s.date: float(s.close_price) for s in sp500_data}
         sp500_map_timestamp = {}
     
-    # Get baseline S&P 500 value from period start (not user join date)
+    # Get baseline S&P 500 value from user's first snapshot date (apples-to-apples)
+    # Find the S&P record closest to (on or after) the user's baseline date
     baseline_sp500 = None
     if sp500_data:
-        # SPY_INTRADAY and SPY_SP500 are both already stored as spy_price * 10
-        baseline_sp500 = float(sp500_data[0].close_price)
+        for sp_rec in sp500_data:
+            if sp_rec.date >= sp500_baseline_date:
+                baseline_sp500 = float(sp_rec.close_price)
+                break
+        # Fallback to first available if none found on/after baseline
+        if baseline_sp500 is None:
+            baseline_sp500 = float(sp500_data[0].close_price)
     
     if not baseline_sp500:
-        logger.warning(f"No S&P 500 baseline data found for period starting {period_start}")
+        logger.warning(f"No S&P 500 baseline data found for user baseline {sp500_baseline_date}")
         baseline_sp500 = 1.0  # Avoid division by zero
+    
+    logger.info(f"S&P 500 baseline: ${baseline_sp500:.2f} from user start {sp500_baseline_date} (period_start={period_start})")
+    
+    # Track which chart points are before user's first activity (for S&P-only rendering)
+    # Points before the user's baseline show S&P from the baseline perspective (will be 0 or slightly off)
     
     # Build snapshot map for quick lookup
     snapshot_map = {s.date: s for s in snapshots if s.total_value > 0}

@@ -466,10 +466,14 @@ def _compute_all_user_metrics(period='YTD'):
     cap percentages, subscriber count, and trade frequency for each.
     Returns the full list (unfiltered, unsorted) so callers can filter by category.
     
+    ELIGIBILITY FILTER: Users must have been active for the ENTIRE leaderboard
+    period to be included. e.g., 3M leaderboard requires 90+ days of activity.
+    This prevents artificially high performance from short-lived accounts.
+    
     Called once per period by update_leaderboard_cache, then filtered 3x by category.
     """
     from datetime import datetime, date, timedelta
-    from performance_calculator import calculate_portfolio_performance, get_period_dates
+    from performance_calculator import calculate_portfolio_performance, get_period_dates, get_leaderboard_eligibility
     from models import Subscription, Transaction
     import time as _time
     
@@ -488,8 +492,28 @@ def _compute_all_user_metrics(period='YTD'):
     skipped = []  # Track why users are skipped for diagnostics
     first_error = None
     error_count = 0
+    eligibility_skipped = 0
     
     for user in users:
+        # LEADERBOARD ELIGIBILITY CHECK: User must have been active for the full period
+        # e.g., 3M leaderboard requires 90+ days of activity
+        try:
+            eligibility = get_leaderboard_eligibility(user.id, period)
+            if not eligibility['eligible']:
+                days_active = eligibility['days_active']
+                days_required = eligibility['days_required']
+                skipped.append({
+                    'username': user.username,
+                    'reason': 'insufficient_activity',
+                    'days_active': days_active,
+                    'days_required': days_required
+                })
+                eligibility_skipped += 1
+                continue
+        except Exception as e:
+            logger.warning(f"Eligibility check failed for user {user.id}: {e}")
+            # On error, fall through to normal processing (don't block on eligibility check failure)
+        
         # Get latest snapshot to verify user has data
         try:
             latest_snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id)\
@@ -590,7 +614,7 @@ def _compute_all_user_metrics(period='YTD'):
         })
     
     elapsed = round(_time.time() - _t0, 2)
-    print(f"  Computed metrics for {len(all_metrics)}/{len(users)} users in {elapsed}s")
+    print(f"  Computed metrics for {len(all_metrics)}/{len(users)} users in {elapsed}s (eligibility_skipped={eligibility_skipped})")
     if first_error:
         print(f"  \u26a0 FIRST ERROR for {period}: {first_error}")
         print(f"  \u26a0 Total errors: {error_count}/{len(users)} users")
