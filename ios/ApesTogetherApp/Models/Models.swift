@@ -171,6 +171,13 @@ struct ChartResponse: Codable {
     let sp500Return: Double
     let chartData: [ChartPoint]
     let period: String
+    
+    // Leaderboard eligibility (for banner display)
+    let leaderboardEligible: Bool?
+    let daysActive: Int?
+    let daysRequired: Int?
+    let eligibleDate: String?       // ISO date when user will become eligible
+    let firstActivityDate: String?  // ISO date of user's first trade/asset
 }
 
 struct ChartPoint: Codable, Identifiable {

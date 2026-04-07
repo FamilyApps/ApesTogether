@@ -57,7 +57,11 @@ struct PortfolioDetailView: View {
                                 viewModel.selectedPeriod = period
                                 Task { await viewModel.loadChart(slug: slug) }
                             },
-                            portfolioLabel: portfolio.isOwner ? "Your Portfolio" : portfolio.owner.username
+                            portfolioLabel: portfolio.isOwner ? "Your Portfolio" : portfolio.owner.username,
+                            leaderboardEligible: viewModel.leaderboardEligible,
+                            daysActive: viewModel.daysActive,
+                            daysRequired: viewModel.daysRequired,
+                            eligibleDate: viewModel.eligibleDate
                         )
                         .padding(.horizontal, 16)
                         
@@ -602,6 +606,12 @@ class PortfolioDetailViewModel: ObservableObject {
     @Published var selectedPeriod: String = "1W"
     @Published var isLoadingChart = false
     
+    // Leaderboard eligibility
+    @Published var leaderboardEligible: Bool = true
+    @Published var daysActive: Int = 0
+    @Published var daysRequired: Int = 0
+    @Published var eligibleDate: String?
+    
     func loadPortfolio(slug: String) async {
         guard !slug.isEmpty else {
             error = "Invalid portfolio"
@@ -634,11 +644,18 @@ class PortfolioDetailViewModel: ObservableObject {
             }
             portfolioReturn = response.portfolioReturn
             sp500Return = response.sp500Return
+            
+            // Update leaderboard eligibility
+            leaderboardEligible = response.leaderboardEligible ?? true
+            daysActive = response.daysActive ?? 0
+            daysRequired = response.daysRequired ?? 0
+            eligibleDate = response.eligibleDate
         } catch {
             // Chart errors are non-fatal, just show empty chart
             chartData = []
             portfolioReturn = 0
             sp500Return = 0
+            leaderboardEligible = true
         }
         
         isLoadingChart = false

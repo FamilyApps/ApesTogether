@@ -8,6 +8,10 @@ struct PerformanceChartView: View {
     let selectedPeriod: String
     let onPeriodChange: (String) -> Void
     var portfolioLabel: String = "Your Portfolio"
+    var leaderboardEligible: Bool = true
+    var daysActive: Int = 0
+    var daysRequired: Int = 0
+    var eligibleDate: String? = nil
     
     private let periods = ["1D", "1W", "1M", "3M", "YTD", "1Y"]
     
@@ -197,7 +201,25 @@ struct PerformanceChartView: View {
             }
             .padding(.horizontal, 12)
             .padding(.top, 12)
-            .padding(.bottom, 16)
+            .padding(.bottom, leaderboardEligible ? 16 : 8)
+            
+            // Leaderboard eligibility banner
+            if !leaderboardEligible {
+                HStack(spacing: 6) {
+                    Image(systemName: "clock.badge.exclamationmark")
+                        .font(.system(size: 11))
+                    Text(eligibilityBannerText)
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundColor(.orange)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .background(Color.orange.opacity(0.08))
+                .cornerRadius(8)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
+            }
         }
         .background(Color.cardBackground)
         .cornerRadius(16)
@@ -205,6 +227,25 @@ struct PerformanceChartView: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(Color.cardBorder, lineWidth: 0.5)
         )
+    }
+    
+    private var eligibilityBannerText: String {
+        let monthsNeeded = max(1, Int(ceil(Double(daysRequired) / 30.0)))
+        let monthsHave = max(0, Int(floor(Double(daysActive) / 30.0)))
+        let monthsRemaining = monthsNeeded - monthsHave
+        
+        if let dateStr = eligibleDate, let targetDate = ISO8601DateFormatter().date(from: dateStr + "T00:00:00Z") {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "MMM d, yyyy"
+            return "Ineligible for leaderboard until \(formatter.string(from: targetDate))"
+        }
+        
+        if monthsRemaining > 0 {
+            let unit = monthsRemaining == 1 ? "month" : "months"
+            return "Ineligible for leaderboard — \(monthsRemaining) more \(unit) of data needed"
+        }
+        
+        return "Ineligible for leaderboard for this period"
     }
 }
 
