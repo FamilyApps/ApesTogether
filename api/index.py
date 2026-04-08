@@ -4447,6 +4447,18 @@ def create_tables():
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
 
+@app.route('/admin/process-queued-trades')
+@admin_2fa_required
+def admin_process_queued_trades():
+    """Manually trigger processing of all queued after-hours email trades."""
+    try:
+        from services.trading_email import process_queued_trades
+        result = process_queued_trades()
+        return jsonify({'success': True, 'result': result}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/admin/run-migration')
 @admin_2fa_required
 def run_migration():
