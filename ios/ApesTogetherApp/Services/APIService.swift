@@ -161,6 +161,39 @@ class APIService {
         return try await post("/portfolio/stocks", body: body, authenticated: true)
     }
     
+    // MARK: - W-9 Tax Form
+    
+    func getW9Status() async throws -> W9StatusResponse {
+        return try await get("/user/w9/status")
+    }
+    
+    func submitW9(
+        firstName: String, lastName: String, businessName: String,
+        taxClassification: String, address1: String, address2: String,
+        city: String, state: String, zipCode: String,
+        tinType: String, tin: String, signatureName: String
+    ) async throws -> W9SubmitResponse {
+        var body: [String: Any] = [
+            "legal_first_name": firstName,
+            "legal_last_name": lastName,
+            "tax_classification": taxClassification,
+            "address_line1": address1,
+            "city": city,
+            "state": state,
+            "zip_code": zipCode,
+            "tin_type": tinType,
+            "tin": tin,
+            "signature_name": signatureName
+        ]
+        if !businessName.isEmpty {
+            body["business_name"] = businessName
+        }
+        if !address2.isEmpty {
+            body["address_line2"] = address2
+        }
+        return try await post("/user/w9/submit", body: body, authenticated: true)
+    }
+    
     // MARK: - Private Helpers
     
     private func get<T: Decodable>(_ endpoint: String, authenticated: Bool = true) async throws -> T {

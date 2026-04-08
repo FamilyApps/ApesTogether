@@ -1430,6 +1430,114 @@ def update_user_preferences():
         return jsonify({'error': 'update_failed'}), 500
 
 
+# =============================================================================
+# W-9 Tax Form Endpoints
+# =============================================================================
+
+@mobile_api.route('/user/w9/status', methods=['GET'])
+@require_auth
+def get_w9_status():
+    """Get W-9 submission status for the current user."""
+    try:
+        from services.w9_service import get_w9_status as _get_status
+        status = _get_status(g.user_id)
+        return jsonify(status)
+    except Exception as e:
+        logger.error(f"W-9 status error: {e}")
+        return jsonify({'error': 'fetch_failed'}), 500
+
+
+@mobile_api.route('/user/w9/submit', methods=['POST'])
+@require_auth
+def submit_w9():
+    """
+    Submit IRS Form W-9 data.
+    
+    Request body:
+    {
+        "legal_first_name": "John",
+        "legal_last_name": "Doe",
+        "business_name": "Optional DBA",
+        "tax_classification": "individual",
+        "address_line1": "123 Main St",
+        "address_line2": "Apt 4B",
+        "city": "New York",
+        "state": "NY",
+        "zip_code": "10001",
+        "tin_type": "ssn",
+        "tin": "123456789",
+        "signature_name": "John Doe"
+    }
+    """
+    from models import db, W9Submission
+    from services.w9_service import validate_w9_data, encrypt_tin
+    import re
+    from datetime import date as date_mod
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'missing_request_body'}), 400
+    
+    # Validate
+    errors = validate_w9_data(data)
+    if errors:
+        return jsonify({'error': 'validation_failed', 'details': errors}), 400
+    
+    try:
+        # Extract and sanitize TIN
+        tin_raw = re.sub(r'\D', '', data['tin'])
+        tin_last_four = tin_raw[-4:]
+        
+        # Encrypt TIN
+        tin_encrypted = encrypt_tin(tin_raw)
+        
+        # Mark any previous active submissions as superseded
+        W9Submission.query.filter_by(user_id=g.user_id).filter(
+            W9Submission.status.in_(['submitted', 'verified'])
+        ).update({'status': 'superseded'}, synchronize_session='fetch')
+        
+        # Create new submission
+        w9 = W9Submission(
+            user_id=g.user_id,
+            legal_first_name=data['legal_first_name'].strip(),
+            legal_last_name=data['legal_last_name'].strip(),
+            business_name=(data.get('business_name') or '').strip() or None,
+            tax_classification=data['tax_classification'],
+            address_line1=data['address_line1'].strip(),
+            address_line2=(data.get('address_line2') or '').strip() or None,
+            city=data['city'].strip(),
+            state=data['state'].upper().strip(),
+            zip_code=data['zip_code'].strip(),
+            tin_type=data['tin_type'],
+            tin_encrypted=tin_encrypted,
+            tin_last_four=tin_last_four,
+            signature_name=data['signature_name'].strip(),
+            signature_date=date_mod.today(),
+            signature_ip=request.headers.get('X-Forwarded-For', request.remote_addr),
+            status='submitted'
+        )
+        db.session.add(w9)
+        db.session.commit()
+        
+        logger.info(f"W-9 submitted by user {g.user_id}, TIN ...{tin_last_four}")
+        
+        return jsonify({
+            'success': True,
+            'w9_id': w9.id,
+            'status': 'submitted',
+            'message': 'W-9 submitted successfully. Under review.'
+        })
+        
+    except RuntimeError as e:
+        # Encryption not configured
+        logger.error(f"W-9 encryption error: {e}")
+        return jsonify({'error': 'encryption_not_configured'}), 503
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"W-9 submission error: {e}")
+        return jsonify({'error': 'submission_failed'}), 500
+
+
 @mobile_api.route('/user/username', methods=['PUT'])
 @require_auth
 def update_username():
@@ -6087,3 +6195,242 @@ def _save_auto_create_settings(settings):
             db.session.commit()
     except Exception as e:
         logger.error(f"Save auto-create settings error: {e}")
+
+
+# =============================================================================
+# Admin W-9 Management Endpoints
+# =============================================================================
+
+@mobile_api.route('/admin/w9/list', methods=['GET'])
+@require_admin_2fa
+@with_db_retry
+def admin_w9_list():
+    """List all W-9 submissions with filtering.
+    
+    Query params:
+    - status: 'submitted', 'verified', 'rejected', 'superseded' (optional)
+    - page: page number (default 1)
+    - per_page: items per page (default 50)
+    """
+    from models import W9Submission, User
+    
+    status_filter = request.args.get('status')
+    page = int(request.args.get('page', 1))
+    per_page = min(int(request.args.get('per_page', 50)), 100)
+    
+    query = W9Submission.query.order_by(W9Submission.created_at.desc())
+    if status_filter:
+        query = query.filter_by(status=status_filter)
+    
+    paginated = query.paginate(page=page, per_page=per_page, error_out=False)
+    
+    submissions = []
+    for w9 in paginated.items:
+        user = User.query.get(w9.user_id)
+        submissions.append({
+            'id': w9.id,
+            'user_id': w9.user_id,
+            'username': user.username if user else 'unknown',
+            'email': user.email if user else 'unknown',
+            'legal_name': f"{w9.legal_first_name} {w9.legal_last_name}",
+            'business_name': w9.business_name,
+            'tax_classification': w9.tax_classification,
+            'address': f"{w9.address_line1}, {w9.city}, {w9.state} {w9.zip_code}",
+            'tin_type': w9.tin_type,
+            'tin_display': w9.display_tin,
+            'status': w9.status,
+            'signature_name': w9.signature_name,
+            'signature_date': w9.signature_date.isoformat() if w9.signature_date else None,
+            'submitted_at': w9.created_at.isoformat() if w9.created_at else None,
+            'reviewed_at': w9.reviewed_at.isoformat() if w9.reviewed_at else None,
+            'reviewed_by': w9.reviewed_by,
+            'rejection_reason': w9.rejection_reason,
+        })
+    
+    return jsonify({
+        'submissions': submissions,
+        'total': paginated.total,
+        'page': page,
+        'per_page': per_page,
+        'pages': paginated.pages,
+    })
+
+
+@mobile_api.route('/admin/w9/<int:w9_id>/review', methods=['POST'])
+@require_admin_2fa
+@with_db_retry
+def admin_w9_review(w9_id):
+    """Verify or reject a W-9 submission.
+    
+    Request body:
+    {
+        "action": "verify" or "reject",
+        "rejection_reason": "Reason for rejection" (required if reject)
+    }
+    """
+    from models import db, W9Submission
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'missing_request_body'}), 400
+    
+    action = data.get('action')
+    if action not in ('verify', 'reject'):
+        return jsonify({'error': 'action must be verify or reject'}), 400
+    
+    w9 = W9Submission.query.get(w9_id)
+    if not w9:
+        return jsonify({'error': 'w9_not_found'}), 404
+    
+    from flask import session as flask_session
+    admin_email = flask_session.get('email', 'admin')
+    
+    if action == 'verify':
+        w9.status = 'verified'
+        w9.reviewed_at = datetime.utcnow()
+        w9.reviewed_by = admin_email
+        w9.rejection_reason = None
+    else:
+        reason = data.get('rejection_reason', '').strip()
+        if not reason:
+            return jsonify({'error': 'rejection_reason required'}), 400
+        w9.status = 'rejected'
+        w9.reviewed_at = datetime.utcnow()
+        w9.reviewed_by = admin_email
+        w9.rejection_reason = reason
+    
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'w9_id': w9.id,
+        'status': w9.status,
+        'reviewed_by': admin_email,
+    })
+
+
+@mobile_api.route('/admin/w9/<int:w9_id>/decrypt-tin', methods=['POST'])
+@require_admin_2fa
+@with_db_retry
+def admin_w9_decrypt_tin(w9_id):
+    """Decrypt and view the full TIN for 1099-NEC generation.
+    
+    This is an audited action — logs who viewed the TIN.
+    """
+    from models import W9Submission
+    from services.w9_service import decrypt_tin
+    
+    w9 = W9Submission.query.get(w9_id)
+    if not w9:
+        return jsonify({'error': 'w9_not_found'}), 404
+    
+    try:
+        tin_plain = decrypt_tin(w9.tin_encrypted)
+        
+        from flask import session as flask_session
+        admin_email = flask_session.get('email', 'admin')
+        logger.warning(f"AUDIT: Admin {admin_email} decrypted TIN for W-9 #{w9_id} (user {w9.user_id})")
+        
+        # Format for display
+        if w9.tin_type == 'ssn':
+            formatted = f"{tin_plain[:3]}-{tin_plain[3:5]}-{tin_plain[5:]}"
+        else:
+            formatted = f"{tin_plain[:2]}-{tin_plain[2:]}"
+        
+        return jsonify({
+            'w9_id': w9.id,
+            'tin_type': w9.tin_type,
+            'tin_plain': formatted,
+            'legal_name': f"{w9.legal_first_name} {w9.legal_last_name}",
+        })
+    except Exception as e:
+        logger.error(f"TIN decryption failed for W-9 #{w9_id}: {e}")
+        return jsonify({'error': 'decryption_failed'}), 500
+
+
+@mobile_api.route('/admin/w9/1099-data', methods=['GET'])
+@require_admin_2fa
+@with_db_retry
+def admin_1099_data():
+    """Generate 1099-NEC data for a tax year.
+    
+    Query params:
+    - year: tax year (default: current year)
+    - threshold: minimum earnings to include (default: 600)
+    
+    Returns all users who earned >= threshold with their W-9 info and total earnings.
+    """
+    from models import db, W9Submission, User, XeroPayoutRecord
+    from services.w9_service import decrypt_tin
+    from sqlalchemy import func
+    
+    year = int(request.args.get('year', datetime.utcnow().year))
+    threshold = float(request.args.get('threshold', 600.0))
+    
+    # Get total payouts per user for the year
+    from datetime import date as date_type
+    year_start = date_type(year, 1, 1)
+    year_end = date_type(year, 12, 31)
+    
+    payout_totals = db.session.query(
+        XeroPayoutRecord.portfolio_user_id,
+        func.sum(XeroPayoutRecord.influencer_payout + XeroPayoutRecord.bonus_payout).label('total_paid')
+    ).filter(
+        XeroPayoutRecord.period_start >= year_start,
+        XeroPayoutRecord.period_end <= year_end,
+        XeroPayoutRecord.payment_status == 'paid'
+    ).group_by(XeroPayoutRecord.portfolio_user_id).having(
+        func.sum(XeroPayoutRecord.influencer_payout + XeroPayoutRecord.bonus_payout) >= threshold
+    ).all()
+    
+    results = []
+    missing_w9 = []
+    
+    for user_id, total_paid in payout_totals:
+        user = User.query.get(user_id)
+        if not user:
+            continue
+        
+        # Get latest verified W-9
+        w9 = W9Submission.query.filter_by(user_id=user_id).filter(
+            W9Submission.status.in_(['submitted', 'verified'])
+        ).order_by(W9Submission.created_at.desc()).first()
+        
+        entry = {
+            'user_id': user_id,
+            'username': user.username,
+            'email': user.email,
+            'total_paid': round(total_paid, 2),
+        }
+        
+        if w9:
+            try:
+                tin_plain = decrypt_tin(w9.tin_encrypted)
+                entry.update({
+                    'has_w9': True,
+                    'legal_name': f"{w9.legal_first_name} {w9.legal_last_name}",
+                    'business_name': w9.business_name,
+                    'address': f"{w9.address_line1}, {w9.city}, {w9.state} {w9.zip_code}",
+                    'tin_type': w9.tin_type,
+                    'tin': tin_plain,
+                    'w9_status': w9.status,
+                })
+            except Exception:
+                entry.update({'has_w9': True, 'tin_error': 'decryption_failed'})
+            results.append(entry)
+        else:
+            entry['has_w9'] = False
+            missing_w9.append(entry)
+    
+    from flask import session as flask_session
+    admin_email = flask_session.get('email', 'admin')
+    logger.warning(f"AUDIT: Admin {admin_email} generated 1099-NEC data for year {year}")
+    
+    return jsonify({
+        'year': year,
+        'threshold': threshold,
+        'recipients': results,
+        'missing_w9': missing_w9,
+        'total_recipients': len(results),
+        'total_missing_w9': len(missing_w9),
+    })

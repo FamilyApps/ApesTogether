@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var showPrivacy = false
     @State private var showFAQ = false
     @State private var urlCopied = false
+    @State private var showW9Form = false
     
     private var personalURL: String {
         if let slug = authManager.currentUser?.portfolioSlug {
@@ -109,9 +110,9 @@ struct SettingsView: View {
                                 AccentDivider()
                                 SettingsNavRow(
                                     icon: "doc.text.fill",
-                                    label: "1099-NEC Tax Form"
+                                    label: "W-9 / Tax Info"
                                 ) {
-                                    // TODO: Navigate to 1099-NEC retrieval
+                                    showW9Form = true
                                 }
                             }
                             .cardStyle(padding: 0)
@@ -230,6 +231,10 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showFAQ) {
                 FAQView()
+            }
+            .sheet(isPresented: $showW9Form) {
+                W9FormView()
+                    .environmentObject(authManager)
             }
         }
     }
