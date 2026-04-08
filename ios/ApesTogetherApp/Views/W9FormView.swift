@@ -261,16 +261,29 @@ struct W9FormView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     SectionHeader(title: "Electronic Signature")
                     VStack(spacing: 12) {
-                        Text("Under penalties of perjury, I certify that the number shown on this form is my correct taxpayer identification number and that I am a U.S. citizen or U.S. resident alien.")
-                            .font(.caption)
-                            .foregroundColor(.textSecondary)
-                            .padding(.horizontal, 16)
-                            .padding(.top, 12)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Part II — Certification")
+                                .font(.subheadline.bold())
+                                .foregroundColor(.textPrimary)
+                            
+                            Text("Under penalties of perjury, I certify that:")
+                                .font(.caption)
+                                .foregroundColor(.textSecondary)
+                            
+                            VStack(alignment: .leading, spacing: 6) {
+                                certificationItem("1.", "The number shown on this form is my correct taxpayer identification number (or I am waiting for a number to be issued to me); and")
+                                certificationItem("2.", "I am not subject to backup withholding because: (a) I am exempt from backup withholding, or (b) I have not been notified by the IRS that I am subject to backup withholding as a result of a failure to report all interest or dividends, or (c) the IRS has notified me that I am no longer subject to backup withholding; and")
+                                certificationItem("3.", "I am a U.S. citizen or other U.S. person (defined in the IRS instructions for Form W-9); and")
+                                certificationItem("4.", "The FATCA code(s) entered on this form (if any) indicating that I am exempt from FATCA reporting is correct.")
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
                         
-                        FormField(title: "Type Your Full Legal Name", text: $viewModel.signatureName, placeholder: "John A. Doe")
+                        FormField(title: "Type Your Full Legal Name to Sign", text: $viewModel.signatureName, placeholder: "John A. Doe")
                         
                         Toggle(isOn: $viewModel.certify) {
-                            Text("I certify that the information above is true and correct")
+                            Text("I certify under penalties of perjury that all of the above statements are true and correct")
                                 .font(.caption)
                                 .foregroundColor(.textPrimary)
                         }
@@ -304,6 +317,19 @@ struct W9FormView: View {
                 .padding(.bottom, 32)
             }
             .padding()
+        }
+    }
+    
+    private func certificationItem(_ number: String, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text(number)
+                .font(.caption2.bold())
+                .foregroundColor(.textSecondary)
+                .frame(width: 16, alignment: .trailing)
+            Text(text)
+                .font(.caption2)
+                .foregroundColor(.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
