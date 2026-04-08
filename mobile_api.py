@@ -691,47 +691,41 @@ def get_portfolio(slug):
         ).count()
         response['avg_trades_per_week'] = round(recent_trade_count / 4.3, 1)
         
-        # Unique stocks count
-        num_stocks = Stock.query.filter_by(user_id=owner.id).count()
-        response['num_stocks'] = num_stocks
+        # Load all stocks once (reuse for value calc, holdings, and count)
+        all_stocks = Stock.query.filter_by(user_id=owner.id).all()
+        response['num_stocks'] = len(all_stocks)
         
-        # Portfolio value (always visible as public info)
+        # Single bulk API call for ALL stock prices (premium tier: 150 calls/min)
+        batch_prices = {}
         try:
             from portfolio_performance import PortfolioPerformanceCalculator
             calc = PortfolioPerformanceCalculator()
-            response['portfolio_value'] = round(calc.calculate_portfolio_value(owner.id), 2)
-        except Exception:
-            response['portfolio_value'] = 0.0
+            tickers = [s.ticker for s in all_stocks if s.ticker and s.quantity > 0]
+            if tickers:
+                batch_prices = calc.get_batch_stock_data(tickers)
+        except Exception as e:
+            logger.warning(f"Bulk price fetch failed: {e}")
+        
+        # Portfolio value from batch prices (no additional API calls)
+        portfolio_value = 0.0
+        for stock in all_stocks:
+            if stock.quantity > 0:
+                price = batch_prices.get(stock.ticker.upper(), stock.purchase_price or 0)
+                portfolio_value += price * stock.quantity
+        portfolio_value += getattr(owner, 'cash_proceeds', 0.0) or 0.0
+        response['portfolio_value'] = round(portfolio_value, 2)
         
         # If subscribed or owner, show full portfolio
         if is_owner or is_subscribed:
-            stocks = Stock.query.filter_by(user_id=owner.id).all()
-            
-            # Fetch current market prices for all holdings
-            current_prices = {}
-            try:
-                from portfolio_performance import PortfolioPerformanceCalculator
-                calc = PortfolioPerformanceCalculator()
-                tickers = [s.ticker for s in stocks if s.ticker]
-                for ticker in tickers:
-                    try:
-                        data = calc.get_stock_data(ticker)
-                        if data and data.get('price'):
-                            current_prices[ticker] = round(float(data['price']), 2)
-                    except Exception:
-                        pass
-            except Exception as e:
-                logger.warning(f"Could not fetch current prices: {e}")
-            
             response['holdings'] = [
                 {
                     'ticker': stock.ticker,
                     'quantity': stock.quantity,
                     'purchase_price': stock.purchase_price or 0,
-                    'current_price': current_prices.get(stock.ticker, stock.purchase_price or 0),
+                    'current_price': round(batch_prices.get(stock.ticker.upper(), stock.purchase_price or 0), 2),
                     'purchase_date': stock.purchase_date.isoformat() if stock.purchase_date else None
                 }
-                for stock in stocks
+                for stock in all_stocks
             ]
             
             # Get recent transactions
@@ -1158,14 +1152,29 @@ def get_leaderboard():
                         if raw_vals and len(raw_vals) >= 2:
                             sparkline_points = [round(float(v), 2) for v in raw_vals]
             
-            # S&P sparkline is always full-period length (same for all users).
-            # Portfolio sparkline is left-padded with null so it aligns to the right
-            # of the S&P line — the user's line "appears" when their account was created.
-            sp500_len = len(sp500_sparkline_global)
-            if sparkline_points and sp500_len > len(sparkline_points):
-                pad = [None] * (sp500_len - len(sparkline_points))
-                sparkline_points = pad + sparkline_points
-            sp500_sparkline_points = sp500_sparkline_global
+            # Normalize portfolio sparkline to start at 0% (same origin as S&P).
+            # Chart data may have the portfolio starting at a non-zero value if
+            # the user joined mid-period. Shift so first point is 0.
+            if sparkline_points:
+                first_valid = next((v for v in sparkline_points if v is not None), None)
+                if first_valid is not None and first_valid != 0:
+                    sparkline_points = [
+                        round(v - first_valid, 2) if v is not None else None
+                        for v in sparkline_points
+                    ]
+            
+            # Sample S&P sparkline to same length as portfolio for consistent alignment.
+            # Both start at 0% on the y-axis with matching x-axis density.
+            portfolio_len = len([v for v in sparkline_points if v is not None]) if sparkline_points else 0
+            if portfolio_len > 0 and sp500_sparkline_global:
+                sp_step = max(1, len(sp500_sparkline_global) // max(portfolio_len, 1))
+                sp500_sparkline_points = sp500_sparkline_global[::sp_step][-portfolio_len:]
+                # Normalize S&P to also start at 0 from the sampled window
+                if sp500_sparkline_points:
+                    sp_base = sp500_sparkline_points[0]
+                    sp500_sparkline_points = [round(v - sp_base, 2) for v in sp500_sparkline_points]
+            else:
+                sp500_sparkline_points = sp500_sparkline_global
             
             # ── Active Edge filter ──
             if active_edge:
@@ -1193,6 +1202,9 @@ def get_leaderboard():
             elif frequency_filter == 'moderate' and (avg_trades_per_week >= 5 or avg_trades_per_week < 0.5):
                 continue
             
+            user_return = entry.get('performance_percent', 0.0)
+            alpha_vs_sp500 = round(user_return - sp500_return_for_period, 2)
+            
             leaderboard.append({
                 'rank': 0,
                 'user': {
@@ -1200,7 +1212,9 @@ def get_leaderboard():
                     'username': entry.get('username', user.username),
                     'portfolio_slug': user.portfolio_slug
                 },
-                'return_percent': entry.get('performance_percent', 0.0),
+                'return_percent': user_return,
+                'sp500_return': round(sp500_return_for_period, 2),
+                'alpha_vs_sp500': alpha_vs_sp500,
                 'subscriber_count': sub_count,
                 'subscription_price': entry.get('subscription_price', 9.00),
                 'sparkline_data': sparkline_points[-20:] if sparkline_points else [],

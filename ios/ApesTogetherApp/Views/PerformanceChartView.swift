@@ -61,26 +61,39 @@ struct PerformanceChartView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Return summary header
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(portfolioLabel)
-                        .font(.caption)
-                        .foregroundColor(.textMuted)
-                    Text(String(format: "%+.2f%%", portfolioReturn))
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                        .foregroundColor(portfolioColor)
-                }
-                
-                Spacer()
-                
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text("S&P 500")
-                        .font(.caption)
-                        .foregroundColor(.textMuted)
-                    Text(String(format: "%+.2f%%", sp500Return))
-                        .font(.system(size: 18, weight: .semibold, design: .rounded))
-                        .foregroundColor(sp500Return >= 0 ? .gains.opacity(0.6) : .losses.opacity(0.6))
+            // Return summary header — alpha vs S&P is the main value prop
+            VStack(spacing: 6) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        let alpha = portfolioReturn - sp500Return
+                        Text(alpha >= 0 ? "Beating S&P by" : "Trailing S&P by")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.textMuted)
+                        Text(String(format: "%+.2f%%", alpha))
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .foregroundColor(alpha >= 0 ? .gains : .losses)
+                    }
+                    
+                    Spacer()
+                    
+                    VStack(alignment: .trailing, spacing: 6) {
+                        HStack(spacing: 4) {
+                            Text(portfolioLabel)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.textMuted)
+                            Text(String(format: "%+.1f%%", portfolioReturn))
+                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                                .foregroundColor(portfolioColor)
+                        }
+                        HStack(spacing: 4) {
+                            Text("S&P 500")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.textMuted)
+                            Text(String(format: "%+.1f%%", sp500Return))
+                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                                .foregroundColor(sp500Return >= 0 ? .gains.opacity(0.7) : .losses.opacity(0.7))
+                        }
+                    }
                 }
             }
             .padding(.horizontal, 16)

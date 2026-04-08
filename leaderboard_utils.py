@@ -473,7 +473,7 @@ def _compute_all_user_metrics(period='YTD'):
     Called once per period by update_leaderboard_cache, then filtered 3x by category.
     """
     from datetime import datetime, date, timedelta
-    from performance_calculator import calculate_portfolio_performance, get_period_dates, get_leaderboard_eligibility
+    from performance_calculator import calculate_portfolio_performance, get_period_dates, batch_get_leaderboard_eligibility
     from models import Subscription, Transaction
     import time as _time
     
@@ -494,40 +494,97 @@ def _compute_all_user_metrics(period='YTD'):
     error_count = 0
     eligibility_skipped = 0
     
+    # BATCH eligibility check — single SQL query for ALL users (scales to 10k+)
+    try:
+        eligibility_map = batch_get_leaderboard_eligibility(period)
+        print(f"  Batch eligibility: {len(eligibility_map)} users checked in 1 query")
+    except Exception as e:
+        logger.warning(f"Batch eligibility check failed: {e}, falling back to no filtering")
+        eligibility_map = {}
+    
+    # ── BATCH pre-fetches: replace per-user queries with bulk loads ──
+    from sqlalchemy import func as sqla_func
+    from models import UserPortfolioStats, AdminSubscription
+    
+    # 1) Latest snapshot per user via subquery (efficient at 10k+ scale)
+    _latest_snap_map = {}
+    try:
+        max_dates_sub = db.session.query(
+            PortfolioSnapshot.user_id,
+            sqla_func.max(PortfolioSnapshot.date).label('max_date')
+        ).group_by(PortfolioSnapshot.user_id).subquery()
+        
+        actual_snaps = PortfolioSnapshot.query.join(
+            max_dates_sub,
+            (PortfolioSnapshot.user_id == max_dates_sub.c.user_id) &
+            (PortfolioSnapshot.date == max_dates_sub.c.max_date)
+        ).all()
+        _latest_snap_map = {s.user_id: s for s in actual_snaps}
+        print(f"  Batch snapshots: {len(_latest_snap_map)} loaded")
+    except Exception as e:
+        logger.warning(f"Batch snapshot load failed: {e}")
+    
+    # 2) UserPortfolioStats — cached cap %, subscriber count, trades/wk
+    _stats_map = {}
+    try:
+        all_stats = UserPortfolioStats.query.all()
+        _stats_map = {s.user_id: s for s in all_stats}
+        print(f"  Batch stats: {len(_stats_map)} loaded")
+    except Exception as e:
+        logger.warning(f"Batch stats load failed: {e}")
+    
+    # 3) Subscriber counts (real subscriptions)
+    _sub_count_map = {}
+    try:
+        sub_counts = db.session.query(
+            Subscription.subscribed_to_id,
+            sqla_func.count(Subscription.id).label('cnt')
+        ).filter(Subscription.status == 'active').group_by(Subscription.subscribed_to_id).all()
+        _sub_count_map = {uid: cnt for uid, cnt in sub_counts}
+    except Exception as e:
+        logger.warning(f"Batch subscriber count failed: {e}")
+    
+    # 4) Admin (gifted) subscriber bonuses
+    _admin_bonus_map = {}
+    try:
+        for asub in AdminSubscription.query.all():
+            bonus = asub.bonus_subscriber_count or 0
+            if bonus > 0:
+                _admin_bonus_map[asub.portfolio_user_id] = bonus
+    except Exception as e:
+        logger.warning(f"Batch admin sub load failed: {e}")
+    
+    # 5) Recent trade counts (last 30 days) — single aggregation query
+    _trade_count_map = {}
+    try:
+        trade_counts = db.session.query(
+            Transaction.user_id,
+            sqla_func.count(Transaction.id).label('cnt')
+        ).filter(Transaction.timestamp >= thirty_days_ago).group_by(Transaction.user_id).all()
+        _trade_count_map = {uid: cnt for uid, cnt in trade_counts}
+    except Exception as e:
+        logger.warning(f"Batch trade count failed: {e}")
+    
     for user in users:
         # LEADERBOARD ELIGIBILITY CHECK: User must have been active for the full period
         # e.g., 3M leaderboard requires 90+ days of activity
-        try:
-            eligibility = get_leaderboard_eligibility(user.id, period)
-            if not eligibility['eligible']:
-                days_active = eligibility['days_active']
-                days_required = eligibility['days_required']
-                skipped.append({
-                    'username': user.username,
-                    'reason': 'insufficient_activity',
-                    'days_active': days_active,
-                    'days_required': days_required
-                })
-                eligibility_skipped += 1
-                continue
-        except Exception as e:
-            logger.warning(f"Eligibility check failed for user {user.id}: {e}")
-            # On error, fall through to normal processing (don't block on eligibility check failure)
-        
-        # Get latest snapshot to verify user has data
-        try:
-            latest_snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id)\
-                .order_by(PortfolioSnapshot.date.desc()).first()
-        except Exception as e:
-            if not first_error:
-                first_error = f"Snapshot query failed for user {user.id}: {e}"
-            error_count += 1
-            try:
-                db.session.rollback()
-            except Exception:
-                pass
+        eligibility = eligibility_map.get(user.id)
+        if eligibility and not eligibility['eligible']:
+            skipped.append({
+                'username': user.username,
+                'reason': 'insufficient_activity',
+                'days_active': eligibility['days_active'],
+                'days_required': eligibility['days_required']
+            })
+            eligibility_skipped += 1
+            continue
+        elif not eligibility:
+            # User has no snapshots at all — skip
+            eligibility_skipped += 1
             continue
         
+        # Get latest snapshot from batch-loaded map (no DB query)
+        latest_snapshot = _latest_snap_map.get(user.id)
         if not latest_snapshot:
             skipped.append({'username': user.username, 'reason': 'no_snapshots'})
             continue
@@ -567,27 +624,19 @@ def _compute_all_user_metrics(period='YTD'):
                 pass
             continue
         
-        # Cap percentages (computed once, used for category filtering)
-        small_cap_percent, large_cap_percent = calculate_portfolio_cap_percentages(user.id)
+        # Cap percentages from batch-loaded UserPortfolioStats (no DB query)
+        cached_stats = _stats_map.get(user.id)
+        if cached_stats:
+            small_cap_percent = cached_stats.small_cap_percent or 0.0
+            large_cap_percent = cached_stats.large_cap_percent or 0.0
+        else:
+            small_cap_percent, large_cap_percent = 0.0, 0.0
         
-        # Subscriber count (real + gifted)
-        subscriber_count = Subscription.query.filter_by(
-            subscribed_to_id=user.id, 
-            status='active'
-        ).count()
-        try:
-            from models import AdminSubscription
-            admin_sub = AdminSubscription.query.filter_by(portfolio_user_id=user.id).first()
-            if admin_sub:
-                subscriber_count += admin_sub.bonus_subscriber_count or 0
-        except Exception:
-            pass
+        # Subscriber count from batch-loaded maps (no DB query)
+        subscriber_count = _sub_count_map.get(user.id, 0) + _admin_bonus_map.get(user.id, 0)
         
-        # Average trades per week (last 30 days)
-        recent_trades = Transaction.query.filter(
-            Transaction.user_id == user.id,
-            Transaction.timestamp >= thirty_days_ago
-        ).count()
+        # Average trades per week from batch-loaded trade counts (no DB query)
+        recent_trades = _trade_count_map.get(user.id, 0)
         avg_trades_per_day = round(recent_trades / 30, 1)
         avg_trades_per_week = round(avg_trades_per_day * 7, 1)
         
@@ -596,7 +645,7 @@ def _compute_all_user_metrics(period='YTD'):
         performance_percent = float(performance_percent)
         small_cap_pct = float(small_cap_percent) if small_cap_percent is not None else 0.0
         large_cap_pct = float(large_cap_percent) if large_cap_percent is not None else 0.0
-        subscription_price = float(user.subscription_price) if user.subscription_price is not None else 4.0
+        subscription_price = float(user.subscription_price) if user.subscription_price is not None else 9.0
         
         all_metrics.append({
             'user_id': user.id,

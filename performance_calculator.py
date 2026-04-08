@@ -57,6 +57,72 @@ def get_user_first_activity_date(user_id: int) -> Optional[date]:
     return first_snapshot.date if first_snapshot else None
 
 
+def batch_get_first_activity_dates() -> Dict[int, date]:
+    """
+    Batch-fetch first activity dates for ALL users in a single SQL query.
+    Returns {user_id: first_activity_date} for users with non-zero snapshots.
+    
+    This is O(1) queries vs O(n) for get_user_first_activity_date per user.
+    Used by leaderboard computation to scale to 10k+ users.
+    """
+    from sqlalchemy import func as sqla_func
+    from models import db
+    
+    rows = db.session.query(
+        PortfolioSnapshot.user_id,
+        sqla_func.min(PortfolioSnapshot.date).label('first_date')
+    ).filter(
+        PortfolioSnapshot.total_value > 0
+    ).group_by(PortfolioSnapshot.user_id).all()
+    
+    return {uid: first_date for uid, first_date in rows}
+
+
+def batch_get_leaderboard_eligibility(period: str) -> Dict[int, dict]:
+    """
+    Batch-check leaderboard eligibility for ALL users in a single SQL query.
+    Returns {user_id: eligibility_dict} — same format as get_leaderboard_eligibility.
+    
+    Scales to 10k+ users with O(1) database queries instead of O(n).
+    """
+    first_dates = batch_get_first_activity_dates()
+    
+    try:
+        from portfolio_performance import get_market_date
+    except ImportError:
+        from zoneinfo import ZoneInfo
+        MARKET_TZ = ZoneInfo('America/New_York')
+        def get_market_date():
+            return datetime.now(MARKET_TZ).date()
+    
+    today = get_market_date()
+    
+    period_requirements = {
+        '1D': 0, '5D': 0, '1W': 0, '1M': 30, '3M': 90,
+        'YTD': (today - date(today.year, 1, 1)).days,
+        '1Y': 365, '5Y': 365 * 5, 'MAX': 0,
+    }
+    days_required = period_requirements.get(period.upper(), 0)
+    
+    results = {}
+    for uid, first_activity in first_dates.items():
+        days_active = (today - first_activity).days
+        eligible = days_active >= days_required
+        eligible_date = None
+        if not eligible and days_required > 0:
+            eligible_date = first_activity + timedelta(days=days_required)
+        
+        results[uid] = {
+            'eligible': eligible,
+            'first_activity_date': first_activity,
+            'days_active': days_active,
+            'days_required': days_required,
+            'eligible_date': eligible_date
+        }
+    
+    return results
+
+
 def get_leaderboard_eligibility(user_id: int, period: str) -> dict:
     """
     Check if a user is eligible for a specific leaderboard period.
@@ -491,19 +557,16 @@ def _generate_chart_points(
     logger.debug(f"Chart baseline: ${baseline_value:.2f} on {baseline_date}")
     logger.info(f"[CHART-TIMING] snapshots_count={len(snapshots)}, baseline={baseline_date}")
     
-    # Get S&P 500 data for the full period timeline.
-    # S&P BASELINE is set from user's first snapshot date (not period start) so
-    # the % comparison is apples-to-apples with the user's actual trading window.
-    # For 1D/5D: Use SPY_INTRADAY for intraday comparison, fallback to daily if unavailable
-    # For longer periods: Use SPY_SP500 daily close
+    # S&P 500 data starts from user's baseline_date (not period_start) so the chart
+    # only shows data points since the user had assets. Both lines start at 0%.
     sp500_baseline_date = baseline_date  # User's first non-zero snapshot date
     _tsp = _time.time()
     if period in ['1D', '5D']:
-        # Query intraday S&P 500 data
+        # Query intraday S&P 500 data from user's baseline
         sp500_data = MarketData.query.filter(
             and_(
                 MarketData.ticker == 'SPY_INTRADAY',
-                MarketData.date >= period_start,
+                MarketData.date >= sp500_baseline_date,
                 MarketData.date <= period_end,
                 MarketData.timestamp.isnot(None)
             )
@@ -515,16 +578,16 @@ def _generate_chart_points(
             sp500_data = MarketData.query.filter(
                 and_(
                     MarketData.ticker == 'SPY_SP500',
-                    MarketData.date >= period_start,
+                    MarketData.date >= sp500_baseline_date,
                     MarketData.date <= period_end
                 )
             ).order_by(MarketData.date.asc()).all()
     else:
-        # Query daily S&P 500 data
+        # Query daily S&P 500 data from user's baseline date
         sp500_data = MarketData.query.filter(
             and_(
                 MarketData.ticker == 'SPY_SP500',
-                MarketData.date >= period_start,  # Use period_start, not baseline_date
+                MarketData.date >= sp500_baseline_date,
                 MarketData.date <= period_end
             )
         ).order_by(MarketData.date.asc()).all()
@@ -534,9 +597,9 @@ def _generate_chart_points(
     # DEBUG: Log what dates we actually got
     if sp500_data:
         logger.info(f"📊 S&P 500 query returned {len(sp500_data)} records from {sp500_data[0].date} to {sp500_data[-1].date}")
-        logger.info(f"📊 Query params: period_start={period_start}, period_end={period_end}")
+        logger.info(f"📊 Query params: sp500_baseline_date={sp500_baseline_date}, period_end={period_end}")
     else:
-        logger.warning(f"⚠️ S&P 500 query returned NO DATA for period {period_start} to {period_end}")
+        logger.warning(f"⚠️ S&P 500 query returned NO DATA for {sp500_baseline_date} to {period_end}")
     
     # Build S&P 500 lookup map (by date for daily, by timestamp for intraday)
     if period in ['1D', '5D']:
@@ -686,7 +749,36 @@ def _generate_chart_points(
         if sp500_data and sampled_sp500[-1] != sp500_data[-1]:
             sampled_sp500.append(sp500_data[-1])
         
-        user_started = False
+        # Helper: calculate Modified Dietz portfolio return from baseline to a target snapshot
+        def _calc_portfolio_pct(target_snapshot):
+            V_start = baseline_value
+            V_end = target_snapshot.total_value
+            CF_net = target_snapshot.max_cash_deployed - baseline_snapshot.max_cash_deployed
+            
+            if CF_net <= 0:
+                return ((V_end - V_start) / V_start) * 100 if V_start > 0 else 0.0
+            
+            weighted_cf = 0.0
+            prev_deployed = baseline_snapshot.max_cash_deployed
+            period_days = (target_snapshot.date - baseline_snapshot.date).days
+            
+            for s in snapshots:
+                if s.date > target_snapshot.date:
+                    break
+                if s.date <= baseline_snapshot.date:
+                    continue
+                capital_added = s.max_cash_deployed - prev_deployed
+                if capital_added > 0 and period_days > 0:
+                    days_remaining = (target_snapshot.date - s.date).days
+                    weight = days_remaining / period_days
+                    weighted_cf += capital_added * weight
+                prev_deployed = s.max_cash_deployed
+            
+            W = weighted_cf / CF_net if CF_net > 0 else 0.5
+            denominator = V_start + (W * CF_net)
+            return ((V_end - V_start - CF_net) / denominator) * 100 if denominator > 0 else 0.0
+        
+        last_known_pct = 0.0  # Track last known portfolio % for gap-filling
         
         for idx, sp500_record in enumerate(sampled_sp500):
             # Period-appropriate date format for mobile screens
@@ -700,108 +792,24 @@ def _generate_chart_points(
             else:
                 date_str = f"{sp500_record.date.month}/{sp500_record.date.day}"  # "3/18" — compact for 1M and shorter
             
-            # S&P 500 percentage (always calculated from period start)
+            # S&P 500 percentage from user's baseline (both lines start at 0%)
             sp500_value = float(sp500_record.close_price)
             sp500_pct = ((sp500_value - baseline_sp500) / baseline_sp500) * 100
             
             # Portfolio percentage using Modified Dietz (accounts for cash flows)
-            portfolio_pct = None
             if sp500_record.date in snapshot_map:
-                user_started = True
-                snapshot = snapshot_map[sp500_record.date]
-                
-                # Calculate Modified Dietz return from baseline to this point
-                V_start = baseline_value
-                V_end = snapshot.total_value
-                CF_net = snapshot.max_cash_deployed - baseline_snapshot.max_cash_deployed
-                
-                # Calculate time-weighted cash flows up to this date
-                if CF_net <= 0:
-                    # No net capital added - use simple percentage
-                    if V_start > 0:
-                        portfolio_pct = ((V_end - V_start) / V_start) * 100
-                    else:
-                        portfolio_pct = 0.0
-                else:
-                    # Calculate W (time-weighted factor) for cash flows up to this date
-                    weighted_cf = 0.0
-                    prev_deployed = baseline_snapshot.max_cash_deployed
-                    period_days = (sp500_record.date - baseline_snapshot.date).days
-                    
-                    for s in snapshots:
-                        if s.date > sp500_record.date:
-                            break
-                        if s.date <= baseline_snapshot.date:
-                            continue
-                        
-                        capital_added = s.max_cash_deployed - prev_deployed
-                        if capital_added > 0 and period_days > 0:
-                            days_remaining = (sp500_record.date - s.date).days
-                            weight = days_remaining / period_days
-                            weighted_cf += capital_added * weight
-                        prev_deployed = s.max_cash_deployed
-                    
-                    W = weighted_cf / CF_net if CF_net > 0 else 0.5
-                    denominator = V_start + (W * CF_net)
-                    
-                    if denominator > 0:
-                        numerator = V_end - V_start - CF_net
-                        portfolio_pct = (numerator / denominator) * 100
-                    else:
-                        portfolio_pct = 0.0
-                        
-            elif user_started:
-                # User has started but no snapshot for this date - use last known value
-                # Find previous snapshot
-                prev_snapshot = None
-                for s in reversed(snapshots):
-                    if s.date < sp500_record.date:
-                        prev_snapshot = s
-                        break
-                if prev_snapshot:
-                    # Calculate Modified Dietz for previous snapshot
-                    V_start = baseline_value
-                    V_end = prev_snapshot.total_value
-                    CF_net = prev_snapshot.max_cash_deployed - baseline_snapshot.max_cash_deployed
-                    
-                    if CF_net <= 0 and V_start > 0:
-                        portfolio_pct = ((V_end - V_start) / V_start) * 100
-                    elif CF_net > 0:
-                        weighted_cf = 0.0
-                        prev_deployed = baseline_snapshot.max_cash_deployed
-                        period_days = (prev_snapshot.date - baseline_snapshot.date).days
-                        
-                        for s in snapshots:
-                            if s.date > prev_snapshot.date:
-                                break
-                            if s.date <= baseline_snapshot.date:
-                                continue
-                            
-                            capital_added = s.max_cash_deployed - prev_deployed
-                            if capital_added > 0 and period_days > 0:
-                                days_remaining = (prev_snapshot.date - s.date).days
-                                weight = days_remaining / period_days
-                                weighted_cf += capital_added * weight
-                            prev_deployed = s.max_cash_deployed
-                        
-                        W = weighted_cf / CF_net if CF_net > 0 else 0.5
-                        denominator = V_start + (W * CF_net)
-                        
-                        if denominator > 0:
-                            numerator = V_end - V_start - CF_net
-                            portfolio_pct = (numerator / denominator) * 100
-                        else:
-                            portfolio_pct = 0.0
-                    else:
-                        portfolio_pct = 0.0
+                last_known_pct = _calc_portfolio_pct(snapshot_map[sp500_record.date])
             else:
-                # User hasn't started yet - portfolio line absent (None)
-                portfolio_pct = None
+                # No snapshot for this date — use last known value (gap-fill)
+                # Find previous snapshot for more accurate gap-fill
+                for s in reversed(snapshots):
+                    if s.date < sp500_record.date and s.total_value > 0:
+                        last_known_pct = _calc_portfolio_pct(s)
+                        break
             
-            # Always emit chart point (S&P always present, portfolio may be None)
             chart_data.append({
                 'date': date_str,
-                'portfolio': round(portfolio_pct, 2) if portfolio_pct is not None else None,
+                'portfolio': round(last_known_pct, 2),
                 'sp500': round(sp500_pct, 2)
             })
     
@@ -813,12 +821,17 @@ def _generate_chart_points(
     return chart_data
 
 
+_sp500_benchmark_cache: Dict[tuple, float] = {}
+
 def _calculate_sp500_benchmark(start_date: date, end_date: date) -> float:
     """
     Calculate S&P 500 return for the period using simple percentage.
     
     Note: Uses simple return (not Modified Dietz) since it's a passive benchmark
     with no cash flows. Just measures market movement.
+    
+    Cached in-memory: many users share the same start/end dates during bulk
+    leaderboard computation, avoiding redundant DB queries at 10k scale.
     
     Args:
         start_date: Period start
@@ -827,6 +840,9 @@ def _calculate_sp500_benchmark(start_date: date, end_date: date) -> float:
     Returns:
         S&P 500 percentage return
     """
+    cache_key = (start_date, end_date)
+    if cache_key in _sp500_benchmark_cache:
+        return _sp500_benchmark_cache[cache_key]
     # For 1D periods (start_date == end_date), try intraday data first, fall back to daily
     if start_date == end_date:
         # Query intraday SPY data for this date
@@ -852,9 +868,12 @@ def _calculate_sp500_benchmark(start_date: date, end_date: date) -> float:
             ).first()
             
             if prev_sp500 and curr_sp500 and float(prev_sp500.close_price) > 0:
-                return ((float(curr_sp500.close_price) - float(prev_sp500.close_price)) / float(prev_sp500.close_price)) * 100
+                result = ((float(curr_sp500.close_price) - float(prev_sp500.close_price)) / float(prev_sp500.close_price)) * 100
+                _sp500_benchmark_cache[cache_key] = result
+                return result
             
             logger.warning(f"Missing SPY data for 1D: intraday and daily fallback both failed for {start_date}")
+            _sp500_benchmark_cache[cache_key] = 0.0
             return 0.0
         
         # SPY_INTRADAY already contains S&P 500 value (spy_price * 10 from intraday cron)
@@ -864,6 +883,7 @@ def _calculate_sp500_benchmark(start_date: date, end_date: date) -> float:
         
         if start_price == 0:
             logger.warning(f"Zero SPY_INTRADAY start price on {start_date}")
+            _sp500_benchmark_cache[cache_key] = 0.0
             return 0.0
         
         sp500_return = ((end_price - start_price) / start_price) * 100
@@ -873,6 +893,7 @@ def _calculate_sp500_benchmark(start_date: date, end_date: date) -> float:
             f"({start_date} 9:30 AM: ${start_price:.2f} -> 4:00 PM: ${end_price:.2f})"
         )
         
+        _sp500_benchmark_cache[cache_key] = sp500_return
         return sp500_return
     
     # For multi-day periods, use daily SPY_SP500 data
@@ -892,6 +913,7 @@ def _calculate_sp500_benchmark(start_date: date, end_date: date) -> float:
     
     if not start_price_data or not end_price_data:
         logger.warning(f"Missing SPY_SP500 data for period {start_date} to {end_date}")
+        _sp500_benchmark_cache[cache_key] = 0.0
         return 0.0
     
     start_price = start_price_data.close_price
@@ -899,6 +921,7 @@ def _calculate_sp500_benchmark(start_date: date, end_date: date) -> float:
     
     if start_price == 0:
         logger.warning(f"Zero S&P 500 start price on {start_price_data.date}")
+        _sp500_benchmark_cache[cache_key] = 0.0
         return 0.0
     
     sp500_return = ((end_price - start_price) / start_price) * 100
@@ -908,6 +931,7 @@ def _calculate_sp500_benchmark(start_date: date, end_date: date) -> float:
         f"({start_price_data.date}: ${start_price:.2f} -> {end_price_data.date}: ${end_price:.2f})"
     )
     
+    _sp500_benchmark_cache[cache_key] = sp500_return
     return sp500_return
 
 

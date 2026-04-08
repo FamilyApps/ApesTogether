@@ -494,6 +494,10 @@ struct LeaderboardCard: View {
                             Image(systemName: rc > 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
                                 .font(.system(size: 7))
                                 .foregroundColor(rc > 0 ? .gains : .losses)
+                        } else {
+                            Text("—")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.textMuted.opacity(0.5))
                         }
                     }
                     
@@ -534,11 +538,17 @@ struct LeaderboardCard: View {
                     )
                     .frame(width: 52, height: 26)
                     
-                    // Return percent
-                    Text(String(format: "%+.1f%%", entry.returnPercent))
-                        .font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit())
-                        .foregroundColor(entry.returnPercent >= 0 ? .gains : .losses)
-                        .frame(minWidth: 56, alignment: .trailing)
+                    // Alpha vs S&P (main value prop)
+                    VStack(alignment: .trailing, spacing: 1) {
+                        let alpha = entry.alphaVsSp500 ?? (entry.returnPercent - (entry.sp500Return ?? 0))
+                        Text(String(format: "%+.1f%%", alpha))
+                            .font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit())
+                            .foregroundColor(alpha >= 0 ? .gains : .losses)
+                        Text("vs S&P")
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundColor(.textMuted)
+                    }
+                    .frame(minWidth: 56, alignment: .trailing)
                     
                     // Expand chevron
                     Image(systemName: "chevron.down")
@@ -606,15 +616,15 @@ struct LeaderboardCard: View {
             Rectangle().fill(Color.cardBorder.opacity(0.3)).frame(height: 0.5)
                 .padding(.horizontal, 14)
             
-            // Stats grid
+            // Return stats row (raw performance + S&P comparison)
             HStack(spacing: 0) {
-                statCell(title: "Trades/wk", value: String(format: "%.1f", entry.avgTradesPerWeek ?? 0))
+                statCell(title: "Return", value: String(format: "%+.1f%%", entry.returnPercent))
+                statDivider
+                statCell(title: "S&P 500", value: String(format: "%+.1f%%", entry.sp500Return ?? 0))
                 statDivider
                 statCell(title: "Stocks", value: "\(entry.uniqueStocks ?? 0)")
                 statDivider
-                statCell(title: "Large Cap", value: String(format: "%.0f%%", entry.largeCapPct ?? 0))
-                statDivider
-                statCell(title: "Age", value: formatAge(entry.accountAgeDays ?? 0))
+                statCell(title: "Trades/wk", value: String(format: "%.1f", entry.avgTradesPerWeek ?? 0))
             }
             .padding(.vertical, 8)
             .background(

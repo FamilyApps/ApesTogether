@@ -6949,9 +6949,25 @@ def public_portfolio_view(slug):
                     else:
                         is_subscriber = False
         
-        # Get current portfolio value
+        # Load all stocks once (used for value calc, holdings, and count)
+        from models import Transaction
+        from datetime import timedelta
+        
+        stocks = Stock.query.filter_by(user_id=user.id).all()
+        num_stocks = len(stocks)
+        
+        # Single bulk API call for ALL stock prices (instead of N serial calls)
         calculator = PortfolioPerformanceCalculator()
-        current_value = calculator.calculate_portfolio_value(user.id)
+        tickers = [s.ticker for s in stocks if s.quantity > 0]
+        batch_prices = calculator.get_batch_stock_data(tickers) if tickers else {}
+        
+        # Calculate current portfolio value from batch prices
+        current_value = 0.0
+        for stock in stocks:
+            if stock.quantity > 0:
+                price = batch_prices.get(stock.ticker.upper(), stock.purchase_price)
+                current_value += price * stock.quantity
+        current_value += getattr(user, 'cash_proceeds', 0.0) or 0.0
         
         # Get latest snapshot for comparison
         latest_snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id).order_by(
@@ -6966,13 +6982,6 @@ def public_portfolio_view(slug):
             day_change = 0
             day_change_pct = 0
         
-        # Calculate portfolio statistics
-        from models import Transaction
-        from datetime import timedelta
-        
-        # Number of unique stocks held
-        num_stocks = Stock.query.filter_by(user_id=user.id).count()
-        
         # Average trades per week (last 30 days)
         thirty_days_ago = datetime.utcnow() - timedelta(days=30)
         recent_trades = Transaction.query.filter(
@@ -6981,15 +6990,12 @@ def public_portfolio_view(slug):
         ).count()
         avg_trades_per_week = round(recent_trades / 4.3, 1)  # 30 days ≈ 4.3 weeks
         
-        # Get holdings if subscriber
+        # Build holdings from batch prices (no additional API calls)
         holdings = []
         if is_subscriber:
-            stocks = Stock.query.filter_by(user_id=user.id).all()
             for stock in stocks:
-                # Get current price from API
-                stock_data = get_stock_data(stock.ticker)
-                current_price = stock_data.get('price', stock.purchase_price) if stock_data else stock.purchase_price
-                value = current_price * stock.quantity
+                price = batch_prices.get(stock.ticker.upper(), stock.purchase_price)
+                value = price * stock.quantity
                 gain_loss = value - (stock.purchase_price * stock.quantity)
                 gain_loss_pct = (gain_loss / (stock.purchase_price * stock.quantity) * 100) if stock.purchase_price > 0 else 0
                 
@@ -6997,7 +7003,7 @@ def public_portfolio_view(slug):
                     'ticker': stock.ticker,
                     'quantity': stock.quantity,
                     'purchase_price': stock.purchase_price,
-                    'current_price': current_price,
+                    'current_price': price,
                     'value': value,
                     'gain_loss': gain_loss,
                     'gain_loss_pct': gain_loss_pct
