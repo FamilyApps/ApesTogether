@@ -280,6 +280,12 @@ struct W9FormView: View {
                         .padding(.horizontal, 16)
                         .padding(.top, 12)
                         
+                        Text("The IRS does not require your consent to any provision of this document other than the certifications required to avoid backup withholding.")
+                            .font(.caption2)
+                            .italic()
+                            .foregroundColor(.textSecondary)
+                            .padding(.horizontal, 16)
+                        
                         FormField(title: "Type Your Full Legal Name to Sign", text: $viewModel.signatureName, placeholder: "John A. Doe")
                         
                         Toggle(isOn: $viewModel.certify) {
