@@ -2197,6 +2197,21 @@ def execute_trade():
             except Exception as meta_err:
                 logger.warning(f"Non-blocking: failed to auto-populate metadata for {ticker}: {meta_err}")
         
+        # Notify subscribers (email + push) — non-blocking
+        position_pct = None
+        if trade_type == 'sell' and position_before_qty and position_before_qty > 0:
+            position_pct = round((quantity / position_before_qty) * 100, 1)
+        try:
+            from services.notification_utils import notify_subscribers_via_email
+            notify_subscribers_via_email(db, g.user_id, trade_type, ticker, quantity, price, position_pct=position_pct)
+        except Exception as notif_err:
+            logger.warning(f"Non-blocking: subscriber email notification failed: {notif_err}")
+        try:
+            from push_notification_service import notify_subscribers_of_trade
+            notify_subscribers_of_trade(db, g.user_id, trade_type, ticker, quantity, price, position_pct=position_pct)
+        except Exception as push_err:
+            logger.warning(f"Non-blocking: subscriber push notification failed: {push_err}")
+        
         return jsonify({
             'success': True,
             'trade': {
@@ -3446,8 +3461,9 @@ def _execute_bot_trade_wave(wave, dry_run=False):
     try:
         from models import db, User, Stock
         
-        # Get active bot users
-        bots = User.query.filter_by(role='agent', bot_active=True).all()
+        # Get active bot users (bot_active is stored in extra_data JSON, not a column)
+        all_bots = User.query.filter_by(role='agent').all()
+        bots = [b for b in all_bots if (b.extra_data or {}).get('bot_active', True)]
         if not bots:
             return {'success': True, 'message': 'No active bots', 'trades': 0}
         
