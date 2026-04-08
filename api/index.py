@@ -4450,8 +4450,19 @@ def create_tables():
 @app.route('/admin/process-queued-trades')
 @admin_2fa_required
 def admin_process_queued_trades():
-    """Manually trigger processing of all queued after-hours email trades."""
+    """Manually trigger processing of all queued after-hours email trades.
+    Use ?retry_failed=1 to reset recently failed trades back to queued first."""
     try:
+        if request.args.get('retry_failed'):
+            from models import QueuedEmailTrade
+            failed = QueuedEmailTrade.query.filter_by(status='failed').all()
+            for qt in failed:
+                qt.status = 'queued'
+                qt.error_message = None
+                qt.executed_at = None
+            db.session.commit()
+            logger.info(f"Reset {len(failed)} failed trades back to queued")
+
         from services.trading_email import process_queued_trades
         result = process_queued_trades()
         return jsonify({'success': True, 'result': result}), 200
