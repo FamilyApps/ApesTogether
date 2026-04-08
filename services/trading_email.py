@@ -152,8 +152,8 @@ def handle_inbound_email(from_email, subject, body):
     # ── 3. Fetch live prices for all tickers ─────────────────────────────
     tickers = list({t['ticker'] for t in trades})
     try:
-        from portfolio_performance import PortfolioPerformance
-        pp = PortfolioPerformance()
+        from portfolio_performance import PortfolioPerformanceCalculator
+        pp = PortfolioPerformanceCalculator()
         prices = pp.get_batch_stock_data(tickers)
     except Exception as e:
         logger.error(f"Price fetch failed: {e}")
@@ -399,8 +399,8 @@ def process_queued_trades():
     # Batch-fetch prices for all unique tickers
     tickers = list({q.ticker for q in queued})
     try:
-        from portfolio_performance import PortfolioPerformance
-        pp = PortfolioPerformance()
+        from portfolio_performance import PortfolioPerformanceCalculator
+        pp = PortfolioPerformanceCalculator()
         prices = pp.get_batch_stock_data(tickers)
     except Exception as e:
         logger.error(f"Bulk price fetch failed for queued trades: {e}")
@@ -415,6 +415,7 @@ def process_queued_trades():
             qt.status = 'failed'
             qt.error_message = 'Price unavailable at market open'
             qt.executed_at = datetime.utcnow()
+            db.session.commit()
             failed += 1
             send_email(
                 qt.user_email,
