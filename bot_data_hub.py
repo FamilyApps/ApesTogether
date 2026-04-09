@@ -140,9 +140,13 @@ def _fallback_alphavantage_prices(tickers, max_tickers=100):
         try:
             url = (f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY"
                    f"&symbol={ticker}&outputsize=compact&apikey={ALPHA_VANTAGE_KEY}")
+            t0 = time.time()
             resp = requests.get(url, timeout=15)
+            elapsed_ms = int((time.time() - t0) * 1000)
             data = resp.json()
             ts = data.get('Time Series (Daily)', {})
+            _log_av_api_call('TIME_SERIES_DAILY', ticker,
+                             'success' if ts else 'error', elapsed_ms)
             if not ts:
                 continue
 
@@ -404,6 +408,22 @@ ALPHA_NEWS_TOPICS = [
     'manufacturing', 'real_estate', 'retail_wholesale', 'economy_macro',
 ]
 
+def _log_av_api_call(endpoint, symbol='N/A', status='success', response_time_ms=None):
+    """Best-effort log of an AlphaVantage API call to the tracking table."""
+    try:
+        from models import AlphaVantageAPILog, db as _db
+        log = AlphaVantageAPILog(
+            endpoint=endpoint,
+            symbol=symbol,
+            response_status=status,
+            response_time_ms=response_time_ms,
+        )
+        _db.session.add(log)
+        _db.session.commit()
+    except Exception:
+        pass  # Never break bot trading over a log write
+
+
 def fetch_news_sentiment():
     """
     Fetch news sentiment from AlphaVantage NEWS_SENTIMENT endpoint.
@@ -420,8 +440,14 @@ def fetch_news_sentiment():
             url = (f"https://www.alphavantage.co/query?function=NEWS_SENTIMENT"
                    f"&topics={topic}&limit=50&sort=RELEVANCE"
                    f"&apikey={ALPHA_VANTAGE_KEY}")
+            t0 = time.time()
             resp = requests.get(url, timeout=20)
+            elapsed_ms = int((time.time() - t0) * 1000)
             data = resp.json()
+
+            has_feed = bool(data.get('feed'))
+            _log_av_api_call('NEWS_SENTIMENT', f'topic:{topic}',
+                             'success' if has_feed else 'error', elapsed_ms)
 
             articles = data.get('feed', [])
             for article in articles:
@@ -482,8 +508,12 @@ def fetch_top_movers():
     try:
         url = (f"https://www.alphavantage.co/query?function=TOP_GAINERS_LOSERS"
                f"&apikey={ALPHA_VANTAGE_KEY}")
+        t0 = time.time()
         resp = requests.get(url, timeout=15)
+        elapsed_ms = int((time.time() - t0) * 1000)
         data = resp.json()
+        _log_av_api_call('TOP_GAINERS_LOSERS', 'MARKET',
+                         'success' if data.get('top_gainers') else 'error', elapsed_ms)
 
         def parse_movers(key):
             items = data.get(key, [])

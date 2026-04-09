@@ -5332,12 +5332,17 @@ def bot_generate_payout_records():
             if real_count == 0 and bonus_count == 0:
                 continue
             
+            # Check W-9 status — hold payouts if no valid W-9 on file
+            from services.w9_service import user_has_valid_w9
+            has_w9 = user_has_valid_w9(uid)
+            
             record = XeroPayoutRecord(
                 portfolio_user_id=uid,
                 period_start=period_start,
                 period_end=period_end,
                 real_subscriber_count=real_count,
                 bonus_subscriber_count=bonus_count,
+                payment_status='pending' if has_w9 else 'held',
             )
             record.calculate_totals()
             db.session.add(record)
@@ -5351,17 +5356,21 @@ def bot_generate_payout_records():
                 'influencer_payout': record.influencer_payout,
                 'bonus_payout': record.bonus_payout,
                 'total_payout': record.total_payout,
+                'payment_status': record.payment_status,
+                'has_w9': has_w9,
             })
         
         db.session.commit()
         
         total_obligation = sum(r['total_payout'] for r in records_created)
+        held_records = [r for r in records_created if r['payment_status'] == 'held']
         
         return jsonify({
             'success': True,
             'period': f'{period_start} to {period_end}',
             'records_created': len(records_created),
             'total_payout_obligation': round(total_obligation, 2),
+            'held_for_w9': len(held_records),
             'records': sorted(records_created, key=lambda x: x['total_payout'], reverse=True),
         })
         
@@ -6285,11 +6294,26 @@ def admin_w9_review(w9_id):
     from flask import session as flask_session
     admin_email = flask_session.get('email', 'admin')
     
+    xero_result = None
+    
     if action == 'verify':
         w9.status = 'verified'
         w9.reviewed_at = datetime.utcnow()
         w9.reviewed_by = admin_email
         w9.rejection_reason = None
+        db.session.commit()
+        
+        # Auto-sync verified W-9 to Xero contact (legal name, TIN, address)
+        try:
+            import xero_service
+            xero_result = xero_service.sync_w9_to_xero_contact(w9.user_id)
+            if 'error' in xero_result:
+                logger.warning(f"W-9 verified but Xero sync failed for user {w9.user_id}: {xero_result['error']}")
+            else:
+                logger.info(f"W-9 verified and synced to Xero for user {w9.user_id}")
+        except Exception as e:
+            logger.error(f"Xero sync error after W-9 verification: {e}")
+            xero_result = {'error': str(e)}
     else:
         reason = data.get('rejection_reason', '').strip()
         if not reason:
@@ -6298,15 +6322,42 @@ def admin_w9_review(w9_id):
         w9.reviewed_at = datetime.utcnow()
         w9.reviewed_by = admin_email
         w9.rejection_reason = reason
+        db.session.commit()
+        
+        # Notify creator via email that their W-9 was rejected
+        try:
+            from models import User
+            from services.notification_utils import send_email as _send_email
+            user = User.query.get(w9.user_id)
+            if user and user.email:
+                _send_email(
+                    user.email,
+                    'Action Required: Your W-9 Was Not Accepted',
+                    (
+                        f"Hi {user.username},\n\n"
+                        f"Your W-9 tax form submission was not accepted for the following reason:\n\n"
+                        f"  {reason}\n\n"
+                        f"Please open the Apes Together app, go to Settings > W-9 / Tax Info, "
+                        f"and submit a corrected W-9.\n\n"
+                        f"Payouts are held until a valid W-9 is on file.\n\n"
+                        f"— Apes Together Team"
+                    ),
+                    bcc=False,
+                )
+                logger.info(f"W-9 rejection email sent to {user.email}")
+        except Exception as e:
+            logger.error(f"Failed to send W-9 rejection email: {e}")
     
-    db.session.commit()
-    
-    return jsonify({
+    response = {
         'success': True,
         'w9_id': w9.id,
         'status': w9.status,
         'reviewed_by': admin_email,
-    })
+    }
+    if xero_result:
+        response['xero_sync'] = xero_result
+    
+    return jsonify(response)
 
 
 @mobile_api.route('/admin/w9/<int:w9_id>/decrypt-tin', methods=['POST'])
@@ -6433,4 +6484,129 @@ def admin_1099_data():
         'missing_w9': missing_w9,
         'total_recipients': len(results),
         'total_missing_w9': len(missing_w9),
+    })
+
+
+@mobile_api.route('/admin/w9/release-held-payouts', methods=['POST'])
+@require_admin_2fa
+@with_db_retry
+def admin_release_held_payouts():
+    """Release held payout records for creators who now have a valid W-9.
+    
+    Scans all XeroPayoutRecords with payment_status='held' and releases
+    those whose creator now has an active W-9 on file.
+    """
+    from models import db, User, XeroPayoutRecord
+    from services.w9_service import user_has_valid_w9
+    
+    held_records = XeroPayoutRecord.query.filter_by(payment_status='held').all()
+    
+    released = []
+    still_held = []
+    
+    for record in held_records:
+        if user_has_valid_w9(record.portfolio_user_id):
+            record.payment_status = 'pending'
+            user = User.query.get(record.portfolio_user_id)
+            released.append({
+                'record_id': record.id,
+                'user_id': record.portfolio_user_id,
+                'username': user.username if user else f'user_{record.portfolio_user_id}',
+                'period': f'{record.period_start} to {record.period_end}',
+                'total_payout': record.total_payout,
+            })
+        else:
+            user = User.query.get(record.portfolio_user_id)
+            still_held.append({
+                'record_id': record.id,
+                'user_id': record.portfolio_user_id,
+                'username': user.username if user else f'user_{record.portfolio_user_id}',
+                'total_payout': record.total_payout,
+            })
+    
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'released': len(released),
+        'still_held': len(still_held),
+        'released_records': released,
+        'still_held_records': still_held,
+    })
+
+
+@mobile_api.route('/admin/xero/sync-all-w9s', methods=['POST'])
+@require_admin_2fa
+@with_db_retry
+def admin_xero_sync_all_w9s():
+    """Bulk-sync all verified W-9s to Xero contacts.
+    
+    For each creator with a verified/submitted W-9, creates or updates
+    their Xero contact with legal name, TIN, address, and adds them
+    to the '1099 Contractors' contact group.
+    
+    Use this once to backfill Xero contacts for existing creators,
+    or after reconnecting Xero.
+    """
+    from models import W9Submission, User
+    import xero_service
+    
+    token = xero_service.get_valid_token()
+    if not token:
+        return jsonify({'error': 'No valid Xero token — connect at /admin/xero/connect first'}), 400
+    
+    # Get all active W-9s (latest per user)
+    active_w9s = W9Submission.query.filter(
+        W9Submission.status.in_(['submitted', 'verified'])
+    ).order_by(W9Submission.user_id, W9Submission.created_at.desc()).all()
+    
+    # Deduplicate: keep only the latest per user
+    seen_users = set()
+    unique_w9s = []
+    for w9 in active_w9s:
+        if w9.user_id not in seen_users:
+            seen_users.add(w9.user_id)
+            unique_w9s.append(w9)
+    
+    synced = []
+    failed = []
+    
+    for w9 in unique_w9s:
+        user = User.query.get(w9.user_id)
+        if not user:
+            continue
+        
+        # Skip bots
+        if hasattr(user, 'role') and user.role == 'agent':
+            continue
+        
+        try:
+            contact_id = xero_service.find_or_create_contact(
+                token, user.username, email=user.email, w9=w9,
+            )
+            if contact_id:
+                synced.append({
+                    'user_id': w9.user_id,
+                    'username': user.username,
+                    'contact_id': contact_id,
+                })
+            else:
+                failed.append({
+                    'user_id': w9.user_id,
+                    'username': user.username,
+                    'error': 'contact creation returned None',
+                })
+        except Exception as e:
+            failed.append({
+                'user_id': w9.user_id,
+                'username': user.username,
+                'error': str(e),
+            })
+    
+    return jsonify({
+        'success': True,
+        'synced': len(synced),
+        'failed': len(failed),
+        'synced_contacts': synced,
+        'failed_contacts': failed,
     })

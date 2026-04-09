@@ -1,17 +1,25 @@
 """
-Xero OAuth2 + Accounting API integration for influencer payouts.
+Xero OAuth2 + Accounting API integration for influencer payouts and 1099-NEC reporting.
 
 Handles:
-- OAuth2 authorization code flow (connect/callback/refresh)
-- Creating contacts in Xero for influencers
+- OAuth2 authorization code flow with PKCE (connect/callback/refresh)
+- Creating/updating Xero contacts with W-9 tax info (legal name, TIN, address)
+- Managing '1099 Contractors' contact group for 1099 report filtering
 - Creating bills (Accounts Payable) from XeroPayoutRecord entries
+- Syncing verified W-9 data to Xero contacts on admin approval
 - Token refresh (access tokens expire every 30 min, refresh tokens last 60 days)
 
+End-to-end 1099-NEC flow:
+1. Creator submits W-9 in iOS app → admin verifies → sync_w9_to_xero_contact()
+2. Monthly: generate-payout-records → sync-payouts → bills appear in Xero AP
+3. Admin writes checks, marks bills paid in Xero
+4. Tax season: Xero → Reports → 1099 → e-file via Tax1099/SmartFile/TaxBandits
+
 Xero granular scopes (apps created after March 2, 2026):
-- accounting.transactions.read / .create
-- accounting.contacts.read / .create
-- accounting.settings.read
-- offline_access (for refresh tokens)
+- accounting.invoices → Bills, Invoices, CreditNotes
+- accounting.contacts → Contacts, ContactGroups
+- accounting.settings.read → Accounts, TaxRates (read-only)
+- offline_access → Refresh tokens
 """
 
 import os
@@ -282,15 +290,77 @@ def _xero_post(endpoint, token, json_data):
     return resp
 
 
+# ── Contact Group for 1099 Filtering ─────────────────────────────────────
+
+_1099_group_id_cache = None
+
+def get_or_create_1099_contact_group(token):
+    """Find or create the '1099 Contractors' contact group in Xero.
+    
+    Xero uses contact groups to filter contacts for 1099 reporting.
+    Returns the ContactGroupID string, or None on failure.
+    """
+    global _1099_group_id_cache
+    if _1099_group_id_cache:
+        return _1099_group_id_cache
+    
+    GROUP_NAME = '1099 Contractors'
+    
+    resp = _xero_get('ContactGroups', token)
+    if resp.status_code == 200:
+        for group in resp.json().get('ContactGroups', []):
+            if group.get('Name') == GROUP_NAME and group.get('Status') == 'ACTIVE':
+                _1099_group_id_cache = group['ContactGroupID']
+                return _1099_group_id_cache
+    
+    # Create if missing
+    resp = _xero_post('ContactGroups', token, {
+        'ContactGroups': [{'Name': GROUP_NAME}]
+    })
+    if resp.status_code == 200:
+        groups = resp.json().get('ContactGroups', [])
+        if groups:
+            _1099_group_id_cache = groups[0]['ContactGroupID']
+            logger.info(f"Created Xero contact group '{GROUP_NAME}': {_1099_group_id_cache}")
+            return _1099_group_id_cache
+    
+    logger.error(f"Failed to create 1099 contact group: {resp.status_code} {resp.text}")
+    return None
+
+
+def _add_contact_to_1099_group(token, contact_id):
+    """Add a contact to the '1099 Contractors' group."""
+    group_id = get_or_create_1099_contact_group(token)
+    if not group_id:
+        return False
+    
+    resp = requests.put(
+        f"{XERO_API_BASE}/ContactGroups/{group_id}/Contacts",
+        headers=_xero_headers(token),
+        json={'Contacts': [{'ContactID': contact_id}]},
+        timeout=15,
+    )
+    if resp.status_code == 200:
+        logger.info(f"Added contact {contact_id} to 1099 Contractors group")
+        return True
+    
+    logger.warning(f"Failed to add contact to 1099 group: {resp.status_code} {resp.text}")
+    return False
+
+
 # ── Contact Management ─────────────────────────────────────────────────────
 
-def find_or_create_contact(token, username, email=None):
+def find_or_create_contact(token, username, email=None, w9=None):
     """Find or create a Xero contact for an influencer.
+    
+    When a W9Submission is provided, the contact is populated with full
+    tax info (legal name, TIN, address) needed for Xero's native 1099 report.
     
     Args:
         token: Valid XeroOAuthToken
         username: Influencer's username (used as contact name)
-        email: Influencer's email (optional, for matching)
+        email: Influencer's email (optional)
+        w9: W9Submission instance (optional — populates tax fields)
     
     Returns:
         Xero ContactID string, or None on failure
@@ -303,28 +373,69 @@ def find_or_create_contact(token, username, email=None):
         timeout=15,
     )
     
+    existing_contact_id = None
     if search.status_code == 200:
         contacts = search.json().get('Contacts', [])
         if contacts:
-            return contacts[0]['ContactID']
+            existing_contact_id = contacts[0]['ContactID']
     
-    # Create new contact
-    contact_data = {
-        'Contacts': [{
-            'Name': username,
-            'ContactStatus': 'ACTIVE',
-            'IsSupplier': True,
-        }]
+    # Build contact payload
+    contact = {
+        'Name': username,
+        'ContactStatus': 'ACTIVE',
+        'IsSupplier': True,
     }
     if email:
-        contact_data['Contacts'][0]['EmailAddress'] = email
+        contact['EmailAddress'] = email
     
-    resp = _xero_post('Contacts', token, contact_data)
+    # Populate W-9 tax info if available
+    if w9:
+        contact['FirstName'] = w9.legal_first_name
+        contact['LastName'] = w9.legal_last_name
+        
+        # TaxNumber — Xero uses this for 1099 reporting (SSN or EIN)
+        try:
+            from services.w9_service import decrypt_tin
+            tin_plain = decrypt_tin(w9.tin_encrypted)
+            if w9.tin_type == 'ssn':
+                contact['TaxNumber'] = f"{tin_plain[:3]}-{tin_plain[3:5]}-{tin_plain[5:]}"
+            else:
+                contact['TaxNumber'] = f"{tin_plain[:2]}-{tin_plain[2:]}"
+        except Exception as e:
+            logger.error(f"Could not decrypt TIN for Xero contact ({username}): {e}")
+        
+        # Address
+        contact['Addresses'] = [{
+            'AddressType': 'STREET',
+            'AddressLine1': w9.address_line1,
+            'AddressLine2': w9.address_line2 or '',
+            'City': w9.city,
+            'Region': w9.state,
+            'PostalCode': w9.zip_code,
+            'Country': 'US',
+        }]
+    
+    if existing_contact_id:
+        # Update existing contact with W-9 data
+        contact['ContactID'] = existing_contact_id
+        resp = _xero_post('Contacts', token, {'Contacts': [contact]})
+        if resp.status_code == 200:
+            logger.info(f"Updated Xero contact for {username}: {existing_contact_id}")
+            if w9:
+                _add_contact_to_1099_group(token, existing_contact_id)
+            return existing_contact_id
+        logger.error(f"Failed to update Xero contact for {username}: {resp.status_code} {resp.text}")
+        return existing_contact_id  # Return ID even if update failed
+    
+    # Create new contact
+    resp = _xero_post('Contacts', token, {'Contacts': [contact]})
     
     if resp.status_code == 200:
         new_contact = resp.json().get('Contacts', [{}])[0]
         contact_id = new_contact.get('ContactID')
         logger.info(f"Created Xero contact for {username}: {contact_id}")
+        if w9:
+            _add_contact_to_1099_group(token, contact_id)
         return contact_id
     
     logger.error(f"Failed to create Xero contact for {username}: {resp.status_code} {resp.text}")
@@ -333,7 +444,7 @@ def find_or_create_contact(token, username, email=None):
 
 # ── Bill Creation ──────────────────────────────────────────────────────────
 
-def create_bill_for_payout(token, payout_record, username, email=None):
+def create_bill_for_payout(token, payout_record, username, email=None, w9=None):
     """Create a bill (Accounts Payable) in Xero for an influencer payout.
     
     Args:
@@ -341,16 +452,17 @@ def create_bill_for_payout(token, payout_record, username, email=None):
         payout_record: XeroPayoutRecord instance
         username: Influencer's username
         email: Influencer's email (optional)
+        w9: W9Submission instance (optional — enriches Xero contact with tax info)
     
     Returns:
         dict with 'invoice_id' and 'contact_id' on success, or 'error' on failure
     """
     from models import AdminSubscription
     
-    # Ensure we have a contact
+    # Ensure we have a contact (with W-9 data if available)
     contact_id = payout_record.xero_contact_id
     if not contact_id:
-        contact_id = find_or_create_contact(token, username, email)
+        contact_id = find_or_create_contact(token, username, email, w9=w9)
         if not contact_id:
             return {'error': f'Failed to find/create Xero contact for {username}'}
     
@@ -430,8 +542,12 @@ def sync_payout_records_to_xero(period_start=None, period_end=None):
     if not token:
         return {'error': 'No valid Xero token — connect at /admin/xero/connect first'}
     
-    # Get pending payout records
-    query = XeroPayoutRecord.query.filter_by(xero_sync_status='pending')
+    from models import W9Submission
+    
+    # Get pending payout records (skip held — those need a W-9 first)
+    query = XeroPayoutRecord.query.filter_by(xero_sync_status='pending').filter(
+        XeroPayoutRecord.payment_status != 'held'
+    )
     if period_start:
         query = query.filter_by(period_start=period_start)
     if period_end:
@@ -443,6 +559,7 @@ def sync_payout_records_to_xero(period_start=None, period_end=None):
         'synced': [],
         'failed': [],
         'skipped': 0,
+        'held': 0,
         'total_amount': 0.0,
     }
     
@@ -457,8 +574,13 @@ def sync_payout_records_to_xero(period_start=None, period_end=None):
             results['skipped'] += 1
             continue
         
+        # Get W-9 for contact enrichment (best-effort — bill still created without it)
+        w9 = W9Submission.query.filter_by(user_id=record.portfolio_user_id).filter(
+            W9Submission.status.in_(['submitted', 'verified'])
+        ).order_by(W9Submission.created_at.desc()).first()
+        
         email = getattr(user, 'email', None)
-        bill_result = create_bill_for_payout(token, record, user.username, email)
+        bill_result = create_bill_for_payout(token, record, user.username, email, w9=w9)
         
         if 'error' in bill_result:
             record.xero_sync_status = 'failed'
@@ -513,6 +635,51 @@ def sync_payout_records_to_xero(period_start=None, period_end=None):
     )
     
     return results
+
+
+# ── W-9 → Xero Contact Sync ────────────────────────────────────────────────
+
+def sync_w9_to_xero_contact(user_id):
+    """When a W-9 is verified, sync the creator's tax info to Xero.
+    
+    Creates or updates their Xero contact with legal name, TIN, address,
+    and adds them to the '1099 Contractors' contact group.
+    
+    Args:
+        user_id: User ID of the influencer
+    
+    Returns:
+        dict with 'contact_id' on success, or 'error' on failure
+    """
+    from models import User, W9Submission
+    
+    token = get_valid_token()
+    if not token:
+        return {'error': 'No valid Xero token — connect at /admin/xero/connect first'}
+    
+    user = User.query.get(user_id)
+    if not user:
+        return {'error': f'User {user_id} not found'}
+    
+    w9 = W9Submission.query.filter_by(user_id=user_id).filter(
+        W9Submission.status.in_(['submitted', 'verified'])
+    ).order_by(W9Submission.created_at.desc()).first()
+    
+    if not w9:
+        return {'error': f'No active W-9 for user {user_id}'}
+    
+    contact_id = find_or_create_contact(
+        token,
+        user.username,
+        email=user.email,
+        w9=w9,
+    )
+    
+    if contact_id:
+        logger.info(f"W-9 synced to Xero contact for {user.username} (contact_id={contact_id})")
+        return {'contact_id': contact_id, 'username': user.username}
+    
+    return {'error': f'Failed to create/update Xero contact for {user.username}'}
 
 
 def get_xero_status():
