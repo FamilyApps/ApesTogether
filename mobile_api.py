@@ -1462,7 +1462,7 @@ def get_tax_status():
             return jsonify({
                 'tax_info_on_file': False,
                 'status': 'missing',
-                'message': 'Tax information required. Xero will email you to collect your W-9 / tax details. Payouts are held until this is complete.'
+                'message': 'Tax information not yet received. Check your email from Xero for a W-9 request, or contact support if you haven\'t received one.'
             })
     except Exception as e:
         logger.error(f"Tax status check error: {e}")
@@ -5268,20 +5268,13 @@ def bot_generate_payout_records():
             if real_count == 0 and bonus_count == 0:
                 continue
             
-            # Check tax info status via Xero — hold payouts if no TIN on file
-            try:
-                import xero_service
-                has_w9 = xero_service.contact_has_tax_number(user.username)
-            except Exception:
-                has_w9 = False  # Hold payouts if we can't verify
-            
             record = XeroPayoutRecord(
                 portfolio_user_id=uid,
                 period_start=period_start,
                 period_end=period_end,
                 real_subscriber_count=real_count,
                 bonus_subscriber_count=bonus_count,
-                payment_status='pending' if has_w9 else 'held',
+                payment_status='pending',
             )
             record.calculate_totals()
             db.session.add(record)
@@ -5296,20 +5289,17 @@ def bot_generate_payout_records():
                 'bonus_payout': record.bonus_payout,
                 'total_payout': record.total_payout,
                 'payment_status': record.payment_status,
-                'has_w9': has_w9,
             })
         
         db.session.commit()
         
         total_obligation = sum(r['total_payout'] for r in records_created)
-        held_records = [r for r in records_created if r['payment_status'] == 'held']
         
         return jsonify({
             'success': True,
             'period': f'{period_start} to {period_end}',
             'records_created': len(records_created),
             'total_payout_obligation': round(total_obligation, 2),
-            'held_for_w9': len(held_records),
             'records': sorted(records_created, key=lambda x: x['total_payout'], reverse=True),
         })
         
@@ -6222,59 +6212,8 @@ def _save_auto_create_settings(settings):
 # =============================================================================
 
 
-@mobile_api.route('/admin/w9/release-held-payouts', methods=['POST'])
-@require_admin_2fa
-@with_db_retry
-def admin_release_held_payouts():
-    """Release held payout records for creators whose Xero contact now has a TIN.
-    
-    Xero handles W-9 collection natively. This endpoint checks each held
-    payout record to see if the creator's Xero contact has a TaxNumber set.
-    If so, the payout is released from 'held' to 'pending'.
-    """
-    from models import db, User, XeroPayoutRecord
-    import xero_service
-    
-    held_records = XeroPayoutRecord.query.filter_by(payment_status='held').all()
-    
-    if not held_records:
-        return jsonify({'success': True, 'message': 'No held payouts', 'released': 0, 'still_held': 0})
-    
-    released = []
-    still_held = []
-    
-    for record in held_records:
-        user = User.query.get(record.portfolio_user_id)
-        username = user.username if user else f'user_{record.portfolio_user_id}'
-        
-        try:
-            has_tin = xero_service.contact_has_tax_number(username) if user else False
-        except Exception:
-            has_tin = False
-        
-        if has_tin:
-            record.payment_status = 'pending'
-            released.append({
-                'record_id': record.id,
-                'user_id': record.portfolio_user_id,
-                'username': username,
-                'period': f'{record.period_start} to {record.period_end}',
-                'total_payout': record.total_payout,
-            })
-        else:
-            still_held.append({
-                'record_id': record.id,
-                'user_id': record.portfolio_user_id,
-                'username': username,
-                'total_payout': record.total_payout,
-            })
-    
-    db.session.commit()
-    
-    return jsonify({
-        'success': True,
-        'released': len(released),
-        'still_held': len(still_held),
-        'released_records': released,
-        'still_held_records': still_held,
-    })
+
+# NOTE: Payouts are no longer held for W-9 completion.
+# Xero handles W-9 collection natively via the 1099 Contractors group.
+# All payouts go to 'pending' immediately and are synced to Xero as bills.
+# At year-end, Xero flags missing TINs in the 1099 report.

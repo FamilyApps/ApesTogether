@@ -10,7 +10,7 @@ struct SettingsView: View {
     @State private var showPrivacy = false
     @State private var showFAQ = false
     @State private var urlCopied = false
-    @State private var showW9Form = false
+    @State private var showTaxInfo = false
     
     private var personalURL: String {
         if let slug = authManager.currentUser?.portfolioSlug {
@@ -110,9 +110,9 @@ struct SettingsView: View {
                                 AccentDivider()
                                 SettingsNavRow(
                                     icon: "doc.text.fill",
-                                    label: "W-9 / Tax Info"
+                                    label: "Tax Info"
                                 ) {
-                                    showW9Form = true
+                                    showTaxInfo = true
                                 }
                             }
                             .cardStyle(padding: 0)
@@ -232,8 +232,8 @@ struct SettingsView: View {
             .sheet(isPresented: $showFAQ) {
                 FAQView()
             }
-            .sheet(isPresented: $showW9Form) {
-                W9FormView()
+            .sheet(isPresented: $showTaxInfo) {
+                TaxInfoView()
                     .environmentObject(authManager)
             }
         }

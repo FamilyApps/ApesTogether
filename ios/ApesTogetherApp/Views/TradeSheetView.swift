@@ -1,4 +1,5 @@
 import SwiftUI
+import StoreKit
 
 struct TradeSheetView: View {
     let ticker: String
@@ -310,6 +311,7 @@ struct TradeSheetView: View {
                 
                 if response.success {
                     showSuccess = true
+                    Self.promptReviewIfEligible()
                     try? await Task.sleep(nanoseconds: 800_000_000)
                     dismiss()
                     onComplete()
@@ -320,6 +322,25 @@ struct TradeSheetView: View {
                 errorMessage = error.localizedDescription
             }
             isSubmitting = false
+        }
+    }
+    
+    // MARK: - App Store Review Prompt
+    
+    private static let tradeCountKey = "successfulTradeCount"
+    
+    private static func promptReviewIfEligible() {
+        let count = UserDefaults.standard.integer(forKey: tradeCountKey) + 1
+        UserDefaults.standard.set(count, forKey: tradeCountKey)
+        
+        // Prompt after 3rd successful trade (user is engaged, feeling accomplished)
+        if count == 3 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                if let scene = UIApplication.shared.connectedScenes
+                    .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene {
+                    SKStoreReviewController.requestReview(in: scene)
+                }
+            }
         }
     }
 }

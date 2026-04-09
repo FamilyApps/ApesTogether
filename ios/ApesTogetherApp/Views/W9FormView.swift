@@ -1,32 +1,24 @@
 import SwiftUI
 
-// MARK: - W-9 Status Response Model
+// MARK: - Tax Status Response Model
 
-struct W9StatusResponse: Codable {
-    let hasW9: Bool
+struct TaxStatusResponse: Codable {
+    let taxInfoOnFile: Bool
     let status: String
-    let submittedAt: String?
-    let reviewedAt: String?
-    let rejectionReason: String?
-    let tinDisplay: String?
-    let legalName: String?
-    let message: String?
+    let message: String
+    
+    enum CodingKeys: String, CodingKey {
+        case taxInfoOnFile = "tax_info_on_file"
+        case status
+        case message
+    }
 }
 
-struct W9SubmitResponse: Codable {
-    let success: Bool?
-    let w9Id: Int?
-    let status: String?
-    let message: String?
-    let error: String?
-    let details: [String]?
-}
+// MARK: - Tax Info Status View
 
-// MARK: - W-9 Form View
-
-struct W9FormView: View {
+struct TaxInfoView: View {
     @Environment(\.dismiss) var dismiss
-    @StateObject private var viewModel = W9FormViewModel()
+    @StateObject private var viewModel = TaxInfoViewModel()
     
     var body: some View {
         NavigationView {
@@ -36,504 +28,109 @@ struct W9FormView: View {
                 if viewModel.isLoading {
                     ProgressView()
                         .tint(.primaryAccent)
-                } else if viewModel.hasActiveW9 {
-                    w9StatusView
                 } else {
-                    w9FormContent
+                    ScrollView {
+                        VStack(spacing: 24) {
+                            // Status icon and message
+                            VStack(spacing: 16) {
+                                Image(systemName: viewModel.taxInfoOnFile ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                                    .font(.system(size: 48))
+                                    .foregroundColor(viewModel.taxInfoOnFile ? .green : .orange)
+                                
+                                Text(viewModel.taxInfoOnFile ? "Tax Info Complete" : "Tax Info Required")
+                                    .font(.title2.bold())
+                                    .foregroundColor(.textPrimary)
+                                
+                                Text(viewModel.message)
+                                    .font(.subheadline)
+                                    .foregroundColor(.textSecondary)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal)
+                            }
+                            .padding(.top, 32)
+                            
+                            // Explanation card
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("How It Works")
+                                    .font(.headline)
+                                    .foregroundColor(.textPrimary)
+                                
+                                VStack(alignment: .leading, spacing: 10) {
+                                    infoRow(icon: "1.circle.fill", text: "When you earn your first payout, we'll add you to our payment system (Xero)")
+                                    infoRow(icon: "2.circle.fill", text: "Xero will email you to collect your W-9 tax information (legal name, TIN, address)")
+                                    infoRow(icon: "3.circle.fill", text: "Once complete, payouts are processed on the 15th of each month")
+                                }
+                            }
+                            .padding()
+                            .background(Color.cardBackground)
+                            .cornerRadius(12)
+                            .padding(.horizontal)
+                            
+                            // Info note
+                            VStack(spacing: 8) {
+                                Text("Your tax information is collected and stored securely by Xero, our accounting partner. Apes Together never stores your SSN/EIN.")
+                                    .font(.caption)
+                                    .foregroundColor(.textSecondary)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal)
+                            }
+                            .padding(.bottom, 32)
+                        }
+                    }
                 }
             }
-            .navigationTitle("W-9 Tax Form")
+            .navigationTitle("Tax Info")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") { dismiss() }
+                    Button("Done") { dismiss() }
                         .foregroundColor(.primaryAccent)
                 }
-            }
-            .alert("Error", isPresented: $viewModel.showError) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(viewModel.errorMessage)
-            }
-            .alert("W-9 Submitted", isPresented: $viewModel.showSuccess) {
-                Button("Done") { dismiss() }
-            } message: {
-                Text("Your W-9 has been submitted successfully and is under review.")
             }
         }
         .task { await viewModel.loadStatus() }
     }
     
-    // MARK: - Status View (existing W-9)
-    
-    private var w9StatusView: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                VStack(spacing: 16) {
-                    Image(systemName: statusIcon)
-                        .font(.system(size: 48))
-                        .foregroundColor(statusColor)
-                    
-                    Text(statusTitle)
-                        .font(.title2.bold())
-                        .foregroundColor(.textPrimary)
-                    
-                    Text(viewModel.statusMessage)
-                        .font(.subheadline)
-                        .foregroundColor(.textSecondary)
-                        .multilineTextAlignment(.center)
-                }
-                .padding(.top, 32)
-                
-                VStack(spacing: 0) {
-                    SettingsRow(label: "Name", value: viewModel.statusLegalName)
-                    AccentDivider()
-                    SettingsRow(label: "TIN", value: viewModel.statusTinDisplay)
-                    AccentDivider()
-                    SettingsRow(label: "Status", value: viewModel.statusText.capitalized)
-                    if let date = viewModel.statusSubmittedAt {
-                        AccentDivider()
-                        SettingsRow(label: "Submitted", value: date)
-                    }
-                }
-                .cardStyle(padding: 0)
-                
-                if viewModel.statusText == "rejected" {
-                    Button {
-                        viewModel.hasActiveW9 = false
-                    } label: {
-                        Text("Resubmit W-9")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.primaryAccent)
-                            .cornerRadius(12)
-                    }
-                    .padding(.horizontal)
-                }
-            }
-            .padding()
-        }
-    }
-    
-    private var statusIcon: String {
-        switch viewModel.statusText {
-        case "verified": return "checkmark.seal.fill"
-        case "rejected": return "xmark.octagon.fill"
-        default: return "clock.fill"
-        }
-    }
-    
-    private var statusColor: Color {
-        switch viewModel.statusText {
-        case "verified": return .green
-        case "rejected": return .red
-        default: return .orange
-        }
-    }
-    
-    private var statusTitle: String {
-        switch viewModel.statusText {
-        case "verified": return "W-9 Verified"
-        case "rejected": return "W-9 Rejected"
-        case "submitted": return "Under Review"
-        default: return "W-9 Status"
-        }
-    }
-    
-    // MARK: - Form Content
-    
-    private var w9FormContent: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                // Header
-                VStack(spacing: 8) {
-                    Text("IRS Form W-9")
-                        .font(.title2.bold())
-                        .foregroundColor(.textPrimary)
-                    Text("Request for Taxpayer Identification Number and Certification")
-                        .font(.caption)
-                        .foregroundColor(.textSecondary)
-                        .multilineTextAlignment(.center)
-                }
-                .padding(.top, 8)
-                
-                // Legal Name Section
-                VStack(alignment: .leading, spacing: 12) {
-                    SectionHeader(title: "Legal Name")
-                    VStack(spacing: 12) {
-                        FormField(title: "First Name", text: $viewModel.firstName, placeholder: "As shown on tax return")
-                        FormField(title: "Last Name", text: $viewModel.lastName, placeholder: "As shown on tax return")
-                        FormField(title: "Business Name", text: $viewModel.businessName, placeholder: "Optional — DBA or entity name")
-                    }
-                    .cardStyle(padding: 0)
-                }
-                
-                // Tax Classification
-                VStack(alignment: .leading, spacing: 12) {
-                    SectionHeader(title: "Federal Tax Classification")
-                    VStack(spacing: 0) {
-                        ForEach(TaxClassification.allCases) { classification in
-                            Button {
-                                viewModel.taxClassification = classification
-                            } label: {
-                                HStack {
-                                    Image(systemName: viewModel.taxClassification == classification ? "checkmark.circle.fill" : "circle")
-                                        .foregroundColor(viewModel.taxClassification == classification ? .primaryAccent : .textSecondary)
-                                    Text(classification.displayName)
-                                        .foregroundColor(.textPrimary)
-                                        .font(.subheadline)
-                                    Spacer()
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 10)
-                            }
-                            if classification != TaxClassification.allCases.last {
-                                AccentDivider()
-                            }
-                        }
-                    }
-                    .cardStyle(padding: 0)
-                }
-                
-                // Address
-                VStack(alignment: .leading, spacing: 12) {
-                    SectionHeader(title: "Address")
-                    VStack(spacing: 12) {
-                        FormField(title: "Street Address", text: $viewModel.address1, placeholder: "123 Main St")
-                        FormField(title: "Apt/Suite", text: $viewModel.address2, placeholder: "Optional")
-                        FormField(title: "City", text: $viewModel.city, placeholder: "City")
-                        HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("State")
-                                    .font(.caption)
-                                    .foregroundColor(.textSecondary)
-                                    .padding(.horizontal, 16)
-                                Picker("State", selection: $viewModel.state) {
-                                    Text("Select").tag("")
-                                    ForEach(USState.allCases) { state in
-                                        Text(state.rawValue).tag(state.rawValue)
-                                    }
-                                }
-                                .pickerStyle(.menu)
-                                .tint(.primaryAccent)
-                                .padding(.horizontal, 12)
-                                .padding(.bottom, 8)
-                            }
-                            .frame(maxWidth: .infinity)
-                            FormField(title: "ZIP Code", text: $viewModel.zipCode, placeholder: "12345")
-                                .keyboardType(.numberPad)
-                        }
-                    }
-                    .cardStyle(padding: 0)
-                }
-                
-                // TIN
-                VStack(alignment: .leading, spacing: 12) {
-                    SectionHeader(title: "Taxpayer ID Number")
-                    VStack(spacing: 12) {
-                        Picker("TIN Type", selection: $viewModel.tinType) {
-                            Text("SSN").tag("ssn")
-                            Text("EIN").tag("ein")
-                        }
-                        .pickerStyle(.segmented)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 12)
-                        
-                        FormField(
-                            title: viewModel.tinType == "ssn" ? "Social Security Number" : "Employer Identification Number",
-                            text: $viewModel.tin,
-                            placeholder: viewModel.tinType == "ssn" ? "XXX-XX-XXXX" : "XX-XXXXXXX",
-                            isSecure: true
-                        )
-                        .keyboardType(.numberPad)
-                    }
-                    .cardStyle(padding: 0)
-                    
-                    Text("Your TIN is encrypted at rest and never stored in plain text.")
-                        .font(.caption2)
-                        .foregroundColor(.textSecondary)
-                        .padding(.horizontal, 4)
-                }
-                
-                // E-Signature
-                VStack(alignment: .leading, spacing: 12) {
-                    SectionHeader(title: "Electronic Signature")
-                    VStack(spacing: 12) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Part II — Certification")
-                                .font(.subheadline.bold())
-                                .foregroundColor(.textPrimary)
-                            
-                            Text("Under penalties of perjury, I certify that:")
-                                .font(.caption)
-                                .foregroundColor(.textSecondary)
-                            
-                            VStack(alignment: .leading, spacing: 6) {
-                                certificationItem("1.", "The number shown on this form is my correct taxpayer identification number (or I am waiting for a number to be issued to me); and")
-                                certificationItem("2.", "I am not subject to backup withholding because: (a) I am exempt from backup withholding, or (b) I have not been notified by the IRS that I am subject to backup withholding as a result of a failure to report all interest or dividends, or (c) the IRS has notified me that I am no longer subject to backup withholding; and")
-                                certificationItem("3.", "I am a U.S. citizen or other U.S. person (defined in the IRS instructions for Form W-9); and")
-                                certificationItem("4.", "The FATCA code(s) entered on this form (if any) indicating that I am exempt from FATCA reporting is correct.")
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 12)
-                        
-                        Text("The IRS does not require your consent to any provision of this document other than the certifications required to avoid backup withholding.")
-                            .font(.caption2)
-                            .italic()
-                            .foregroundColor(.textSecondary)
-                            .padding(.horizontal, 16)
-                        
-                        FormField(title: "Type Your Full Legal Name to Sign", text: $viewModel.signatureName, placeholder: "John A. Doe")
-                        
-                        Toggle(isOn: $viewModel.certify) {
-                            Text("I certify under penalties of perjury that all of the above statements are true and correct")
-                                .font(.caption)
-                                .foregroundColor(.textPrimary)
-                        }
-                        .toggleStyle(SwitchToggleStyle(tint: Color.primaryAccent))
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 12)
-                    }
-                    .cardStyle(padding: 0)
-                }
-                
-                // Submit Button
-                Button {
-                    Task { await viewModel.submit() }
-                } label: {
-                    if viewModel.isSubmitting {
-                        ProgressView()
-                            .tint(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                    } else {
-                        Text("Submit W-9")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                    }
-                }
-                .background(viewModel.isFormValid ? Color.primaryAccent : Color.gray.opacity(0.3))
-                .cornerRadius(12)
-                .disabled(!viewModel.isFormValid || viewModel.isSubmitting)
-                .padding(.bottom, 32)
-            }
-            .padding()
-        }
-    }
-    
-    private func certificationItem(_ number: String, _ text: String) -> some View {
-        HStack(alignment: .top, spacing: 6) {
-            Text(number)
-                .font(.caption2.bold())
-                .foregroundColor(.textSecondary)
-                .frame(width: 16, alignment: .trailing)
+    private func infoRow(icon: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .foregroundColor(.primaryAccent)
+                .font(.subheadline)
+                .frame(width: 24)
             Text(text)
-                .font(.caption2)
+                .font(.subheadline)
                 .foregroundColor(.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
 
-// MARK: - Form Field
-
-private struct FormField: View {
-    let title: String
-    @Binding var text: String
-    var placeholder: String = ""
-    var isSecure: Bool = false
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption)
-                .foregroundColor(.textSecondary)
-            if isSecure {
-                SecureField(placeholder, text: $text)
-                    .font(.body)
-                    .foregroundColor(.textPrimary)
-            } else {
-                TextField(placeholder, text: $text)
-                    .font(.body)
-                    .foregroundColor(.textPrimary)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-    }
-}
-
 // MARK: - View Model
 
 @MainActor
-class W9FormViewModel: ObservableObject {
-    // Status
+class TaxInfoViewModel: ObservableObject {
     @Published var isLoading = true
-    @Published var hasActiveW9 = false
-    @Published var statusText = ""
-    @Published var statusMessage = ""
-    @Published var statusLegalName = ""
-    @Published var statusTinDisplay = ""
-    @Published var statusSubmittedAt: String? = nil
-    
-    // Form fields
-    @Published var firstName = ""
-    @Published var lastName = ""
-    @Published var businessName = ""
-    @Published var taxClassification: TaxClassification = .individual
-    @Published var address1 = ""
-    @Published var address2 = ""
-    @Published var city = ""
-    @Published var state = ""
-    @Published var zipCode = ""
-    @Published var tinType = "ssn"
-    @Published var tin = ""
-    @Published var signatureName = ""
-    @Published var certify = false
-    
-    // UI state
-    @Published var isSubmitting = false
-    @Published var showError = false
-    @Published var showSuccess = false
-    @Published var errorMessage = ""
-    
-    var isFormValid: Bool {
-        !firstName.trimmingCharacters(in: .whitespaces).isEmpty &&
-        !lastName.trimmingCharacters(in: .whitespaces).isEmpty &&
-        !address1.trimmingCharacters(in: .whitespaces).isEmpty &&
-        !city.trimmingCharacters(in: .whitespaces).isEmpty &&
-        !state.isEmpty &&
-        zipCode.count >= 5 &&
-        tin.filter(\.isNumber).count == 9 &&
-        !signatureName.trimmingCharacters(in: .whitespaces).isEmpty &&
-        certify
-    }
+    @Published var taxInfoOnFile = false
+    @Published var message = ""
     
     func loadStatus() async {
         isLoading = true
         defer { isLoading = false }
         
         do {
-            let status: W9StatusResponse = try await APIService.shared.getW9Status()
-            if status.hasW9 {
-                hasActiveW9 = true
-                statusText = status.status
-                statusMessage = status.message ?? ""
-                statusLegalName = status.legalName ?? ""
-                statusTinDisplay = status.tinDisplay ?? ""
-                statusSubmittedAt = formatDate(status.submittedAt)
-            }
+            let status: TaxStatusResponse = try await APIService.shared.getTaxStatus()
+            taxInfoOnFile = status.taxInfoOnFile
+            message = status.message
         } catch {
-            // No W-9 on file — show form
-            hasActiveW9 = false
+            taxInfoOnFile = false
+            message = "Unable to check tax info status. Please try again later."
         }
     }
-    
-    func submit() async {
-        guard isFormValid else { return }
-        isSubmitting = true
-        defer { isSubmitting = false }
-        
-        do {
-            let response: W9SubmitResponse = try await APIService.shared.submitW9(
-                firstName: firstName.trimmingCharacters(in: .whitespaces),
-                lastName: lastName.trimmingCharacters(in: .whitespaces),
-                businessName: businessName.trimmingCharacters(in: .whitespaces),
-                taxClassification: taxClassification.rawValue,
-                address1: address1.trimmingCharacters(in: .whitespaces),
-                address2: address2.trimmingCharacters(in: .whitespaces),
-                city: city.trimmingCharacters(in: .whitespaces),
-                state: state,
-                zipCode: zipCode.trimmingCharacters(in: .whitespaces),
-                tinType: tinType,
-                tin: tin.filter(\.isNumber),
-                signatureName: signatureName.trimmingCharacters(in: .whitespaces)
-            )
-            
-            if response.success == true {
-                showSuccess = true
-            } else {
-                let details = response.details?.joined(separator: "\n") ?? response.error ?? "Submission failed"
-                errorMessage = details
-                showError = true
-            }
-        } catch {
-            errorMessage = error.localizedDescription
-            showError = true
-        }
-    }
-    
-    private func formatDate(_ iso: String?) -> String? {
-        guard let iso = iso else { return nil }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: iso) {
-            let display = DateFormatter()
-            display.dateStyle = .medium
-            display.timeStyle = .none
-            return display.string(from: date)
-        }
-        // Try without fractional seconds
-        formatter.formatOptions = [.withInternetDateTime]
-        if let date = formatter.date(from: iso) {
-            let display = DateFormatter()
-            display.dateStyle = .medium
-            display.timeStyle = .none
-            return display.string(from: date)
-        }
-        return String(iso.prefix(10))
-    }
-}
-
-// MARK: - Tax Classification Enum
-
-enum TaxClassification: String, CaseIterable, Identifiable {
-    case individual
-    case soleProprietor = "sole_proprietor"
-    case llcSingle = "llc_single"
-    case llcPartnership = "llc_partnership"
-    case cCorp = "c_corp"
-    case sCorp = "s_corp"
-    case partnership
-    case trustEstate = "trust_estate"
-    
-    var id: String { rawValue }
-    
-    var displayName: String {
-        switch self {
-        case .individual: return "Individual"
-        case .soleProprietor: return "Sole Proprietor"
-        case .llcSingle: return "LLC (Single Member)"
-        case .llcPartnership: return "LLC (Partnership)"
-        case .cCorp: return "C Corporation"
-        case .sCorp: return "S Corporation"
-        case .partnership: return "Partnership"
-        case .trustEstate: return "Trust / Estate"
-        }
-    }
-}
-
-// MARK: - US States Enum
-
-enum USState: String, CaseIterable, Identifiable {
-    case AL, AK, AZ, AR, CA, CO, CT, DE, FL, GA
-    case HI, ID, IL, IN, IA, KS, KY, LA, ME, MD
-    case MA, MI, MN, MS, MO, MT, NE, NV, NH, NJ
-    case NM, NY, NC, ND, OH, OK, OR, PA, RI, SC
-    case SD, TN, TX, UT, VT, VA, WA, WV, WI, WY
-    case DC
-    
-    var id: String { rawValue }
 }
 
 // MARK: - Preview
 
 #Preview {
-    W9FormView()
+    TaxInfoView()
         .environmentObject(AuthenticationManager())
 }
