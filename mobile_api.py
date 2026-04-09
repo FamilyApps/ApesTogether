@@ -3591,14 +3591,18 @@ def _execute_bot_trade_wave(wave, dry_run=False):
             from bot_behaviors import should_trade_today, get_trade_wave, apply_human_biases, apply_fomo_trades
             from bot_data_hub import MarketDataHub
         except ImportError as e:
-            return jsonify({'error': f'Bot modules not available: {e}'}), 500
+            return {'error': f'Bot modules not available: {e}'}
         
         # Refresh market data once for all bots
         hub = MarketDataHub()
         hub.refresh(include_extras=True)
         
         if not hub.is_core_available():
-            return jsonify({'error': 'Market data unavailable'}), 503
+            return {'error': 'Market data unavailable'}
+        
+        results['data_quality'] = hub.data_quality
+        results['data_summary'] = hub.summary()
+        logger.info(f"Data quality for wave {wave}: {hub.data_quality}")
         
         for bot in bots:
             try:
@@ -3675,7 +3679,7 @@ def _execute_bot_trade_wave(wave, dry_run=False):
                                 stock = Stock(user_id=bot.id, ticker=ticker, quantity=quantity, purchase_price=price)
                                 db.session.add(stock)
                             
-                            pt_func(db, bot.id, ticker, quantity, price, 'buy', timestamp=datetime.utcnow())
+                            pt_func(db, bot.id, ticker, quantity, price, 'buy', timestamp=datetime.utcnow(), price_source='bot_research')
                             
                         elif action == 'sell':
                             stock = Stock.query.filter_by(user_id=bot.id, ticker=ticker).first()
@@ -3683,7 +3687,7 @@ def _execute_bot_trade_wave(wave, dry_run=False):
                                 pos_before = stock.quantity
                                 stock.quantity -= quantity
                                 pt_func(db, bot.id, ticker, quantity, price, 'sell',
-                                       timestamp=datetime.utcnow(), position_before_qty=pos_before)
+                                       timestamp=datetime.utcnow(), position_before_qty=pos_before, price_source='bot_research')
                             else:
                                 decision_info['status'] = 'skipped_insufficient_shares'
                                 results['decisions'].append(decision_info)
@@ -4054,7 +4058,8 @@ def bot_email_trade():
                 # Process transaction through cash tracking
                 tx_result = process_transaction(
                     db, bot.id, ticker, quantity, price, action,
-                    timestamp=datetime.utcnow()
+                    timestamp=datetime.utcnow(),
+                    price_source=source or 'copytrade'
                 )
                 if action == 'buy':
                     if stock:
@@ -5658,7 +5663,12 @@ def bot_cron_health():
         last_market_day = get_last_market_day()
         
         # Market Close — should have a snapshot for the last market day
-        snap_date = last_snap.date.isoformat() if last_snap else None
+        # Return a full datetime (not just date) so JS doesn't misinterpret timezone.
+        # The market-close cron runs at 20:05 UTC (4:05 PM ET).
+        if last_snap:
+            snap_date = datetime.combine(last_snap.date, datetime.min.time().replace(hour=20, minute=5)).isoformat()
+        else:
+            snap_date = None
         if last_snap:
             days_since = (last_market_day - last_snap.date).days
             if days_since <= 0:
@@ -5730,7 +5740,74 @@ def bot_cron_health():
             'status': pending_status,
         })
         
-        return jsonify({'jobs': jobs, 'server_time': now.isoformat()})
+        # ── Market Research Data Quality ──
+        data_sources = []
+        try:
+            from models import AlphaVantageAPILog
+            import os
+            from sqlalchemy import func as sqlfunc
+            
+            # Check last 24 hours of API calls
+            cutoff = now - timedelta(hours=24)
+            
+            # AlphaVantage news sentiment
+            news_calls = AlphaVantageAPILog.query.filter(
+                AlphaVantageAPILog.endpoint == 'NEWS_SENTIMENT',
+                AlphaVantageAPILog.timestamp >= cutoff
+            ).all()
+            news_ok = sum(1 for c in news_calls if c.response_status == 'success')
+            data_sources.append({
+                'name': 'AlphaVantage News', 'type': 'news_sentiment',
+                'calls_24h': len(news_calls), 'successes': news_ok,
+                'status': 'active' if news_ok > 0 else ('error' if len(news_calls) > 0 else 'no_calls'),
+                'avg_latency_ms': round(sum(c.response_time_ms or 0 for c in news_calls) / max(len(news_calls), 1)),
+            })
+            
+            # AlphaVantage top movers
+            mover_calls = AlphaVantageAPILog.query.filter(
+                AlphaVantageAPILog.endpoint == 'TOP_GAINERS_LOSERS',
+                AlphaVantageAPILog.timestamp >= cutoff
+            ).all()
+            mover_ok = sum(1 for c in mover_calls if c.response_status == 'success')
+            data_sources.append({
+                'name': 'AlphaVantage Movers', 'type': 'top_movers',
+                'calls_24h': len(mover_calls), 'successes': mover_ok,
+                'status': 'active' if mover_ok > 0 else ('error' if len(mover_calls) > 0 else 'no_calls'),
+            })
+            
+            # AlphaVantage price fallback
+            price_calls = AlphaVantageAPILog.query.filter(
+                AlphaVantageAPILog.endpoint == 'TIME_SERIES_DAILY',
+                AlphaVantageAPILog.timestamp >= cutoff
+            ).all()
+            price_ok = sum(1 for c in price_calls if c.response_status == 'success')
+            data_sources.append({
+                'name': 'AlphaVantage Prices (fallback)', 'type': 'price_fallback',
+                'calls_24h': len(price_calls), 'successes': price_ok,
+                'status': 'active' if price_ok > 0 else 'idle',
+            })
+            
+            # yfinance (primary price source) — no direct logging, but infer from whether
+            # bots have indicator data (they do if prices loaded)
+            data_sources.append({
+                'name': 'yfinance (primary prices)', 'type': 'yfinance',
+                'calls_24h': None,  # No per-call logging for yfinance
+                'status': 'active' if bot_status in ('ok', 'warning') else 'unknown',
+                'note': 'Primary price + OHLCV source; no per-call tracking',
+            })
+            
+            # Finnhub
+            finnhub_key = os.environ.get('FINNHUB_API_KEY', '')
+            data_sources.append({
+                'name': 'Finnhub (social + analyst)', 'type': 'finnhub',
+                'calls_24h': None,
+                'status': 'configured' if finnhub_key else 'missing_key',
+                'note': 'Free tier: insider data only. Premium: social sentiment + analyst upgrades.' if finnhub_key else 'FINNHUB_API_KEY not set in env vars',
+            })
+        except Exception as dq_err:
+            logger.warning(f"Data quality check error: {dq_err}")
+        
+        return jsonify({'jobs': jobs, 'data_sources': data_sources, 'server_time': now.isoformat()})
     except Exception as e:
         logger.error(f"Cron health error: {e}")
         return jsonify({'error': 'cron_health_failed'}), 500

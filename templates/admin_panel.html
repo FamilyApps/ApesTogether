@@ -1593,10 +1593,35 @@ const SystemHealth = ({ api }) => {
           { key: 'ticker', label: 'Ticker', render: v => <span style={{ fontWeight: 600 }}>{v}</span> },
           { key: 'quantity', label: 'Qty' },
           { key: 'value', label: 'Value', render: v => `$${(v || 0).toFixed(2)}` },
-          { key: 'price_source', label: 'Source', render: v => <Badge text={v || '—'} color={v === 'bulk_api' ? 'var(--green)' : v === 'cached' ? 'var(--blue)' : v === 'single_api' ? 'var(--yellow)' : v === 'manual' ? 'var(--accent)' : v === 'email' ? 'var(--purple, #a855f7)' : 'var(--text-muted)'} /> },
+          { key: 'price_source', label: 'Source', render: v => <Badge text={v || '—'} color={v === 'bulk_api' ? 'var(--green)' : v === 'cached' ? 'var(--blue)' : v === 'single_api' ? 'var(--yellow)' : v === 'manual' ? 'var(--accent)' : v === 'email' ? 'var(--purple, #a855f7)' : v === 'bot_research' ? 'var(--blue)' : v === 'queued_email' ? 'var(--purple, #a855f7)' : (v && v.includes('copytrade')) ? 'var(--accent)' : 'var(--text-muted)'} /> },
         ]} data={trades?.trades || []} />
         {trades && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10 }}>Showing {trades.trades?.length || 0} of {trades.total || 0} total trades</div>}
       </Card>
+
+      {/* Market Research Data Sources */}
+      {(cron?.data_sources || []).length > 0 && (
+        <Card>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>Market Research Data Sources</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {cron.data_sources.map((src, i) => {
+              const statusColor = src.status === 'active' ? 'var(--green)' : src.status === 'configured' ? 'var(--blue)' : src.status === 'idle' ? 'var(--text-muted)' : src.status === 'error' ? 'var(--red)' : src.status === 'missing_key' ? 'var(--red)' : 'var(--yellow)';
+              return (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: 'var(--bg-elevated)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: statusColor, boxShadow: `0 0 8px ${statusColor}44` }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{src.name}</div>
+                    {src.note && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{src.note}</div>}
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <Badge text={src.status} color={statusColor} />
+                    {src.calls_24h != null && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{src.successes}/{src.calls_24h} calls OK (24h){src.avg_latency_ms ? ` · ${src.avg_latency_ms}ms avg` : ''}</div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
     </div>
   );
 };
