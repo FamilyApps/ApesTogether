@@ -660,10 +660,10 @@ class InAppPurchase(db.Model):
     price = db.Column(db.Float, default=9.00)  # Flat $9
     currency = db.Column(db.String(3), default='USD')
     
-    # Payout tracking
-    influencer_payout = db.Column(db.Float, default=5.40)  # 60% of $9
-    platform_revenue = db.Column(db.Float, default=0.90)  # 10% of $9
-    store_fee = db.Column(db.Float, default=2.70)  # 30% Apple/Google
+    # Payout tracking — Small Business Program (15% store fee)
+    influencer_payout = db.Column(db.Float, default=6.50)  # 85% of post-store ($7.65)
+    platform_revenue = db.Column(db.Float, default=1.15)   # 15% of post-store ($7.65)
+    store_fee = db.Column(db.Float, default=1.35)           # 15% of $9.00
     
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

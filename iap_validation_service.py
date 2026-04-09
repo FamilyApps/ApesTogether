@@ -47,11 +47,12 @@ class IAPValidationService:
     # Our product ID
     PRODUCT_ID = 'com.apestogether.subscription.monthly'
     
-    # Pricing
+    # Pricing — Small Business Program (< $1M annual revenue)
+    # 15% to Apple/Google, then 15% platform / 85% influencer on remainder
     SUBSCRIPTION_PRICE = 9.00
-    INFLUENCER_PAYOUT = 5.40  # 60%
-    PLATFORM_REVENUE = 0.90   # 10%
-    STORE_FEE = 2.70          # 30%
+    STORE_FEE = 1.35           # 15% of $9.00
+    PLATFORM_REVENUE = 1.15    # 15% of $7.65 (post-store)
+    INFLUENCER_PAYOUT = 6.50   # 85% of $7.65 (post-store)
     
     def __init__(self):
         # Apple credentials
