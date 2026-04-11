@@ -35,6 +35,8 @@
 		AA000002AAAA000200000001 /* PortfolioShareCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000002AAAA000200000002 /* PortfolioShareCardView.swift */; };
 		AA000003AAAA000300000001 /* PerformanceChartView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000003AAAA000300000002 /* PerformanceChartView.swift */; };
 		AA000004AAAA000400000001 /* TradeSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000004AAAA000400000002 /* TradeSheetView.swift */; };
+		AA000005AAAA000500000001 /* W9FormView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000005AAAA000500000002 /* W9FormView.swift */; };
+		AA000006AAAA000600000001 /* FeaturePollView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000006AAAA000600000002 /* FeaturePollView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -68,6 +70,8 @@
 		AA000002AAAA000200000002 /* PortfolioShareCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioShareCardView.swift; sourceTree = "<group>"; };
 		AA000003AAAA000300000002 /* PerformanceChartView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceChartView.swift; sourceTree = "<group>"; };
 		AA000004AAAA000400000002 /* TradeSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradeSheetView.swift; sourceTree = "<group>"; };
+		AA000005AAAA000500000002 /* W9FormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = W9FormView.swift; sourceTree = "<group>"; };
+		AA000006AAAA000600000002 /* FeaturePollView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeaturePollView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -135,6 +139,8 @@
 				AA000002AAAA000200000002 /* PortfolioShareCardView.swift */,
 				AA000003AAAA000300000002 /* PerformanceChartView.swift */,
 				AA000004AAAA000400000002 /* TradeSheetView.swift */,
+				AA000005AAAA000500000002 /* W9FormView.swift */,
+				AA000006AAAA000600000002 /* FeaturePollView.swift */,
 			);
 			name = Views;
 			path = ../ApesTogetherApp/Views;
@@ -272,6 +278,8 @@
 				AA000002AAAA000200000001 /* PortfolioShareCardView.swift in Sources */,
 				AA000003AAAA000300000001 /* PerformanceChartView.swift in Sources */,
 				AA000004AAAA000400000001 /* TradeSheetView.swift in Sources */,
+				AA000005AAAA000500000001 /* W9FormView.swift in Sources */,
+				AA000006AAAA000600000001 /* FeaturePollView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
