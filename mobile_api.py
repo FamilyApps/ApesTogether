@@ -489,7 +489,7 @@ def get_subscriptions():
         gifted_subs_count = 0
         try:
             from models import AdminSubscription
-            admin_sub = AdminSubscription.query.filter_by(portfolio_user_id=user_id).first()
+            admin_sub = AdminSubscription.query.filter_by(portfolio_user_id=g.user_id).first()
             if admin_sub:
                 gifted_subs_count = admin_sub.bonus_subscriber_count or 0
         except Exception:
@@ -1090,11 +1090,28 @@ def get_leaderboard():
             except Exception:
                 pass
         
+        # API-time eligibility filter: ensure users have enough history for this period.
+        # This catches stale cache entries that were computed before eligibility checks existed.
+        eligibility_map_api = {}
+        try:
+            from performance_calculator import batch_get_leaderboard_eligibility
+            eligibility_map_api = batch_get_leaderboard_eligibility(cache_period)
+        except Exception as e:
+            logger.warning(f"API-time eligibility check failed: {e}")
+        
         for entry in (raw_data or []):
             user_id = entry.get('user_id')
             user = users_map.get(user_id)
             if not user:
                 continue
+            
+            # Skip users ineligible for this period (e.g., 3M requires 90 days of data)
+            if eligibility_map_api:
+                elig = eligibility_map_api.get(user_id)
+                if elig and not elig['eligible']:
+                    continue
+                elif not elig:
+                    continue  # No snapshot data at all
             
             # Prefer cached values from calculate_leaderboard_data; fallback to live
             avg_trades_per_week = entry.get('avg_trades_per_week')

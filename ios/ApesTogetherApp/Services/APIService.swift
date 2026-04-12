@@ -102,6 +102,16 @@ class APIService {
         let _: EmptyResponse = try await put("/notifications/settings", body: body)
     }
     
+    func unsubscribe(subscriptionId: Int) async throws -> UnsubscribeResponse {
+        return try await delete("/unsubscribe/\(subscriptionId)")
+    }
+    
+    // MARK: - Notification History
+    
+    func getNotificationHistory(limit: Int = 50, offset: Int = 0) async throws -> NotificationHistoryResponse {
+        return try await get("/notifications/history?limit=\(limit)&offset=\(offset)")
+    }
+    
     // MARK: - Account Management
     
     func deleteAccount() async throws {

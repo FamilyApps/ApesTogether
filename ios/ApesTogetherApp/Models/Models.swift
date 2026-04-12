@@ -273,3 +273,29 @@ struct PollVoteResponse: Codable {
     let selectedOption: String?
     let error: String?
 }
+
+// MARK: - Notification History
+
+struct NotificationHistoryResponse: Codable {
+    let notifications: [NotificationItem]
+    let total: Int
+    let limit: Int
+    let offset: Int
+}
+
+struct NotificationItem: Codable, Identifiable {
+    let id: String
+    let type: String
+    let traderUsername: String
+    let status: String?
+    let createdAt: String?
+    let title: String?
+    let body: String?
+}
+
+// MARK: - Unsubscribe
+
+struct UnsubscribeResponse: Codable {
+    let success: Bool?
+    let message: String?
+}

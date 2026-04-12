@@ -666,7 +666,10 @@ def _generate_chart_points(
                     ts_et = ts.replace(tzinfo=UTC_TZ).astimezone(ET)
                 else:
                     ts_et = ts.astimezone(ET)
-                date_str = ts_et.strftime('%I:%M %p')  # "09:30 AM" (compact for mobile)
+                if period == '1D':
+                    date_str = ts_et.strftime('%I:%M %p')  # "09:30 AM" — single day, time only
+                else:
+                    date_str = ts_et.strftime('%a %I:%M')   # "Mon 09:30" — multi-day, include day name
             else:
                 date_str = snapshot.date.strftime('%b %d')
             
