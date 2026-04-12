@@ -6263,3 +6263,61 @@ def _save_auto_create_settings(settings):
 # Xero handles W-9 collection natively via the 1099 Contractors group.
 # All payouts go to 'pending' immediately and are synced to Xero as bills.
 # At year-end, Xero flags missing TINs in the 1099 report.
+
+
+@mobile_api.route('/admin/debug-sparkline/<username>/<period>', methods=['GET'])
+def debug_sparkline(username, period):
+    """Compare cached sparkline vs live chart data for a user."""
+    import json
+    from models import User, LeaderboardCache
+    from performance_calculator import calculate_portfolio_performance, get_period_dates, _sp500_benchmark_cache
+    
+    user = User.query.filter_by(username=username).first()
+    if not user:
+        return jsonify({'error': 'user_not_found'}), 404
+    
+    # 1) Get cached sparkline from LeaderboardCache
+    cache_period = '5D' if period == '1W' else period
+    cached_sparkline = None
+    cached_perf = None
+    cache_key = f"{cache_period}_all"
+    cache_entry = LeaderboardCache.query.filter_by(period=cache_key).first()
+    if cache_entry:
+        cached_data = json.loads(cache_entry.leaderboard_data)
+        for entry in cached_data:
+            if entry.get('user_id') == user.id:
+                cached_sparkline = entry.get('sparkline_data', [])
+                cached_perf = entry.get('performance_percent')
+                break
+    
+    # 2) Compute live chart data
+    _sp500_benchmark_cache.clear()
+    chart_period = '5D' if period == '1W' else period
+    start_date, end_date = get_period_dates(chart_period, user_id=user.id)
+    result = calculate_portfolio_performance(
+        user.id, start_date, end_date,
+        include_chart_data=True, period=chart_period
+    )
+    
+    live_chart_data = result.get('chart_data', []) if result else []
+    live_sparkline = [round(pt.get('portfolio', 0) or 0, 2) for pt in live_chart_data]
+    live_perf = result.get('portfolio_return') if result else None
+    
+    return jsonify({
+        'user_id': user.id,
+        'username': username,
+        'period': period,
+        'cache_period': cache_period,
+        'start_date': str(start_date),
+        'end_date': str(end_date),
+        'cache_generated_at': cache_entry.generated_at.isoformat() if cache_entry else None,
+        'cached_sparkline': cached_sparkline,
+        'cached_sparkline_len': len(cached_sparkline) if cached_sparkline else 0,
+        'cached_perf': cached_perf,
+        'live_chart_data': live_chart_data,
+        'live_chart_data_len': len(live_chart_data),
+        'live_sparkline': live_sparkline,
+        'live_sparkline_len': len(live_sparkline),
+        'live_perf': live_perf,
+        'match': cached_sparkline == live_sparkline if cached_sparkline else 'no_cache',
+    })
