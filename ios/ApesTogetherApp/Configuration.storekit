@@ -1,0 +1,63 @@
+{
+  "identifier" : "D8A3B5E2-4F1C-4D9A-8E7B-1A2C3D4E5F6G",
+  "type" : "Configuration",
+  "version" : 3,
+  "localizations" : [
+
+  ],
+  "settings" : {
+    "_applicationInternalID" : "6504619234",
+    "_developerTeamID" : "5437W495L9",
+    "_locale" : "en_US",
+    "_storeCountryCode" : "USA",
+    "_storeKitErrors" : [
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      }
+    ]
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "21586488",
+      "localizations" : [
+
+      ],
+      "name" : "Apes Together Premium",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "9.00",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "6742894371",
+          "introductoryOffer" : {
+            "displayPrice" : "0",
+            "internalID" : "FREE_TRIAL_1M",
+            "numberOfPeriods" : 1,
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P1M"
+          },
+          "localizations" : [
+            {
+              "description" : "Follow a trader's moves in real-time",
+              "displayName" : "Monthly Subscription",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.apestogether.subscription.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Monthly - $9",
+          "subscriptionGroupID" : "21586488",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ]
+}

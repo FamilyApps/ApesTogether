@@ -29,16 +29,29 @@ class SubscriptionManager: ObservableObject {
     func loadProducts() async {
         do {
             products = try await Product.products(for: productIds)
+            print("[SubscriptionManager] Loaded \(products.count) products: \(products.map { $0.id })")
+            if products.isEmpty {
+                print("[SubscriptionManager] WARNING: No products found for IDs: \(productIds)")
+            }
         } catch {
-            print("Failed to load products: \(error)")
+            print("[SubscriptionManager] Failed to load products: \(error)")
+            self.error = "Could not load subscription products"
         }
     }
     
     func subscribe(to userId: Int) async {
+        // Retry loading products if empty
+        if products.isEmpty {
+            await loadProducts()
+        }
+        
         guard let product = products.first else {
-            error = "Subscription product not available"
+            error = "Subscription not available yet. Please try again later."
+            print("[SubscriptionManager] subscribe() failed: no products loaded for IDs: \(productIds)")
             return
         }
+        
+        print("[SubscriptionManager] Starting purchase of \(product.id) for user \(userId)")
         
         isProcessing = true
         error = nil

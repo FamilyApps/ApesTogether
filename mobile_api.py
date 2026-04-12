@@ -1169,16 +1169,9 @@ def get_leaderboard():
                         if raw_vals and len(raw_vals) >= 2:
                             sparkline_points = [round(float(v), 2) for v in raw_vals]
             
-            # Normalize portfolio sparkline to start at 0% (same origin as S&P).
-            # Chart data may have the portfolio starting at a non-zero value if
-            # the user joined mid-period. Shift so first point is 0.
-            if sparkline_points:
-                first_valid = next((v for v in sparkline_points if v is not None), None)
-                if first_valid is not None and first_valid != 0:
-                    sparkline_points = [
-                        round(v - first_valid, 2) if v is not None else None
-                        for v in sparkline_points
-                    ]
+            # NOTE: sparkline data comes from calculate_portfolio_performance which
+            # already computes returns relative to the first snapshot (baseline = 0%).
+            # No normalization needed — shifting would cause mismatch with portfolio chart.
             
             # Sample S&P sparkline to same length as portfolio for consistent alignment.
             # Both start at 0% on the y-axis with matching x-axis density.
@@ -1970,7 +1963,10 @@ def get_portfolio_chart(slug):
         sp500_return = 0.0
         
         try:
-            from performance_calculator import calculate_portfolio_performance, get_period_dates
+            from performance_calculator import calculate_portfolio_performance, get_period_dates, _sp500_benchmark_cache
+            # Clear stale S&P cache from previous requests in same serverless instance
+            _sp500_benchmark_cache.clear()
+            
             start_date, end_date = get_period_dates(period, user_id=owner.id)
             result = calculate_portfolio_performance(
                 owner.id, start_date, end_date,
@@ -1979,7 +1975,38 @@ def get_portfolio_chart(slug):
             if result and result.get('chart_data'):
                 chart_data = result['chart_data']
                 portfolio_return = result.get('portfolio_return', 0.0)
-                sp500_return = result.get('sp500_return', 0.0)
+            
+            # Compute PERIOD-LEVEL S&P 500 return (same as leaderboard header)
+            # This uses the full period range, not the user's first snapshot date
+            from models import MarketData
+            from datetime import timedelta as td
+            period_start, period_end = get_period_dates(period)  # No user_id = full period
+            
+            if period in ('1D', '5D'):
+                sp_records = MarketData.query.filter(
+                    MarketData.ticker == 'SPY_INTRADAY',
+                    MarketData.date >= period_start,
+                    MarketData.date <= period_end,
+                    MarketData.timestamp.isnot(None)
+                ).order_by(MarketData.timestamp.asc()).all()
+                if not sp_records or len(sp_records) < 2:
+                    sp_records = MarketData.query.filter(
+                        MarketData.ticker == 'SPY_SP500',
+                        MarketData.date >= period_start,
+                        MarketData.date <= period_end
+                    ).order_by(MarketData.date.asc()).all()
+            else:
+                sp_records = MarketData.query.filter(
+                    MarketData.ticker == 'SPY_SP500',
+                    MarketData.date >= period_start,
+                    MarketData.date <= period_end
+                ).order_by(MarketData.date.asc()).all()
+            
+            if sp_records and len(sp_records) >= 2:
+                base_val = float(sp_records[0].close_price)
+                end_val = float(sp_records[-1].close_price)
+                if base_val > 0:
+                    sp500_return = round(((end_val - base_val) / base_val) * 100, 2)
         except Exception as e:
             logger.warning(f"Performance calculator failed for user {owner.id}: {e}")
         
@@ -2003,7 +2030,9 @@ def get_portfolio_chart(slug):
                         })
                     
                     portfolio_return = chart_result.get('portfolio_return', 0.0)
-                    sp500_return = chart_result.get('sp500_return', 0.0)
+                    # Don't overwrite sp500_return — period-level value computed above
+                    if sp500_return == 0.0:
+                        sp500_return = chart_result.get('sp500_return', 0.0)
             except Exception as e:
                 logger.warning(f"Chart generation fallback failed: {e}")
         

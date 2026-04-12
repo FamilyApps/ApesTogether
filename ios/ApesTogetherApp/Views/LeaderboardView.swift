@@ -684,14 +684,14 @@ struct LeaderboardCard: View {
                 }
             }
             
-            // Action buttons
-            HStack(spacing: 10) {
+            // Action buttons (stacked vertically for consistent sizing)
+            VStack(spacing: 8) {
                 NavigationLink(destination: PortfolioDetailView(slug: entry.user.portfolioSlug ?? "")) {
                     HStack(spacing: 5) {
                         Image(systemName: "chart.line.uptrend.xyaxis")
-                            .font(.system(size: 11))
+                            .font(.system(size: 12))
                         Text("View Portfolio")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.system(size: 13, weight: .semibold))
                     }
                     .foregroundColor(.primaryAccent)
                     .frame(maxWidth: .infinity)
@@ -707,9 +707,9 @@ struct LeaderboardCard: View {
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "crown.fill")
-                            .font(.system(size: 11))
-                        Text("Try Free, then $\(String(format: "%.0f", entry.subscriptionPrice))/mo")
-                            .font(.system(size: 12, weight: .bold))
+                            .font(.system(size: 12))
+                        Text("Try Free for 1 Month, then $\(String(format: "%.0f", entry.subscriptionPrice))/mo")
+                            .font(.system(size: 13, weight: .bold))
                     }
                     .foregroundColor(.appBackground)
                     .frame(maxWidth: .infinity)
@@ -721,6 +721,14 @@ struct LeaderboardCard: View {
             }
             .padding(.horizontal, 14)
             .padding(.bottom, 12)
+        }
+        .alert("Subscription", isPresented: Binding(
+            get: { subscriptionManager.error != nil },
+            set: { if !$0 { subscriptionManager.error = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(subscriptionManager.error ?? "")
         }
     }
     
@@ -793,7 +801,11 @@ class LeaderboardViewModel: ObservableObject {
         } catch let urlError as URLError where urlError.code == .cancelled {
             // Silently ignore — iOS cancels in-flight request on refresh
         } catch {
-            self.error = error.localizedDescription
+            // Ignore any cancellation-like errors (can be wrapped in various ways)
+            let desc = error.localizedDescription.lowercased()
+            if !desc.contains("cancelled") && !desc.contains("canceled") {
+                self.error = error.localizedDescription
+            }
         }
         
         isLoading = false
