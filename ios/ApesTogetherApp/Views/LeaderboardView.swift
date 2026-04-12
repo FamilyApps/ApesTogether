@@ -616,15 +616,15 @@ struct LeaderboardCard: View {
             Rectangle().fill(Color.cardBorder.opacity(0.3)).frame(height: 0.5)
                 .padding(.horizontal, 14)
             
-            // Return stats row (raw performance + S&P comparison)
+            // Stats row: Subscribers | Stocks | Trades/wk | Return
             HStack(spacing: 0) {
-                statCell(title: "Return", value: String(format: "%+.1f%%", entry.returnPercent))
-                statDivider
-                statCell(title: "S&P 500", value: String(format: "%+.1f%%", entry.sp500Return ?? 0))
+                statCell(title: "Subscribers", value: "\(entry.subscriberCount)")
                 statDivider
                 statCell(title: "Stocks", value: "\(entry.uniqueStocks ?? 0)")
                 statDivider
                 statCell(title: "Trades/wk", value: String(format: "%.1f", entry.avgTradesPerWeek ?? 0))
+                statDivider
+                statCell(title: "Return", value: String(format: "%+.1f%%", entry.returnPercent))
             }
             .padding(.vertical, 8)
             .background(
@@ -706,9 +706,9 @@ struct LeaderboardCard: View {
                     Task { await subscriptionManager.subscribe(to: entry.user.id) }
                 } label: {
                     HStack(spacing: 5) {
-                        Image(systemName: "bell.fill")
+                        Image(systemName: "crown.fill")
                             .font(.system(size: 11))
-                        Text("Try Free")
+                        Text("Try Free, then $\(String(format: "%.0f", entry.subscriptionPrice))/mo")
                             .font(.system(size: 12, weight: .bold))
                     }
                     .foregroundColor(.appBackground)

@@ -966,31 +966,6 @@ struct BlurredHoldingsTeaser: View {
                 }
                 .frame(maxWidth: 240)
                 
-                // Trial timeline
-                VStack(spacing: 4) {
-                    HStack(spacing: 0) {
-                        VStack(spacing: 2) {
-                            Circle().fill(Color.primaryAccent).frame(width: 8, height: 8)
-                            Text("Today").font(.system(size: 10, weight: .semibold)).foregroundColor(.primaryAccent)
-                            Text("Free").font(.system(size: 9)).foregroundColor(.textSecondary)
-                        }
-                        Rectangle().fill(Color.primaryAccent.opacity(0.3)).frame(height: 2)
-                        VStack(spacing: 2) {
-                            Circle().fill(Color.textSecondary.opacity(0.5)).frame(width: 8, height: 8)
-                            Text("Day 30").font(.system(size: 10, weight: .semibold)).foregroundColor(.textSecondary)
-                            Text("$\(String(format: "%.0f", subscriptionPrice))/mo").font(.system(size: 9)).foregroundColor(.textSecondary)
-                        }
-                    }
-                    .frame(maxWidth: 200)
-                    
-                    Text("Cancel anytime — we'll remind you before the trial ends")
-                        .font(.system(size: 10))
-                        .foregroundColor(.textSecondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 4)
-                }
-                .padding(.vertical, 8)
-                
                 // CTA button
                 Button(action: onSubscribe) {
                     HStack(spacing: 6) {
@@ -1012,6 +987,12 @@ struct BlurredHoldingsTeaser: View {
                 Text("1 month free, then $\(String(format: "%.0f", subscriptionPrice))/month")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.textSecondary)
+                
+                Text("Cancel anytime — we'll remind you before the trial ends")
+                    .font(.system(size: 10))
+                    .foregroundColor(.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 2)
                 
                 // Legal links
                 HStack(spacing: 12) {
