@@ -606,12 +606,19 @@ def _compute_all_user_metrics(period='YTD'):
                 continue
             
             # Pre-compute sparkline from chart_data (portfolio % returns)
-            # Send ALL points so sparkline shape exactly matches the portfolio chart.
-            # The iOS SparklineView renders any point count efficiently via Swift Charts.
+            # Use ALL points for short periods; evenly sample to ~150 for longer ones.
+            # Even sampling preserves shape (unlike [-20:] which clips to tail only).
             chart_pts = result.get('chart_data') or []
             sparkline = []
             if chart_pts:
-                sparkline = [round(pt.get('portfolio', 0) or 0, 2) for pt in chart_pts]
+                all_vals = [round(pt.get('portfolio', 0) or 0, 2) for pt in chart_pts]
+                max_sparkline = 150
+                if len(all_vals) <= max_sparkline:
+                    sparkline = all_vals
+                else:
+                    step = len(all_vals) / max_sparkline
+                    sparkline = [all_vals[int(i * step)] for i in range(max_sparkline - 1)]
+                    sparkline.append(all_vals[-1])  # Always include final point
                 
         except Exception as e:
             if not first_error:
