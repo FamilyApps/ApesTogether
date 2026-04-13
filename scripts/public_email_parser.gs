@@ -358,3 +358,83 @@ function reprocessTodaysTrades() {
   }
   Logger.log(`Marked ${unmarked} messages as unread — run checkForTradeEmails() next`);
 }
+
+/**
+ * Reprocess all trade emails since a given date.
+ * Change the SINCE_DATE below before running.
+ * Step 1: Run this to mark emails unread.
+ * Step 2: Run checkForTradeEmails() to process them.
+ */
+function reprocessSince() {
+  const SINCE_DATE = '2026/03/28';  // ← Change this date as needed (YYYY/MM/DD)
+  
+  const queries = [
+    `from:mail.public.com subject:"Your trade executed" after:${SINCE_DATE}`,
+    `from:mail.public.com subject:"trade" after:${SINCE_DATE}`,
+    `from:mail.public.com subject:"bought" after:${SINCE_DATE}`,
+    `from:mail.public.com subject:"sold" after:${SINCE_DATE}`,
+    `from:mail.public.com subject:"executed" after:${SINCE_DATE}`,
+    `from:mail.public.com subject:"order" after:${SINCE_DATE}`,
+    `from:mail.public.com subject:"rebalanced" after:${SINCE_DATE}`,
+  ];
+  
+  const processedIds = new Set();
+  let totalUnmarked = 0;
+  
+  for (const query of queries) {
+    const threads = GmailApp.search(query, 0, 50);
+    for (const thread of threads) {
+      for (const msg of thread.getMessages()) {
+        if (!processedIds.has(msg.getId())) {
+          processedIds.add(msg.getId());
+          if (!msg.isUnread()) {
+            msg.markUnread();
+            totalUnmarked++;
+          }
+        }
+      }
+    }
+  }
+  
+  Logger.log(`Found ${processedIds.size} emails since ${SINCE_DATE}, marked ${totalUnmarked} as unread.`);
+  Logger.log(`Now run checkForTradeEmails() to process them.`);
+}
+
+/**
+ * Diagnose: show all trade emails since a date and what the parser extracts.
+ * Does NOT submit anything or mark anything — read-only.
+ * Change the SINCE_DATE below before running.
+ */
+function diagnoseTrades() {
+  const SINCE_DATE = '2026/03/28';  // ← Change this date as needed
+  
+  const threads = GmailApp.search(`from:mail.public.com after:${SINCE_DATE}`, 0, 50);
+  Logger.log(`Found ${threads.length} threads from mail.public.com since ${SINCE_DATE}`);
+  
+  let emailCount = 0;
+  let parsedCount = 0;
+  
+  for (const thread of threads) {
+    for (const msg of thread.getMessages()) {
+      emailCount++;
+      const subject = msg.getSubject();
+      const date = msg.getDate();
+      const body = msg.getPlainBody();
+      const htmlBody = msg.getBody();
+      const isRead = !msg.isUnread();
+      
+      const trades = parseTradesFromEmail(body, htmlBody);
+      
+      Logger.log(`--- Email #${emailCount} ---`);
+      Logger.log(`  Date: ${date}`);
+      Logger.log(`  Subject: ${subject}`);
+      Logger.log(`  Read: ${isRead}`);
+      Logger.log(`  Body preview: ${(body || htmlBody || '').substring(0, 300)}`);
+      Logger.log(`  Parsed trades: ${trades.length > 0 ? JSON.stringify(trades) : 'NONE'}`);
+      
+      if (trades.length > 0) parsedCount++;
+    }
+  }
+  
+  Logger.log(`\n=== SUMMARY: ${emailCount} emails found, ${parsedCount} had parseable trades ===`);
+}
