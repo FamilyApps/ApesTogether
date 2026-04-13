@@ -38,49 +38,64 @@ function checkForTradeEmails() {
     return;
   }
 
-  // Search for unread Public.com trade notification emails
-  // Primary subject is "Your trade executed" — that's the actual email subject from Public.com
-  // Broad queries — the API auto-detects which bot portfolio each email belongs to
-  // by matching traded tickers against each bot's current holdings
-  // Actual sender is replies@mail.public.com — match any @public.com or @mail.public.com
+  // Load set of already-processed message IDs from ScriptProperties
+  // This makes us independent of read/unread status (emails may be auto-read
+  // by another Gmail client, phone, or preview pane).
+  const props = PropertiesService.getScriptProperties();
+  const processedJson = props.getProperty('PROCESSED_MESSAGE_IDS') || '[]';
+  let processedArray = [];
+  try { processedArray = JSON.parse(processedJson); } catch (e) { processedArray = []; }
+  const alreadyProcessed = new Set(processedArray);
+
+  // Search for Public.com trade emails from the last 2 days (covers weekends)
+  // No is:unread filter — we track processed IDs ourselves
   const queries = [
-    'from:mail.public.com subject:"Your trade executed" is:unread',
-    'from:mail.public.com subject:"trade" is:unread',
-    'from:mail.public.com subject:"bought" is:unread',
-    'from:mail.public.com subject:"sold" is:unread',
-    'from:mail.public.com subject:"executed" is:unread',
-    'from:mail.public.com subject:"order" is:unread',
-    'from:mail.public.com subject:"rebalanced" is:unread',
+    'from:mail.public.com subject:"Your trade executed" newer_than:2d',
+    'from:mail.public.com subject:"trade" newer_than:2d',
+    'from:mail.public.com subject:"bought" newer_than:2d',
+    'from:mail.public.com subject:"sold" newer_than:2d',
+    'from:mail.public.com subject:"executed" newer_than:2d',
+    'from:mail.public.com subject:"order" newer_than:2d',
+    'from:mail.public.com subject:"rebalanced" newer_than:2d',
   ];
 
   let processedCount = 0;
-  const processedIds = new Set(); // Avoid processing same message from multiple query matches
+  const seenIds = new Set(); // Avoid processing same message from multiple query matches
+  const newlyProcessed = [];
 
   for (const query of queries) {
-    const threads = GmailApp.search(query, 0, 10);
+    const threads = GmailApp.search(query, 0, 20);
 
     for (const thread of threads) {
       const messages = thread.getMessages();
       for (const message of messages) {
-        if (message.isUnread() && !processedIds.has(message.getId())) {
-          processedIds.add(message.getId());
-          try {
-            const result = processTradeEmail(message, config);
-            if (result) {
-              processedCount++;
-              Logger.log(`Processed: ${message.getSubject()} → ${result.trades_executed} trades (auto-routed to ${result.bot_username})`);
-            }
-          } catch (e) {
-            Logger.log(`ERROR processing "${message.getSubject()}": ${e.message}`);
+        const msgId = message.getId();
+        if (alreadyProcessed.has(msgId) || seenIds.has(msgId)) continue;
+        seenIds.add(msgId);
+
+        try {
+          const result = processTradeEmail(message, config);
+          if (result) {
+            processedCount++;
+            Logger.log(`Processed: ${message.getSubject()} → ${result.trades_executed} trades (auto-routed to ${result.bot_username})`);
           }
-          // Mark as read regardless to avoid reprocessing
-          message.markRead();
+        } catch (e) {
+          Logger.log(`ERROR processing "${message.getSubject()}": ${e.message}`);
         }
+        // Mark as read for inbox cleanliness
+        message.markRead();
+        newlyProcessed.push(msgId);
       }
     }
   }
 
-  Logger.log(`Processed ${processedCount} trade emails`);
+  // Persist updated processed IDs (keep last 500 to avoid property size limits)
+  if (newlyProcessed.length > 0) {
+    const updated = processedArray.concat(newlyProcessed).slice(-500);
+    props.setProperty('PROCESSED_MESSAGE_IDS', JSON.stringify(updated));
+  }
+
+  Logger.log(`Processed ${processedCount} trade emails (${newlyProcessed.length} new, ${alreadyProcessed.size} previously seen)`);
 
   // Retry any pending trades that couldn't be auto-routed earlier
   // (new stock tickers that didn't match any bot at the time)
@@ -362,11 +377,24 @@ function reprocessTodaysTrades() {
 /**
  * Reprocess all trade emails since a given date.
  * Change the SINCE_DATE below before running.
- * Step 1: Run this to mark emails unread.
- * Step 2: Run checkForTradeEmails() to process them.
+ * 
+ * This clears the processed-ID list so checkForTradeEmails() will
+ * pick up all emails in its 2-day window on the next run.
+ * For older emails, this function directly submits them to the API.
  */
 function reprocessSince() {
   const SINCE_DATE = '2026/03/28';  // ← Change this date as needed (YYYY/MM/DD)
+  const config = getConfig();
+  
+  if (!config.CRON_SECRET) {
+    Logger.log('ERROR: CRON_SECRET not configured');
+    return;
+  }
+  
+  // Clear the processed-ID tracker so nothing is skipped
+  const props = PropertiesService.getScriptProperties();
+  props.deleteProperty('PROCESSED_MESSAGE_IDS');
+  Logger.log('Cleared PROCESSED_MESSAGE_IDS');
   
   const queries = [
     `from:mail.public.com subject:"Your trade executed" after:${SINCE_DATE}`,
@@ -378,26 +406,41 @@ function reprocessSince() {
     `from:mail.public.com subject:"rebalanced" after:${SINCE_DATE}`,
   ];
   
-  const processedIds = new Set();
-  let totalUnmarked = 0;
+  const seenIds = new Set();
+  let submitted = 0;
+  let failed = 0;
+  const newlyProcessed = [];
   
   for (const query of queries) {
     const threads = GmailApp.search(query, 0, 50);
     for (const thread of threads) {
       for (const msg of thread.getMessages()) {
-        if (!processedIds.has(msg.getId())) {
-          processedIds.add(msg.getId());
-          if (!msg.isUnread()) {
-            msg.markUnread();
-            totalUnmarked++;
+        const msgId = msg.getId();
+        if (seenIds.has(msgId)) continue;
+        seenIds.add(msgId);
+        
+        try {
+          const result = processTradeEmail(msg, config);
+          if (result) {
+            submitted++;
+            Logger.log(`Reprocessed: ${msg.getSubject()} (${msg.getDate()}) → ${result.trades_executed} trades`);
           }
+        } catch (e) {
+          failed++;
+          Logger.log(`ERROR reprocessing "${msg.getSubject()}": ${e.message}`);
         }
+        msg.markRead();
+        newlyProcessed.push(msgId);
       }
     }
   }
   
-  Logger.log(`Found ${processedIds.size} emails since ${SINCE_DATE}, marked ${totalUnmarked} as unread.`);
-  Logger.log(`Now run checkForTradeEmails() to process them.`);
+  // Save all these as processed so the regular trigger doesn't re-submit them
+  if (newlyProcessed.length > 0) {
+    props.setProperty('PROCESSED_MESSAGE_IDS', JSON.stringify(newlyProcessed.slice(-500)));
+  }
+  
+  Logger.log(`Reprocess complete: ${seenIds.size} emails found, ${submitted} submitted, ${failed} failed`);
 }
 
 /**
