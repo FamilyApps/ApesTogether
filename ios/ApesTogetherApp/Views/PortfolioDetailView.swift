@@ -4,6 +4,8 @@ import Charts
 
 struct PortfolioDetailView: View {
     let slug: String
+    var initialPeriod: String? = nil
+    var onPeriodChanged: ((String) -> Void)? = nil
     @StateObject private var viewModel = PortfolioDetailViewModel()
     @EnvironmentObject var subscriptionManager: SubscriptionManager
     @State private var tradeSheet: TradeSheetInfo?
@@ -55,6 +57,7 @@ struct PortfolioDetailView: View {
                             selectedPeriod: viewModel.selectedPeriod,
                             onPeriodChange: { period in
                                 viewModel.selectedPeriod = period
+                                onPeriodChanged?(period)
                                 Task { await viewModel.loadChart(slug: slug) }
                             },
                             portfolioLabel: portfolio.isOwner ? "Your Portfolio" : portfolio.owner.username,
@@ -98,7 +101,7 @@ struct PortfolioDetailView: View {
                                 .disabled(subscriptionManager.isProcessing)
                                 
                                 ShareLink(
-                                    item: URL(string: "https://apestogether.ai/p/\(portfolio.owner.portfolioSlug ?? slug)")!,
+                                    item: URL(string: "https://apestogether.ai/p/\(portfolio.owner.portfolioSlug ?? slug)?period=\(viewModel.selectedPeriod)")!,
                                     subject: Text("\(portfolio.owner.username)'s Portfolio"),
                                     message: Text("Check out \(portfolio.owner.username)'s stock portfolio on ApesTogether!")
                                 ) {
@@ -283,7 +286,7 @@ struct PortfolioDetailView: View {
             if let portfolio = viewModel.portfolio, !portfolio.isOwner {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     ShareLink(
-                        item: URL(string: "https://apestogether.ai/p/\(portfolio.owner.portfolioSlug ?? slug)")!,
+                        item: URL(string: "https://apestogether.ai/p/\(portfolio.owner.portfolioSlug ?? slug)?period=\(viewModel.selectedPeriod)")!,
                         subject: Text("\(portfolio.owner.username)'s Portfolio"),
                         message: Text("Check out \(portfolio.owner.username)'s portfolio on ApesTogether!")
                     ) {
@@ -295,6 +298,9 @@ struct PortfolioDetailView: View {
             }
         }
         .onAppear {
+            if let period = initialPeriod {
+                viewModel.selectedPeriod = period
+            }
             Task {
                 await viewModel.loadPortfolio(slug: slug)
                 await viewModel.loadChart(slug: slug)

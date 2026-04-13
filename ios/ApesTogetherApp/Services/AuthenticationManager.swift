@@ -72,12 +72,14 @@ class AuthenticationManager: ObservableObject {
         }
     }
     
-    func navigateToPortfolio(slug: String) {
+    func navigateToPortfolio(slug: String, period: String? = nil) {
         // Handle deep link to portfolio
+        var info: [String: Any] = ["slug": slug]
+        if let p = period { info["period"] = p }
         NotificationCenter.default.post(
             name: .navigateToPortfolio,
             object: nil,
-            userInfo: ["slug": slug]
+            userInfo: info
         )
     }
 }

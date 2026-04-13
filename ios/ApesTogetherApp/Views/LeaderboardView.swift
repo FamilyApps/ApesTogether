@@ -210,6 +210,7 @@ struct LeaderboardView: View {
                                     LeaderboardCard(
                                         entry: entry,
                                         isExpanded: isExpanded(entry),
+                                        selectedPeriod: selectedPeriod,
                                         onTap: {
                                             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                                                 autoExpandedTop = false
@@ -470,6 +471,7 @@ struct FilterSheet: View {
 struct LeaderboardCard: View {
     let entry: LeaderboardEntry
     let isExpanded: Bool
+    let selectedPeriod: String
     let onTap: () -> Void
     @EnvironmentObject var subscriptionManager: SubscriptionManager
     
@@ -686,7 +688,7 @@ struct LeaderboardCard: View {
             
             // Action buttons (stacked vertically for consistent sizing)
             VStack(spacing: 8) {
-                NavigationLink(destination: PortfolioDetailView(slug: entry.user.portfolioSlug ?? "")) {
+                NavigationLink(destination: PortfolioDetailView(slug: entry.user.portfolioSlug ?? "", initialPeriod: selectedPeriod)) {
                     HStack(spacing: 5) {
                         Image(systemName: "chart.line.uptrend.xyaxis")
                             .font(.system(size: 12))

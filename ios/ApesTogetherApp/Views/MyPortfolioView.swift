@@ -11,7 +11,7 @@ struct MyPortfolioView: View {
     
     private var personalURL: String {
         if let slug = authManager.currentUser?.portfolioSlug {
-            return "https://apestogether.ai/p/\(slug)"
+            return "https://apestogether.ai/p/\(slug)?period=\(shareViewModel.selectedPeriod)"
         }
         return "https://apestogether.ai"
     }
@@ -27,7 +27,9 @@ struct MyPortfolioView: View {
                     
                     if let user = authManager.currentUser, let slug = user.portfolioSlug {
                         VStack(spacing: 0) {
-                            PortfolioDetailView(slug: slug)
+                            PortfolioDetailView(slug: slug, onPeriodChanged: { period in
+                                shareViewModel.selectedPeriod = period
+                            })
                             
                             // Share button
                             Button {

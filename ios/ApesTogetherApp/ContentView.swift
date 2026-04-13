@@ -58,16 +58,19 @@ struct ContentView: View {
         .onChange(of: authManager.isAuthenticated) { newValue in
             if newValue {
                 // User just authenticated
-                if let slug = deepLinkManager.pendingPortfolioSlug {
+                if let pending = deepLinkManager.consumePendingSlug() {
                     // Came from referral — navigate to that portfolio to subscribe
-                    deepLinkManager.pendingPortfolioSlug = nil
                     subscribedToUsername = ""
+                    let slug = pending.slug
+                    let period = pending.period
                     // Navigate to the portfolio in the main tab view
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        var info: [String: Any] = ["slug": slug]
+                        if let p = period { info["period"] = p }
                         NotificationCenter.default.post(
                             name: .openPortfolio,
                             object: nil,
-                            userInfo: ["slug": slug]
+                            userInfo: info
                         )
                     }
                 }
@@ -76,7 +79,8 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .openPortfolio)) { notification in
             if let slug = notification.userInfo?["slug"] as? String {
-                authManager.navigateToPortfolio(slug: slug)
+                let period = notification.userInfo?["period"] as? String
+                authManager.navigateToPortfolio(slug: slug, period: period)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .didSubscribe)) { notification in
