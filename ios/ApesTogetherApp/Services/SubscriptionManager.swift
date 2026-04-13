@@ -61,10 +61,12 @@ class SubscriptionManager: ObservableObject {
             
             switch result {
             case .success(let verification):
+                // Extract JWS from the VerificationResult before unwrapping
+                let jwsRepresentation = verification.jwsRepresentation
                 let transaction = try checkVerified(verification)
                 
                 // Validate with backend
-                await validateWithBackend(transaction: transaction, userId: userId)
+                await validateWithBackend(jwsRepresentation: jwsRepresentation, transaction: transaction, userId: userId)
                 
                 await transaction.finish()
                 
@@ -84,10 +86,8 @@ class SubscriptionManager: ObservableObject {
         isProcessing = false
     }
     
-    private func validateWithBackend(transaction: StoreKit.Transaction, userId: Int) async {
+    private func validateWithBackend(jwsRepresentation: String, transaction: StoreKit.Transaction, userId: Int) async {
         // Use StoreKit 2's signed JWS representation (works in sandbox + production)
-        let jwsRepresentation = transaction.jwsRepresentation
-        
         do {
             let response = try await APIService.shared.validatePurchase(
                 platform: "apple",
