@@ -586,11 +586,34 @@ struct TradeRow: View {
     }
     
     private func formatDate(_ dateString: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        if let date = formatter.date(from: dateString) {
+        // Try standard ISO8601 first
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var date = isoFormatter.date(from: dateString)
+        
+        // Fallback without fractional seconds
+        if date == nil {
+            let basic = ISO8601DateFormatter()
+            date = basic.date(from: dateString)
+        }
+        
+        // Fallback: manual format for Python's isoformat() output (no timezone)
+        if date == nil {
+            let manual = DateFormatter()
+            manual.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
+            manual.locale = Locale(identifier: "en_US_POSIX")
+            date = manual.date(from: dateString)
+        }
+        if date == nil {
+            let manual = DateFormatter()
+            manual.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+            manual.locale = Locale(identifier: "en_US_POSIX")
+            date = manual.date(from: dateString)
+        }
+        
+        if let date = date {
             let displayFormatter = DateFormatter()
-            displayFormatter.dateStyle = .short
-            displayFormatter.timeStyle = .short
+            displayFormatter.dateFormat = "MMM d, h:mm:ss a"
             return displayFormatter.string(from: date)
         }
         return dateString
