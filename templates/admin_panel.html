@@ -44,6 +44,15 @@ const { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie
 // ─── Config ──────────────────────────────────────────────────────────────────
 const API_BASE = '/api/mobile';
 
+// Format share quantities: whole for integers, 2dp for ≥1, up to 4dp for fractions
+const fmtQty = v => {
+  if (v == null) return '—';
+  const n = Number(v);
+  if (Number.isInteger(n)) return n.toString();
+  if (n >= 1) return n.toFixed(2);
+  return parseFloat(n.toFixed(4)).toString();
+};
+
 // ─── API Helper (session-cookie auth) ────────────────────────────────────────
 // NOTE: Server already verified Google OAuth + TOTP before serving this file.
 // No client-side auth check needed — just provide the api() helper.
@@ -863,7 +872,7 @@ const UserDetailDrawer = ({ api, userId, onClose }) => {
             {holdings.length === 0 ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No holdings</div> : (
               <Table columns={[
                 { key: 'ticker', label: 'Ticker', render: v => <span style={{ fontWeight: 600 }}>{v}</span> },
-                { key: 'quantity', label: 'Qty', render: v => v?.toFixed?.(2) || v },
+                { key: 'quantity', label: 'Qty', render: fmtQty },
                 { key: 'purchase_price', label: 'Avg Price', render: v => v ? `$${Number(v).toFixed(2)}` : '—' },
               ]} data={holdings} />
             )}
@@ -876,7 +885,7 @@ const UserDetailDrawer = ({ api, userId, onClose }) => {
                 { key: 'timestamp', label: 'Time', render: v => v ? new Date(v).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—' },
                 { key: 'transaction_type', label: 'Action', render: v => <Badge text={v?.toUpperCase()} color={v === 'buy' ? 'var(--green)' : 'var(--red)'} /> },
                 { key: 'ticker', label: 'Ticker', render: v => <span style={{ fontWeight: 600 }}>{v}</span> },
-                { key: 'quantity', label: 'Qty', render: v => v?.toFixed?.(2) || v },
+                { key: 'quantity', label: 'Qty', render: fmtQty },
                 { key: 'price', label: 'Price', render: v => v ? `$${Number(v).toFixed(2)}` : '—' },
               ]} data={txns} />
             )}
@@ -1550,7 +1559,7 @@ const EmailMonitor = ({ api }) => {
             { key: 'id', label: 'ID' },
             { key: 'ticker', label: 'Ticker', render: v => <span style={{ fontWeight: 600 }}>{v}</span> },
             { key: 'action', label: 'Action', render: v => <Badge text={v?.toUpperCase()} color={v === 'buy' ? 'var(--green)' : 'var(--red)'} /> },
-            { key: 'quantity', label: 'Qty' },
+            { key: 'quantity', label: 'Qty', render: fmtQty },
             { key: 'status', label: 'Status', render: v => <Badge text={v} color={v === 'routed' ? 'var(--green)' : v === 'pending' ? 'var(--yellow)' : 'var(--red)'} /> },
             { key: 'assigned_bot_id', label: 'Bot', render: v => v || '—' },
             { key: 'created_at', label: 'Age', render: v => v ? `${Math.round((Date.now() - new Date(v).getTime()) / 60000)}m` : '—' },
@@ -1619,7 +1628,7 @@ const SystemHealth = ({ api }) => {
           { key: 'role', label: 'Role', render: v => <Badge text={v} color={v === 'agent' ? 'var(--blue)' : 'var(--accent)'} /> },
           { key: 'type', label: 'Type', render: v => <Badge text={v?.toUpperCase()} color={v === 'buy' ? 'var(--green)' : v === 'sell' ? 'var(--red)' : 'var(--text-muted)'} /> },
           { key: 'ticker', label: 'Ticker', render: v => <span style={{ fontWeight: 600 }}>{v}</span> },
-          { key: 'quantity', label: 'Qty' },
+          { key: 'quantity', label: 'Qty', render: fmtQty },
           { key: 'value', label: 'Value', render: v => `$${(v || 0).toFixed(2)}` },
           { key: 'price_source', label: 'Source', render: v => <Badge text={v || '—'} color={v === 'bulk_api' ? 'var(--green)' : v === 'cached' ? 'var(--blue)' : v === 'single_api' ? 'var(--yellow)' : v === 'manual' ? 'var(--accent)' : v === 'email' ? 'var(--purple, #a855f7)' : v === 'bot_research' ? 'var(--blue)' : v === 'queued_email' ? 'var(--purple, #a855f7)' : (v && v.includes('copytrade')) ? 'var(--accent)' : 'var(--text-muted)'} /> },
         ]} data={trades?.trades || []} />

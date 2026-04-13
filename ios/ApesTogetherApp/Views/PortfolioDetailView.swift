@@ -577,7 +577,7 @@ struct TradeRow: View {
             
             Spacer()
             
-            Text("\(Int(trade.quantity)) @ $\(String(format: "%.2f", trade.price))")
+            Text("\(formatQuantity(trade.quantity)) @ $\(String(format: "%.2f", trade.price))")
                 .font(.subheadline)
                 .foregroundColor(.textSecondary)
         }
@@ -617,6 +617,21 @@ struct TradeRow: View {
             return displayFormatter.string(from: date)
         }
         return dateString
+    }
+    
+    private func formatQuantity(_ quantity: Double) -> String {
+        if quantity == quantity.rounded() && quantity >= 1 {
+            return String(format: "%.0f", quantity)
+        } else if quantity >= 1 {
+            return String(format: "%.2f", quantity)
+        } else {
+            // Fractional shares < 1: up to 4 decimals, trim trailing zeros
+            let formatted = String(format: "%.4f", quantity)
+            var result = formatted
+            while result.hasSuffix("0") { result = String(result.dropLast()) }
+            if result.hasSuffix(".") { result = String(result.dropLast()) }
+            return result
+        }
     }
 }
 
