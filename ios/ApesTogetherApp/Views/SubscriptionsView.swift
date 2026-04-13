@@ -280,16 +280,21 @@ struct SubscriptionCard: View {
                 Spacer()
                 
                 // Notification toggle
-                Toggle("", isOn: Binding(
-                    get: { subscription.pushNotificationsEnabled },
-                    set: { newValue in
-                        Task {
-                            await viewModel.toggleNotifications(subscriptionId: subscription.id, enabled: newValue)
+                HStack(spacing: 6) {
+                    Image(systemName: subscription.pushNotificationsEnabled ? "bell.fill" : "bell.slash")
+                        .font(.system(size: 12))
+                        .foregroundColor(subscription.pushNotificationsEnabled ? .primaryAccent : .textMuted)
+                    Toggle("", isOn: Binding(
+                        get: { subscription.pushNotificationsEnabled },
+                        set: { newValue in
+                            Task {
+                                await viewModel.toggleNotifications(subscriptionId: subscription.id, enabled: newValue)
+                            }
                         }
-                    }
-                ))
-                .toggleStyle(SwitchToggleStyle(tint: Color.primaryAccent))
-                .labelsHidden()
+                    ))
+                    .toggleStyle(SwitchToggleStyle(tint: Color.primaryAccent))
+                    .labelsHidden()
+                }
             }
             .padding(14)
             
