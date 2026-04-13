@@ -6265,6 +6265,24 @@ def _save_auto_create_settings(settings):
 # At year-end, Xero flags missing TINs in the 1099 report.
 
 
+@mobile_api.route('/admin/rebuild-leaderboard-cache/<period>', methods=['GET'])
+def rebuild_leaderboard_cache_single(period):
+    """Rebuild leaderboard cache for a single period (avoids Vercel timeout)."""
+    try:
+        from leaderboard_utils import update_leaderboard_cache
+        cache_period = '5D' if period == '1W' else period
+        updated = update_leaderboard_cache(periods=[cache_period])
+        return jsonify({
+            'success': True,
+            'period': period,
+            'cache_period': cache_period,
+            'entries_updated': updated
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
 @mobile_api.route('/admin/debug-sparkline/<username>/<period>', methods=['GET'])
 def debug_sparkline(username, period):
     """Compare cached sparkline vs live chart data for a user."""
