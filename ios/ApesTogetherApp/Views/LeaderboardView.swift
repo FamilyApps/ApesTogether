@@ -536,7 +536,7 @@ struct LeaderboardCard: View {
                     SparklineView(
                         dataPoints: entry.sparklineData ?? [],
                         sp500Points: entry.sp500SparklineData ?? [],
-                        isPositive: entry.returnPercent >= 0
+                        isPositive: (entry.alphaVsSp500 ?? entry.returnPercent) >= 0
                     )
                     .frame(width: 52, height: 26)
                     

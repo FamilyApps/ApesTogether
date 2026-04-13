@@ -85,21 +85,14 @@ class SubscriptionManager: ObservableObject {
     }
     
     private func validateWithBackend(transaction: StoreKit.Transaction, userId: Int) async {
-        // Get the receipt data
-        guard let appStoreReceiptURL = Bundle.main.appStoreReceiptURL,
-              FileManager.default.fileExists(atPath: appStoreReceiptURL.path),
-              let receiptData = try? Data(contentsOf: appStoreReceiptURL) else {
-            error = "Could not retrieve receipt"
-            return
-        }
-        
-        let receiptString = receiptData.base64EncodedString()
+        // Use StoreKit 2's signed JWS representation (works in sandbox + production)
+        let jwsRepresentation = transaction.jwsRepresentation
         
         do {
             let response = try await APIService.shared.validatePurchase(
                 platform: "apple",
-                receiptData: receiptString,
-                purchaseToken: nil,
+                receiptData: jwsRepresentation,
+                purchaseToken: String(transaction.originalID),
                 subscribedToId: userId
             )
             

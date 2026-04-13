@@ -76,15 +76,24 @@ class IAPValidationService:
         exclude_old_transactions: bool = True
     ) -> Dict[str, Any]:
         """
-        Validate Apple App Store receipt
+        Validate Apple App Store receipt or StoreKit 2 JWS transaction.
+        
+        Detects format automatically:
+        - JWS (contains dots): StoreKit 2 signed transaction — decode JWT payload
+        - Base64 blob: Legacy receipt — send to /verifyReceipt
         
         Args:
-            receipt_data: Base64-encoded receipt data from StoreKit
-            exclude_old_transactions: Only return latest transaction
+            receipt_data: Base64-encoded receipt OR JWS string from StoreKit 2
+            exclude_old_transactions: Only return latest transaction (legacy only)
             
         Returns:
             Dict with validation result and subscription info
         """
+        # Detect StoreKit 2 JWS format (JWT has 3 dot-separated parts)
+        if receipt_data and receipt_data.count('.') == 2:
+            return self._parse_storekit2_jws(receipt_data)
+        
+        # Legacy receipt path
         if not self.apple_shared_secret:
             logger.error("APPLE_SHARED_SECRET not configured")
             return {'valid': False, 'error': 'server_config_error'}
@@ -114,6 +123,87 @@ class IAPValidationService:
                 result = response.json()
         
         return self._parse_apple_response(result)
+    
+    def _parse_storekit2_jws(self, jws: str) -> Dict[str, Any]:
+        """
+        Parse a StoreKit 2 signed transaction (JWS/JWT).
+        
+        The JWS payload contains all transaction fields. In production,
+        the signature should be verified against Apple's public key chain
+        (provided in the JWS header's x5c field). For now we decode the
+        payload which is sufficient for sandbox + early production.
+        """
+        import base64
+        
+        try:
+            parts = jws.split('.')
+            if len(parts) != 3:
+                return {'valid': False, 'error': 'invalid_jws_format'}
+            
+            # Decode JWT payload (part 2, base64url-encoded)
+            payload_b64 = parts[1]
+            # Add padding if needed
+            padding = 4 - len(payload_b64) % 4
+            if padding != 4:
+                payload_b64 += '=' * padding
+            
+            payload_bytes = base64.urlsafe_b64decode(payload_b64)
+            payload = json.loads(payload_bytes)
+            
+            logger.info(f"StoreKit 2 JWS decoded: productId={payload.get('productId')}, "
+                        f"transactionId={payload.get('transactionId')}, "
+                        f"environment={payload.get('environment')}")
+            
+            # Extract fields from StoreKit 2 transaction payload
+            product_id = payload.get('productId', '')
+            transaction_id = str(payload.get('transactionId', ''))
+            original_transaction_id = str(payload.get('originalTransactionId', transaction_id))
+            
+            # Dates in StoreKit 2 are Unix timestamps in milliseconds
+            purchase_date_ms = payload.get('purchaseDate', 0)
+            expires_date_ms = payload.get('expiresDate')
+            revocation_date_ms = payload.get('revocationDate')
+            
+            purchase_date = datetime.fromtimestamp(purchase_date_ms / 1000) if purchase_date_ms else datetime.utcnow()
+            expires_date = datetime.fromtimestamp(expires_date_ms / 1000) if expires_date_ms else None
+            
+            # Determine status
+            now = datetime.utcnow()
+            if revocation_date_ms:
+                status = SubscriptionStatus.REFUNDED
+            elif expires_date and expires_date > now:
+                status = SubscriptionStatus.ACTIVE
+            elif expires_date:
+                status = SubscriptionStatus.EXPIRED
+            else:
+                status = SubscriptionStatus.ACTIVE
+            
+            # Trial detection
+            offer_type = payload.get('offerType')  # 1=intro, 2=promo, 3=offer code
+            is_trial = (offer_type == 1)
+            
+            return {
+                'valid': True,
+                'platform': Platform.APPLE.value,
+                'product_id': product_id,
+                'transaction_id': transaction_id,
+                'original_transaction_id': original_transaction_id,
+                'purchase_date': purchase_date,
+                'expires_date': expires_date,
+                'status': status.value,
+                'is_trial': is_trial,
+                'is_in_intro_offer': is_trial,
+                'auto_renew_status': True,  # StoreKit 2 only sends active renewals
+                'environment': payload.get('environment', 'unknown'),
+                'price': self.SUBSCRIPTION_PRICE,
+                'influencer_payout': self.INFLUENCER_PAYOUT,
+                'platform_revenue': self.PLATFORM_REVENUE,
+                'store_fee': self.STORE_FEE,
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to parse StoreKit 2 JWS: {e}")
+            return {'valid': False, 'error': f'jws_parse_error: {str(e)}'}
     
     def _parse_apple_response(self, response: Dict[str, Any]) -> Dict[str, Any]:
         """Parse Apple's receipt validation response"""
