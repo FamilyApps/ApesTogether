@@ -2106,6 +2106,123 @@ def track_linkclick():
         return jsonify({'ok': False}), 200
 
 
+@app.route('/admin/debug-user-snapshots')
+@admin_required
+def admin_debug_user_snapshots():
+    """
+    Show snapshot data for a user around a date range to diagnose chart jumps.
+    Usage: /admin/debug-user-snapshots?username=chart1658&start=2026-03-15&end=2026-05-03
+    """
+    from models import User, PortfolioSnapshot, Transaction
+    from sqlalchemy import and_
+    username = request.args.get('username')
+    user_id = request.args.get('user_id')
+    start = request.args.get('start', '2026-03-01')
+    end = request.args.get('end', '2026-05-03')
+
+    if username:
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': f'User {username} not found'}), 404
+        user_id = user.id
+    elif user_id:
+        user_id = int(user_id)
+        user = User.query.get(user_id)
+    else:
+        return jsonify({'error': 'username or user_id required'}), 400
+
+    from datetime import date as _date
+    start_date = _date.fromisoformat(start)
+    end_date = _date.fromisoformat(end)
+
+    snapshots = PortfolioSnapshot.query.filter(
+        and_(
+            PortfolioSnapshot.user_id == user_id,
+            PortfolioSnapshot.date >= start_date,
+            PortfolioSnapshot.date <= end_date
+        )
+    ).order_by(PortfolioSnapshot.date.asc()).all()
+
+    # Also get transactions in this window to see capital flows
+    transactions = Transaction.query.filter(
+        and_(
+            Transaction.user_id == user_id,
+            Transaction.timestamp >= start_date,
+            Transaction.timestamp <= end_date
+        )
+    ).order_by(Transaction.timestamp.asc()).all()
+
+    # Build snapshot rows with day-over-day deltas
+    rows = []
+    prev = None
+    for s in snapshots:
+        row = {
+            'date': s.date.isoformat(),
+            'total_value': round(s.total_value, 2),
+            'stock_value': round(s.stock_value or 0, 2),
+            'cash_proceeds': round(s.cash_proceeds or 0, 2),
+            'max_cash_deployed': round(s.max_cash_deployed or 0, 2),
+        }
+        if prev:
+            row['delta_total_value'] = round(s.total_value - prev.total_value, 2)
+            row['delta_max_cash'] = round((s.max_cash_deployed or 0) - (prev.max_cash_deployed or 0), 2)
+            row['delta_stock_value'] = round((s.stock_value or 0) - (prev.stock_value or 0), 2)
+            # Flag suspicious jumps (>10% in one day on total_value or >$500 on max_cash)
+            if prev.total_value > 0:
+                pct_change = abs(s.total_value - prev.total_value) / prev.total_value * 100
+                row['pct_change'] = round(pct_change, 2)
+                if pct_change > 10:
+                    row['FLAG'] = f'⚠️ {pct_change:.1f}% daily change'
+            if abs(row['delta_max_cash']) > 0:
+                row['CAPITAL_FLOW'] = f'💰 ${row["delta_max_cash"]:.2f} new capital'
+        prev = s
+        rows.append(row)
+
+    txn_rows = [{
+        'date': t.timestamp.isoformat() if t.timestamp else 'N/A',
+        'type': t.transaction_type,
+        'ticker': t.ticker,
+        'quantity': t.quantity,
+        'price': t.price,
+        'total': round(t.quantity * t.price, 2) if t.quantity and t.price else None
+    } for t in transactions]
+
+    return jsonify({
+        'user': {'id': user_id, 'username': user.username, 'max_cash_deployed': user.max_cash_deployed},
+        'period': f'{start} to {end}',
+        'snapshot_count': len(rows),
+        'transaction_count': len(txn_rows),
+        'snapshots': rows,
+        'transactions': txn_rows
+    })
+
+
+@app.route('/admin/rename-user', methods=['POST'])
+@admin_required
+def admin_rename_user():
+    """Rename a user by ID. POST JSON: {user_id, new_username}"""
+    from models import User
+    try:
+        data = request.get_json() or {}
+        user_id = data.get('user_id')
+        new_username = (data.get('new_username') or '').strip()
+        if not user_id or not new_username:
+            return jsonify({'error': 'user_id and new_username required'}), 400
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': f'User {user_id} not found'}), 404
+        existing = User.query.filter(User.username == new_username, User.id != user_id).first()
+        if existing:
+            return jsonify({'error': f'Username "{new_username}" already taken by user {existing.id}'}), 409
+        old_username = user.username
+        user.username = new_username
+        db.session.commit()
+        return jsonify({'success': True, 'old_username': old_username, 'new_username': new_username, 'user_id': user_id})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/admin/waitlist')
 @admin_required
 def admin_waitlist():

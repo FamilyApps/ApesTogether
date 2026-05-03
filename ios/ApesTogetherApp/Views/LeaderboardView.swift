@@ -710,7 +710,7 @@ struct LeaderboardCard: View {
                     HStack(spacing: 5) {
                         Image(systemName: "crown.fill")
                             .font(.system(size: 12))
-                        Text("Try Free for 1 Month, then $\(String(format: "%.0f", entry.subscriptionPrice))/mo")
+                        Text("Try Free for 7 Days, then $\(String(format: "%.0f", entry.subscriptionPrice))/mo")
                             .font(.system(size: 13, weight: .bold))
                     }
                     .foregroundColor(.appBackground)

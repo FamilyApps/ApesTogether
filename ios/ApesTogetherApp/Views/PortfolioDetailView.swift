@@ -89,7 +89,7 @@ struct PortfolioDetailView: View {
                                     HStack(spacing: 6) {
                                         Image(systemName: "crown.fill")
                                             .font(.system(size: 13))
-                                        Text("Try Free, then $\(String(format: "%.0f", portfolio.subscriptionPrice))/mo")
+                                        Text("Try 7 Days Free, then $\(String(format: "%.0f", portfolio.subscriptionPrice))/mo")
                                             .font(.system(size: 14, weight: .bold))
                                     }
                                     .frame(maxWidth: .infinity)
@@ -1028,7 +1028,7 @@ struct BlurredHoldingsTeaser: View {
                 .padding(.horizontal, 16)
                 
                 // Price disclosure (Apple requirement: most prominent)
-                Text("1 month free, then $\(String(format: "%.0f", subscriptionPrice))/month")
+                Text("7-day free trial, then $\(String(format: "%.0f", subscriptionPrice))/month")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.textSecondary)
                 

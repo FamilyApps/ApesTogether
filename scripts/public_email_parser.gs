@@ -11,8 +11,8 @@
  * 3. Set Script Properties (Project Settings → Script Properties):
  *    - CRON_SECRET: your cron secret (separate from admin API key)
  *    - API_BASE_URL: https://apestogether.ai/api/mobile
- *    - GROK_BOT_USERNAME: (the randomly generated bot username for Grok Portfolio)
- *    - WOLFF_BOT_USERNAME: (the randomly generated bot username for Wolff's Fund)
+ *    - GROK_BOT_USERNAME: The Grok Portfolio
+ *    - WOLFF_BOT_USERNAME: Wolff's Flagship Fund
  * 4. Run setupTrigger() once to create the time-based trigger
  * 5. The script will check for new emails every 5 minutes
  */

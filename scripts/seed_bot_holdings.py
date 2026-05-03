@@ -32,7 +32,7 @@ HEADERS = {
     'X-Cron-Secret': CRON_SECRET
 }
 
-# Wolff's Flagship Fund — user_id=14, username=CoastHillBear
+# Wolff's Flagship Fund — user_id=14, username=Wolff's Flagship Fund
 WOLFF_HOLDINGS = {
     'user_id': 14,
     'cash': 21.39,
@@ -45,7 +45,7 @@ WOLFF_HOLDINGS = {
     }
 }
 
-# Grok Portfolio — user_id=13, username=marblethehill72
+# Grok Portfolio — user_id=13, username=The Grok Portfolio
 GROK_HOLDINGS = {
     'user_id': 13,
     'cash': 103.58,
@@ -176,8 +176,8 @@ def main():
     print(f"\nFetched {len(prices)}/{len(all_tickers)} prices")
     
     # Seed each portfolio
-    seed_portfolio(GROK_HOLDINGS, "Grok Portfolio (marblethehill72)", prices)
-    seed_portfolio(WOLFF_HOLDINGS, "Wolff's Flagship Fund (CoastHillBear)", prices)
+    seed_portfolio(GROK_HOLDINGS, "The Grok Portfolio", prices)
+    seed_portfolio(WOLFF_HOLDINGS, "Wolff's Flagship Fund", prices)
     
     print(f"\n{'='*60}")
     print("[OK] Portfolio seeding complete!")

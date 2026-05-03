@@ -13,7 +13,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/landing.css?v=9">
+    <link rel="stylesheet" href="/static/css/landing.css?v=10">
 </head>
 <body>
 
@@ -29,7 +29,7 @@
             <a href="#how-it-works">How It Works</a>
             <a href="#earn">Earn</a>
             <a href="#faq">FAQ</a>
-            <a href="#waitlist-anchor" class="btn-sm" style="color:#000 !important;">Get Early Access</a>
+            <a href="#waitlist-anchor" class="btn-sm" style="color:#000 !important;">Join the Beta</a>
         </div>
     </div>
 </nav>
@@ -51,9 +51,14 @@
         <div id="waitlist" class="waitlist-form-wrap">
             <form class="waitlist-form" id="hero-waitlist" onsubmit="return submitWaitlist(event, 'hero-waitlist')">
                 <input type="email" name="email" placeholder="Enter your email" required autocomplete="email">
-                <button type="submit" class="btn-lg">Get Early Access</button>
+                <div class="waitlist-segment">
+                    <label class="seg-option"><input type="radio" name="role" value="investor" checked> I want to follow traders</label>
+                    <label class="seg-option"><input type="radio" name="role" value="trader"> I want to earn as a trader</label>
+                </div>
+                <button type="submit" class="btn-lg">Join the Beta Waitlist</button>
             </form>
             <div class="waitlist-msg" id="hero-waitlist-msg"></div>
+            <div class="waitlist-urgency">Beta opens June 1 — limited spots</div>
         </div>
 
         <!-- App mockup -->
@@ -84,12 +89,12 @@
 <!-- TRUST BAR -->
 <div class="trust-bar">
     <div class="container">
-        <div class="label">Built on trusted technology</div>
+        <div class="label">The transparency standard</div>
         <div class="trust-logos">
-            <span>&#9679; Swift</span>
-            <span>&#9679; App Store</span>
-            <span>&#9679; Stripe</span>
-            <span>&#9679; Firebase</span>
+            <span>&#9679; Real market data</span>
+            <span>&#9679; 4,000+ US stocks</span>
+            <span>&#9679; iOS &amp; Android</span>
+            <span>&#9679; Verified by math</span>
         </div>
     </div>
 </div>
@@ -208,14 +213,14 @@
             <div class="slider-group">
                 <div class="slider-label">
                     <span>Subscribers</span>
-                    <span class="v" id="sub-lbl">500</span>
+                    <span class="v" id="sub-lbl">100</span>
                 </div>
-                <input type="range" id="sub-slider" min="10" max="5000" value="500" step="10" oninput="updateCalc()">
+                <input type="range" id="sub-slider" min="10" max="5000" value="100" step="10" oninput="updateCalc()">
             </div>
             <div class="calc-formula">
-                <span id="sub-disp">500</span> subs <span class="op">&times;</span> $6.50/mo
+                <span id="sub-disp">100</span> subs <span class="op">&times;</span> $6.50/mo
             </div>
-            <div class="calc-result" id="calc-annual">$39,000<small>/yr</small></div>
+            <div class="calc-result" id="calc-annual">$7,800<small>/yr</small></div>
             <div class="calc-sub">Potential annual income</div>
             <div class="calc-note">From trades you're already making. No content creation required.</div>
         </div>
@@ -233,15 +238,15 @@
         <div class="proof-grid">
             <div class="proof-card">
                 <div class="qt">&ldquo;85% of investors aged 18&ndash;40 turn to social media for investment ideas &mdash; but only 20% of finfluencer recommendations include proper disclosure.&rdquo;</div>
-                <div class="src">&mdash; Industry Research, 2024</div>
+                <div class="src">&mdash; SEC &amp; Journal of Financial Economics research</div>
             </div>
             <div class="proof-card">
                 <div class="qt">&ldquo;On Reddit, dozens of people have algorithms that consistently beat the S&amp;P 500 with no way to monetize beyond their own portfolio. Until now.&rdquo;</div>
                 <div class="src">&mdash; The Apes Together Thesis</div>
             </div>
             <div class="proof-card">
-                <div class="qt">&ldquo;Half of r/investing claims they consistently beat the SPY. We're tracking who actually does.&rdquo;</div>
-                <div class="src">&mdash; apestogether.ai</div>
+                <div class="qt">&ldquo;Half of r/investing claims they consistently beat the SPY. We're building the platform that tracks who actually does.&rdquo;</div>
+                <div class="src">&mdash; Apes Together</div>
             </div>
         </div>
     </div>
@@ -358,6 +363,12 @@
                     <h5>Contact</h5>
                     <a href="mailto:support@apestogether.ai">support@apestogether.ai</a>
                 </div>
+                <div class="footer-col">
+                    <h5>Follow Us</h5>
+                    <a href="https://x.com/ApesTogetherApp" target="_blank" rel="noopener">X / Twitter</a>
+                    <a href="https://tiktok.com/@apestogether" target="_blank" rel="noopener">TikTok</a>
+                    <a href="https://instagram.com/apestogether" target="_blank" rel="noopener">Instagram</a>
+                </div>
             </div>
         </div>
         <div class="footer-bottom">
@@ -367,7 +378,7 @@
                 Past performance does not guarantee future results. Users are solely responsible for their own investment decisions.
                 Apes Together is operated by Family Apps LLC.
             </p>
-            <p class="footer-copy">&copy; 2025 Family Apps LLC. All rights reserved.</p>
+            <p class="footer-copy">&copy; 2026 Family Apps LLC. All rights reserved.</p>
         </div>
     </div>
 </footer>
@@ -399,6 +410,8 @@ async function submitWaitlist(e, formId) {
     const form = document.getElementById(formId);
     const msg = document.getElementById(formId + '-msg');
     const email = form.querySelector('input[name="email"]').value.trim();
+    const roleEl = form.querySelector('input[name="role"]:checked');
+    const role = roleEl ? roleEl.value : 'investor';
     const btn = form.querySelector('button');
 
     btn.disabled = true;
@@ -408,7 +421,7 @@ async function submitWaitlist(e, formId) {
         const res = await fetch('/api/waitlist', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({email: email})
+            body: JSON.stringify({email: email, role: role})
         });
         const data = await res.json();
 

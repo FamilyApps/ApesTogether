@@ -33,7 +33,7 @@ HEADERS = {
 # Grok: 1.37x  (~$13,892 -> ~$19,032)
 # Wolff: 1.52x (~$9,953 -> ~$15,129)
 BOTS = [
-    {'user_id': 13, 'label': 'Grok Portfolio', 'multiplier': 1.37},
+    {'user_id': 13, 'label': 'The Grok Portfolio', 'multiplier': 1.37},
     {'user_id': 14, 'label': "Wolff's Flagship Fund", 'multiplier': 1.52},
 ]
 

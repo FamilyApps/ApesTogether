@@ -39,10 +39,10 @@
           "internalID" : "6742894371",
           "introductoryOffer" : {
             "displayPrice" : "0",
-            "internalID" : "FREE_TRIAL_1M",
+            "internalID" : "FREE_TRIAL_7D",
             "numberOfPeriods" : 1,
             "paymentMode" : "free",
-            "subscriptionPeriod" : "P1M"
+            "subscriptionPeriod" : "P1W"
           },
           "localizations" : [
             {

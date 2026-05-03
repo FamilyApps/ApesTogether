@@ -41,7 +41,7 @@ HEADERS = {
 
 BOTS = [
     {
-        'label': 'Grok Portfolio',
+        'label': 'The Grok Portfolio',
         'source': 'grok_portfolio',
         'industry': 'Technology',
         'strategy': 'AI/Tech-focused growth portfolio managed by xAI Grok',
