@@ -2106,6 +2106,29 @@ def track_linkclick():
         return jsonify({'ok': False}), 200
 
 
+@app.route('/admin/waitlist')
+@admin_required
+def admin_view_waitlist():
+    """View all beta waitlist signups with role breakdown."""
+    from models import BetaWaitlist
+    entries = BetaWaitlist.query.order_by(BetaWaitlist.created_at.desc()).all()
+    rows = [{
+        'id': e.id,
+        'email': e.email,
+        'role': e.role or 'unspecified',
+        'referral_source': e.referral_source,
+        'signed_up': e.created_at.isoformat() if e.created_at else None
+    } for e in entries]
+    investors = sum(1 for e in entries if e.role == 'investor')
+    traders = sum(1 for e in entries if e.role == 'trader')
+    unspecified = sum(1 for e in entries if not e.role)
+    return jsonify({
+        'total': len(rows),
+        'breakdown': {'investors': investors, 'traders': traders, 'unspecified': unspecified},
+        'entries': rows
+    })
+
+
 @app.route('/admin/debug-user-snapshots')
 @admin_required
 def admin_debug_user_snapshots():

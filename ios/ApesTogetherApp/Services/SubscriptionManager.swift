@@ -8,8 +8,22 @@ class SubscriptionManager: ObservableObject {
     @Published var purchasedSubscriptions: [Product] = []
     @Published var isProcessing = false
     @Published var error: String?
+    @Published var selectedPlan: PlanType = .annual
     
-    private let productIds = ["com.apestogether.subscription.monthly"]
+    enum PlanType: String, CaseIterable {
+        case monthly, annual
+    }
+    
+    static let monthlyProductId = "com.apestogether.subscription.monthly"
+    static let annualProductId  = "com.apestogether.subscription.annual"
+    
+    private let productIds = [monthlyProductId, annualProductId]
+    
+    var monthlyProduct: Product? { products.first { $0.id == Self.monthlyProductId } }
+    var annualProduct: Product?  { products.first { $0.id == Self.annualProductId } }
+    var selectedProduct: Product? {
+        selectedPlan == .annual ? annualProduct : monthlyProduct
+    }
     private var updateTask: Task<Void, Never>?
     
     init() {
@@ -45,13 +59,13 @@ class SubscriptionManager: ObservableObject {
             await loadProducts()
         }
         
-        guard let product = products.first else {
+        guard let product = selectedProduct ?? products.first else {
             error = "Subscription not available yet. Please try again later."
             print("[SubscriptionManager] subscribe() failed: no products loaded for IDs: \(productIds)")
             return
         }
         
-        print("[SubscriptionManager] Starting purchase of \(product.id) for user \(userId)")
+        print("[SubscriptionManager] Starting purchase of \(product.id) (\(selectedPlan.rawValue)) for user \(userId)")
         
         isProcessing = true
         error = nil

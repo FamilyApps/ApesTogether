@@ -44,15 +44,39 @@ class IAPValidationService:
     APPLE_PRODUCTION_URL = 'https://buy.itunes.apple.com/verifyReceipt'
     APPLE_SANDBOX_URL = 'https://sandbox.itunes.apple.com/verifyReceipt'
     
-    # Our product ID
+    # Our product IDs
     PRODUCT_ID = 'com.apestogether.subscription.monthly'
+    ANNUAL_PRODUCT_ID = 'com.apestogether.subscription.annual'
+    VALID_PRODUCT_IDS = {PRODUCT_ID, ANNUAL_PRODUCT_ID}
     
     # Pricing — Small Business Program (< $1M annual revenue)
     # 15% to Apple/Google, then 15% platform / 85% influencer on remainder
+    PRICING = {
+        'com.apestogether.subscription.monthly': {
+            'price': 9.00,
+            'store_fee': 1.35,           # 15% of $9.00
+            'platform_revenue': 1.15,    # 15% of $7.65 (post-store)
+            'influencer_payout': 6.50,   # 85% of $7.65 (post-store)
+            'period': 'monthly',
+        },
+        'com.apestogether.subscription.annual': {
+            'price': 79.00,
+            'store_fee': 11.85,          # 15% of $79.00
+            'platform_revenue': 10.07,   # 15% of $67.15 (post-store)
+            'influencer_payout': 57.08,  # 85% of $67.15 (post-store)
+            'period': 'annual',
+        },
+    }
+    
+    # Default pricing (monthly) for backward compatibility
     SUBSCRIPTION_PRICE = 9.00
-    STORE_FEE = 1.35           # 15% of $9.00
-    PLATFORM_REVENUE = 1.15    # 15% of $7.65 (post-store)
-    INFLUENCER_PAYOUT = 6.50   # 85% of $7.65 (post-store)
+    STORE_FEE = 1.35
+    PLATFORM_REVENUE = 1.15
+    INFLUENCER_PAYOUT = 6.50
+    
+    def _get_pricing(self, product_id: str) -> dict:
+        """Get pricing breakdown for a product ID, defaulting to monthly."""
+        return self.PRICING.get(product_id, self.PRICING[self.PRODUCT_ID])
     
     def __init__(self):
         # Apple credentials
@@ -182,6 +206,7 @@ class IAPValidationService:
             offer_type = payload.get('offerType')  # 1=intro, 2=promo, 3=offer code
             is_trial = (offer_type == 1)
             
+            pricing = self._get_pricing(product_id)
             return {
                 'valid': True,
                 'platform': Platform.APPLE.value,
@@ -195,10 +220,11 @@ class IAPValidationService:
                 'is_in_intro_offer': is_trial,
                 'auto_renew_status': True,  # StoreKit 2 only sends active renewals
                 'environment': payload.get('environment', 'unknown'),
-                'price': self.SUBSCRIPTION_PRICE,
-                'influencer_payout': self.INFLUENCER_PAYOUT,
-                'platform_revenue': self.PLATFORM_REVENUE,
-                'store_fee': self.STORE_FEE,
+                'price': pricing['price'],
+                'influencer_payout': pricing['influencer_payout'],
+                'platform_revenue': pricing['platform_revenue'],
+                'store_fee': pricing['store_fee'],
+                'billing_period': pricing['period'],
             }
             
         except Exception as e:

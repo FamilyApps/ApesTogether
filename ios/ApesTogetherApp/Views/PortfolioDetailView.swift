@@ -89,7 +89,9 @@ struct PortfolioDetailView: View {
                                     HStack(spacing: 6) {
                                         Image(systemName: "crown.fill")
                                             .font(.system(size: 13))
-                                        Text("Try 7 Days Free, then $\(String(format: "%.0f", portfolio.subscriptionPrice))/mo")
+                                        Text(subscriptionManager.selectedPlan == .annual
+                                             ? "Try 7 Days Free, then $79/yr"
+                                             : "Try 7 Days Free, then $\(String(format: "%.0f", portfolio.subscriptionPrice))/mo")
                                             .font(.system(size: 14, weight: .bold))
                                     }
                                     .frame(maxWidth: .infinity)
@@ -243,11 +245,10 @@ struct PortfolioDetailView: View {
                             // ── Blurred Holdings Teaser ──
                             BlurredHoldingsTeaser(
                                 username: portfolio.owner.username,
-                                subscriptionPrice: portfolio.subscriptionPrice,
+                                subscriptionManager: subscriptionManager,
                                 onSubscribe: {
                                     Task { await subscriptionManager.subscribe(to: portfolio.owner.id) }
-                                },
-                                isProcessing: subscriptionManager.isProcessing
+                                }
                             )
                             .padding(.horizontal, 16)
                         } else {
@@ -918,9 +919,8 @@ struct SectorAllocationCard: View {
 
 struct BlurredHoldingsTeaser: View {
     let username: String
-    let subscriptionPrice: Double
+    @ObservedObject var subscriptionManager: SubscriptionManager
     let onSubscribe: () -> Void
-    let isProcessing: Bool
     
     private let fakeHoldings: [(String, String, String, Bool)] = [
         ("AAPL", "$8,329", "+13.6%", true),
@@ -1010,6 +1010,17 @@ struct BlurredHoldingsTeaser: View {
                 }
                 .frame(maxWidth: 240)
                 
+                // Plan toggle pills
+                HStack(spacing: 0) {
+                    planPill(label: "Annual", sublabel: "$79/year", tag: "Save 27%", plan: .annual)
+                    planPill(label: "Monthly", sublabel: "$9/month", tag: nil, plan: .monthly)
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.white.opacity(0.06))
+                )
+                .padding(.horizontal, 16)
+                
                 // CTA button
                 Button(action: onSubscribe) {
                     HStack(spacing: 6) {
@@ -1024,13 +1035,21 @@ struct BlurredHoldingsTeaser: View {
                     .background(Color.primaryAccent)
                     .cornerRadius(12)
                 }
-                .disabled(isProcessing)
+                .disabled(subscriptionManager.isProcessing)
                 .padding(.horizontal, 16)
                 
-                // Price disclosure (Apple requirement: most prominent)
-                Text("7-day free trial, then $\(String(format: "%.0f", subscriptionPrice))/month")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.textSecondary)
+                // Price disclosure (Apple requirement: total amount most prominent)
+                Group {
+                    if subscriptionManager.selectedPlan == .annual {
+                        Text("7-day free trial, then $79/year ($6.58/mo)")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.textSecondary)
+                    } else {
+                        Text("7-day free trial, then $9/month")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.textSecondary)
+                    }
+                }
                 
                 Text("Cancel anytime — we'll remind you before the trial ends")
                     .font(.system(size: 10))
@@ -1060,6 +1079,44 @@ struct BlurredHoldingsTeaser: View {
             Text(text)
                 .font(.system(size: 13))
                 .foregroundColor(.textPrimary)
+        }
+    }
+    
+    private func planPill(label: String, sublabel: String, tag: String?, plan: SubscriptionManager.PlanType) -> some View {
+        let isSelected = subscriptionManager.selectedPlan == plan
+        return Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                subscriptionManager.selectedPlan = plan
+            }
+        } label: {
+            VStack(spacing: 3) {
+                if let tag = tag {
+                    Text(tag)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(isSelected ? .white : .primaryAccent)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule().fill(isSelected ? Color.primaryAccent : Color.primaryAccent.opacity(0.15))
+                        )
+                }
+                Text(label)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(isSelected ? .textPrimary : .textSecondary)
+                Text(sublabel)
+                    .font(.system(size: 11))
+                    .foregroundColor(isSelected ? .textSecondary : .textMuted)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(isSelected ? Color.white.opacity(0.1) : Color.clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(isSelected ? Color.primaryAccent : Color.clear, lineWidth: 1.5)
+            )
         }
     }
 }
