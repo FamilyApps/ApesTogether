@@ -47,24 +47,25 @@ Your current pricing is correctly positioned. Here's why, and the detailed evide
 
 **Pricing:**
 - **$0 additional fee for copy trading** — no subscription, no performance fee, no management fee
-- Revenue comes from spreads and currency conversion fees
+- Revenue comes from spreads and currency conversion fees (hidden costs)
 - **$200 minimum** to copy a single investor
 - **$500+ recommended** for accurate replication
 - Withdrawal fee: $5
 - Currency conversion fee: 1.5% (for non-USD deposits)
 - Inactivity fee: $10/month after 12 months
+- **Waitlisted access** — copy trading feature is currently behind a waitlist in the US, creating an additional barrier to entry beyond the $200 minimum
 
-**Creator compensation (eToro Popular Investor Program):**
-- **Cadet tier:** No payment
-- **Champion tier:** 1.5% of AUC (Assets Under Copy) annually
-- **Elite tier:** 1.5% of AUC + additional perks
-- **Elite Pro:** 2% of AUC
-- Example: $150K AUC = $2,250/year ($187/month)
-- Example: $1M AUC = $15,000/year
+**Creator compensation (eToro Popular Investor Program) — 4 tiers:**
+- **Cadet tier (Level 1):** No payment. Need 1 verified copier, $1K AUC, risk score ≤6, must stay 2+ months
+- **Champion tier (Level 2):** Monthly payment from eToro (fixed amount, not %). Need to stay 4+ months
+- **Elite tier (Level 3):** 1.5% of AUC annually, paid monthly. Must stay 2+ months before advancing
+- **Elite Pro (Level 4):** Up to 2-2.5% of AUC annually, paid monthly
+- Example: $150K AUC × 1.5% = $2,250/year ($187/month)
+- Example: $5M AUC × 2% = $100,000/year ($8,333/month)
 
-**User experience:** Generally positive. Main complaints: positions can't be transferred to another broker, small copy amounts miss some trades.
+**User experience:** Generally positive. Main complaints: positions can't be transferred to another broker, small copy amounts miss some trades. Copy trading behind a waitlist frustrates US users who signed up expecting immediate access.
 
-**Key insight:** eToro's "free" model is funded by spreads/FX fees, which are invisible to most users. Their Popular Investor payments are based on AUC, not subscriptions — structurally different from your model.
+**Key insight:** eToro's "free" model is funded by spreads/FX fees, which are invisible to most users. Their Popular Investor payments are based on AUC, not subscriptions — structurally different from your model. The waitlist + $200 minimum + requirement that real money is at risk are all significant friction points that Apes Together avoids entirely.
 
 ---
 
