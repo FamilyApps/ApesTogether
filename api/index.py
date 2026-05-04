@@ -2210,13 +2210,58 @@ def admin_debug_user_snapshots():
         'total': round(t.quantity * t.price, 2) if t.quantity and t.price else None
     } for t in transactions]
 
+    # Replay cash tracking from ALL transactions to verify max_cash_deployed
+    all_txns = Transaction.query.filter(
+        Transaction.user_id == user_id
+    ).order_by(Transaction.timestamp.asc()).all()
+    
+    replay_cash = 0.0
+    replay_max_cash = 0.0
+    replay_log = []
+    for txn in all_txns:
+        val = txn.quantity * txn.price
+        txn_date = txn.timestamp.date().isoformat() if txn.timestamp else 'N/A'
+        before_cash = replay_cash
+        before_max = replay_max_cash
+        if txn.transaction_type in ('buy', 'initial'):
+            if replay_cash >= val:
+                replay_cash -= val
+            else:
+                new_cap = val - replay_cash
+                replay_cash = 0
+                replay_max_cash += new_cap
+        elif txn.transaction_type in ('sell', 'dividend'):
+            replay_cash += val
+        # Only log transactions in our date window for readability
+        if start_date <= (txn.timestamp.date() if txn.timestamp else start_date) <= end_date:
+            replay_log.append({
+                'date': txn_date,
+                'type': txn.transaction_type,
+                'ticker': txn.ticker,
+                'total': round(val, 2),
+                'cash_before': round(before_cash, 2),
+                'max_cash_before': round(before_max, 2),
+                'cash_after': round(replay_cash, 2),
+                'max_cash_after': round(replay_max_cash, 2),
+            })
+    
     return jsonify({
-        'user': {'id': user_id, 'username': user.username, 'max_cash_deployed': user.max_cash_deployed},
+        'user': {
+            'id': user_id,
+            'username': user.username,
+            'max_cash_deployed_current': user.max_cash_deployed,
+            'cash_proceeds_current': user.cash_proceeds,
+            'max_cash_deployed_replayed': round(replay_max_cash, 2),
+            'cash_proceeds_replayed': round(replay_cash, 2),
+            'drift': round(user.max_cash_deployed - replay_max_cash, 2),
+        },
         'period': f'{start} to {end}',
         'snapshot_count': len(rows),
         'transaction_count': len(txn_rows),
+        'total_transaction_count': len(all_txns),
         'snapshots': rows,
-        'transactions': txn_rows
+        'transactions': txn_rows,
+        'cash_replay_in_window': replay_log,
     })
 
 
