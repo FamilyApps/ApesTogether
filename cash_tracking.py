@@ -53,7 +53,12 @@ def process_transaction(db, user_id, ticker, quantity, price, transaction_type, 
     Returns:
         dict with updated max_cash_deployed and cash_proceeds
     """
-    user = User.query.get(user_id)
+    # CRITICAL: Use SELECT ... FOR UPDATE to prevent race conditions when
+    # multiple trades execute concurrently (e.g., rapid-fire buys/sells).
+    # Without this lock, concurrent reads of cash_proceeds/max_cash_deployed
+    # can cause stale values, leading to incorrect capital tracking.
+    from sqlalchemy import text as _text
+    user = db.session.query(User).filter(User.id == user_id).with_for_update().first()
     if not user:
         raise ValueError(f"User {user_id} not found")
     

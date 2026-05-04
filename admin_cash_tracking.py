@@ -667,6 +667,145 @@ def register_cash_tracking_routes(app, db):
             logger.error(f"Cash tracking error: {e}", exc_info=True)
             return jsonify({'error': str(e)}), 500
     
+    @app.route('/admin/cash-tracking/reconcile')
+    @admin_required
+    def reconcile_cash_tracking():
+        """
+        Fix max_cash_deployed drift caused by race conditions in concurrent trades.
+        
+        For a given user (or all users):
+        1. Replay ALL transactions chronologically to get the correct max_cash_deployed
+        2. Fix the user model if it has drifted
+        3. Rebuild snapshot max_cash_deployed values (per-date replay)
+        
+        Usage:
+          /admin/cash-tracking/reconcile?username=chart1658          (preview)
+          /admin/cash-tracking/reconcile?username=chart1658&execute=true  (fix)
+          /admin/cash-tracking/reconcile?all=true&execute=true       (fix all users)
+        """
+        username = request.args.get('username')
+        fix_all = request.args.get('all') == 'true'
+        execute = request.args.get('execute') == 'true'
+        
+        try:
+            from sqlalchemy import text
+            
+            if username:
+                user = User.query.filter_by(username=username).first()
+                if not user:
+                    return jsonify({'error': f'User {username} not found'}), 404
+                users = [user]
+            elif fix_all:
+                users = User.query.all()
+            else:
+                return jsonify({'error': 'Provide username or all=true'}), 400
+            
+            results = []
+            
+            for user in users:
+                # Get ALL transactions chronologically
+                txns = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.timestamp).all()
+                
+                if not txns:
+                    continue
+                
+                # Replay to get correct final values
+                replay_cash = 0.0
+                replay_max_cash = 0.0
+                
+                # Also build per-date max_cash_deployed for snapshot correction
+                per_date_max_cash = {}
+                per_date_cash_proceeds = {}
+                
+                for txn in txns:
+                    val = txn.quantity * txn.price
+                    if txn.transaction_type in ('buy', 'initial'):
+                        if replay_cash >= val:
+                            replay_cash -= val
+                        else:
+                            new_cap = val - replay_cash
+                            replay_cash = 0
+                            replay_max_cash += new_cap
+                    elif txn.transaction_type in ('sell', 'dividend'):
+                        replay_cash += val
+                    
+                    txn_date = txn.timestamp.date() if txn.timestamp else None
+                    if txn_date:
+                        per_date_max_cash[txn_date] = replay_max_cash
+                        per_date_cash_proceeds[txn_date] = replay_cash
+                
+                # Check for drift
+                user_drift = round(user.max_cash_deployed - replay_max_cash, 2)
+                cash_drift = round(user.cash_proceeds - replay_cash, 2)
+                
+                result = {
+                    'username': user.username,
+                    'user_max_cash_current': round(user.max_cash_deployed, 2),
+                    'user_max_cash_correct': round(replay_max_cash, 2),
+                    'user_cash_current': round(user.cash_proceeds, 2),
+                    'user_cash_correct': round(replay_cash, 2),
+                    'max_cash_drift': user_drift,
+                    'cash_drift': cash_drift,
+                    'has_drift': abs(user_drift) > 0.01 or abs(cash_drift) > 0.01,
+                    'transactions': len(txns),
+                }
+                
+                if execute:
+                    # 1. Fix user model
+                    db.session.execute(text("""
+                        UPDATE "user"
+                        SET max_cash_deployed = :max_cash,
+                            cash_proceeds = :cash_proc
+                        WHERE id = :user_id
+                    """), {
+                        'max_cash': replay_max_cash,
+                        'cash_proc': replay_cash,
+                        'user_id': user.id
+                    })
+                    
+                    # 2. Fix snapshots — update max_cash_deployed per date
+                    # For each snapshot date, use the max_cash_deployed as of end-of-day
+                    from models import PortfolioSnapshot
+                    snapshots = PortfolioSnapshot.query.filter_by(user_id=user.id).order_by(PortfolioSnapshot.date).all()
+                    
+                    snapshots_fixed = 0
+                    # Build a sorted list of dates where max_cash changed
+                    sorted_dates = sorted(per_date_max_cash.keys())
+                    
+                    for snap in snapshots:
+                        # Find the correct max_cash_deployed as of snapshot date
+                        correct_max_cash = 0.0
+                        for d in sorted_dates:
+                            if d <= snap.date:
+                                correct_max_cash = per_date_max_cash[d]
+                            else:
+                                break
+                        
+                        if abs((snap.max_cash_deployed or 0) - correct_max_cash) > 0.01:
+                            snap.max_cash_deployed = correct_max_cash
+                            snapshots_fixed += 1
+                    
+                    result['snapshots_fixed'] = snapshots_fixed
+                    result['fixed'] = True
+                
+                results.append(result)
+            
+            if execute:
+                db.session.commit()
+            
+            drifted = [r for r in results if r.get('has_drift')]
+            return jsonify({
+                'execute': execute,
+                'users_checked': len(results),
+                'users_with_drift': len(drifted),
+                'results': results if len(results) <= 20 else drifted,
+            })
+        
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Reconciliation error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
+    
     @app.route('/admin/cash-tracking/backfill-users')
     @admin_required
     def backfill_user_cash():
