@@ -173,8 +173,9 @@ a:hover { text-decoration: underline; }
     width: 100%; border-radius: 10px; display: block;
 }
 .mockup-frame.has-img {
-    background: #2a2d35; border: none; padding: 20px;
-    box-shadow: 0 20px 80px rgba(0,0,0,0.5);
+    background: linear-gradient(145deg, #2e323b 0%, #22262d 40%, #1a1e24 100%);
+    border: 1px solid rgba(255,255,255,0.06); padding: 20px;
+    box-shadow: 0 20px 80px rgba(0,0,0,0.5), 0 0 60px rgba(0,217,165,0.04);
     border-radius: 18px;
 }
 .mockup-frame.has-img img {

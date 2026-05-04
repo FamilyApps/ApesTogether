@@ -3666,6 +3666,13 @@ try:
 except Exception as e:
     logger.warning(f"Could not register mobile API blueprint: {e}")
 
+try:
+    from admin_cash_tracking import register_cash_tracking_routes
+    register_cash_tracking_routes(app, db)
+    logger.info("Cash tracking admin routes registered successfully")
+except Exception as e:
+    logger.warning(f"Could not register cash tracking routes: {e}")
+
 # Error handler
 @app.errorhandler(500)
 def internal_error(error):

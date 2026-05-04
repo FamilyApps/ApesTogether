@@ -775,14 +775,28 @@ def register_cash_tracking_routes(app, db):
                     for snap in snapshots:
                         # Find the correct max_cash_deployed as of snapshot date
                         correct_max_cash = 0.0
+                        correct_cash_proceeds = 0.0
                         for d in sorted_dates:
                             if d <= snap.date:
                                 correct_max_cash = per_date_max_cash[d]
+                                correct_cash_proceeds = per_date_cash_proceeds[d]
                             else:
                                 break
                         
+                        changed = False
                         if abs((snap.max_cash_deployed or 0) - correct_max_cash) > 0.01:
                             snap.max_cash_deployed = correct_max_cash
+                            changed = True
+                        if abs((snap.cash_proceeds or 0) - correct_cash_proceeds) > 0.01:
+                            snap.cash_proceeds = correct_cash_proceeds
+                            changed = True
+                        # Recalculate total_value = stock_value + cash_proceeds
+                        if snap.stock_value is not None and snap.cash_proceeds is not None:
+                            correct_total = snap.stock_value + snap.cash_proceeds
+                            if abs((snap.total_value or 0) - correct_total) > 0.01:
+                                snap.total_value = correct_total
+                                changed = True
+                        if changed:
                             snapshots_fixed += 1
                     
                     result['snapshots_fixed'] = snapshots_fixed
