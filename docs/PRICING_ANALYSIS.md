@@ -6,9 +6,9 @@
 
 ## Executive Summary
 
-**Recommendation: Keep $9/month per trader subscription. Lower the free trial from 1 month to 7 days. Add an annual plan at $79/year (27% discount).**
+**Recommendation: Keep $9/month per trader subscription. Lower the free trial from 1 month to 7 days. Add an annual plan at $69/year (36% discount).**
 
-Your current pricing is correctly positioned. Here's why, and the detailed evidence.
+The aggressive 36% annual discount compensates for the manual execution friction that distinguishes Apes Together from auto-copy platforms. Your monthly price is below every comparable signal service; your annual price beats every competitor on fee drag. Here's the detailed evidence.
 
 ---
 

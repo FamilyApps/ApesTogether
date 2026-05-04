@@ -33,7 +33,7 @@
           "codeOffers" : [
 
           ],
-          "displayPrice" : "79.00",
+          "displayPrice" : "69.00",
           "familyShareable" : false,
           "groupNumber" : 1,
           "internalID" : "6742894372",
@@ -53,7 +53,7 @@
           ],
           "productID" : "com.apestogether.subscription.annual",
           "recurringSubscriptionPeriod" : "P1Y",
-          "referenceName" : "Annual - $79",
+          "referenceName" : "Annual - $69",
           "subscriptionGroupID" : "21586488",
           "type" : "RecurringSubscription"
         },

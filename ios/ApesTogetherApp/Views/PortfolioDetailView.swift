@@ -90,7 +90,7 @@ struct PortfolioDetailView: View {
                                         Image(systemName: "crown.fill")
                                             .font(.system(size: 13))
                                         Text(subscriptionManager.selectedPlan == .annual
-                                             ? "Try 7 Days Free, then $79/yr"
+                                             ? "Try 7 Days Free, then $69/yr"
                                              : "Try 7 Days Free, then $\(String(format: "%.0f", portfolio.subscriptionPrice))/mo")
                                             .font(.system(size: 14, weight: .bold))
                                     }
@@ -1012,7 +1012,7 @@ struct BlurredHoldingsTeaser: View {
                 
                 // Plan toggle pills
                 HStack(spacing: 0) {
-                    planPill(label: "Annual", sublabel: "$79/year", tag: "Save 27%", plan: .annual)
+                    planPill(label: "Annual", sublabel: "$69/year", tag: "Save 36%", plan: .annual)
                     planPill(label: "Monthly", sublabel: "$9/month", tag: nil, plan: .monthly)
                 }
                 .background(
@@ -1041,7 +1041,7 @@ struct BlurredHoldingsTeaser: View {
                 // Price disclosure (Apple requirement: total amount most prominent)
                 Group {
                     if subscriptionManager.selectedPlan == .annual {
-                        Text("7-day free trial, then $79/year ($6.58/mo)")
+                        Text("7-day free trial, then $69/year ($5.75/mo)")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(.textSecondary)
                     } else {

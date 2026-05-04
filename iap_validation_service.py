@@ -60,10 +60,10 @@ class IAPValidationService:
             'period': 'monthly',
         },
         'com.apestogether.subscription.annual': {
-            'price': 79.00,
-            'store_fee': 11.85,          # 15% of $79.00
-            'platform_revenue': 10.07,   # 15% of $67.15 (post-store)
-            'influencer_payout': 57.08,  # 85% of $67.15 (post-store)
+            'price': 69.00,
+            'store_fee': 10.35,          # 15% of $69.00
+            'platform_revenue': 8.80,    # 15% of $58.65 (post-store)
+            'influencer_payout': 49.85,  # 85% of $58.65 (post-store)
             'period': 'annual',
         },
     }
