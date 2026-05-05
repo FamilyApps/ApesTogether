@@ -762,18 +762,20 @@ def register_cash_tracking_routes(app, db):
                         'cash_proc': replay_cash,
                         'user_id': user.id
                     })
-                    
-                    # 2. Fix snapshots — update max_cash_deployed per date
-                    # For each snapshot date, use the max_cash_deployed as of end-of-day
+
+                    # 2. Fix snapshots via raw SQL UPDATE (per snapshot).
+                    # We previously mutated ORM objects and relied on db.session.commit()
+                    # to flush them, but those flushes did not persist reliably (likely a
+                    # session/identity-map edge case), causing snapshots_fixed > 0 but no
+                    # actual DB changes. Raw UPDATE returns rowcount so we know each
+                    # statement persisted.
                     from models import PortfolioSnapshot
                     snapshots = PortfolioSnapshot.query.filter_by(user_id=user.id).order_by(PortfolioSnapshot.date).all()
-                    
+
                     snapshots_fixed = 0
-                    # Build a sorted list of dates where max_cash changed
                     sorted_dates = sorted(per_date_max_cash.keys())
-                    
+
                     for snap in snapshots:
-                        # Find the correct max_cash_deployed as of snapshot date
                         correct_max_cash = 0.0
                         correct_cash_proceeds = 0.0
                         for d in sorted_dates:
@@ -782,23 +784,28 @@ def register_cash_tracking_routes(app, db):
                                 correct_cash_proceeds = per_date_cash_proceeds[d]
                             else:
                                 break
-                        
-                        changed = False
-                        if abs((snap.max_cash_deployed or 0) - correct_max_cash) > 0.01:
-                            snap.max_cash_deployed = correct_max_cash
-                            changed = True
-                        if abs((snap.cash_proceeds or 0) - correct_cash_proceeds) > 0.01:
-                            snap.cash_proceeds = correct_cash_proceeds
-                            changed = True
-                        # Recalculate total_value = stock_value + cash_proceeds
-                        if snap.stock_value is not None and snap.cash_proceeds is not None:
-                            correct_total = snap.stock_value + snap.cash_proceeds
-                            if abs((snap.total_value or 0) - correct_total) > 0.01:
-                                snap.total_value = correct_total
-                                changed = True
-                        if changed:
+
+                        upd = db.session.execute(text("""
+                            UPDATE portfolio_snapshot
+                            SET max_cash_deployed = :max_cash,
+                                cash_proceeds = :cash_proc,
+                                total_value = COALESCE(stock_value, 0) + :cash_proc
+                            WHERE user_id = :user_id
+                              AND date = :snap_date
+                              AND (
+                                  ABS(COALESCE(max_cash_deployed, 0) - :max_cash) > 0.01
+                                  OR ABS(COALESCE(cash_proceeds, 0) - :cash_proc) > 0.01
+                                  OR ABS(COALESCE(total_value, 0) - (COALESCE(stock_value, 0) + :cash_proc)) > 0.01
+                              )
+                        """), {
+                            'max_cash': correct_max_cash,
+                            'cash_proc': correct_cash_proceeds,
+                            'user_id': user.id,
+                            'snap_date': snap.date,
+                        })
+                        if upd.rowcount > 0:
                             snapshots_fixed += 1
-                    
+
                     result['snapshots_fixed'] = snapshots_fixed
                     result['fixed'] = True
                 
@@ -878,15 +885,20 @@ def register_cash_tracking_routes(app, db):
 
             target_max_cash = round(cost_basis + replay_cash, 2)
 
-            # Safety check: this endpoint is only meant for users with no buys
-            if buy_count > 0:
+            # Safety check: only fix users whose recorded transactions can't fully account
+            # for their current holdings. If replay_max_cash already >= cost_basis, the
+            # transaction history is sufficient and reconcile is the right tool.
+            if replay_max_cash >= cost_basis - 0.01:
                 return jsonify({
-                    'error': 'user_has_buy_transactions',
+                    'error': 'use_reconcile_instead',
                     'message': (
-                        f'{username} has {buy_count} buy/initial transactions. '
-                        'Use /admin/cash-tracking/reconcile instead — that endpoint '
-                        'replays buys correctly.'
+                        f'{username}\'s replay max_cash_deployed (${replay_max_cash:.2f}) '
+                        f'covers their current cost basis (${cost_basis:.2f}). '
+                        'Transaction history is sufficient — use '
+                        '/admin/cash-tracking/reconcile instead.'
                     ),
+                    'replay_max_cash': round(replay_max_cash, 2),
+                    'cost_basis': cost_basis,
                     'buy_count': buy_count,
                     'sell_count': sell_count,
                 }), 400
@@ -896,6 +908,7 @@ def register_cash_tracking_routes(app, db):
                 'user_id': user.id,
                 'stocks_held': len(stocks),
                 'cost_basis': cost_basis,
+                'replayed_max_cash_deployed': round(replay_max_cash, 2),
                 'replayed_cash_proceeds': round(replay_cash, 2),
                 'target_max_cash_deployed': target_max_cash,
                 'current_user_max_cash_deployed': round(user.max_cash_deployed or 0, 2),
