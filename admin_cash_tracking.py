@@ -28,6 +28,7 @@ def register_cash_tracking_routes(app, db):
     
     @app.route('/admin/cash-tracking/status')
     @admin_required
+    @with_db_retry
     def cash_tracking_status():
         """Quick JSON status check of all phases"""
         try:
