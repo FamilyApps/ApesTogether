@@ -15,6 +15,7 @@ Import these routes in api/index.py:
 from flask import jsonify, request
 from flask_login import current_user
 from admin_auth import admin_required
+from mobile_api import with_db_retry
 from models import User, Stock, Transaction, PortfolioSnapshot
 from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
@@ -669,6 +670,7 @@ def register_cash_tracking_routes(app, db):
     
     @app.route('/admin/cash-tracking/reconcile')
     @admin_required
+    @with_db_retry
     def reconcile_cash_tracking():
         """
         Fix max_cash_deployed drift caused by race conditions in concurrent trades.
@@ -829,6 +831,7 @@ def register_cash_tracking_routes(app, db):
     
     @app.route('/admin/cash-tracking/fix-seeded-bot')
     @admin_required
+    @with_db_retry
     def fix_seeded_bot_cash():
         """
         Fix max_cash_deployed for bots whose stocks were seeded directly without
