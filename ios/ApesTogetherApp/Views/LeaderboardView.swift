@@ -704,6 +704,9 @@ struct LeaderboardCard: View {
                     )
                 }
                 
+                // Compact plan toggle
+                CompactPlanToggle(subscriptionManager: subscriptionManager)
+                
                 Button {
                     Task { await subscriptionManager.subscribe(to: entry.user.id) }
                 } label: {

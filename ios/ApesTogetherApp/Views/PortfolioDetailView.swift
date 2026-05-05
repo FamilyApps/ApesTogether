@@ -82,44 +82,49 @@ struct PortfolioDetailView: View {
                         
                         // ── Action Buttons (non-owner: Subscribe + Share) ──
                         if !portfolio.isOwner && !portfolio.isSubscribed {
-                            HStack(spacing: 10) {
-                                Button {
-                                    Task { await subscriptionManager.subscribe(to: portfolio.owner.id) }
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "crown.fill")
-                                            .font(.system(size: 13))
-                                        Text(subscriptionManager.selectedPlan == .annual
-                                             ? "Try 7 Days Free, then $69/yr"
-                                             : "Try 7 Days Free, then $\(String(format: "%.0f", portfolio.subscriptionPrice))/mo")
-                                            .font(.system(size: 14, weight: .bold))
-                                    }
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 13)
-                                    .background(Color.primaryAccent)
-                                    .foregroundColor(.white)
-                                    .cornerRadius(12)
-                                }
-                                .disabled(subscriptionManager.isProcessing)
+                            VStack(spacing: 10) {
+                                // Compact plan toggle
+                                CompactPlanToggle(subscriptionManager: subscriptionManager)
                                 
-                                ShareLink(
-                                    item: URL(string: "https://apestogether.ai/p/\(portfolio.owner.portfolioSlug ?? slug)?period=\(viewModel.selectedPeriod)")!,
-                                    subject: Text("\(portfolio.owner.username)'s Portfolio"),
-                                    message: Text("Check out \(portfolio.owner.username)'s stock portfolio on ApesTogether!")
-                                ) {
-                                    HStack(spacing: 5) {
-                                        Image(systemName: "square.and.arrow.up")
-                                            .font(.system(size: 13))
-                                        Text("Share")
-                                            .font(.system(size: 14, weight: .semibold))
+                                HStack(spacing: 10) {
+                                    Button {
+                                        Task { await subscriptionManager.subscribe(to: portfolio.owner.id) }
+                                    } label: {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "crown.fill")
+                                                .font(.system(size: 13))
+                                            Text(subscriptionManager.selectedPlan == .annual
+                                                 ? "Try 7 Days Free, then $69/yr"
+                                                 : "Try 7 Days Free, then $\(String(format: "%.0f", portfolio.subscriptionPrice))/mo")
+                                                .font(.system(size: 14, weight: .bold))
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 13)
+                                        .background(Color.primaryAccent)
+                                        .foregroundColor(.white)
+                                        .cornerRadius(12)
                                     }
-                                    .foregroundColor(.textSecondary)
-                                    .padding(.vertical, 13)
-                                    .padding(.horizontal, 20)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                                    )
+                                    .disabled(subscriptionManager.isProcessing)
+                                    
+                                    ShareLink(
+                                        item: URL(string: "https://apestogether.ai/p/\(portfolio.owner.portfolioSlug ?? slug)?period=\(viewModel.selectedPeriod)")!,
+                                        subject: Text("\(portfolio.owner.username)'s Portfolio"),
+                                        message: Text("Check out \(portfolio.owner.username)'s stock portfolio on ApesTogether!")
+                                    ) {
+                                        HStack(spacing: 5) {
+                                            Image(systemName: "square.and.arrow.up")
+                                                .font(.system(size: 13))
+                                            Text("Share")
+                                                .font(.system(size: 14, weight: .semibold))
+                                        }
+                                        .foregroundColor(.textSecondary)
+                                        .padding(.vertical, 13)
+                                        .padding(.horizontal, 20)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                                        )
+                                    }
                                 }
                             }
                             .padding(.horizontal, 16)
