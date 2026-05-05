@@ -1219,7 +1219,7 @@ def get_leaderboard():
                 'rank': 0,
                 'user': {
                     'id': user_id,
-                    'username': entry.get('username', user.username),
+                    'username': user.username,  # Live DB is source of truth (avoids stale cached usernames after renames)
                     'portfolio_slug': user.portfolio_slug
                 },
                 'return_percent': user_return,
