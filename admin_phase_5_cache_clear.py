@@ -11,6 +11,9 @@ from flask import jsonify, request
 from flask_login import current_user
 from admin_auth import admin_required
 from sqlalchemy import text
+import logging
+
+logger = logging.getLogger(__name__)
 
 def register_phase_5_cache_routes(app, db):
     """Register Phase 5 cache clearing routes"""

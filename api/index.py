@@ -3673,6 +3673,20 @@ try:
 except Exception as e:
     logger.warning(f"Could not register cash tracking routes: {e}")
 
+try:
+    from admin_phase_5_cache_clear import register_phase_5_cache_routes
+    register_phase_5_cache_routes(app, db)
+    logger.info("Phase 5 cache clear routes registered successfully")
+except Exception as e:
+    logger.warning(f"Could not register phase 5 cache clear routes: {e}")
+
+try:
+    from admin_phase_5_routes import register_phase_5_routes
+    register_phase_5_routes(app, db)
+    logger.info("Phase 5 admin routes registered successfully")
+except Exception as e:
+    logger.warning(f"Could not register phase 5 admin routes: {e}")
+
 # Error handler
 @app.errorhandler(500)
 def internal_error(error):
