@@ -820,6 +820,136 @@ def register_cash_tracking_routes(app, db):
             logger.error(f"Reconciliation error: {e}", exc_info=True)
             return jsonify({'error': str(e)}), 500
     
+    @app.route('/admin/cash-tracking/fix-seeded-bot')
+    @admin_required
+    def fix_seeded_bot_cash():
+        """
+        Fix max_cash_deployed for bots whose stocks were seeded directly without
+        corresponding 'buy'/'initial' transactions.
+
+        These users have replay max_cash_deployed = 0 (because there are no buys
+        in their transaction history) even though they hold real stock positions.
+
+        Sets:
+            user.max_cash_deployed = current_cost_basis + current_cash_proceeds
+        and propagates that value to every PortfolioSnapshot for the user, then
+        recalculates total_value = stock_value + cash_proceeds for each snapshot.
+
+        Usage:
+            /admin/cash-tracking/fix-seeded-bot?username=fund.finance2024            (preview)
+            /admin/cash-tracking/fix-seeded-bot?username=fund.finance2024&execute=true (apply)
+        """
+        username = request.args.get('username')
+        execute = request.args.get('execute') == 'true'
+
+        if not username:
+            return jsonify({'error': 'username required'}), 400
+
+        try:
+            from sqlalchemy import text
+
+            user = User.query.filter_by(username=username).first()
+            if not user:
+                return jsonify({'error': f'User {username} not found'}), 404
+
+            # Compute current cost basis from holdings
+            stocks = Stock.query.filter_by(user_id=user.id).all()
+            cost_basis = round(sum((s.quantity or 0) * (s.purchase_price or 0) for s in stocks), 2)
+
+            # Replay transactions to compute correct cash_proceeds
+            txns = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.timestamp).all()
+            replay_cash = 0.0
+            replay_max_cash = 0.0
+            buy_count = 0
+            sell_count = 0
+            for txn in txns:
+                val = (txn.quantity or 0) * (txn.price or 0)
+                if txn.transaction_type in ('buy', 'initial'):
+                    buy_count += 1
+                    if replay_cash >= val:
+                        replay_cash -= val
+                    else:
+                        new_cap = val - replay_cash
+                        replay_cash = 0
+                        replay_max_cash += new_cap
+                elif txn.transaction_type in ('sell', 'dividend'):
+                    sell_count += 1
+                    replay_cash += val
+
+            target_max_cash = round(cost_basis + replay_cash, 2)
+
+            # Safety check: this endpoint is only meant for users with no buys
+            if buy_count > 0:
+                return jsonify({
+                    'error': 'user_has_buy_transactions',
+                    'message': (
+                        f'{username} has {buy_count} buy/initial transactions. '
+                        'Use /admin/cash-tracking/reconcile instead — that endpoint '
+                        'replays buys correctly.'
+                    ),
+                    'buy_count': buy_count,
+                    'sell_count': sell_count,
+                }), 400
+
+            preview = {
+                'username': user.username,
+                'user_id': user.id,
+                'stocks_held': len(stocks),
+                'cost_basis': cost_basis,
+                'replayed_cash_proceeds': round(replay_cash, 2),
+                'target_max_cash_deployed': target_max_cash,
+                'current_user_max_cash_deployed': round(user.max_cash_deployed or 0, 2),
+                'current_user_cash_proceeds': round(user.cash_proceeds or 0, 2),
+                'transactions': len(txns),
+                'buy_count': buy_count,
+                'sell_count': sell_count,
+            }
+
+            if not execute:
+                preview['execute_url'] = (
+                    f'/admin/cash-tracking/fix-seeded-bot?username={username}&execute=true'
+                )
+                return jsonify({'preview': True, 'plan': preview})
+
+            # APPLY: update user model via raw SQL (so it commits even if ORM hiccups)
+            db.session.execute(text("""
+                UPDATE "user"
+                SET max_cash_deployed = :max_cash,
+                    cash_proceeds = :cash_proc
+                WHERE id = :user_id
+            """), {
+                'max_cash': target_max_cash,
+                'cash_proc': replay_cash,
+                'user_id': user.id,
+            })
+
+            # APPLY: update all historical snapshots via raw SQL UPDATE
+            # (avoids ORM session edge cases that may have prevented earlier reconciles
+            #  from persisting)
+            snap_update_result = db.session.execute(text("""
+                UPDATE portfolio_snapshot
+                SET max_cash_deployed = :max_cash,
+                    cash_proceeds = :cash_proc,
+                    total_value = COALESCE(stock_value, 0) + :cash_proc
+                WHERE user_id = :user_id
+            """), {
+                'max_cash': target_max_cash,
+                'cash_proc': replay_cash,
+                'user_id': user.id,
+            })
+            snapshots_updated = snap_update_result.rowcount
+
+            db.session.commit()
+
+            preview['snapshots_updated'] = snapshots_updated
+            preview['committed'] = True
+            return jsonify({'success': True, 'applied': preview})
+
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"fix-seeded-bot error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
+
     @app.route('/admin/cash-tracking/backfill-users')
     @admin_required
     def backfill_user_cash():
