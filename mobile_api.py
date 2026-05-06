@@ -6266,21 +6266,39 @@ def _save_auto_create_settings(settings):
 
 
 @mobile_api.route('/admin/rebuild-leaderboard-cache/<period>', methods=['GET'])
+@with_db_retry
 def rebuild_leaderboard_cache_single(period):
-    """Rebuild leaderboard cache for a single period (avoids Vercel timeout)."""
+    """Rebuild leaderboard cache for a single period (avoids Vercel timeout).
+
+    Reset the DB session up-front so we never spend the budget on a stale cold
+    connection. with_db_retry handles transient SSL drops mid-execution.
+    """
+    _reset_db_session()
+    import time as _time
+    t0 = _time.time()
     try:
         from leaderboard_utils import update_leaderboard_cache
         cache_period = '5D' if period == '1W' else period
         updated = update_leaderboard_cache(periods=[cache_period])
+        from models import db
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
         return jsonify({
             'success': True,
             'period': period,
             'cache_period': cache_period,
-            'entries_updated': updated
+            'entries_updated': updated,
+            'elapsed_seconds': round(_time.time() - t0, 2),
         })
     except Exception as e:
         import traceback
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc(),
+            'elapsed_seconds': round(_time.time() - t0, 2),
+        }), 500
 
 
 @mobile_api.route('/admin/debug-sparkline/<username>/<period>', methods=['GET'])
