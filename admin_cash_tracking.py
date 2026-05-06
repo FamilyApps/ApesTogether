@@ -967,6 +967,214 @@ def register_cash_tracking_routes(app, db):
             logger.error(f"fix-seeded-bot error: {e}", exc_info=True)
             return jsonify({'error': str(e)}), 500
 
+    @app.route('/admin/cash-tracking/full-rebuild')
+    @admin_required
+    @with_db_retry
+    def full_rebuild_cash_tracking():
+        """
+        Comprehensive per-date snapshot rebuild that handles seeded bots correctly.
+
+        For each user this:
+          1. Replays all transactions to build per-date (max_cash, cash_proceeds)
+          2. Detects 'seeded baseline' — capital deployed at portfolio creation
+             that's not represented as a buy transaction (typical for bots seeded
+             via seed_bot_holdings.py).
+             - If the earliest snapshot still has its preserved seeded max_cash
+               (i.e. first_snap.max_cash_deployed > replay_max_at_that_date),
+               seeded_baseline = first_snap.max_cash_deployed - replay_max_at_first_snap.
+             - Else (snapshot history was corrupted by an earlier reconcile or v1
+               fix-seeded-bot), fall back to:
+                 seeded_baseline = max(0, current_cost_basis - replay_max_cash)
+          3. Sets user.max_cash_deployed = seeded_baseline + replay_max_cash
+                 user.cash_proceeds   = replay_cash
+          4. Sets every snapshot to:
+                 max_cash_deployed = seeded_baseline + replay_max_at_date
+                 cash_proceeds     = replay_cash_at_date
+                 total_value       = stock_value + cash_proceeds
+
+        Why this matters:
+          - reconcile sets snapshot.max_cash from raw replay (starts at 0), which
+            destroys seeded baseline and creates discontinuities at first txn.
+          - fix-seeded-bot v1 set ALL snapshots to the same final cash, which
+            inflated total_value pre-sell (cash that didn't exist yet).
+          - This endpoint produces consistent, time-correct snapshots for any user.
+
+        Usage:
+          /admin/cash-tracking/full-rebuild?username=marblethehill72              (preview)
+          /admin/cash-tracking/full-rebuild?username=marblethehill72&execute=true (apply)
+        """
+        username = request.args.get('username')
+        execute = request.args.get('execute') == 'true'
+
+        if not username:
+            return jsonify({'error': 'username required'}), 400
+
+        try:
+            from sqlalchemy import text
+            from models import PortfolioSnapshot
+
+            user = User.query.filter_by(username=username).first()
+            if not user:
+                return jsonify({'error': f'User {username} not found'}), 404
+
+            # 1. Compute current cost basis from holdings
+            stocks = Stock.query.filter_by(user_id=user.id).all()
+            cost_basis = round(sum((s.quantity or 0) * (s.purchase_price or 0) for s in stocks), 2)
+
+            # 2. Replay transactions chronologically; build per-date dictionaries
+            txns = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.timestamp).all()
+            replay_max_cash = 0.0
+            replay_cash = 0.0
+            per_date_max_cash = {}
+            per_date_cash = {}
+            buy_count = 0
+            sell_count = 0
+
+            for txn in txns:
+                val = (txn.quantity or 0) * (txn.price or 0)
+                if txn.transaction_type in ('buy', 'initial'):
+                    buy_count += 1
+                    if replay_cash >= val:
+                        replay_cash -= val
+                    else:
+                        replay_max_cash += val - replay_cash
+                        replay_cash = 0
+                elif txn.transaction_type in ('sell', 'dividend'):
+                    sell_count += 1
+                    replay_cash += val
+                txn_date = txn.timestamp.date() if txn.timestamp else None
+                if txn_date:
+                    per_date_max_cash[txn_date] = replay_max_cash
+                    per_date_cash[txn_date] = replay_cash
+
+            replay_max_cash = round(replay_max_cash, 2)
+            replay_cash = round(replay_cash, 2)
+
+            # 3. Find earliest snapshot to detect preserved seeded baseline
+            first_snap = PortfolioSnapshot.query.filter_by(user_id=user.id).order_by(
+                PortfolioSnapshot.date.asc()
+            ).first()
+
+            seeded_baseline = 0.0
+            seeded_source = 'none'
+
+            if first_snap:
+                # Compute replay_max at first_snap.date by walking sorted dates <= first_snap.date
+                replay_max_at_first = 0.0
+                for d in sorted(per_date_max_cash.keys()):
+                    if d <= first_snap.date:
+                        replay_max_at_first = per_date_max_cash[d]
+                    else:
+                        break
+
+                first_snap_max = float(first_snap.max_cash_deployed or 0)
+
+                # If first snapshot still has the preserved seeded baseline, use it
+                if first_snap_max > replay_max_at_first + 0.01:
+                    seeded_baseline = round(first_snap_max - replay_max_at_first, 2)
+                    seeded_source = f'first_snapshot_preserved (first_snap={first_snap.date}, max={first_snap_max:.2f}, replay_max_at_date={replay_max_at_first:.2f})'
+
+            # Fallback: if no preserved baseline, derive from current cost basis
+            if seeded_baseline < 0.01:
+                derived = max(0.0, cost_basis - replay_max_cash)
+                if derived > 0.01:
+                    seeded_baseline = round(derived, 2)
+                    seeded_source = f'cost_basis_derived (cost_basis={cost_basis:.2f}, replay_max={replay_max_cash:.2f})'
+                else:
+                    seeded_source = 'none (regular user, no seeded baseline)'
+
+            target_user_max_cash = round(seeded_baseline + replay_max_cash, 2)
+            target_user_cash = replay_cash
+
+            preview = {
+                'username': user.username,
+                'user_id': user.id,
+                'transactions': len(txns),
+                'buy_count': buy_count,
+                'sell_count': sell_count,
+                'cost_basis': cost_basis,
+                'replay_max_cash': replay_max_cash,
+                'replay_cash_proceeds': replay_cash,
+                'seeded_baseline': seeded_baseline,
+                'seeded_source': seeded_source,
+                'target_user_max_cash_deployed': target_user_max_cash,
+                'target_user_cash_proceeds': target_user_cash,
+                'current_user_max_cash_deployed': round(user.max_cash_deployed or 0, 2),
+                'current_user_cash_proceeds': round(user.cash_proceeds or 0, 2),
+            }
+
+            if not execute:
+                preview['execute_url'] = (
+                    f'/admin/cash-tracking/full-rebuild?username={username}&execute=true'
+                )
+                return jsonify({'preview': True, 'plan': preview})
+
+            # 4. Update user model
+            db.session.execute(text("""
+                UPDATE "user"
+                SET max_cash_deployed = :max_cash,
+                    cash_proceeds = :cash_proc
+                WHERE id = :user_id
+            """), {
+                'max_cash': target_user_max_cash,
+                'cash_proc': target_user_cash,
+                'user_id': user.id,
+            })
+
+            # 5. Update every snapshot with seeded_baseline + per_date_replay
+            snapshots = PortfolioSnapshot.query.filter_by(user_id=user.id).order_by(
+                PortfolioSnapshot.date.asc()
+            ).all()
+
+            sorted_dates = sorted(per_date_max_cash.keys())
+            snapshots_updated = 0
+
+            for snap in snapshots:
+                replay_max_at = 0.0
+                replay_cash_at = 0.0
+                for d in sorted_dates:
+                    if d <= snap.date:
+                        replay_max_at = per_date_max_cash[d]
+                        replay_cash_at = per_date_cash[d]
+                    else:
+                        break
+
+                new_max = round(seeded_baseline + replay_max_at, 2)
+                new_cash = round(replay_cash_at, 2)
+
+                upd = db.session.execute(text("""
+                    UPDATE portfolio_snapshot
+                    SET max_cash_deployed = :max_cash,
+                        cash_proceeds = :cash_proc,
+                        total_value = COALESCE(stock_value, 0) + :cash_proc
+                    WHERE user_id = :user_id
+                      AND date = :snap_date
+                      AND (
+                          ABS(COALESCE(max_cash_deployed, 0) - :max_cash) > 0.01
+                          OR ABS(COALESCE(cash_proceeds, 0) - :cash_proc) > 0.01
+                          OR ABS(COALESCE(total_value, 0) - (COALESCE(stock_value, 0) + :cash_proc)) > 0.01
+                      )
+                """), {
+                    'max_cash': new_max,
+                    'cash_proc': new_cash,
+                    'user_id': user.id,
+                    'snap_date': snap.date,
+                })
+                if upd.rowcount > 0:
+                    snapshots_updated += 1
+
+            db.session.commit()
+
+            preview['snapshots_total'] = len(snapshots)
+            preview['snapshots_updated'] = snapshots_updated
+            preview['committed'] = True
+            return jsonify({'success': True, 'applied': preview})
+
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"full-rebuild error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
+
     @app.route('/admin/cash-tracking/backfill-users')
     @admin_required
     def backfill_user_cash():
