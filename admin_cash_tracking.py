@@ -1022,6 +1022,36 @@ def register_cash_tracking_routes(app, db):
             cost_basis = round(sum((s.quantity or 0) * (s.purchase_price or 0) for s in stocks), 2)
 
             # 2. Replay transactions chronologically; build per-date dictionaries
+            #
+            # CRITICAL: align with snapshot creation timing.
+            # The market-close cron creates a daily snapshot at 16:00 ET capturing
+            # stock_value as-of that moment. Transactions logged AFTER 16:00 ET on
+            # date D are not reflected in D's stock_value (cron already ran). They
+            # ARE reflected in (D+1)'s stock_value. So for cash_proceeds to remain
+            # consistent with stock_value, post-close transactions must be attributed
+            # to the next trading-day's snapshot, not the same calendar date.
+            from zoneinfo import ZoneInfo
+            from datetime import time as _dt_time, timedelta as _td
+            _MARKET_TZ = ZoneInfo('America/New_York')
+            _UTC_TZ = ZoneInfo('UTC')
+
+            def _snapshot_effective_date(ts):
+                """Return the snapshot date a transaction at ts contributes to.
+
+                Trades < 16:00 ET on D -> D.   Trades >= 16:00 ET on D -> D+1
+                (D+1 may be a weekend/holiday; replay_at(snap.date) walks sorted
+                dates and picks the latest <= snap.date, so this is fine.)
+                """
+                if ts is None:
+                    return None
+                if ts.tzinfo is None:
+                    ts_et = ts.replace(tzinfo=_UTC_TZ).astimezone(_MARKET_TZ)
+                else:
+                    ts_et = ts.astimezone(_MARKET_TZ)
+                if ts_et.time() >= _dt_time(16, 0):
+                    return ts_et.date() + _td(days=1)
+                return ts_et.date()
+
             txns = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.timestamp).all()
             replay_max_cash = 0.0
             replay_cash = 0.0
@@ -1029,6 +1059,7 @@ def register_cash_tracking_routes(app, db):
             per_date_cash = {}
             buy_count = 0
             sell_count = 0
+            after_close_count = 0
 
             for txn in txns:
                 val = (txn.quantity or 0) * (txn.price or 0)
@@ -1042,10 +1073,14 @@ def register_cash_tracking_routes(app, db):
                 elif txn.transaction_type in ('sell', 'dividend'):
                     sell_count += 1
                     replay_cash += val
-                txn_date = txn.timestamp.date() if txn.timestamp else None
-                if txn_date:
-                    per_date_max_cash[txn_date] = replay_max_cash
-                    per_date_cash[txn_date] = replay_cash
+                eff_date = _snapshot_effective_date(txn.timestamp)
+                if eff_date:
+                    # Track if this transaction was bumped to next day (after-close)
+                    raw_date = txn.timestamp.date() if txn.timestamp else None
+                    if raw_date and eff_date != raw_date:
+                        after_close_count += 1
+                    per_date_max_cash[eff_date] = replay_max_cash
+                    per_date_cash[eff_date] = replay_cash
 
             replay_max_cash = round(replay_max_cash, 2)
             replay_cash = round(replay_cash, 2)
@@ -1092,6 +1127,7 @@ def register_cash_tracking_routes(app, db):
                 'transactions': len(txns),
                 'buy_count': buy_count,
                 'sell_count': sell_count,
+                'after_close_count': after_close_count,
                 'cost_basis': cost_basis,
                 'replay_max_cash': replay_max_cash,
                 'replay_cash_proceeds': replay_cash,
