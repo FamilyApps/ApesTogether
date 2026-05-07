@@ -1363,6 +1363,239 @@ def register_cash_tracking_routes(app, db):
             logger.error(f"full-rebuild all-users error: {e}", exc_info=True)
             return jsonify({'error': str(e)}), 500
 
+    @app.route('/admin/cash-tracking/drift-check', methods=['GET', 'POST'])
+    @app.route('/api/cron/drift-check', methods=['GET', 'POST'])
+    @with_db_retry
+    def drift_check_cash_tracking():
+        """
+        Detect drift between user.max_cash_deployed/cash_proceeds and replay-derived
+        target values across all users. Sends an email alert if drift is detected.
+
+        Auth (one of):
+          - Cron secret header: Authorization: Bearer $CRON_SECRET   (for Vercel cron)
+          - Admin session   (browser navigation by admin)
+
+        Query params:
+          ?email=true       Send email alert if drift found (default for cron path)
+          ?email=false      Skip email (default for /admin/... path)
+          ?threshold=10.00  Min |drift| in $ to consider significant (default 1.00)
+          ?role=agent       Restrict to bot accounts only
+
+        Response includes a `prompt` field — a copy-pasteable string you can hand
+        to me to investigate. Includes affected usernames, drift amounts, and
+        suggested URLs to fix.
+        """
+        import os as _os
+        from flask import session as _flask_session
+        from sqlalchemy import text
+
+        # ---- Auth ----
+        # Cron path: verify CRON_SECRET. Admin path: require admin session.
+        is_cron_path = request.path.startswith('/api/cron/')
+        if is_cron_path:
+            cron_secret = _os.environ.get('CRON_SECRET', '')
+            auth_header = request.headers.get('Authorization', '')
+            provided = auth_header.replace('Bearer ', '').strip() if auth_header else ''
+            if not cron_secret or provided != cron_secret:
+                return jsonify({'error': 'unauthorized'}), 401
+        else:
+            # Admin path: piggyback on existing admin auth
+            admin_email = _os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
+            session_email = _flask_session.get('email', '')
+            if session_email != admin_email:
+                return jsonify({'error': 'admin_access_required'}), 403
+
+        # ---- Params ----
+        send_email = request.args.get('email', 'true' if is_cron_path else 'false') == 'true'
+        try:
+            threshold = float(request.args.get('threshold', '1.00'))
+        except (TypeError, ValueError):
+            threshold = 1.00
+        role_filter = request.args.get('role')
+
+        from zoneinfo import ZoneInfo
+        from datetime import time as _dt_time, timedelta as _td
+
+        _MARKET_TZ = ZoneInfo('America/New_York')
+        _UTC_TZ = ZoneInfo('UTC')
+
+        def _eff_date(ts):
+            if ts is None:
+                return None
+            ts_et = (ts.replace(tzinfo=_UTC_TZ) if ts.tzinfo is None else ts).astimezone(_MARKET_TZ)
+            if ts_et.time() >= _dt_time(16, 0):
+                return ts_et.date() + _td(days=1)
+            return ts_et.date()
+
+        # ---- Query users ----
+        try:
+            q = User.query.order_by(User.username.asc())
+            if role_filter:
+                q = q.filter(User.role == role_filter)
+            users = q.all()
+
+            drift_users = []
+            scanned = 0
+
+            for user in users:
+                txns = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.timestamp).all()
+                if not txns:
+                    continue  # users with no transactions can't drift
+                scanned += 1
+
+                replay_max_cash = 0.0
+                replay_cash = 0.0
+                for txn in txns:
+                    val = (txn.quantity or 0) * (txn.price or 0)
+                    if txn.transaction_type in ('buy', 'initial'):
+                        if replay_cash >= val:
+                            replay_cash -= val
+                        else:
+                            replay_max_cash += val - replay_cash
+                            replay_cash = 0
+                    elif txn.transaction_type in ('sell', 'dividend'):
+                        replay_cash += val
+
+                # Detect seeded baseline (same logic as full-rebuild)
+                first_snap = PortfolioSnapshot.query.filter_by(user_id=user.id).order_by(
+                    PortfolioSnapshot.date.asc()
+                ).first()
+                seeded_baseline = 0.0
+                if first_snap:
+                    fsm = float(first_snap.max_cash_deployed or 0)
+                    # Replay max at first snapshot date
+                    rmf = 0.0
+                    rcf = 0.0
+                    for txn in txns:
+                        eff = _eff_date(txn.timestamp)
+                        if eff and eff > first_snap.date:
+                            break
+                        v = (txn.quantity or 0) * (txn.price or 0)
+                        if txn.transaction_type in ('buy', 'initial'):
+                            if rcf >= v:
+                                rcf -= v
+                            else:
+                                rmf += v - rcf
+                                rcf = 0
+                        elif txn.transaction_type in ('sell', 'dividend'):
+                            rcf += v
+                    if fsm > rmf + 0.01:
+                        seeded_baseline = round(fsm - rmf, 2)
+
+                if seeded_baseline < 0.01:
+                    stocks = Stock.query.filter_by(user_id=user.id).all()
+                    cb = sum((s.quantity or 0) * (s.purchase_price or 0) for s in stocks)
+                    derived = max(0.0, cb - replay_max_cash)
+                    if derived > 0.01:
+                        seeded_baseline = round(derived, 2)
+
+                target_max = round(seeded_baseline + replay_max_cash, 2)
+                target_cash = round(replay_cash, 2)
+                cur_max = round(user.max_cash_deployed or 0, 2)
+                cur_cash = round(user.cash_proceeds or 0, 2)
+
+                max_drift = round(target_max - cur_max, 2)
+                cash_drift = round(target_cash - cur_cash, 2)
+
+                if abs(max_drift) >= threshold or abs(cash_drift) >= threshold:
+                    drift_users.append({
+                        'username': user.username,
+                        'user_id': user.id,
+                        'role': user.role,
+                        'transactions': len(txns),
+                        'current_max_cash': cur_max,
+                        'target_max_cash': target_max,
+                        'max_cash_drift': max_drift,
+                        'current_cash_proceeds': cur_cash,
+                        'target_cash_proceeds': target_cash,
+                        'cash_drift': cash_drift,
+                        'seeded_baseline': seeded_baseline,
+                        'fix_url': f'/admin/cash-tracking/full-rebuild?username={user.username}&execute=true',
+                    })
+
+            # ---- Build prompt-ready summary ----
+            timestamp_str = datetime.now(ZoneInfo('America/New_York')).strftime('%Y-%m-%d %H:%M ET')
+            if drift_users:
+                prompt_lines = [
+                    f"# Cash-tracking drift detected ({len(drift_users)} users) — {timestamp_str}",
+                    f"# Threshold: ${threshold:.2f}",
+                    "",
+                    "Users with drift (paste this to your AI assistant for investigation):",
+                    "",
+                ]
+                for d in drift_users:
+                    prompt_lines.append(
+                        f"- {d['username']} (id={d['user_id']}, role={d['role']}, txns={d['transactions']}): "
+                        f"max_cash_drift=${d['max_cash_drift']:.2f}, cash_drift=${d['cash_drift']:.2f}"
+                    )
+                prompt_lines.append("")
+                prompt_lines.append("To fix all in one shot:")
+                prompt_lines.append("  GET /admin/cash-tracking/full-rebuild?all=true&execute=true")
+                prompt_lines.append("")
+                prompt_lines.append("To fix individually:")
+                for d in drift_users[:10]:
+                    prompt_lines.append(f"  GET https://apestogether.ai{d['fix_url']}")
+                if len(drift_users) > 10:
+                    prompt_lines.append(f"  ... and {len(drift_users) - 10} more (see full list above)")
+                prompt = '\n'.join(prompt_lines)
+            else:
+                prompt = f"# No drift detected ({timestamp_str}) — {scanned} users scanned, all clean."
+
+            response = {
+                'success': True,
+                'timestamp': timestamp_str,
+                'users_scanned': scanned,
+                'drift_count': len(drift_users),
+                'threshold': threshold,
+                'drift_users': drift_users,
+                'prompt': prompt,
+            }
+
+            # ---- Email if drift found ----
+            if drift_users and send_email:
+                try:
+                    import smtplib
+                    from email.mime.text import MIMEText
+
+                    notify_email = _os.environ.get('ADMIN_NOTIFY_EMAIL', 'bobford00@gmail.com')
+                    smtp_user = _os.environ.get('SMTP_USER')
+                    smtp_pass = _os.environ.get('SMTP_PASS')
+
+                    if smtp_user and smtp_pass:
+                        body = (
+                            f"Cash-tracking drift detected on {timestamp_str}.\n\n"
+                            f"{len(drift_users)} of {scanned} users have drift > ${threshold:.2f} "
+                            f"between user.max_cash_deployed/cash_proceeds and replay-derived "
+                            f"target values.\n\n"
+                            "===== Prompt-ready summary (paste to AI) =====\n\n"
+                            f"{prompt}\n\n"
+                            "===== Full JSON =====\n"
+                            f"{drift_users}\n"
+                        )
+                        msg = MIMEText(body)
+                        msg['Subject'] = f'[ApesTogether] Cash-tracking drift: {len(drift_users)} users affected'
+                        msg['From'] = smtp_user
+                        msg['To'] = notify_email
+
+                        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+                            server.login(smtp_user, smtp_pass)
+                            server.send_message(msg)
+                        response['email_sent'] = True
+                        logger.info(f"Drift alert email sent to {notify_email}: {len(drift_users)} users")
+                    else:
+                        response['email_sent'] = False
+                        response['email_error'] = 'SMTP not configured'
+                        logger.warning("Drift detected but SMTP_USER/SMTP_PASS not set")
+                except Exception as ee:
+                    response['email_sent'] = False
+                    response['email_error'] = str(ee)
+                    logger.error(f"Failed to send drift email: {ee}")
+
+            return jsonify(response)
+        except Exception as e:
+            logger.error(f"drift-check error: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
+
     @app.route('/admin/cash-tracking/backfill-users')
     @admin_required
     def backfill_user_cash():
