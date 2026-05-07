@@ -5960,27 +5960,35 @@ def bot_batch_seed():
 
 
 def _seed_bot_portfolio(user_id, profile, attention):
-    """Seed a bot's initial portfolio with stocks from its attention universe."""
+    """Seed a bot's initial portfolio with stocks from its attention universe.
+
+    CRITICAL: Each holding goes through process_transaction() with type='initial' so:
+      - A Transaction row is created (required for replay-based reconciliation)
+      - user.max_cash_deployed is incremented by the purchase value
+      - user.cash_proceeds stays at 0 (no proceeds from initial seeding)
+
+    Without this, a newly-seeded bot has Stock rows but max_cash_deployed=0, which
+    breaks Modified Dietz on its first chart render and causes drift visible in
+    the leaderboard.
+    """
     from models import db, Stock
+    from cash_tracking import process_transaction
     import random as _rnd
-    import math
-    
+
     num_stocks = _rnd.randint(4, min(10, len(attention)))
     selected = _rnd.sample(attention, num_stocks)
-    
+
     # Log-normal portfolio size: median ~$40K, range $5K–$500K
     raw = _rnd.lognormvariate(10.6, 0.9)
     portfolio_size = max(5_000, min(500_000, raw))
-    
+
     added = 0
     for ticker in selected:
-        # Use a reasonable default price since we don't have live data in this context
-        # The bot_agent CLI fetches real prices; here we approximate
         try:
             price = _get_approximate_price(ticker)
             if price <= 0:
                 continue
-            
+
             allocation = portfolio_size / num_stocks
             qty = max(1, int(allocation / price))
             qty = max(1, int(qty * _rnd.uniform(0.7, 1.3)))
@@ -5988,22 +5996,37 @@ def _seed_bot_portfolio(user_id, profile, attention):
                 qty = round(qty / 5) * 5
             elif qty > 10:
                 qty = round(qty / 2) * 2
-            
+
             price_noise = _rnd.uniform(-0.02, 0.02)
             purchase_price = round(price * (1 + price_noise), 2)
-            
-            stock = Stock(
-                user_id=user_id,
-                ticker=ticker.upper(),
-                quantity=qty,
-                purchase_price=purchase_price,
-                purchase_date=datetime.utcnow().date(),
+            ticker_upper = ticker.upper()
+
+            # 1. Create or update the Stock holding
+            existing = Stock.query.filter_by(user_id=user_id, ticker=ticker_upper).first()
+            if existing:
+                total_cost = (existing.purchase_price * existing.quantity) + (purchase_price * qty)
+                existing.quantity += qty
+                existing.purchase_price = total_cost / existing.quantity if existing.quantity > 0 else purchase_price
+            else:
+                stock = Stock(
+                    user_id=user_id,
+                    ticker=ticker_upper,
+                    quantity=qty,
+                    purchase_price=purchase_price,
+                    purchase_date=datetime.utcnow().date(),
+                )
+                db.session.add(stock)
+
+            # 2. Record transaction + increment user.max_cash_deployed via process_transaction
+            #    Type 'initial' is treated like a buy for cash-tracking purposes.
+            process_transaction(
+                db, user_id, ticker_upper, qty, purchase_price, 'initial',
+                timestamp=datetime.utcnow()
             )
-            db.session.add(stock)
             added += 1
         except Exception as e:
             logger.debug(f"Skip seeding {ticker} for user {user_id}: {e}")
-    
+
     return added
 
 
