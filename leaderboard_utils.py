@@ -969,36 +969,36 @@ def update_leaderboard_cache(periods=None):
                 cache_key = f"{period}_{category}"
                 leaderboard_data_json = json.dumps(leaderboard_data)
                 now = datetime.now()
-                
-                # Store JSON-only cache
-                with db.engine.connect() as primary_conn:
-                    with primary_conn.begin():
-                        select_sql = text("SELECT id FROM leaderboard_cache WHERE period = :period")
-                        result = primary_conn.execute(select_sql, {'period': cache_key})
-                        existing_id = result.scalar()
-                        
-                        if existing_id:
-                            update_sql = text("""
-                                UPDATE leaderboard_cache 
-                                SET leaderboard_data = :data, generated_at = :time
-                                WHERE id = :id
-                            """)
-                            primary_conn.execute(update_sql, {
-                                'id': existing_id,
-                                'data': leaderboard_data_json,
-                                'time': now
-                            })
-                        else:
-                            insert_sql = text("""
-                                INSERT INTO leaderboard_cache (period, leaderboard_data, generated_at)
-                                VALUES (:period, :data, :time)
-                            """)
-                            primary_conn.execute(insert_sql, {
-                                'period': cache_key,
-                                'data': leaderboard_data_json,
-                                'time': now
-                            })
-                
+
+                # Store JSON-only cache using the existing request-scoped session.
+                # (Previously used db.engine.connect() which opens a brand-new
+                # connection — on Vercel's serverless that's a cold SSL handshake
+                # every time, blowing past the 60s timeout when writing 18 entries.)
+                select_sql = text("SELECT id FROM leaderboard_cache WHERE period = :period")
+                existing_id = db.session.execute(select_sql, {'period': cache_key}).scalar()
+
+                if existing_id:
+                    db.session.execute(text("""
+                        UPDATE leaderboard_cache
+                        SET leaderboard_data = :data, generated_at = :time
+                        WHERE id = :id
+                    """), {
+                        'id': existing_id,
+                        'data': leaderboard_data_json,
+                        'time': now,
+                    })
+                else:
+                    db.session.execute(text("""
+                        INSERT INTO leaderboard_cache (period, leaderboard_data, generated_at)
+                        VALUES (:period, :data, :time)
+                    """), {
+                        'period': cache_key,
+                        'data': leaderboard_data_json,
+                        'time': now,
+                    })
+                # Commit per entry so a later failure doesn't lose earlier work.
+                db.session.commit()
+
                 updated_count += 1
                 print(f"  ✓ Leaderboard cache saved for {cache_key}")
                 

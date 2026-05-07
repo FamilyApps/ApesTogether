@@ -1551,6 +1551,34 @@ def register_cash_tracking_routes(app, db):
                 'prompt': prompt,
             }
 
+            # ---- Persist last drift-check result on admin user (no SMTP required) ----
+            # This lets the admin browse the result later via the dedicated endpoint
+            # below, even if SMTP isn't configured.
+            try:
+                from sqlalchemy.orm.attributes import flag_modified
+                admin = User.query.filter_by(email=_os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')).first()
+                if admin:
+                    extra = dict(admin.extra_data or {})
+                    extra['last_drift_check'] = {
+                        'timestamp': timestamp_str,
+                        'users_scanned': scanned,
+                        'drift_count': len(drift_users),
+                        'threshold': threshold,
+                        'drift_users': drift_users,
+                        'prompt': prompt,
+                    }
+                    admin.extra_data = extra
+                    flag_modified(admin, 'extra_data')
+                    db.session.commit()
+                    response['persisted'] = True
+            except Exception as pe:
+                logger.warning(f"Could not persist drift-check result: {pe}")
+                response['persisted'] = False
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+
             # ---- Email if drift found ----
             if drift_users and send_email:
                 try:
@@ -1595,6 +1623,29 @@ def register_cash_tracking_routes(app, db):
         except Exception as e:
             logger.error(f"drift-check error: {e}", exc_info=True)
             return jsonify({'error': str(e)}), 500
+
+    @app.route('/admin/cash-tracking/last-drift-check')
+    @admin_required
+    def last_drift_check():
+        """Return the most recently persisted drift-check result.
+
+        The weekly cron writes its result to admin.extra_data['last_drift_check'].
+        This endpoint reads it back so you can see the drift status without
+        needing SMTP configured. The 'prompt' field is paste-ready for me.
+        """
+        import os as _os
+        admin = User.query.filter_by(
+            email=_os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
+        ).first()
+        if not admin:
+            return jsonify({'error': 'admin user not found'}), 404
+        result = (admin.extra_data or {}).get('last_drift_check')
+        if not result:
+            return jsonify({
+                'never_run': True,
+                'hint': 'Run /admin/cash-tracking/drift-check first to populate.',
+            })
+        return jsonify(result)
 
     @app.route('/admin/cash-tracking/backfill-users')
     @admin_required
