@@ -1121,7 +1121,7 @@ def register_cash_tracking_routes(app, db):
                 'user_id': user.id,
             })
 
-            # 5. Update every snapshot with seeded_baseline + per_date_replay
+            # 5. Update every daily snapshot with seeded_baseline + per_date_replay
             snapshots = PortfolioSnapshot.query.filter_by(user_id=user.id).order_by(
                 PortfolioSnapshot.date.asc()
             ).all()
@@ -1129,15 +1129,20 @@ def register_cash_tracking_routes(app, db):
             sorted_dates = sorted(per_date_max_cash.keys())
             snapshots_updated = 0
 
-            for snap in snapshots:
-                replay_max_at = 0.0
-                replay_cash_at = 0.0
+            def replay_at(target_date):
+                """Walk sorted txn dates and return (replay_max, replay_cash) at target_date."""
+                rmax = 0.0
+                rcash = 0.0
                 for d in sorted_dates:
-                    if d <= snap.date:
-                        replay_max_at = per_date_max_cash[d]
-                        replay_cash_at = per_date_cash[d]
+                    if d <= target_date:
+                        rmax = per_date_max_cash[d]
+                        rcash = per_date_cash[d]
                     else:
                         break
+                return rmax, rcash
+
+            for snap in snapshots:
+                replay_max_at, replay_cash_at = replay_at(snap.date)
 
                 new_max = round(seeded_baseline + replay_max_at, 2)
                 new_cash = round(replay_cash_at, 2)
@@ -1163,10 +1168,59 @@ def register_cash_tracking_routes(app, db):
                 if upd.rowcount > 0:
                     snapshots_updated += 1
 
+            # 6. Update intraday snapshots (used by 1D/5D charts!)
+            # The performance calculator uses ONLY intraday for 1D/5D periods, so
+            # without this update the 1W chart shows stale values regardless of
+            # daily snapshot fixes.
+            from models import PortfolioSnapshotIntraday
+            from zoneinfo import ZoneInfo
+            MARKET_TZ = ZoneInfo('America/New_York')
+            UTC_TZ = ZoneInfo('UTC')
+
+            intraday_snapshots = PortfolioSnapshotIntraday.query.filter_by(
+                user_id=user.id
+            ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
+
+            intraday_updated = 0
+            for isnap in intraday_snapshots:
+                # Convert UTC-naive timestamp to ET date for replay alignment
+                ts = isnap.timestamp
+                if ts.tzinfo is None:
+                    ts_et = ts.replace(tzinfo=UTC_TZ).astimezone(MARKET_TZ)
+                else:
+                    ts_et = ts.astimezone(MARKET_TZ)
+                snap_date = ts_et.date()
+
+                replay_max_at, replay_cash_at = replay_at(snap_date)
+
+                new_max = round(seeded_baseline + replay_max_at, 2)
+                new_cash = round(replay_cash_at, 2)
+
+                upd = db.session.execute(text("""
+                    UPDATE portfolio_snapshot_intraday
+                    SET max_cash_deployed = :max_cash,
+                        cash_proceeds = :cash_proc,
+                        total_value = COALESCE(stock_value, 0) + :cash_proc
+                    WHERE id = :snap_id
+                      AND (
+                          ABS(COALESCE(max_cash_deployed, 0) - :max_cash) > 0.01
+                          OR ABS(COALESCE(cash_proceeds, 0) - :cash_proc) > 0.01
+                          OR ABS(COALESCE(total_value, 0) - (COALESCE(stock_value, 0) + :cash_proc)) > 0.01
+                      )
+                """), {
+                    'max_cash': new_max,
+                    'cash_proc': new_cash,
+                    'snap_id': isnap.id,
+                })
+                if upd.rowcount > 0:
+                    intraday_updated += 1
+
             db.session.commit()
 
             preview['snapshots_total'] = len(snapshots)
             preview['snapshots_updated'] = snapshots_updated
+            preview['intraday_total'] = len(intraday_snapshots)
+            preview['intraday_updated'] = intraday_updated
             preview['committed'] = True
             return jsonify({'success': True, 'applied': preview})
 
