@@ -15,38 +15,35 @@ struct PerformanceChartView: View {
     
     private let periods = ["1D", "1W", "1M", "3M", "YTD", "1Y"]
     
-    private var xAxisLabelCount: Int {
-        switch selectedPeriod {
-        case "1D": return 4
-        case "1W": return 5
-        case "1M": return 4
-        case "3M": return 5
-        case "YTD": return 5
-        case "1Y": return 5
-        default: return 4
-        }
-    }
-    
     private var portfolioColor: Color {
         portfolioReturn >= 0 ? .gains : .losses
     }
-    
+
+    /// Pick chart points whose `date` label is non-empty as the X-axis ticks.
+    /// The backend marks "boundary" points (hour anchors for 1D, day starts for 1W,
+    /// month starts for 3M+) by setting `date`; non-boundary points get an empty
+    /// string. This guarantees consistent, semantically meaningful labels at
+    /// uniform positions regardless of how many raw data points the chart has.
     private var xAxisTickValues: [Int] {
-        let count = chartData.count
-        guard count > 1 else { return count == 1 ? [0] : [] }
-        let desiredLabels = xAxisLabelCount
-        let step = max(1, count / desiredLabels)
-        var ticks: [Int] = []
-        var i = 0
-        while i < count {
-            ticks.append(i)
-            i += step
+        let labeled = chartData.indices.filter { !chartData[$0].date.isEmpty }
+        // Fallback (legacy backends or unexpected empty labels): step through evenly
+        if labeled.isEmpty {
+            let count = chartData.count
+            guard count > 1 else { return count == 1 ? [0] : [] }
+            let desired = 5
+            let step = max(1, count / desired)
+            var ticks: [Int] = []
+            var i = 0
+            while i < count {
+                ticks.append(i)
+                i += step
+            }
+            if let last = ticks.last, last != count - 1 {
+                ticks.append(count - 1)
+            }
+            return ticks
         }
-        // Always include the last point
-        if let last = ticks.last, last != count - 1 {
-            ticks.append(count - 1)
-        }
-        return ticks
+        return labeled
     }
     
     private func formatYAxisLabel(_ val: Double) -> String {

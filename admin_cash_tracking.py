@@ -1624,6 +1624,192 @@ def register_cash_tracking_routes(app, db):
             logger.error(f"drift-check error: {e}", exc_info=True)
             return jsonify({'error': str(e)}), 500
 
+    @app.route('/admin/cash-tracking/inspect-snapshots')
+    @admin_required
+    def inspect_snapshots():
+        """Dump daily + intraday snapshots for a user over the last N days.
+
+        Useful for diagnosing chart anomalies (data spikes, missing points,
+        max_cash_deployed jumps, etc.).
+
+        Usage:
+          /admin/cash-tracking/inspect-snapshots?username=USER             (last 7 days)
+          /admin/cash-tracking/inspect-snapshots?username=USER&days=14     (last 14 days)
+          /admin/cash-tracking/inspect-snapshots?username=USER&date=2026-05-04   (just one day)
+
+        Response:
+          - user: current max_cash_deployed and cash_proceeds
+          - daily_snapshots: every daily snapshot in window with all fields
+          - intraday_snapshots: every intraday snapshot in window (ET-converted)
+          - anomalies: pairs of consecutive intraday snapshots with > 5% total_value swing
+          - transactions: any transactions in window
+        """
+        from datetime import datetime as _dt, date as _date, time as _t, timedelta as _td
+        from zoneinfo import ZoneInfo as _ZI
+        from models import PortfolioSnapshot, PortfolioSnapshotIntraday, Transaction
+
+        username = request.args.get('username')
+        if not username:
+            return jsonify({'error': 'username required'}), 400
+
+        try:
+            days = int(request.args.get('days', '7'))
+        except (TypeError, ValueError):
+            days = 7
+
+        single_date_str = request.args.get('date')
+        single_date = None
+        if single_date_str:
+            try:
+                single_date = _dt.strptime(single_date_str, '%Y-%m-%d').date()
+            except ValueError:
+                return jsonify({'error': 'date must be YYYY-MM-DD'}), 400
+
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': f'user {username} not found'}), 404
+
+        ET = _ZI('America/New_York')
+        UTC = _ZI('UTC')
+
+        # Determine date window
+        today_et = _dt.now(ET).date()
+        if single_date:
+            start_date = single_date
+            end_date = single_date
+        else:
+            end_date = today_et
+            start_date = end_date - _td(days=days)
+
+        # 1. Daily snapshots
+        daily_q = PortfolioSnapshot.query.filter(
+            PortfolioSnapshot.user_id == user.id,
+            PortfolioSnapshot.date >= start_date,
+            PortfolioSnapshot.date <= end_date,
+        ).order_by(PortfolioSnapshot.date.asc()).all()
+
+        daily_rows = []
+        prev_total = None
+        for s in daily_q:
+            tot = float(s.total_value or 0)
+            stock = float(s.stock_value or 0)
+            cash = float(s.cash_proceeds or 0)
+            max_cash = float(s.max_cash_deployed or 0)
+            pct_change = None
+            if prev_total and prev_total > 0:
+                pct_change = round((tot - prev_total) / prev_total * 100, 2)
+            daily_rows.append({
+                'date': s.date.isoformat(),
+                'total_value': round(tot, 2),
+                'stock_value': round(stock, 2),
+                'cash_proceeds': round(cash, 2),
+                'max_cash_deployed': round(max_cash, 2),
+                'sum_check': round(stock + cash - tot, 2),  # Should be 0
+                'pct_change_from_prev_day': pct_change,
+            })
+            prev_total = tot
+
+        # 2. Intraday snapshots
+        start_dt = _dt.combine(start_date, _t.min)
+        end_dt = _dt.combine(end_date, _t.max)
+
+        intraday_q = PortfolioSnapshotIntraday.query.filter(
+            PortfolioSnapshotIntraday.user_id == user.id,
+            PortfolioSnapshotIntraday.timestamp >= start_dt,
+            PortfolioSnapshotIntraday.timestamp <= end_dt,
+        ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
+
+        intraday_rows = []
+        anomalies = []
+        prev_tot = None
+        prev_ts_et = None
+        for s in intraday_q:
+            ts = s.timestamp
+            ts_et = (ts.replace(tzinfo=UTC) if ts.tzinfo is None else ts).astimezone(ET)
+            tot = float(s.total_value or 0)
+            stock = float(s.stock_value or 0)
+            cash = float(s.cash_proceeds or 0)
+            max_cash = float(s.max_cash_deployed or 0)
+
+            pct_change = None
+            if prev_tot and prev_tot > 0:
+                pct_change = round((tot - prev_tot) / prev_tot * 100, 2)
+                if abs(pct_change) >= 5.0:
+                    anomalies.append({
+                        'from': prev_ts_et.strftime('%Y-%m-%d %H:%M ET') if prev_ts_et else None,
+                        'to': ts_et.strftime('%Y-%m-%d %H:%M ET'),
+                        'prev_total': round(prev_tot, 2),
+                        'curr_total': round(tot, 2),
+                        'pct_change': pct_change,
+                        'curr_stock_value': round(stock, 2),
+                        'curr_cash_proceeds': round(cash, 2),
+                    })
+
+            intraday_rows.append({
+                'ts_et': ts_et.strftime('%Y-%m-%d %H:%M ET'),
+                'date_et': ts_et.date().isoformat(),
+                'time_et': ts_et.strftime('%H:%M'),
+                'total_value': round(tot, 2),
+                'stock_value': round(stock, 2),
+                'cash_proceeds': round(cash, 2),
+                'max_cash_deployed': round(max_cash, 2),
+                'sum_check': round(stock + cash - tot, 2),
+                'pct_change_from_prev': pct_change,
+            })
+            prev_tot = tot
+            prev_ts_et = ts_et
+
+        # Coverage analysis: count intraday per ET date
+        coverage = {}
+        for r in intraday_rows:
+            coverage[r['date_et']] = coverage.get(r['date_et'], 0) + 1
+
+        # 3. Transactions in window
+        txn_q = Transaction.query.filter(
+            Transaction.user_id == user.id,
+            Transaction.timestamp >= start_dt,
+            Transaction.timestamp <= end_dt,
+        ).order_by(Transaction.timestamp.asc()).all()
+
+        txn_rows = []
+        for t in txn_q:
+            ts = t.timestamp
+            ts_et = (ts.replace(tzinfo=UTC) if ts.tzinfo is None else ts).astimezone(ET)
+            txn_rows.append({
+                'ts_et': ts_et.strftime('%Y-%m-%d %H:%M ET'),
+                'type': t.transaction_type,
+                'ticker': t.ticker,
+                'quantity': float(t.quantity or 0),
+                'price': float(t.price or 0),
+                'value': round(float(t.quantity or 0) * float(t.price or 0), 2),
+            })
+
+        return jsonify({
+            'user': {
+                'username': user.username,
+                'id': user.id,
+                'role': user.role,
+                'max_cash_deployed': round(float(user.max_cash_deployed or 0), 2),
+                'cash_proceeds': round(float(user.cash_proceeds or 0), 2),
+            },
+            'window': {
+                'start': start_date.isoformat(),
+                'end': end_date.isoformat(),
+                'today_et': today_et.isoformat(),
+            },
+            'counts': {
+                'daily': len(daily_rows),
+                'intraday': len(intraday_rows),
+                'transactions': len(txn_rows),
+                'anomalies_5pct': len(anomalies),
+            },
+            'intraday_coverage_per_day': coverage,
+            'anomalies': anomalies,
+            'transactions': txn_rows,
+            'daily_snapshots': daily_rows,
+            'intraday_snapshots': intraday_rows,
+        })
+
     @app.route('/admin/cash-tracking/last-drift-check')
     @admin_required
     def last_drift_check():

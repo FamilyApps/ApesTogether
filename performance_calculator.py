@@ -646,31 +646,64 @@ def _generate_chart_points(
     if has_intraday:
         # For intraday periods (1D/5D): Generate point for each snapshot
         from zoneinfo import ZoneInfo as _ZoneInfo
-        
+
         # Use proper ZoneInfo for DST-safe ET conversion
         ET = _ZoneInfo('America/New_York')
         UTC_TZ = _ZoneInfo('UTC')
-        
+
+        # Sparse-axis-label strategy: only label "boundary" points; non-boundary
+        # points get empty string. iOS xAxisTickValues filters by non-empty.
+        # - 1D: label fixed market hours (10 AM, 12 PM, 2 PM) + always-last point
+        # - 5D/1W: label first point of each new ET day with "Mon 5/5"-style label
+        labeled_1d_hours = set()  # Track which 1D hour boundaries we've already labeled
+        prev_5d_day = None        # Track which ET dates we've already labeled in 5D mode
+        last_snapshot_index = len(snapshots) - 1
+
+        def _format_1d_hour_label(h_24, m):
+            """Format an hour boundary as '10 AM', '12 PM', '2 PM', or '4 PM'."""
+            h12 = h_24 % 12 if h_24 % 12 != 0 else 12
+            ampm = 'AM' if h_24 < 12 else 'PM'
+            if m == 0:
+                return f"{h12} {ampm}"
+            # Off-the-hour fallback (e.g., last point at 3:45 PM)
+            return f"{h12}:{m:02d} {ampm}"
+
         _tloop = _time.time()
-        for snapshot in snapshots:
+        for idx, snapshot in enumerate(snapshots):
             if snapshot.total_value <= 0:
                 continue
-            
+
             # Format label with time for intraday (ensure Eastern Time), date only for daily close
             if hasattr(snapshot, 'is_intraday') and snapshot.is_intraday:
-                # Format timestamp as Eastern Time label
-                # IMPORTANT: Database stores UTC (psycopg2 converts aware ET→UTC for naive column).
-                # Must convert back to ET for display.
                 ts = snapshot.timestamp
                 if ts.tzinfo is None:
                     ts_et = ts.replace(tzinfo=UTC_TZ).astimezone(ET)
                 else:
                     ts_et = ts.astimezone(ET)
+                h, m = ts_et.hour, ts_et.minute
+
                 if period == '1D':
-                    date_str = ts_et.strftime('%I:%M %p')  # "09:30 AM" — single day, time only
+                    # Label at 10/12/14 boundaries (when minute close to :00) + always last point
+                    is_last = (idx == last_snapshot_index)
+                    is_hour_boundary = (h in (10, 12, 14) and m <= 14 and h not in labeled_1d_hours)
+                    if is_hour_boundary:
+                        labeled_1d_hours.add(h)
+                        date_str = _format_1d_hour_label(h, 0)
+                    elif is_last:
+                        # Always label last actual data point so user sees end time
+                        date_str = _format_1d_hour_label(h, m)
+                    else:
+                        date_str = ""
                 else:
-                    date_str = ts_et.strftime('%a %I:%M')   # "Mon 09:30" — multi-day, include day name
+                    # 5D / 1W: label first point of each new ET day as "Mon 5/5"
+                    et_day = ts_et.date()
+                    if et_day != prev_5d_day:
+                        prev_5d_day = et_day
+                        date_str = f"{ts_et.strftime('%a')} {ts_et.month}/{ts_et.day}"
+                    else:
+                        date_str = ""
             else:
+                # Daily snapshot mixed in (multi-day periods that include daily)
                 date_str = snapshot.date.strftime('%b %d')
             
             # Get S&P 500 value for this timestamp/date
@@ -782,18 +815,53 @@ def _generate_chart_points(
             return ((V_end - V_start - CF_net) / denominator) * 100 if denominator > 0 else 0.0
         
         last_known_pct = 0.0  # Track last known portfolio % for gap-filling
-        
+
+        # Sparse boundary labels for longer periods (matches industry-standard charts):
+        # - 1M:  first point of each ISO week (Monday-style boundary)
+        # - 3M / YTD: first point of each calendar month
+        # - 1Y / 5Y: first point of each calendar month, year suffix when crossing years
+        labeled_months = set()    # (year, month) tuples already labeled
+        labeled_iso_weeks = set() # (year, iso_week) tuples already labeled
+        last_idx = len(sampled_sp500) - 1
+        crosses_year = False
+        if sampled_sp500:
+            crosses_year = sampled_sp500[0].date.year != sampled_sp500[-1].date.year
+
         for idx, sp500_record in enumerate(sampled_sp500):
-            # Period-appropriate date format for mobile screens
-            # IMPORTANT: date_str must be unique per point (used as chart ID in iOS)
-            if period in ['5Y']:
-                date_str = sp500_record.date.strftime("%b '%y")  # "Mar '23" — monthly samples, year avoids ambiguity
-            elif period in ['1Y']:
-                date_str = sp500_record.date.strftime('%b %d')  # "Mar 18" — weekly samples, unique within a year
-            elif period in ['YTD', '3M']:
-                date_str = sp500_record.date.strftime('%b %d')  # "Mar 18"
+            d = sp500_record.date
+            is_last = (idx == last_idx)
+
+            if period == '1M':
+                wk = (d.isocalendar()[0], d.isocalendar()[1])
+                if wk not in labeled_iso_weeks or is_last:
+                    labeled_iso_weeks.add(wk)
+                    date_str = f"{d.month}/{d.day}"  # "5/5"
+                else:
+                    date_str = ""
+            elif period in ('3M', 'YTD'):
+                ym = (d.year, d.month)
+                if ym not in labeled_months or is_last:
+                    labeled_months.add(ym)
+                    # YTD-style: month name only ("Jan", "Feb", ...). Last point may be mid-month.
+                    if is_last and d.day > 7:
+                        date_str = d.strftime('%b %d')  # "May 8" for the actual last point
+                    else:
+                        date_str = d.strftime('%b')      # "May"
+                else:
+                    date_str = ""
+            elif period in ('1Y', '5Y'):
+                ym = (d.year, d.month)
+                if ym not in labeled_months or is_last:
+                    labeled_months.add(ym)
+                    if crosses_year:
+                        date_str = d.strftime("%b '%y")  # "Mar '26"
+                    else:
+                        date_str = d.strftime('%b')       # "Mar"
+                else:
+                    date_str = ""
             else:
-                date_str = f"{sp500_record.date.month}/{sp500_record.date.day}"  # "3/18" — compact for 1M and shorter
+                # Fallback for any unforeseen period
+                date_str = f"{d.month}/{d.day}"
             
             # S&P 500 percentage from user's baseline (both lines start at 0%)
             sp500_value = float(sp500_record.close_price)
