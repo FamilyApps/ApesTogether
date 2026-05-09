@@ -408,20 +408,89 @@ ALPHA_NEWS_TOPICS = [
     'manufacturing', 'real_estate', 'retail_wholesale', 'economy_macro',
 ]
 
+# ── AlphaVantage API call logging ───────────────────────────────────────────
+# We buffer log entries in-memory and flush them in one batch at the end of
+# `MarketDataHub.refresh()`. This works in two execution contexts:
+#   1. Inside a Flask app (e.g. manual refresh via admin endpoint): direct DB
+#      write, fast, no HTTP roundtrip.
+#   2. Inside GitHub Actions (cmd_trade() in bot_agent.py): no Flask app context
+#      and no DATABASE_URL, so direct DB fails. Falls back to HTTP POST to
+#      /api/mobile/admin/bot/log-av-calls with the CRON_SECRET.
+#
+# Historically the direct-DB path silently failed from GitHub Actions, so the
+# admin panel's "Market Research Data Sources" card always showed 0 calls.
+
+_av_log_buffer = []  # module-level buffer of {endpoint, symbol, status, response_time_ms, timestamp}
+
+
 def _log_av_api_call(endpoint, symbol='N/A', status='success', response_time_ms=None):
-    """Best-effort log of an AlphaVantage API call to the tracking table."""
+    """Buffer an AlphaVantage API call. Use `flush_av_logs()` to persist."""
+    _av_log_buffer.append({
+        'endpoint': endpoint,
+        'symbol': symbol,
+        'response_status': status,
+        'response_time_ms': response_time_ms,
+        'timestamp': datetime.utcnow().isoformat() + 'Z',
+    })
+
+
+def flush_av_logs():
+    """Persist buffered AV call logs. Tries direct DB first, HTTP POST as fallback.
+
+    Safe to call with an empty buffer. Clears the buffer on success of either path.
+    Never raises — logging is best-effort and must not break bot trading.
+    """
+    global _av_log_buffer
+    if not _av_log_buffer:
+        return
+
+    # Snapshot + clear immediately so concurrent flushes don't double-write.
+    # (bot_agent.py is single-threaded, but being defensive is cheap.)
+    pending = _av_log_buffer
+    _av_log_buffer = []
+
+    # Path 1: Direct DB write (works inside Flask app context, e.g. admin panel).
     try:
         from models import AlphaVantageAPILog, db as _db
-        log = AlphaVantageAPILog(
-            endpoint=endpoint,
-            symbol=symbol,
-            response_status=status,
-            response_time_ms=response_time_ms,
-        )
-        _db.session.add(log)
+        for entry in pending:
+            try:
+                _db.session.add(AlphaVantageAPILog(
+                    endpoint=entry['endpoint'],
+                    symbol=entry['symbol'],
+                    response_status=entry['response_status'],
+                    response_time_ms=entry.get('response_time_ms'),
+                ))
+            except Exception:
+                continue
         _db.session.commit()
-    except Exception:
-        pass  # Never break bot trading over a log write
+        logger.info(f"Flushed {len(pending)} AV call logs directly to DB")
+        return
+    except Exception as e:
+        # Typical failure from GitHub Actions: "Working outside of application context"
+        logger.debug(f"Direct-DB AV log write failed ({e.__class__.__name__}); trying HTTP fallback")
+
+    # Path 2: HTTP POST to our backend (works from GitHub Actions, CLI tools).
+    try:
+        api_base = os.environ.get('API_BASE_URL', 'https://apestogether.ai/api/mobile')
+        cron_secret = os.environ.get('CRON_SECRET', '')
+        if not cron_secret:
+            logger.debug("No CRON_SECRET — skipping HTTP AV log flush")
+            return
+        resp = requests.post(
+            f'{api_base}/admin/bot/log-av-calls',
+            json={'logs': pending},
+            headers={
+                'X-Cron-Secret': cron_secret,
+                'Content-Type': 'application/json',
+            },
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            logger.info(f"Flushed {len(pending)} AV call logs via HTTP")
+        else:
+            logger.warning(f"HTTP AV log flush failed: {resp.status_code} {resp.text[:200]}")
+    except Exception as e:
+        logger.warning(f"HTTP AV log flush exception: {e}")
 
 
 def fetch_news_sentiment():
@@ -781,6 +850,14 @@ class MarketDataHub:
         elapsed = time.time() - start
         logger.info(f"=== Refresh complete in {elapsed:.1f}s — {len(self.indicators)} tickers with indicators ===")
         logger.info(f"Data quality: {self.data_quality}")
+
+        # Persist the buffered AV API-call logs. In Flask-app context this goes
+        # direct-to-DB; from GitHub Actions it falls back to HTTP POST. Best-effort
+        # — never raises.
+        try:
+            flush_av_logs()
+        except Exception as e:
+            logger.warning(f"flush_av_logs failed: {e}")
 
     def get_stock_data(self, ticker):
         """

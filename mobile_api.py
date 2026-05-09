@@ -3692,6 +3692,78 @@ def _execute_bot_trade_wave(wave, dry_run=False):
         return {'error': str(e)}
 
 
+@mobile_api.route('/admin/bot/log-av-calls', methods=['POST'])
+@require_cron_secret
+@with_db_retry
+def log_av_calls():
+    """Batch-log AlphaVantage API calls from external workers (GitHub Actions).
+
+    Rationale: bot_agent.py runs in GitHub Actions with no DATABASE_URL and no
+    Flask app context, so the direct-DB `_log_av_api_call()` in bot_data_hub.py
+    silently fails (wrapped in bare except). This endpoint gives the external
+    worker an HTTP path to record API usage, so the admin panel's "Market
+    Research Data Sources" card reflects reality.
+
+    Request body (JSON):
+        { "logs": [
+            { "endpoint": "NEWS_SENTIMENT", "symbol": "topic:technology",
+              "response_status": "success", "response_time_ms": 850,
+              "timestamp": "2026-05-09T18:45:12Z"  # optional, defaults to now
+            },
+            ...
+        ] }
+
+    Auth: X-Cron-Secret header OR admin 2FA session.
+    """
+    from models import db, AlphaVantageAPILog
+    from datetime import datetime as _dt
+
+    payload = request.get_json(silent=True) or {}
+    logs = payload.get('logs', [])
+    if not isinstance(logs, list):
+        return jsonify({'error': 'logs must be a list'}), 400
+
+    logged = 0
+    errors = 0
+    for entry in logs:
+        if not isinstance(entry, dict):
+            errors += 1
+            continue
+        try:
+            ts = entry.get('timestamp')
+            if ts:
+                # Parse ISO 8601; strip trailing Z since fromisoformat() doesn't accept it
+                ts_clean = ts.rstrip('Z').replace('Z', '')
+                try:
+                    ts_parsed = _dt.fromisoformat(ts_clean)
+                except ValueError:
+                    ts_parsed = _dt.utcnow()
+            else:
+                ts_parsed = _dt.utcnow()
+
+            log = AlphaVantageAPILog(
+                endpoint=(entry.get('endpoint') or 'UNKNOWN')[:100],
+                symbol=(entry.get('symbol') or 'N/A')[:50],
+                timestamp=ts_parsed,
+                response_status=(entry.get('response_status') or 'success')[:20],
+                response_time_ms=entry.get('response_time_ms'),
+            )
+            db.session.add(log)
+            logged += 1
+        except Exception as e:
+            errors += 1
+            logger.warning(f"log_av_calls: failed to parse entry {entry}: {e}")
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"log_av_calls: commit failed: {e}")
+        return jsonify({'error': 'commit_failed', 'message': str(e)}), 500
+
+    return jsonify({'logged': logged, 'errors': errors, 'received': len(logs)})
+
+
 @mobile_api.route('/admin/bot/trade', methods=['POST'])
 @require_cron_secret
 @with_db_retry
