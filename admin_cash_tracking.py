@@ -1725,14 +1725,21 @@ def register_cash_tracking_routes(app, db):
 
         daily_rows = []
         prev_total = None
+        prev_max_cash_d = None
         for s in daily_q:
             tot = float(s.total_value or 0)
             stock = float(s.stock_value or 0)
             cash = float(s.cash_proceeds or 0)
             max_cash = float(s.max_cash_deployed or 0)
             pct_change = None
+            capital_change = None
             if prev_total and prev_total > 0:
-                pct_change = round((tot - prev_total) / prev_total * 100, 2)
+                # Capital-deployment-aware pct change: subtract any new capital
+                # deployed between snapshots from the value delta, so the metric
+                # reflects ONLY market-driven movement (not cash injections).
+                cap_delta = max_cash - (prev_max_cash_d or 0.0)
+                capital_change = round(cap_delta, 2)
+                pct_change = round((tot - prev_total - cap_delta) / prev_total * 100, 2)
             daily_rows.append({
                 'date': s.date.isoformat(),
                 'total_value': round(tot, 2),
@@ -1741,8 +1748,10 @@ def register_cash_tracking_routes(app, db):
                 'max_cash_deployed': round(max_cash, 2),
                 'sum_check': round(stock + cash - tot, 2),  # Should be 0
                 'pct_change_from_prev_day': pct_change,
+                'capital_deployed_since_prev': capital_change,
             })
             prev_total = tot
+            prev_max_cash_d = max_cash
 
         # 2. Intraday snapshots
         start_dt = _dt.combine(start_date, _t.min)
@@ -1758,6 +1767,7 @@ def register_cash_tracking_routes(app, db):
         anomalies = []
         prev_tot = None
         prev_ts_et = None
+        prev_max_cash_i = None
         for s in intraday_q:
             ts = s.timestamp
             ts_et = (ts.replace(tzinfo=UTC) if ts.tzinfo is None else ts).astimezone(ET)
@@ -1767,15 +1777,23 @@ def register_cash_tracking_routes(app, db):
             max_cash = float(s.max_cash_deployed or 0)
 
             pct_change = None
+            capital_change = None
             if prev_tot and prev_tot > 0:
-                pct_change = round((tot - prev_tot) / prev_tot * 100, 2)
+                # Capital-deployment-aware pct change: subtract any new capital
+                # deployed between snapshots from the value delta, so the metric
+                # reflects ONLY market-driven movement. A 23% jump caused by a
+                # mid-day capital injection should NOT be flagged as an anomaly.
+                cap_delta = max_cash - (prev_max_cash_i or 0.0)
+                capital_change = round(cap_delta, 2)
+                pct_change = round((tot - prev_tot - cap_delta) / prev_tot * 100, 2)
                 if abs(pct_change) >= 5.0:
                     anomalies.append({
                         'from': prev_ts_et.strftime('%Y-%m-%d %H:%M ET') if prev_ts_et else None,
                         'to': ts_et.strftime('%Y-%m-%d %H:%M ET'),
                         'prev_total': round(prev_tot, 2),
                         'curr_total': round(tot, 2),
-                        'pct_change': pct_change,
+                        'capital_deployed_between': capital_change,
+                        'pct_change_market_only': pct_change,
                         'curr_stock_value': round(stock, 2),
                         'curr_cash_proceeds': round(cash, 2),
                     })
@@ -1790,9 +1808,11 @@ def register_cash_tracking_routes(app, db):
                 'max_cash_deployed': round(max_cash, 2),
                 'sum_check': round(stock + cash - tot, 2),
                 'pct_change_from_prev': pct_change,
+                'capital_deployed_since_prev': capital_change,
             })
             prev_tot = tot
             prev_ts_et = ts_et
+            prev_max_cash_i = max_cash
 
         # Coverage analysis: count intraday per ET date
         coverage = {}
