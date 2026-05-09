@@ -124,7 +124,7 @@ struct MyPortfolioView: View {
         
         if #available(iOS 16.0, *) {
             shareImage = ShareCardGenerator.shared.generatePortfolioCard(
-                username: user.username,
+                username: user.publicName,
                 portfolioReturn: shareViewModel.portfolioReturn,
                 sp500Return: shareViewModel.sp500Return,
                 chartData: shareViewModel.chartData,

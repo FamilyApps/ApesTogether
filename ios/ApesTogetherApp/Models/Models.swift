@@ -6,7 +6,14 @@ struct User: Codable, Identifiable {
     let id: Int
     let email: String
     let username: String
+    let displayName: String?
     let portfolioSlug: String?
+
+    /// Public-facing name. Falls back to `username` when `displayName` is nil/empty.
+    var publicName: String {
+        if let dn = displayName, !dn.isEmpty { return dn }
+        return username
+    }
 }
 
 // MARK: - Auth
@@ -57,7 +64,13 @@ struct LeaderboardEntry: Codable, Identifiable {
 struct LeaderboardUser: Codable {
     let id: Int
     let username: String
+    let displayName: String?
     let portfolioSlug: String?
+
+    var publicName: String {
+        if let dn = displayName, !dn.isEmpty { return dn }
+        return username
+    }
 }
 
 // MARK: - Portfolio
@@ -92,7 +105,13 @@ struct LeaderboardBadge: Codable, Identifiable {
 struct PortfolioOwner: Codable {
     let id: Int
     let username: String
+    let displayName: String?
     let portfolioSlug: String?
+
+    var publicName: String {
+        if let dn = displayName, !dn.isEmpty { return dn }
+        return username
+    }
 }
 
 struct Holding: Codable, Identifiable {
@@ -154,6 +173,12 @@ struct Subscriber: Codable, Identifiable {
 struct SubscriberUser: Codable {
     let id: Int
     let username: String
+    let displayName: String?
+
+    var publicName: String {
+        if let dn = displayName, !dn.isEmpty { return dn }
+        return username
+    }
 }
 
 // MARK: - Purchase

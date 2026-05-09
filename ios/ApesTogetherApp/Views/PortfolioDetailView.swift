@@ -60,7 +60,7 @@ struct PortfolioDetailView: View {
                                 onPeriodChanged?(period)
                                 Task { await viewModel.loadChart(slug: slug) }
                             },
-                            portfolioLabel: portfolio.isOwner ? "Your Portfolio" : portfolio.owner.username,
+                            portfolioLabel: portfolio.isOwner ? "Your Portfolio" : portfolio.owner.publicName,
                             leaderboardEligible: viewModel.leaderboardEligible,
                             daysActive: viewModel.daysActive,
                             daysRequired: viewModel.daysRequired,
@@ -108,8 +108,8 @@ struct PortfolioDetailView: View {
                                     
                                     ShareLink(
                                         item: URL(string: "https://apestogether.ai/p/\(portfolio.owner.portfolioSlug ?? slug)?period=\(viewModel.selectedPeriod)")!,
-                                        subject: Text("\(portfolio.owner.username)'s Portfolio"),
-                                        message: Text("Check out \(portfolio.owner.username)'s stock portfolio on ApesTogether!")
+                                        subject: Text("\(portfolio.owner.publicName)'s Portfolio"),
+                                        message: Text("Check out \(portfolio.owner.publicName)'s stock portfolio on ApesTogether!")
                                     ) {
                                         HStack(spacing: 5) {
                                             Image(systemName: "square.and.arrow.up")
@@ -249,7 +249,7 @@ struct PortfolioDetailView: View {
                         } else if portfolio.holdings == nil {
                             // ── Blurred Holdings Teaser ──
                             BlurredHoldingsTeaser(
-                                username: portfolio.owner.username,
+                                username: portfolio.owner.publicName,
                                 subscriptionManager: subscriptionManager,
                                 onSubscribe: {
                                     Task { await subscriptionManager.subscribe(to: portfolio.owner.id) }
@@ -293,8 +293,8 @@ struct PortfolioDetailView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     ShareLink(
                         item: URL(string: "https://apestogether.ai/p/\(portfolio.owner.portfolioSlug ?? slug)?period=\(viewModel.selectedPeriod)")!,
-                        subject: Text("\(portfolio.owner.username)'s Portfolio"),
-                        message: Text("Check out \(portfolio.owner.username)'s portfolio on ApesTogether!")
+                        subject: Text("\(portfolio.owner.publicName)'s Portfolio"),
+                        message: Text("Check out \(portfolio.owner.publicName)'s portfolio on ApesTogether!")
                     ) {
                         Image(systemName: "square.and.arrow.up")
                             .font(.system(size: 14))
@@ -792,12 +792,12 @@ struct PortfolioHeroCard: View {
                     .frame(width: 56, height: 56)
                     .shadow(color: Color.primaryAccent.opacity(0.3), radius: 12)
                 
-                Text(String(portfolio.owner.username.prefix(1)).uppercased())
+                Text(String(portfolio.owner.publicName.prefix(1)).uppercased())
                     .font(.system(size: 22, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
             }
             
-            Text(portfolio.owner.username)
+            Text(portfolio.owner.publicName)
                 .font(.system(size: 20, weight: .bold))
                 .foregroundColor(.textPrimary)
             

@@ -94,7 +94,7 @@ struct SubscriptionsView: View {
                             Image(systemName: "person.circle.fill")
                                 .foregroundColor(.primaryAccent)
                                 .font(.title3)
-                            Text(sub.subscriber?.username ?? "User")
+                            Text(sub.subscriber?.publicName ?? "User")
                                 .font(.subheadline.weight(.medium))
                                 .foregroundColor(.textPrimary)
                             Spacer()
@@ -260,7 +260,7 @@ struct SubscriptionCard: View {
                     .font(.system(size: 28))
                 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(subscription.portfolioOwner?.username ?? "Unknown")
+                    Text(subscription.portfolioOwner?.publicName ?? "Unknown")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(.textPrimary)
                     

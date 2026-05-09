@@ -44,14 +44,14 @@ struct ReferralPreviewView: View {
                                 .fill(Color.primaryAccent.opacity(0.15))
                                 .frame(width: 80, height: 80)
                             
-                            Text(String(portfolio.owner.username.prefix(1)).uppercased())
+                            Text(String(portfolio.owner.publicName.prefix(1)).uppercased())
                                 .font(.system(size: 32, weight: .bold))
                                 .foregroundColor(.primaryAccent)
                         }
                         
                         // Username and stats
                         VStack(spacing: 8) {
-                            Text(portfolio.owner.username)
+                            Text(portfolio.owner.publicName)
                                 .font(.title.bold())
                                 .foregroundColor(.textPrimary)
                             
@@ -76,7 +76,7 @@ struct ReferralPreviewView: View {
                                 .font(.headline)
                                 .foregroundColor(.textPrimary)
                             
-                            Text("Know the moment \(portfolio.owner.username) buys or sells. Never miss a move.")
+                            Text("Know the moment \(portfolio.owner.publicName) buys or sells. Never miss a move.")
                                 .font(.subheadline)
                                 .foregroundColor(.textSecondary)
                                 .multilineTextAlignment(.center)

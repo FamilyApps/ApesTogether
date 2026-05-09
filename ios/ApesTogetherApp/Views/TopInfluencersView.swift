@@ -270,7 +270,7 @@ struct InfluencerRow: View {
             
             // User info
             VStack(alignment: .leading, spacing: 4) {
-                Text(entry.user.username)
+                Text(entry.user.publicName)
                     .font(.subheadline.weight(.semibold))
                     .foregroundColor(.textPrimary)
                     .lineLimit(1)

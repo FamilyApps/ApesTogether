@@ -505,7 +505,7 @@ struct LeaderboardCard: View {
                     
                     // User info column
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(entry.user.username)
+                        Text(entry.user.publicName)
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(.textPrimary)
                             .lineLimit(1)
