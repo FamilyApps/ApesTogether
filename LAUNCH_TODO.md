@@ -1,10 +1,24 @@
 # Launch TODO — Living Checklist
 
-**Launch day: June 1, 2026** (see `docs/LAUNCH_PLAYBOOK.md` for the full day-by-day calendar)
+**Launch day: TBD — deferred until Android app is feature-complete and tested.**
+Launching iOS-only with a buggy or missing Android app risks long-term reputational damage. The June 1, 2026 date is paused. The original day-by-day calendar lives in `docs/LAUNCH_PLAYBOOK.md`; treat it as a *template* now, not a deadline. Many tasks (legal, social accounts, screenshots, App Store assets) can still be completed in parallel and will compress the post-Android timeline.
 
 This document is the single source of truth for what's still open before launch. Update it every session. Items are grouped by category, not by order. Within each category, items are roughly high → low priority.
 
 **Legend:** `[ ]` open · `[~]` in progress · `[x]` done · `[!]` blocked on external dependency
+
+---
+
+## ⏰ Monday market-open checklist (next trading day)
+
+Things to verify when the market is open and the bot pipeline is running. Hit each URL and report back.
+
+- [ ] **Drift detector still clean.** `/admin-panel` → System Health → Cash-Tracking Drift card. Click *Run now*. Should still report "Clean" (or specific drifted users to fix).
+- [ ] **AlphaVantage logging populated.** `/admin-panel` → Bot Management → Market Research Data Sources. After the 9:45 AM ET wave finishes, News (NEWS_SENTIMENT) and Movers (TOP_GAINERS_LOSERS) rows should show non-zero call counts in the last 24h. If still showing `no_calls`, the HTTP fallback isn't firing — check Vercel logs for `/admin/bot/log-av-calls` POSTs.
+- [ ] **Bot trades show realistic prices.** `/admin-panel` → System Health → Recent Trades. Verify trades from this morning's wave have plausible prices (not $0.01, not $99999) and the right `Source` (`bot_research` or `bulk_api`).
+- [ ] **Display names render correctly on iOS.** Open the app, navigate to The Grok Portfolio (was marblethehill72) and Wolff's Flagship Fund (was CoastHillBear) on the leaderboard. Both should show the new public-facing names. Their portfolio detail headers and share-link previews should also use the new names.
+- [ ] **panther2585 1M chart fix verified.** After applying any chart fix from this session, navigate to panther2585's portfolio → 1M period. End of chart should not show ~20% drop unless real market moves justify it.
+- [ ] **bobford00 performance audit.** Verify 1D, 1W, 1M return percentages match expected market movement (since no recent trades, your performance should track your held stocks' price changes minus a rough benchmark).
 
 ---
 
@@ -15,6 +29,10 @@ This document is the single source of truth for what's still open before launch.
 - [x] `FOR UPDATE NOWAIT` on leaderboard_cache SELECT — fail-fast instead of 120s hang
 - [x] Drift-detection System Health card in `/admin-panel`
 - [x] AlphaVantage API logging from GitHub Actions — batch endpoint + HTTP fallback in `_log_av_api_call`
+- [x] `display_name` column on User + serializers + iOS Models — public-facing names that bypass the username regex
+- [ ] **USER ACTION**: After deploy, hit `POST /api/mobile/admin/users/set-display-name` (admin 2FA) with `{updates: [{user_id: 13, display_name: "The Grok Portfolio"}, {user_id: 14, display_name: "Wolff's Flagship Fund"}]}` to install the column and set values
+- [ ] Investigate panther2585 ~20% drop at end of 1M chart — see Monday checklist for diagnostic URL
+- [ ] Audit bobford00 1D/1W/1M performance — no recent trades so should track held stocks only
 - [ ] Audit other `mobile_api.py` admin endpoints for missing auth — I added auth to only one in this session; others may be similarly exposed
 - [ ] Ping cron `*/4 * * * *` → `/api/health` to prevent Vercel cold starts (from `IMPLEMENTATION_CHECKLIST.md:69-73`) — status unclear, verify if deployed
 - [ ] Verify weekly drift-detection cron fires on schedule (first scheduled run confirms; check `/admin/cash-tracking/last-drift-check` after)
@@ -105,8 +123,16 @@ At the end of each session, the assistant should:
 
 ## Last updated
 
-**2026-05-09 — session ended with:**
+**2026-05-09 (afternoon) — session 2 ended with:**
+- Drift indicator card live, drift check returned "Clean" (13 users scanned, $1.00 threshold)
+- AlphaVantage logging fix shipped (verify Mon at 9:45 AM ET wave)
+- iOS Build 31 archived from local Mac
+- Discovered `display_name` field never existed; the past "rename usernames" request was effectively a no-op (validation regex blocks spaces/apostrophes/uppercase). Implemented full `display_name` column + iOS Codable + 8 backend serializers + 6 Swift views in this session.
+- Launch date deferred from June 1, 2026 to TBD pending Android completion.
+- panther2585 ~20% 1M chart drop and bobford00 performance audit pending — diagnostic URLs queued in Monday checklist.
+
+**2026-05-09 (morning) — session 1 ended with:**
 - Chart spike fix deployed
 - Leaderboard rebuild auth + lock-fast deployed (commit `8d448ab`)
-- Drift indicator + AlphaVantage logging fix added (uncommitted — see `git status`)
+- Drift indicator + AlphaVantage logging fix added
 - This LAUNCH_TODO.md created
