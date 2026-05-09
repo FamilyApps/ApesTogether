@@ -6289,12 +6289,16 @@ def _save_auto_create_settings(settings):
 
 
 @mobile_api.route('/admin/rebuild-leaderboard-cache/<period>', methods=['GET'])
+@require_admin_2fa
 @with_db_retry
 def rebuild_leaderboard_cache_single(period):
     """Rebuild leaderboard cache for a single period (avoids Vercel timeout).
 
     Reset the DB session up-front so we never spend the budget on a stale cold
     connection. with_db_retry handles transient SSL drops mid-execution.
+
+    Auth: admin Flask session (2FA-verified) OR X-Admin-Key + X-Admin-OTP headers.
+    Browser users with an active admin session pass through transparently.
     """
     _reset_db_session()
     import time as _time

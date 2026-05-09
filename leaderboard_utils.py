@@ -974,8 +974,30 @@ def update_leaderboard_cache(periods=None):
                 # (Previously used db.engine.connect() which opens a brand-new
                 # connection — on Vercel's serverless that's a cold SSL handshake
                 # every time, blowing past the 60s timeout when writing 18 entries.)
-                select_sql = text("SELECT id FROM leaderboard_cache WHERE period = :period")
-                existing_id = db.session.execute(select_sql, {'period': cache_key}).scalar()
+                #
+                # FOR UPDATE NOWAIT: acquire the row lock at SELECT time. If another
+                # connection holds the row lock (concurrent rebuild, market-close cron,
+                # leftover zombie txn), Postgres raises LockNotAvailable (SQLSTATE
+                # 55P03) immediately instead of letting the UPDATE hang for 120s
+                # (statement_timeout). On lock failure we skip this entry and move on
+                # — the other writer's update is just as good, and a later rebuild
+                # will overwrite it anyway.
+                select_sql = text(
+                    "SELECT id FROM leaderboard_cache WHERE period = :period FOR UPDATE NOWAIT"
+                )
+                try:
+                    existing_id = db.session.execute(select_sql, {'period': cache_key}).scalar()
+                except Exception as lock_e:
+                    err_str = str(lock_e).lower()
+                    if 'could not obtain lock' in err_str or '55p03' in err_str or 'lock not available' in err_str:
+                        print(f"  ⚠ {cache_key}: row locked by another connection, skipping")
+                        _lb_errors.append(f"{period}_{category}: row_locked")
+                        try:
+                            db.session.rollback()
+                        except Exception:
+                            pass
+                        continue
+                    raise
 
                 if existing_id:
                     db.session.execute(text("""
@@ -997,6 +1019,7 @@ def update_leaderboard_cache(periods=None):
                         'time': now,
                     })
                 # Commit per entry so a later failure doesn't lose earlier work.
+                # Commit also releases the FOR UPDATE row lock immediately.
                 db.session.commit()
 
                 updated_count += 1
