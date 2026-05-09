@@ -999,14 +999,26 @@ def register_cash_tracking_routes(app, db):
         cost_basis = round(sum((s.quantity or 0) * (s.purchase_price or 0) for s in stocks), 2)
 
         # 2. Replay transactions chronologically; build per-date dictionaries
+        # AND a per-timestamp timeline so we can do timestamp-granular replay
+        # for intraday snapshots (so a 9:30 AM snapshot doesn't get the EOD
+        # state of transactions that happened at 9:43 AM).
         txns = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.timestamp).all()
         replay_max_cash = 0.0
         replay_cash = 0.0
         per_date_max_cash = {}
         per_date_cash = {}
+        txn_timeline = []  # list of (txn_ts_naive_utc, running_max_cash, running_cash)
         buy_count = 0
         sell_count = 0
         after_close_count = 0
+
+        def _to_naive_utc(ts):
+            """Normalize aware/naive timestamps to naive UTC for direct comparison."""
+            if ts is None:
+                return None
+            if ts.tzinfo is not None:
+                return ts.astimezone(_UTC_TZ).replace(tzinfo=None)
+            return ts
 
         for txn in txns:
             val = (txn.quantity or 0) * (txn.price or 0)
@@ -1027,6 +1039,9 @@ def register_cash_tracking_routes(app, db):
                     after_close_count += 1
                 per_date_max_cash[eff_date] = replay_max_cash
                 per_date_cash[eff_date] = replay_cash
+            ts_naive = _to_naive_utc(txn.timestamp)
+            if ts_naive is not None:
+                txn_timeline.append((ts_naive, replay_max_cash, replay_cash))
 
         replay_max_cash = round(replay_max_cash, 2)
         replay_cash = round(replay_cash, 2)
@@ -1147,23 +1162,43 @@ def register_cash_tracking_routes(app, db):
             if upd.rowcount > 0:
                 snapshots_updated += 1
 
-        # 6. Intraday snapshots
+        # 6. Intraday snapshots — TIMESTAMP-GRANULAR replay
+        #
+        # The previous (buggy) version used `replay_at(snap_date)` which returned
+        # the END-OF-DAY state for the snapshot's date. That meant a 9:30 AM
+        # snapshot got the post-EOD values of transactions that hadn't happened
+        # yet at 9:30 (e.g. trades at 9:43). The chart's Modified Dietz formula
+        # then read those snapshot's max_cash_deployed as new capital deployed
+        # before 9:30, producing a phantom -20% spike.
+        #
+        # Fix: walk transactions and snapshots in chronological order. For each
+        # snapshot at timestamp T, apply only transactions with txn_ts <= T.
         intraday_snapshots = PortfolioSnapshotIntraday.query.filter_by(
             user_id=user.id
         ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
 
         intraday_updated = 0
+        # txn_timeline is already sorted chronologically (insertion order).
+        # Walk it via an index pointer that advances monotonically.
+        timeline_idx = 0
+        running_rmax = 0.0
+        running_rcash = 0.0
         for isnap in intraday_snapshots:
-            ts = isnap.timestamp
-            if ts.tzinfo is None:
-                ts_et = ts.replace(tzinfo=_UTC_TZ).astimezone(_MARKET_TZ)
-            else:
-                ts_et = ts.astimezone(_MARKET_TZ)
-            snap_date = ts_et.date()
+            snap_ts = _to_naive_utc(isnap.timestamp)
+            if snap_ts is None:
+                continue
+            # Advance the timeline pointer past every txn at or before snap_ts.
+            # txn at timestamp == snap_ts is treated as "already applied" (the
+            # cron at T reads user.* fields after any txn at T that committed
+            # before the cron ran).
+            while timeline_idx < len(txn_timeline) and txn_timeline[timeline_idx][0] <= snap_ts:
+                _ts, _max, _cash = txn_timeline[timeline_idx]
+                running_rmax = _max
+                running_rcash = _cash
+                timeline_idx += 1
 
-            rmax, rcash = replay_at(snap_date)
-            new_max = round(seeded_baseline + rmax, 2)
-            new_cash = round(rcash, 2)
+            new_max = round(seeded_baseline + running_rmax, 2)
+            new_cash = round(running_rcash, 2)
 
             upd = db.session.execute(text("""
                 UPDATE portfolio_snapshot_intraday
