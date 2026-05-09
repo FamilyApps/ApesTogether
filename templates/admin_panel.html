@@ -1575,23 +1575,60 @@ const EmailMonitor = ({ api }) => {
 const SystemHealth = ({ api }) => {
   const [cron, setCron] = useState(null);
   const [trades, setTrades] = useState(null);
+  const [drift, setDrift] = useState(null);
+  const [driftRunning, setDriftRunning] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // Drift-check endpoints live on the main Flask app, not /api/mobile.
+  // Use raw fetch() with credentials so the admin session cookie is sent.
+  const fetchDrift = useCallback(async () => {
+    try {
+      const res = await fetch('/admin/cash-tracking/last-drift-check', { credentials: 'include' });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (e) { console.error('drift fetch failed', e); return null; }
+  }, []);
+
+  const runDriftCheck = useCallback(async () => {
+    if (driftRunning) return;
+    setDriftRunning(true);
+    try {
+      const res = await fetch('/admin/cash-tracking/drift-check?email=false&threshold=1.00', {
+        credentials: 'include',
+      });
+      const data = await res.json();
+      // Result of fresh run mirrors the persisted format
+      setDrift(data);
+    } catch (e) { console.error('drift run failed', e); }
+    setDriftRunning(false);
+  }, [driftRunning]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [c, t] = await Promise.all([
+      const [c, t, d] = await Promise.all([
         api('/admin/bot/cron-health'),
         api('/admin/bot/trade-history?per_page=20'),
+        fetchDrift(),
       ]);
-      setCron(c); setTrades(t);
+      setCron(c); setTrades(t); setDrift(d);
     } catch (e) { console.error(e); }
     setLoading(false);
-  }, [api]);
+  }, [api, fetchDrift]);
 
   useEffect(() => { load(); }, [load]);
 
   if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}><Spinner /></div>;
+
+  // Derive drift status indicator color
+  // never_run → gray, drift_count === 0 → green, 1-3 → yellow, >3 → red
+  const driftStatus = (() => {
+    if (!drift || drift.never_run) return { color: 'var(--text-muted)', label: 'Never run', shadow: '#88888844' };
+    const n = drift.drift_count || 0;
+    if (n === 0) return { color: 'var(--green)', label: 'Clean', shadow: 'var(--green)44' };
+    if (n <= 3) return { color: 'var(--yellow)', label: `${n} drifted`, shadow: 'var(--yellow)44' };
+    return { color: 'var(--red)', label: `${n} drifted`, shadow: 'var(--red)44' };
+  })();
 
   return (
     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -1618,6 +1655,74 @@ const SystemHealth = ({ api }) => {
           ))}
         </div>
         {cron?.server_time && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10 }}>Server time: {new Date(cron.server_time).toLocaleString()}</div>}
+      </Card>
+
+      <Card>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>Cash-Tracking Drift</div>
+          <Btn variant="secondary" small onClick={runDriftCheck} disabled={driftRunning}>
+            {driftRunning ? 'Running…' : 'Run now'}
+          </Btn>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: 'var(--bg-elevated)', borderRadius: 8, border: '1px solid var(--border)' }}>
+          <div style={{ width: 10, height: 10, borderRadius: '50%', background: driftStatus.color, boxShadow: `0 0 8px ${driftStatus.shadow}` }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>
+              {driftStatus.label}
+              {drift && !drift.never_run && drift.users_scanned != null && (
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400, marginLeft: 8 }}>
+                  ({drift.users_scanned} users scanned, threshold ${drift.threshold?.toFixed(2) ?? '1.00'})
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+              {drift && drift.never_run
+                ? (drift.hint || 'Click "Run now" to populate.')
+                : drift?.timestamp
+                  ? `Last check: ${drift.timestamp}`
+                  : 'No data'}
+            </div>
+          </div>
+        </div>
+
+        {/* Drilldown: list each drifted user's amounts and the suggested fix URL */}
+        {drift && Array.isArray(drift.drift_users) && drift.drift_users.length > 0 && (
+          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {drift.drift_users.map((u, i) => (
+              <div key={i} style={{ padding: '10px 12px', background: 'var(--bg-elevated)', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <span style={{ fontWeight: 600 }}>{u.username}</span>
+                  <span style={{ color: 'var(--text-muted)' }}>id={u.user_id} · {u.transactions} txns · {u.role}</span>
+                </div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
+                  max_cash: ${u.current_max_cash?.toFixed(2) ?? '?'} → ${u.target_max_cash?.toFixed(2) ?? '?'}
+                  {u.max_cash_drift != null && Math.abs(u.max_cash_drift) >= 0.01 && (
+                    <span style={{ color: Math.abs(u.max_cash_drift) > 1 ? 'var(--red)' : 'var(--yellow)', marginLeft: 6 }}>
+                      (Δ ${u.max_cash_drift.toFixed(2)})
+                    </span>
+                  )}
+                </div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
+                  cash_proceeds: ${u.current_cash_proceeds?.toFixed(2) ?? '?'} → ${u.target_cash_proceeds?.toFixed(2) ?? '?'}
+                  {u.cash_drift != null && Math.abs(u.cash_drift) >= 0.01 && (
+                    <span style={{ color: Math.abs(u.cash_drift) > 1 ? 'var(--red)' : 'var(--yellow)', marginLeft: 6 }}>
+                      (Δ ${u.cash_drift.toFixed(2)})
+                    </span>
+                  )}
+                </div>
+                {u.fix_url && (
+                  <a href={u.fix_url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', fontSize: 11, marginTop: 4, display: 'inline-block' }}>
+                    Fix this user →
+                  </a>
+                )}
+              </div>
+            ))}
+            <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-muted)' }}>
+              Or fix all in one shot: <a href="/admin/cash-tracking/full-rebuild?all=true&execute=true" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>/admin/cash-tracking/full-rebuild?all=true&execute=true</a>
+            </div>
+          </div>
+        )}
       </Card>
 
       <Card>
