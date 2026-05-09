@@ -465,6 +465,7 @@ def get_subscriptions():
                 'portfolio_owner': {
                     'id': owner.id,
                     'username': owner.username,
+                    'display_name': owner.public_name,
                     'portfolio_slug': owner.portfolio_slug
                 } if owner else None,
                 'status': sub.status,
@@ -479,7 +480,8 @@ def get_subscriptions():
                 'id': sub.id,
                 'subscriber': {
                     'id': subscriber.id,
-                    'username': subscriber.username
+                    'username': subscriber.username,
+                    'display_name': subscriber.public_name
                 } if subscriber else None,
                 'status': sub.status,
                 'created_at': sub.created_at.isoformat()
@@ -571,6 +573,7 @@ def get_portfolio(slug):
             'owner': {
                 'id': owner.id,
                 'username': owner.username,
+                'display_name': owner.public_name,
                 'portfolio_slug': owner.portfolio_slug
             },
             'is_owner': is_owner,
@@ -1220,6 +1223,7 @@ def get_leaderboard():
                 'user': {
                     'id': user_id,
                     'username': user.username,  # Live DB is source of truth (avoids stale cached usernames after renames)
+                    'display_name': user.public_name,
                     'portfolio_slug': user.portfolio_slug
                 },
                 'return_percent': user_return,
@@ -1352,7 +1356,7 @@ def notification_history():
             combined.append({
                 'id': f'email-{log.id}',
                 'type': 'email',
-                'trader_username': trader.username if trader else 'Unknown',
+                'trader_username': trader.public_name if trader else 'Unknown',
                 'status': log.status,
                 'created_at': log.created_at.isoformat() if log.created_at else None,
             })
@@ -1363,7 +1367,7 @@ def notification_history():
                 'type': 'push',
                 'title': log.title,
                 'body': log.body,
-                'trader_username': trader.username if trader else 'Unknown',
+                'trader_username': trader.public_name if trader else 'Unknown',
                 'status': log.status,
                 'created_at': log.created_at.isoformat() if log.created_at else None,
                 'data': log.data_payload,
@@ -1394,6 +1398,7 @@ def get_user_preferences():
             return jsonify({'error': 'user_not_found'}), 404
         return jsonify({
             'username': user.username,
+            'display_name': user.public_name,
             'email': user.email,
             'email_notifications_enabled': getattr(user, 'email_notifications_enabled', True),
             'push_notifications_enabled': getattr(user, 'push_notifications_enabled', True),
@@ -1633,6 +1638,7 @@ def get_auth_token():
                 'id': user.id,
                 'email': user.email,
                 'username': user.username,
+                'display_name': user.public_name,
                 'portfolio_slug': user.portfolio_slug
             }
         })
@@ -1664,6 +1670,7 @@ def get_current_user():
             'id': user.id,
             'email': user.email,
             'username': user.username,
+            'display_name': user.public_name,
             'portfolio_slug': user.portfolio_slug
         })
         
@@ -1869,6 +1876,7 @@ def get_top_influencers():
                 'user': {
                     'id': user.id,
                     'username': user.username,
+                    'display_name': user.public_name,
                     'portfolio_slug': user.portfolio_slug
                 },
                 'subscriber_count': sub_totals[uid],
@@ -3690,6 +3698,101 @@ def _execute_bot_trade_wave(wave, dry_run=False):
     except Exception as e:
         logger.error(f"Bot trade wave {wave} error: {e}")
         return {'error': str(e)}
+
+
+@mobile_api.route('/admin/users/set-display-name', methods=['POST'])
+@require_admin_2fa
+@with_db_retry
+def admin_set_display_name():
+    """Set or clear the public-facing display_name for one or more users.
+
+    Idempotently runs `ALTER TABLE "user" ADD COLUMN IF NOT EXISTS display_name`
+    so this endpoint also serves as the migration-applier — hit it once after
+    deploy to install the column. Subsequent calls just update display_name
+    values.
+
+    Bypasses the username validation regex, so display_name can contain spaces,
+    apostrophes, uppercase, emoji, etc. (length capped at 80 chars). Username
+    itself is unchanged — it stays as the unique URL-safe handle.
+
+    Request body (JSON):
+        { "updates": [
+            { "user_id": 13, "display_name": "The Grok Portfolio" },
+            { "user_id": 14, "display_name": "Wolff's Flagship Fund" },
+            { "user_id": 99, "display_name": null }   # clear it
+        ] }
+
+    Auth: admin 2FA session (or X-Admin-Key header in dev paths).
+    """
+    from models import db, User
+    from sqlalchemy import text
+
+    payload = request.get_json(silent=True) or {}
+    updates = payload.get('updates') or []
+    if not isinstance(updates, list):
+        return jsonify({'error': 'updates must be a list'}), 400
+
+    # Step 1: ensure column exists (idempotent — safe to run repeatedly)
+    try:
+        db.session.execute(text(
+            'ALTER TABLE "user" ADD COLUMN IF NOT EXISTS display_name VARCHAR(80)'
+        ))
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"admin_set_display_name: failed to ensure column: {e}")
+        return jsonify({'error': 'schema_setup_failed', 'message': str(e)}), 500
+
+    # Step 2: apply updates
+    applied = []
+    skipped = []
+    for u in updates:
+        if not isinstance(u, dict):
+            skipped.append({'reason': 'not_a_dict', 'value': u})
+            continue
+        user_id = u.get('user_id')
+        new_name = u.get('display_name')  # None means clear
+        if not isinstance(user_id, int):
+            skipped.append({'reason': 'invalid_user_id', 'user_id': user_id})
+            continue
+        if new_name is not None:
+            if not isinstance(new_name, str):
+                skipped.append({'reason': 'display_name_not_string', 'user_id': user_id})
+                continue
+            new_name = new_name.strip()
+            if len(new_name) == 0:
+                new_name = None  # treat empty string as clear
+            elif len(new_name) > 80:
+                skipped.append({'reason': 'display_name_too_long', 'user_id': user_id, 'length': len(new_name)})
+                continue
+
+        user = User.query.get(user_id)
+        if not user:
+            skipped.append({'reason': 'user_not_found', 'user_id': user_id})
+            continue
+
+        previous = user.display_name
+        user.display_name = new_name
+        applied.append({
+            'user_id': user_id,
+            'username': user.username,
+            'previous_display_name': previous,
+            'new_display_name': new_name,
+        })
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"admin_set_display_name: commit failed: {e}")
+        return jsonify({'error': 'commit_failed', 'message': str(e)}), 500
+
+    return jsonify({
+        'success': True,
+        'applied': applied,
+        'skipped': skipped,
+        'count': len(applied),
+    })
 
 
 @mobile_api.route('/admin/bot/log-av-calls', methods=['POST'])

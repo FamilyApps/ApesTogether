@@ -14,6 +14,10 @@ class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(150), unique=True, nullable=False)
     username = db.Column(db.String(80), unique=True, nullable=False)
+    # Optional public-facing name that overrides `username` in display.
+    # Allows spaces, apostrophes, emoji, etc. — things the username regex blocks.
+    # When NULL, callers fall back to `username`. Use `User.public_name` helper.
+    display_name = db.Column(db.String(80), nullable=True)
     password_hash = db.Column(db.String(200), nullable=True)
     oauth_provider = db.Column(db.String(20))
     oauth_id = db.Column(db.String(100))
@@ -48,6 +52,17 @@ class User(UserMixin, db.Model):
     # Future-proofing for leaderboard filtering and admin controls
     leaderboard_eligible = db.Column(db.Boolean, default=True)  # Admin can exclude from leaderboards
     extra_data = db.Column('metadata', db.JSON, default=dict)  # Flexible storage for future fields
+
+    @property
+    def public_name(self) -> str:
+        """Public-facing name. Returns display_name if set, otherwise username.
+
+        Use everywhere a name is rendered to other users (leaderboard, portfolio
+        header, share cards, etc.). Reserve `username` for unique handles, URL
+        slugs, and internal identifiers.
+        """
+        return self.display_name or self.username
+
 
 class Stock(db.Model):
     __tablename__ = 'stock'
