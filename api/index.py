@@ -2265,6 +2265,318 @@ def admin_debug_user_snapshots():
     })
 
 
+@app.route('/admin/audit-snapshot-cash-drift')
+@admin_required
+def admin_audit_snapshot_cash_drift():
+    """
+    Walk every PortfolioSnapshot for every user and verify that
+    snapshot.cash_proceeds matches what a chronological transaction replay
+    would yield at the end of that snapshot's date.
+
+    The bug pattern this catches: snapshots written with stale User.cash_proceeds
+    while live Stock holdings already reflect the same-day bot trades, causing
+    phantom 'drops' on the chart whenever a sell happens close to snapshot time.
+    Manifested today as panther2585 May 7-8: stock_value reflected post-sell
+    holdings, but cash_proceeds did not yet reflect the sell proceeds.
+
+    Query params:
+      ?threshold=0.50   Min |drift| in $ to flag a snapshot (default 0.50)
+      ?limit_users=N    Audit only the first N users (for spot-checking)
+      ?role=agent       Restrict to bot accounts only
+      ?fix=true         Apply UPDATEs to repair flagged snapshots in-place
+                        (sets cash_proceeds = expected, total_value = stock_value + expected)
+
+    Response: per-user summary of bad snapshots, plus aggregate counts.
+    """
+    from models import db, User, Transaction, PortfolioSnapshot
+    from sqlalchemy import text as _sql_text
+
+    try:
+        threshold = float(request.args.get('threshold', '0.50'))
+    except (TypeError, ValueError):
+        threshold = 0.50
+    role_filter = request.args.get('role')
+    limit_users_param = request.args.get('limit_users')
+    apply_fix = request.args.get('fix', 'false').lower() == 'true'
+
+    q = User.query.order_by(User.id.asc())
+    if role_filter:
+        q = q.filter(User.role == role_filter)
+    users = q.all()
+    if limit_users_param:
+        try:
+            users = users[: int(limit_users_param)]
+        except (TypeError, ValueError):
+            pass
+
+    issues = []
+    total_snapshots_checked = 0
+    total_bad_snapshots = 0
+    fix_count = 0
+
+    for user in users:
+        txns = Transaction.query.filter_by(user_id=user.id).order_by(
+            Transaction.timestamp.asc()
+        ).all()
+        snaps = PortfolioSnapshot.query.filter_by(user_id=user.id).order_by(
+            PortfolioSnapshot.date.asc()
+        ).all()
+        if not snaps or not txns:
+            continue
+
+        # Replay transactions chronologically. For each snapshot date, advance
+        # the replay to include every txn whose .date() <= snap.date, then
+        # compare snapshot.cash_proceeds to replay_cash at that point.
+        # We use Option B semantics (end-of-day, all trades of the day included).
+        replay_cash = 0.0
+        replay_max = 0.0
+        txn_idx = 0
+
+        user_bad = []
+        for snap in snaps:
+            # Advance through txns that occurred on or before this snapshot's date
+            while txn_idx < len(txns):
+                txn = txns[txn_idx]
+                txn_date = txn.timestamp.date() if txn.timestamp else None
+                if txn_date is None or txn_date > snap.date:
+                    break
+                val = (txn.quantity or 0) * (txn.price or 0)
+                if txn.transaction_type in ('buy', 'initial'):
+                    if replay_cash >= val:
+                        replay_cash -= val
+                    else:
+                        replay_max += val - replay_cash
+                        replay_cash = 0
+                elif txn.transaction_type in ('sell', 'dividend'):
+                    replay_cash += val
+                txn_idx += 1
+
+            actual_cash = round(float(snap.cash_proceeds or 0), 2)
+            expected_cash = round(replay_cash, 2)
+            cash_drift = round(expected_cash - actual_cash, 2)
+
+            total_snapshots_checked += 1
+
+            if abs(cash_drift) >= threshold:
+                total_bad_snapshots += 1
+                user_bad.append({
+                    'date': snap.date.isoformat(),
+                    'actual_cash_proceeds': actual_cash,
+                    'expected_cash_proceeds': expected_cash,
+                    'drift': cash_drift,
+                    'stock_value': round(float(snap.stock_value or 0), 2),
+                    'actual_total_value': round(float(snap.total_value or 0), 2),
+                    'expected_total_value': round(
+                        float(snap.stock_value or 0) + expected_cash, 2
+                    ),
+                })
+
+                if apply_fix:
+                    # Repair the snapshot in-place. Use parameterized update.
+                    db.session.execute(_sql_text("""
+                        UPDATE portfolio_snapshot
+                        SET cash_proceeds = :cp,
+                            total_value = stock_value + :cp
+                        WHERE id = :sid
+                    """), {'cp': expected_cash, 'sid': snap.id})
+                    fix_count += 1
+
+        if user_bad:
+            issues.append({
+                'user_id': user.id,
+                'username': user.username,
+                'role': user.role,
+                'bad_snapshot_count': len(user_bad),
+                'first_bad_date': user_bad[0]['date'],
+                'last_bad_date': user_bad[-1]['date'],
+                'max_abs_drift': round(max(abs(b['drift']) for b in user_bad), 2),
+                'sample_bad_snapshots': user_bad[:5],
+                'all_bad_snapshots': user_bad if len(user_bad) <= 30 else None,
+            })
+
+    if apply_fix:
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({
+                'error': 'commit_failed',
+                'message': str(e),
+                'fix_count_attempted': fix_count,
+            }), 500
+
+    # Sort issues by max drift descending so worst cases surface first
+    issues.sort(key=lambda x: -x['max_abs_drift'])
+
+    return jsonify({
+        'threshold': threshold,
+        'fix_applied': apply_fix,
+        'fix_count': fix_count if apply_fix else 0,
+        'users_scanned': len(users),
+        'users_with_issues': len(issues),
+        'total_snapshots_checked': total_snapshots_checked,
+        'total_bad_snapshots': total_bad_snapshots,
+        'issues': issues,
+        'next_steps': (
+            'After fixing, run DELETE FROM user_portfolio_chart_cache WHERE user_id IN (...) '
+            'for affected users to force chart regeneration from the corrected snapshots.'
+        ),
+    })
+
+
+@app.route('/admin/audit-snapshot-max-cash-drift')
+@admin_required
+def admin_audit_snapshot_max_cash_drift():
+    """
+    Same idea as audit-snapshot-cash-drift but for max_cash_deployed.
+    Each snapshot's max_cash_deployed should equal seeded_baseline + replay_max
+    at end of snapshot date, where seeded_baseline is the gap between the
+    user's first snapshot's max_cash_deployed and what transactions can explain
+    up to that date (i.e. the imported / pre-history capital).
+
+    Query params: same as audit-snapshot-cash-drift.
+    """
+    from models import db, User, Transaction, PortfolioSnapshot, Stock
+    from sqlalchemy import text as _sql_text
+
+    try:
+        threshold = float(request.args.get('threshold', '1.00'))
+    except (TypeError, ValueError):
+        threshold = 1.00
+    role_filter = request.args.get('role')
+    limit_users_param = request.args.get('limit_users')
+    apply_fix = request.args.get('fix', 'false').lower() == 'true'
+
+    q = User.query.order_by(User.id.asc())
+    if role_filter:
+        q = q.filter(User.role == role_filter)
+    users = q.all()
+    if limit_users_param:
+        try:
+            users = users[: int(limit_users_param)]
+        except (TypeError, ValueError):
+            pass
+
+    issues = []
+    total_snapshots_checked = 0
+    total_bad_snapshots = 0
+    fix_count = 0
+
+    for user in users:
+        txns = Transaction.query.filter_by(user_id=user.id).order_by(
+            Transaction.timestamp.asc()
+        ).all()
+        snaps = PortfolioSnapshot.query.filter_by(user_id=user.id).order_by(
+            PortfolioSnapshot.date.asc()
+        ).all()
+        if not snaps or not txns:
+            continue
+
+        # Determine seeded_baseline: gap between first snapshot max_cash and
+        # what txns through first_snap.date can explain
+        first_snap = snaps[0]
+        rmf = 0.0
+        rcf = 0.0
+        for txn in txns:
+            t_date = txn.timestamp.date() if txn.timestamp else None
+            if t_date is None or t_date > first_snap.date:
+                break
+            v = (txn.quantity or 0) * (txn.price or 0)
+            if txn.transaction_type in ('buy', 'initial'):
+                if rcf >= v:
+                    rcf -= v
+                else:
+                    rmf += v - rcf
+                    rcf = 0
+            elif txn.transaction_type in ('sell', 'dividend'):
+                rcf += v
+        seeded_baseline = max(0.0, round(float(first_snap.max_cash_deployed or 0) - rmf, 2))
+
+        # Replay through all snapshots, comparing snap.max_cash_deployed
+        replay_cash = 0.0
+        replay_max = 0.0
+        txn_idx = 0
+
+        user_bad = []
+        for snap in snaps:
+            while txn_idx < len(txns):
+                txn = txns[txn_idx]
+                t_date = txn.timestamp.date() if txn.timestamp else None
+                if t_date is None or t_date > snap.date:
+                    break
+                v = (txn.quantity or 0) * (txn.price or 0)
+                if txn.transaction_type in ('buy', 'initial'):
+                    if replay_cash >= v:
+                        replay_cash -= v
+                    else:
+                        replay_max += v - replay_cash
+                        replay_cash = 0
+                elif txn.transaction_type in ('sell', 'dividend'):
+                    replay_cash += v
+                txn_idx += 1
+
+            actual_max = round(float(snap.max_cash_deployed or 0), 2)
+            expected_max = round(seeded_baseline + replay_max, 2)
+            max_drift = round(expected_max - actual_max, 2)
+
+            total_snapshots_checked += 1
+
+            if abs(max_drift) >= threshold:
+                total_bad_snapshots += 1
+                user_bad.append({
+                    'date': snap.date.isoformat(),
+                    'actual_max_cash_deployed': actual_max,
+                    'expected_max_cash_deployed': expected_max,
+                    'drift': max_drift,
+                    'seeded_baseline': seeded_baseline,
+                })
+
+                if apply_fix:
+                    db.session.execute(_sql_text("""
+                        UPDATE portfolio_snapshot
+                        SET max_cash_deployed = :mx
+                        WHERE id = :sid
+                    """), {'mx': expected_max, 'sid': snap.id})
+                    fix_count += 1
+
+        if user_bad:
+            issues.append({
+                'user_id': user.id,
+                'username': user.username,
+                'role': user.role,
+                'seeded_baseline': seeded_baseline,
+                'bad_snapshot_count': len(user_bad),
+                'first_bad_date': user_bad[0]['date'],
+                'last_bad_date': user_bad[-1]['date'],
+                'max_abs_drift': round(max(abs(b['drift']) for b in user_bad), 2),
+                'sample_bad_snapshots': user_bad[:5],
+            })
+
+    if apply_fix:
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({
+                'error': 'commit_failed',
+                'message': str(e),
+                'fix_count_attempted': fix_count,
+            }), 500
+
+    issues.sort(key=lambda x: -x['max_abs_drift'])
+
+    return jsonify({
+        'threshold': threshold,
+        'fix_applied': apply_fix,
+        'fix_count': fix_count if apply_fix else 0,
+        'users_scanned': len(users),
+        'users_with_issues': len(issues),
+        'total_snapshots_checked': total_snapshots_checked,
+        'total_bad_snapshots': total_bad_snapshots,
+        'issues': issues,
+    })
+
+
 @app.route('/admin/rename-user', methods=['POST'])
 @admin_required
 def admin_rename_user():
