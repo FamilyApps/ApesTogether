@@ -3732,16 +3732,39 @@ def admin_set_display_name():
     if not isinstance(updates, list):
         return jsonify({'error': 'updates must be a list'}), 400
 
-    # Step 1: ensure column exists (idempotent — safe to run repeatedly)
+    # Step 1: ensure column exists. We do a cheap information_schema lookup
+    # FIRST (no locks) and only attempt the ALTER if missing. Reason:
+    # `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` still acquires ACCESS EXCLUSIVE
+    # on the table even when it's a no-op, and under live traffic Vercel's pooled
+    # connection kills the wait via statement_timeout. By skipping the ALTER when
+    # the column already exists, this endpoint is safely re-runnable without ever
+    # contending for a write lock on the user table.
     try:
-        db.session.execute(text(
-            'ALTER TABLE "user" ADD COLUMN IF NOT EXISTS display_name VARCHAR(80)'
-        ))
-        db.session.commit()
+        col_exists = db.session.execute(text("""
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'user' AND column_name = 'display_name'
+            LIMIT 1
+        """)).fetchone()
+        db.session.commit()  # close the read txn quickly
+
+        if not col_exists:
+            try:
+                db.session.execute(text(
+                    'ALTER TABLE "user" ADD COLUMN IF NOT EXISTS display_name VARCHAR(80)'
+                ))
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                logger.error(f"admin_set_display_name: ALTER failed (column missing): {e}")
+                return jsonify({
+                    'error': 'schema_setup_failed',
+                    'message': str(e),
+                    'hint': 'Run ALTER TABLE \"user\" ADD COLUMN IF NOT EXISTS display_name VARCHAR(80) directly via Supabase SQL Editor; the pooled connection cannot acquire ACCESS EXCLUSIVE under live traffic.',
+                }), 500
     except Exception as e:
         db.session.rollback()
-        logger.error(f"admin_set_display_name: failed to ensure column: {e}")
-        return jsonify({'error': 'schema_setup_failed', 'message': str(e)}), 500
+        logger.error(f"admin_set_display_name: schema check failed: {e}")
+        return jsonify({'error': 'schema_check_failed', 'message': str(e)}), 500
 
     # Step 2: apply updates
     applied = []
