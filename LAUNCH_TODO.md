@@ -38,6 +38,7 @@ Things to verify when the market is open and the bot pipeline is running. Hit ea
 - [ ] Investigate panther2585 ~20% drop at end of 1M chart — see Monday checklist for diagnostic URL
 - [ ] Audit bobford00 1D/1W/1M performance — no recent trades so should track held stocks only
 - [ ] Audit other `mobile_api.py` admin endpoints for missing auth — I added auth to only one in this session; others may be similarly exposed
+- [ ] **🚨 SECURITY (pre-launch blocker): Verify Google/Apple ID tokens properly.** `mobile_api.py:/auth/token` (line ~1576) currently decodes ID tokens with `verify_signature=False` — comment says `"development only!"`. Any actor with any valid Google ID token can authenticate as any user by forging a `sub` claim. Fix: use `google.oauth2.id_token.verify_oauth2_token` against a whitelist of accepted `aud` values (iOS Client ID from `GoogleService-Info.plist`, Android Web Client ID from `secrets.properties`, and the legacy web `GOOGLE_CLIENT_ID` if web sign-in is still in use). Same fix needed for Apple — verify against Apple's JWKS. MUST be fixed before public launch.
 - [ ] Ping cron `*/4 * * * *` → `/api/health` to prevent Vercel cold starts (from `IMPLEMENTATION_CHECKLIST.md:69-73`) — status unclear, verify if deployed
 - [ ] Verify weekly drift-detection cron fires on schedule (first scheduled run confirms; check `/admin/cash-tracking/last-drift-check` after)
 - [ ] Confirm `.env.production` has `ADMIN_TOTP_SECRET` and `ADMIN_API_KEY` set on Vercel
@@ -74,11 +75,11 @@ Things to verify when the market is open and the bot pipeline is running. Hit ea
 
 ### USER ACTIONS — required before the Android app builds locally
 
-- [ ] **Google Play Console** account ($25 one-time, registered as Family Apps LLC). Create the app listing with package `ai.apestogether`.
-- [ ] **Firebase project**: add Android app `ai.apestogether` to the existing iOS Firebase project. Download `google-services.json` and place at `android/app/google-services.json` (gitignored).
-- [ ] **Google Cloud OAuth**: create a "Web application" OAuth Client ID. Copy into `android/secrets.properties` as `GOOGLE_WEB_CLIENT_ID`. Also create an "Android" OAuth Client ID with package + SHA-1 of debug + release keys.
-- [ ] **Generate Gradle wrapper**: from `/android/`, run `gradle wrapper --gradle-version 8.10` (or accept Android Studio's auto-prompt on first sync).
-- [ ] **Replace assetlinks.json placeholders**: `public/.well-known/assetlinks.json` has `REPLACE_WITH_RELEASE_SIGNING_CERT_SHA256` + `REPLACE_WITH_PLAY_APP_SIGNING_CERT_SHA256`. Get the debug fingerprint via `keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android` and the release fingerprint from Play Console once available.
+- [ ] **Google Play Console** account ($25 one-time, registered as Family Apps LLC). Create the app listing with package `com.apestogether.app`.
+- [x] **Firebase project**: Android app `com.apestogether.app` registered (May 10). `google-services.json` downloaded and placed at `android/app/google-services.json` (gitignored). Debug SHA-1 added to Firebase.
+- [x] **Google Cloud OAuth Web client** created ("ApesTogether Web Client") + Android client ("ApesTogether Android Client") with package `com.apestogether.app` + debug SHA-1. Web Client ID needs to be pasted into `android/secrets.properties`. Existing `GOOGLE_CLIENT_ID` Vercel env var ("Stock portfolio web client") is for the web app's Authlib redirect flow — leave it alone.
+- [x] **Gradle wrapper generated** by Android Studio Panda on first sync (May 10).
+- [ ] **Replace assetlinks.json placeholders**: `public/.well-known/assetlinks.json` has `REPLACE_WITH_RELEASE_SIGNING_CERT_SHA256` + `REPLACE_WITH_PLAY_APP_SIGNING_CERT_SHA256`. Get debug SHA-256 from `gradle :app:signingReport` (already done; save it), release SHA-256 comes from Play Console once available.
 
 ### Screens still to port from iOS
 
