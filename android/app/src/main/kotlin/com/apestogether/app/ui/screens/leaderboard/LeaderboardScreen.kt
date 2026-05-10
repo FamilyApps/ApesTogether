@@ -62,6 +62,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -73,8 +74,15 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.apestogether.app.data.api.ApiService
+import com.apestogether.app.data.billing.BillingService
+import com.apestogether.app.data.billing.SubscriptionPlan
 import com.apestogether.app.data.models.LeaderboardEntry
+import com.apestogether.app.data.models.PurchaseValidationRequest
+import com.apestogether.app.ui.components.CompactPlanToggle
 import com.apestogether.app.ui.components.SparklineView
+import com.apestogether.app.ui.components.SubscribeStatusBanner
+import com.apestogether.app.ui.components.SubscribeUiState
+import com.apestogether.app.ui.components.findActivity
 import com.apestogether.app.ui.theme.AppBackground
 import com.apestogether.app.ui.theme.CardBackground
 import com.apestogether.app.ui.theme.CardBorder
@@ -114,6 +122,9 @@ fun LeaderboardScreen(
     val state by viewModel.state.collectAsState()
     val period by viewModel.period.collectAsState()
     val filters by viewModel.filters.collectAsState()
+    val selectedPlan by viewModel.selectedPlan.collectAsState()
+    val subscribeState by viewModel.subscribeState.collectAsState()
+    val activity = LocalContext.current.findActivity()
 
     var showFilters by remember { mutableStateOf(false) }
     var expandedEntryId by remember { mutableStateOf<Int?>(null) }
@@ -168,6 +179,10 @@ fun LeaderboardScreen(
                                 entry = entry,
                                 period = period,
                                 isExpanded = isExpanded,
+                                selectedPlan = selectedPlan,
+                                onSelectPlan = viewModel::setPlan,
+                                subscribeState = subscribeState,
+                                onDismissSubscribeState = viewModel::clearSubscribeState,
                                 onTap = {
                                     autoExpandedTop = false
                                     expandedEntryId =
@@ -179,9 +194,9 @@ fun LeaderboardScreen(
                                         ?.let(onOpenPortfolio)
                                 },
                                 onSubscribe = {
-                                    // TODO: wire to Play Billing — see LAUNCH_TODO §C.
-                                    // For now this is a no-op so the button is visible
-                                    // for visual parity with iOS.
+                                    activity?.let {
+                                        viewModel.subscribe(it, entry.user.id)
+                                    }
                                 },
                             )
                         }
@@ -459,6 +474,10 @@ private fun LeaderboardCard(
     entry: LeaderboardEntry,
     period: String,
     isExpanded: Boolean,
+    selectedPlan: SubscriptionPlan,
+    onSelectPlan: (SubscriptionPlan) -> Unit,
+    subscribeState: SubscribeUiState,
+    onDismissSubscribeState: () -> Unit,
     onTap: () -> Unit,
     onOpenPortfolio: () -> Unit,
     onSubscribe: () -> Unit,
@@ -577,6 +596,10 @@ private fun LeaderboardCard(
         ) {
             ExpandedDetail(
                 entry = entry,
+                selectedPlan = selectedPlan,
+                onSelectPlan = onSelectPlan,
+                subscribeState = subscribeState,
+                onDismissSubscribeState = onDismissSubscribeState,
                 onOpenPortfolio = onOpenPortfolio,
                 onSubscribe = onSubscribe,
             )
@@ -672,9 +695,19 @@ private fun SubBadge(
 @Composable
 private fun ExpandedDetail(
     entry: LeaderboardEntry,
+    selectedPlan: SubscriptionPlan,
+    onSelectPlan: (SubscriptionPlan) -> Unit,
+    subscribeState: SubscribeUiState,
+    onDismissSubscribeState: () -> Unit,
     onOpenPortfolio: () -> Unit,
     onSubscribe: () -> Unit,
 ) {
+    val processing = subscribeState is SubscribeUiState.Processing
+    val ctaText = when (selectedPlan) {
+        SubscriptionPlan.Annual -> "Try Free for 7 Days, then \$69/yr"
+        SubscriptionPlan.Monthly ->
+            "Try Free for 7 Days, then \$${entry.subscriptionPrice.toInt()}/mo"
+    }
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -755,7 +788,9 @@ private fun ExpandedDetail(
             }
         }
 
-        // Action buttons (stacked, like iOS lines 690-727)
+        // Action buttons (stacked, like iOS lines 690-727).
+        // Includes the Annual / Monthly toggle so visual + functional parity
+        // with iOS LeaderboardCard.expanded body.
         Column(
             modifier = Modifier
                 .padding(horizontal = 14.dp)
@@ -787,29 +822,51 @@ private fun ExpandedDetail(
                 )
             }
 
+            CompactPlanToggle(
+                selected = selectedPlan,
+                onSelect = onSelectPlan,
+            )
+
             Button(
                 onClick = onSubscribe,
+                enabled = !processing,
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 36.dp),
                 shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = PrimaryAccent,
+                    disabledContainerColor = PrimaryAccent.copy(alpha = 0.5f),
+                ),
                 contentPadding = PaddingValues(vertical = 8.dp),
             ) {
-                Icon(
-                    imageVector = Icons.Default.WorkspacePremium,
-                    contentDescription = null,
-                    tint = AppBackground,
-                    modifier = Modifier.size(12.dp),
-                )
-                Spacer(Modifier.width(5.dp))
-                Text(
-                    text = "Try Free for 7 Days, then $${entry.subscriptionPrice.toInt()}/mo",
-                    color = AppBackground,
-                    fontWeight = FontWeight.Bold,
-                    style = tightTextStyle(13.sp),
-                )
+                if (processing) {
+                    CircularProgressIndicator(
+                        color = AppBackground,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(14.dp),
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.WorkspacePremium,
+                        contentDescription = null,
+                        tint = AppBackground,
+                        modifier = Modifier.size(12.dp),
+                    )
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        text = ctaText,
+                        color = AppBackground,
+                        fontWeight = FontWeight.Bold,
+                        style = tightTextStyle(13.sp),
+                    )
+                }
             }
+
+            SubscribeStatusBanner(
+                state = subscribeState,
+                onDismiss = onDismissSubscribeState,
+            )
         }
     }
 }
@@ -947,6 +1004,7 @@ sealed interface LeaderboardState {
 @HiltViewModel
 class LeaderboardViewModel @Inject constructor(
     private val apiService: ApiService,
+    private val billingService: BillingService,
 ) : ViewModel() {
     private val _state = MutableStateFlow<LeaderboardState>(LeaderboardState.Loading)
     val state: StateFlow<LeaderboardState> = _state.asStateFlow()
@@ -957,6 +1015,12 @@ class LeaderboardViewModel @Inject constructor(
     private val _filters = MutableStateFlow(LeaderboardFilters())
     val filters: StateFlow<LeaderboardFilters> = _filters.asStateFlow()
 
+    private val _selectedPlan = MutableStateFlow(SubscriptionPlan.Annual)
+    val selectedPlan: StateFlow<SubscriptionPlan> = _selectedPlan.asStateFlow()
+
+    private val _subscribeState = MutableStateFlow<SubscribeUiState>(SubscribeUiState.Idle)
+    val subscribeState: StateFlow<SubscribeUiState> = _subscribeState.asStateFlow()
+
     fun setPeriod(period: String) {
         _period.value = period
         refresh()
@@ -965,6 +1029,79 @@ class LeaderboardViewModel @Inject constructor(
     fun setFilters(filters: LeaderboardFilters) {
         _filters.value = filters
         refresh()
+    }
+
+    fun setPlan(plan: SubscriptionPlan) {
+        _selectedPlan.value = plan
+    }
+
+    fun clearSubscribeState() {
+        _subscribeState.value = SubscribeUiState.Idle
+    }
+
+    /**
+     * Launch Play Billing for the [selectedPlan] and validate the resulting
+     * purchase token against the backend. Mirrors
+     * [com.apestogether.app.ui.screens.portfolio.PortfolioDetailViewModel.subscribe]
+     * so that subscribing from the leaderboard's expanded card produces the
+     * same MobileSubscription row as subscribing from the portfolio detail
+     * page.
+     */
+    fun subscribe(activity: android.app.Activity, subscribedToId: Int) {
+        viewModelScope.launch {
+            _subscribeState.value = SubscribeUiState.Processing
+
+            val ensure = runCatching { billingService.ensureConnected() }.getOrNull()
+            if (ensure == null ||
+                ensure.responseCode !=
+                com.android.billingclient.api.BillingClient.BillingResponseCode.OK
+            ) {
+                _subscribeState.value = SubscribeUiState.Error(
+                    "Play Billing unavailable on this device. Please try again later."
+                )
+                return@launch
+            }
+
+            if (billingService.productDetails.value.isEmpty()) {
+                runCatching { billingService.queryProducts() }
+            }
+
+            val result = billingService.purchase(activity, _selectedPlan.value.productId)
+            when (result) {
+                is BillingService.PurchaseResult.UserCanceled ->
+                    _subscribeState.value = SubscribeUiState.Idle
+
+                is BillingService.PurchaseResult.Error ->
+                    _subscribeState.value = SubscribeUiState.Error(result.message)
+
+                is BillingService.PurchaseResult.Success -> {
+                    val purchase = result.purchase
+                    val validation = runCatching {
+                        apiService.validatePurchase(
+                            PurchaseValidationRequest(
+                                platform = "google",
+                                subscribedToId = subscribedToId,
+                                purchaseToken = purchase.purchaseToken,
+                            )
+                        )
+                    }
+                    val resp = validation.getOrNull()
+                    if (resp?.success == true) {
+                        runCatching { billingService.acknowledge(purchase) }
+                        _subscribeState.value = SubscribeUiState.Success
+                        // Refresh so newly-subscribed creators reflect the
+                        // 'isSubscribed' state on next render.
+                        refresh()
+                    } else {
+                        _subscribeState.value = SubscribeUiState.Error(
+                            resp?.error
+                                ?: validation.exceptionOrNull()?.message
+                                ?: "Server failed to validate the purchase."
+                        )
+                    }
+                }
+            }
+        }
     }
 
     fun refresh() {

@@ -68,19 +68,10 @@ struct PortfolioDetailView: View {
                         )
                         .padding(.horizontal, 16)
                         
-                        // ── Stats Grid (non-owner view) ──
-                        if !portfolio.isOwner {
-                            PortfolioStatsGrid(portfolio: portfolio)
-                                .padding(.horizontal, 16)
-                        }
-                        
-                        // ── Sector Allocation ──
-                        if let mix = portfolio.industryMix, !mix.isEmpty {
-                            SectorAllocationCard(industryMix: mix)
-                                .padding(.horizontal, 16)
-                        }
-                        
                         // ── Action Buttons (non-owner: Subscribe + Share) ──
+                        // Placed immediately under the chart so the conversion
+                        // CTA is visible above the fold without scrolling past
+                        // the stats grid + sector allocation.
                         if !portfolio.isOwner && !portfolio.isSubscribed {
                             VStack(spacing: 10) {
                                 // Compact plan toggle
@@ -128,6 +119,18 @@ struct PortfolioDetailView: View {
                                 }
                             }
                             .padding(.horizontal, 16)
+                        }
+                        
+                        // ── Stats Grid (non-owner view) ──
+                        if !portfolio.isOwner {
+                            PortfolioStatsGrid(portfolio: portfolio)
+                                .padding(.horizontal, 16)
+                        }
+                        
+                        // ── Sector Allocation ──
+                        if let mix = portfolio.industryMix, !mix.isEmpty {
+                            SectorAllocationCard(industryMix: mix)
+                                .padding(.horizontal, 16)
                         }
                         
                         // ── Buy / Sell Buttons ──
@@ -779,24 +782,10 @@ struct PortfolioHeroCard: View {
     }
     
     var body: some View {
-        VStack(spacing: 8) {
-            // Avatar
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.primaryAccent, Color(hex: "059669")],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 56, height: 56)
-                    .shadow(color: Color.primaryAccent.opacity(0.3), radius: 12)
-                
-                Text(String(portfolio.owner.publicName.prefix(1)).uppercased())
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-            }
-            
+        // Slimmed: dropped the 56pt gradient avatar and trimmed vertical
+        // padding 16 → 10pt, spacing 8 → 4pt. Frees ~85pt so the chart +
+        // Subscribe CTA + stats grid fit above the fold on iPhone 17 Pro.
+        VStack(spacing: 4) {
             Text(portfolio.owner.publicName)
                 .font(.system(size: 20, weight: .bold))
                 .foregroundColor(.textPrimary)
@@ -814,11 +803,11 @@ struct PortfolioHeroCard: View {
                 Text("$\(formatLargeNumber(value))")
                     .font(.system(size: 28, weight: .heavy, design: .rounded))
                     .foregroundColor(.textPrimary)
-                    .padding(.top, 4)
+                    .padding(.top, 2)
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 16)
+        .padding(.vertical, 10)
         .cardStyle()
     }
     

@@ -4,7 +4,6 @@ import android.content.Intent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,7 +48,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -67,7 +65,11 @@ import com.apestogether.app.data.models.LeaderboardBadge
 import com.apestogether.app.data.models.PortfolioResponse
 import com.apestogether.app.data.models.PurchaseValidationRequest
 import com.apestogether.app.data.models.Trade
+import com.apestogether.app.ui.components.CompactPlanToggle
 import com.apestogether.app.ui.components.PerformanceChartCard
+import com.apestogether.app.ui.components.SubscribeStatusBanner
+import com.apestogether.app.ui.components.SubscribeUiState
+import com.apestogether.app.ui.components.findActivity
 import com.apestogether.app.ui.theme.AppBackground
 import com.apestogether.app.ui.theme.CardBackground
 import com.apestogether.app.ui.theme.CardBorder
@@ -234,11 +236,13 @@ private fun PortfolioBody(
                 ) {
                     val portfolio = state.portfolio
 
-                    // Hero (non-owner only)
+                    // Hero (non-owner only). Top padding is intentionally tight
+                    // (8dp instead of 16) so the chart + Subscribe CTA both fit
+                    // above the fold on shorter Android screens.
                     if (!portfolio.isOwner) {
                         PortfolioHeroCard(
                             portfolio = portfolio,
-                            modifier = Modifier.padding(horizontal = 16.dp).padding(top = 16.dp),
+                            modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp),
                         )
                     }
 
@@ -254,10 +258,24 @@ private fun PortfolioBody(
                         }
                     }
 
-                    // Subscribe row + plan toggle — placed ABOVE the chart on
-                    // small Android screens (e.g. Pixel 7) so the conversion
-                    // CTA is visible without scrolling. iOS has more vertical
-                    // room and can afford to keep this below the chart.
+                    // Chart
+                    PerformanceChartCard(
+                        chartData = state.chartData,
+                        portfolioReturn = state.portfolioReturn,
+                        sp500Return = state.sp500Return,
+                        selectedPeriod = period,
+                        onPeriodChange = onPeriodChange,
+                        portfolioLabel = if (portfolio.isOwner) "Your Portfolio" else portfolio.owner.publicName,
+                        leaderboardEligible = state.leaderboardEligible,
+                        daysActive = state.daysActive,
+                        daysRequired = state.daysRequired,
+                        eligibleDate = state.eligibleDate,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+
+                    // Subscribe row + plan toggle — placed immediately under the
+                    // chart so the conversion CTA is visible above-the-fold on
+                    // both iPhone 17 Pro and Pixel 7 (matches iOS layout).
                     if (!portfolio.isOwner && !portfolio.isSubscribed) {
                         Column(
                             modifier = Modifier.padding(horizontal = 16.dp),
@@ -285,21 +303,6 @@ private fun PortfolioBody(
                             )
                         }
                     }
-
-                    // Chart
-                    PerformanceChartCard(
-                        chartData = state.chartData,
-                        portfolioReturn = state.portfolioReturn,
-                        sp500Return = state.sp500Return,
-                        selectedPeriod = period,
-                        onPeriodChange = onPeriodChange,
-                        portfolioLabel = if (portfolio.isOwner) "Your Portfolio" else portfolio.owner.publicName,
-                        leaderboardEligible = state.leaderboardEligible,
-                        daysActive = state.daysActive,
-                        daysRequired = state.daysRequired,
-                        eligibleDate = state.eligibleDate,
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                    )
 
                     // Stats grid (non-owner)
                     if (!portfolio.isOwner) {
@@ -375,36 +378,19 @@ private fun PortfolioHeroCard(
     modifier: Modifier = Modifier,
 ) {
     val ageText = formatAccountAge(portfolio.accountAgeDays ?: 0)
+    // Slimmed: dropped the 56dp gradient avatar and trimmed vertical padding
+    // 16 → 10dp, spacing 8 → 4dp. Frees ~85dp so the chart + Subscribe CTA +
+    // stats grid fit above the fold on Pixel 7 / iPhone 17 Pro.
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(CardBackground)
             .border(0.5.dp, CardBorder, RoundedCornerShape(16.dp))
-            .padding(vertical = 16.dp),
+            .padding(vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        // Avatar
-        Box(
-            modifier = Modifier
-                .size(56.dp)
-                .clip(CircleShape)
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(PrimaryAccent, Color(0xFF059669)),
-                    )
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = portfolio.owner.publicName.take(1).uppercase(),
-                color = Color.White,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-            )
-        }
-
         Text(
             text = portfolio.owner.publicName,
             color = TextPrimary,
@@ -428,7 +414,7 @@ private fun PortfolioHeroCard(
                 color = TextPrimary,
                 fontSize = 28.sp,
                 fontWeight = FontWeight.Black,
-                modifier = Modifier.padding(top = 4.dp),
+                modifier = Modifier.padding(top = 2.dp),
             )
         }
     }
@@ -714,137 +700,6 @@ private fun SubscribeAndShareRow(
             Text("Share", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         }
     }
-}
-
-/**
- * Two-pill plan toggle (Monthly / Annual). Annual is highlighted as
- * default since it's a better deal per Family Apps's pricing
- * (~$5.75/mo equivalent vs $9/mo monthly). Matches iOS CompactPlanToggle.
- */
-@Composable
-private fun CompactPlanToggle(
-    selected: SubscriptionPlan,
-    onSelect: (SubscriptionPlan) -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(CardBackground)
-            .border(0.5.dp, CardBorder, RoundedCornerShape(10.dp))
-            .padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        PlanChip(
-            label = "Annual",
-            sublabel = "$69/yr · save 36%",
-            isSelected = selected == SubscriptionPlan.Annual,
-            modifier = Modifier.weight(1f),
-            onClick = { onSelect(SubscriptionPlan.Annual) },
-        )
-        PlanChip(
-            label = "Monthly",
-            sublabel = "$9/mo",
-            isSelected = selected == SubscriptionPlan.Monthly,
-            modifier = Modifier.weight(1f),
-            onClick = { onSelect(SubscriptionPlan.Monthly) },
-        )
-    }
-}
-
-@Composable
-private fun PlanChip(
-    label: String,
-    sublabel: String,
-    isSelected: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (isSelected) PrimaryAccent.copy(alpha = 0.15f) else Color.Transparent)
-            .clickable(onClick = onClick)
-            .padding(vertical = 8.dp, horizontal = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        Text(
-            text = label,
-            color = if (isSelected) PrimaryAccent else TextPrimary,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-        )
-        Text(
-            text = sublabel,
-            color = if (isSelected) PrimaryAccent.copy(alpha = 0.85f) else TextMuted,
-            fontSize = 10.sp,
-        )
-    }
-}
-
-/**
- * Inline banner that pops below the Subscribe CTA after a billing attempt:
- *  - Idle  → nothing
- *  - Processing → already shown via spinner on the button
- *  - Success → green "You're subscribed!" banner
- *  - Error   → red banner with message + tap to dismiss
- */
-@Composable
-private fun SubscribeStatusBanner(
-    state: SubscribeUiState,
-    onDismiss: () -> Unit,
-) {
-    when (state) {
-        is SubscribeUiState.Error -> {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Losses.copy(alpha = 0.1f))
-                    .border(0.5.dp, Losses.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
-                    .clickable(onClick = onDismiss)
-                    .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    text = state.message,
-                    color = Losses,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.weight(1f),
-                )
-                Text("Dismiss", color = Losses.copy(alpha = 0.7f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-        SubscribeUiState.Success -> {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Gains.copy(alpha = 0.1f))
-                    .border(0.5.dp, Gains.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
-                    .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "You're subscribed! Pull to refresh to see your alerts.",
-                    color = Gains,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                )
-            }
-        }
-        SubscribeUiState.Idle, SubscribeUiState.Processing -> Unit
-    }
-}
-
-/** Walks the [Context] chain to find the host [Activity], or null if not on one. */
-private fun android.content.Context.findActivity(): android.app.Activity? = when (this) {
-    is android.app.Activity -> this
-    is android.content.ContextWrapper -> baseContext.findActivity()
-    else -> null
 }
 
 @Composable
@@ -1211,14 +1066,6 @@ sealed interface PortfolioState {
     ) : PortfolioState
 
     data class Error(val message: String) : PortfolioState
-}
-
-/** Lightweight UX state for the Subscribe button flow. */
-sealed interface SubscribeUiState {
-    data object Idle : SubscribeUiState
-    data object Processing : SubscribeUiState
-    data class Error(val message: String) : SubscribeUiState
-    data object Success : SubscribeUiState
 }
 
 @HiltViewModel
