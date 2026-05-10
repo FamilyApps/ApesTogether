@@ -1,63 +1,1093 @@
-﻿package com.apestogether.app.ui.screens.portfolio
+package com.apestogether.app.ui.screens.portfolio
 
-import com.apestogether.app.ui.screens.common.PlaceholderScreen
+import android.content.Intent
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.CallMade
+import androidx.compose.material.icons.filled.CallReceived
+import androidx.compose.material.icons.filled.RemoveCircle
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.ShowChart
+import androidx.compose.material.icons.filled.WorkspacePremium
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.apestogether.app.data.api.ApiService
+import com.apestogether.app.data.models.Holding
+import com.apestogether.app.data.models.LeaderboardBadge
+import com.apestogether.app.data.models.PortfolioResponse
+import com.apestogether.app.data.models.Trade
+import com.apestogether.app.ui.components.PerformanceChartCard
 import com.apestogether.app.ui.theme.AppBackground
+import com.apestogether.app.ui.theme.CardBackground
+import com.apestogether.app.ui.theme.CardBorder
+import com.apestogether.app.ui.theme.Gains
+import com.apestogether.app.ui.theme.Losses
+import com.apestogether.app.ui.theme.PrimaryAccent
+import com.apestogether.app.ui.theme.SecondaryAccent
+import com.apestogether.app.ui.theme.TextMuted
+import com.apestogether.app.ui.theme.TextPrimary
 import com.apestogether.app.ui.theme.TextSecondary
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import javax.inject.Inject
+import kotlin.math.absoluteValue
 
 /**
- * Portfolio detail — equivalent to iOS [PortfolioDetailView] (47KB; the
- * largest view in the iOS app). Shows owner header, performance chart,
- * holdings, recent trades, badges, and the subscribe CTA when not the owner.
+ * Portfolio detail screen. Direct port of iOS [PortfolioDetailView].
  *
- * TODO: Full port. For now, displays the slug being requested so deep-link
- * routing can be verified end-to-end.
+ * Renders the same content matrix the iOS view does, depending on
+ * [PortfolioResponse.isOwner] and [PortfolioResponse.isSubscribed]:
+ *
+ *   1. Hero card (non-owner only) — avatar, name, account-age + subscriber
+ *      count, total portfolio value.
+ *   2. Leaderboard badges (when present) — horizontal scroll of medal pills.
+ *   3. Performance chart card — uses [PerformanceChartCard]. The chart's
+ *      period selector wires through to [PortfolioDetailViewModel.setPeriod]
+ *      which kicks off another `/portfolio/{slug}/chart?period=…` fetch.
+ *   4. Stats grid (non-owner only) — Stocks / Trades-wk / Large Cap %.
+ *   5. Sector allocation card (when industryMix present) — stacked bar
+ *      with sector legend chips.
+ *   6. Action buttons:
+ *      - Non-owner + not subscribed → Subscribe + Share.
+ *      - Owner → Buy + Sell.
+ *      Subscribe is wired to a placeholder; Buy/Sell are still TODOs.
+ *   7. Holdings list (when present) — ticker bubble + qty + value + gain%.
+ *   8. Recent trades list (when present, max 5) — directional arrow +
+ *      type + ticker + timestamp + qty @ price.
+ *   9. Blurred teaser (non-subscriber, holdings withheld) — preview message
+ *      + Subscribe CTA.
+ *  10. Owner empty state when holdings list is empty.
+ *
+ * The composable accepts a [showOwnHeader] toggle so MyPortfolioScreen can
+ * embed this view inside its own Scaffold without doubling up on a top bar.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PortfolioDetailScreen(
     slug: String,
     onBack: () -> Unit,
+    showOwnHeader: Boolean = true,
 ) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        slug,
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onBackground,
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = TextSecondary,
+    val viewModel: PortfolioDetailViewModel = hiltViewModel()
+    val state by viewModel.state.collectAsState()
+    val period by viewModel.period.collectAsState()
+
+    LaunchedEffect(slug) {
+        viewModel.load(slug)
+    }
+
+    if (showOwnHeader) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Text(
+                            text = (state as? PortfolioState.Loaded)?.portfolio?.owner?.publicName
+                                ?: "Portfolio",
+                            color = TextPrimary,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = TextSecondary,
+                            )
+                        }
+                    },
+                    actions = {
+                        (state as? PortfolioState.Loaded)?.portfolio
+                            ?.takeIf { !it.isOwner }
+                            ?.let { p ->
+                                ShareIconButton(slug = p.owner.portfolioSlug ?: slug, period = period)
+                            }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = AppBackground),
+                )
+            },
+            containerColor = AppBackground,
+        ) { padding ->
+            PortfolioBody(
+                modifier = Modifier.padding(padding),
+                state = state,
+                period = period,
+                onPeriodChange = { viewModel.setPeriod(it, slug) },
+                onSubscribe = { /* TODO Play Billing */ },
+            )
+        }
+    } else {
+        // Embedded mode (MyPortfolioScreen wraps us inside its own Scaffold).
+        PortfolioBody(
+            modifier = Modifier.background(AppBackground),
+            state = state,
+            period = period,
+            onPeriodChange = { viewModel.setPeriod(it, slug) },
+            onSubscribe = { /* TODO Play Billing */ },
+        )
+    }
+}
+
+@Composable
+private fun PortfolioBody(
+    modifier: Modifier = Modifier,
+    state: PortfolioState,
+    period: String,
+    onPeriodChange: (String) -> Unit,
+    onSubscribe: () -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(AppBackground)
+    ) {
+        when (state) {
+            PortfolioState.Loading -> {
+                CircularProgressIndicator(
+                    color = PrimaryAccent,
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 100.dp),
+                )
+            }
+
+            is PortfolioState.Error -> {
+                Column(
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 100.dp, start = 24.dp, end = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("Error", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text(state.message, color = TextSecondary, fontSize = 14.sp)
+                }
+            }
+
+            is PortfolioState.Loaded -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(bottom = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    val portfolio = state.portfolio
+
+                    // Hero (non-owner only)
+                    if (!portfolio.isOwner) {
+                        PortfolioHeroCard(
+                            portfolio = portfolio,
+                            modifier = Modifier.padding(horizontal = 16.dp).padding(top = 16.dp),
                         )
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = AppBackground),
+
+                    // Badges
+                    portfolio.leaderboardBadges?.takeIf { it.isNotEmpty() }?.let { badges ->
+                        Row(
+                            modifier = Modifier
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            badges.forEach { LeaderboardBadgePill(badge = it) }
+                        }
+                    }
+
+                    // Chart
+                    PerformanceChartCard(
+                        chartData = state.chartData,
+                        portfolioReturn = state.portfolioReturn,
+                        sp500Return = state.sp500Return,
+                        selectedPeriod = period,
+                        onPeriodChange = onPeriodChange,
+                        portfolioLabel = if (portfolio.isOwner) "Your Portfolio" else portfolio.owner.publicName,
+                        leaderboardEligible = state.leaderboardEligible,
+                        daysActive = state.daysActive,
+                        daysRequired = state.daysRequired,
+                        eligibleDate = state.eligibleDate,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+
+                    // Stats grid (non-owner)
+                    if (!portfolio.isOwner) {
+                        PortfolioStatsGrid(
+                            portfolio = portfolio,
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                        )
+                    }
+
+                    // Sector allocation
+                    portfolio.industryMix?.takeIf { it.isNotEmpty() }?.let { mix ->
+                        SectorAllocationCard(
+                            industryMix = mix,
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                        )
+                    }
+
+                    // Action buttons
+                    if (!portfolio.isOwner && !portfolio.isSubscribed) {
+                        SubscribeAndShareRow(
+                            slug = portfolio.owner.portfolioSlug ?: "",
+                            period = period,
+                            subscriptionPrice = portfolio.subscriptionPrice,
+                            onSubscribe = onSubscribe,
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                        )
+                    }
+
+                    if (portfolio.isOwner) {
+                        OwnerBuySellRow(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                        )
+                    }
+
+                    // Holdings
+                    val holdings = portfolio.holdings
+                    when {
+                        holdings != null && holdings.isNotEmpty() -> {
+                            HoldingsSection(
+                                holdings = holdings,
+                                showSwipeHint = portfolio.isOwner,
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                            )
+
+                            portfolio.recentTrades?.takeIf { it.isNotEmpty() }?.let { trades ->
+                                RecentTradesSection(
+                                    trades = trades.take(5),
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                )
+                            }
+                        }
+
+                        holdings == null -> {
+                            // Non-subscriber teaser
+                            BlurredHoldingsTeaser(
+                                ownerName = portfolio.owner.publicName,
+                                previewMessage = portfolio.previewMessage,
+                                onSubscribe = onSubscribe,
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                            )
+                        }
+
+                        else -> {
+                            OwnerEmptyState(modifier = Modifier.padding(vertical = 40.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Hero (non-owner)
+// ─────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun PortfolioHeroCard(
+    portfolio: PortfolioResponse,
+    modifier: Modifier = Modifier,
+) {
+    val ageText = formatAccountAge(portfolio.accountAgeDays ?: 0)
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(CardBackground)
+            .border(0.5.dp, CardBorder, RoundedCornerShape(16.dp))
+            .padding(vertical = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        // Avatar
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .clip(CircleShape)
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(PrimaryAccent, Color(0xFF059669)),
+                    )
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = portfolio.owner.publicName.take(1).uppercase(),
+                color = Color.White,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
             )
-        },
-    ) { padding ->
-        PlaceholderScreen(
-            modifier = Modifier.padding(padding),
-            title = "Portfolio: $slug",
-            body = "Holdings, trades, chart, and subscribe CTA. iOS reference: PortfolioDetailView.swift",
+        }
+
+        Text(
+            text = portfolio.owner.publicName,
+            color = TextPrimary,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
         )
+
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Member for $ageText", color = TextSecondary, fontSize = 12.sp)
+            Text("·", color = TextSecondary, fontSize = 12.sp)
+            Text(
+                text = "${portfolio.subscriberCount} subscriber" + if (portfolio.subscriberCount != 1) "s" else "",
+                color = TextSecondary,
+                fontSize = 12.sp,
+            )
+        }
+
+        portfolio.portfolioValue?.takeIf { it > 0 }?.let { value ->
+            Text(
+                text = "$" + formatLargeNumber(value),
+                color = TextPrimary,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+    }
+}
+
+private fun formatAccountAge(days: Int): String {
+    if (days >= 365) {
+        val years = days / 365
+        val months = (days % 365) / 30
+        return "${years}y ${months}m"
+    }
+    if (days >= 30) {
+        val months = days / 30
+        return "$months month" + if (months > 1) "s" else ""
+    }
+    return "$days day" + if (days != 1) "s" else ""
+}
+
+private fun formatLargeNumber(value: Double): String {
+    return java.text.NumberFormat.getNumberInstance(Locale.US).apply {
+        minimumFractionDigits = 2
+        maximumFractionDigits = 2
+    }.format(value)
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Badge pill
+// ─────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun LeaderboardBadgePill(badge: LeaderboardBadge) {
+    val medal = when (badge.rank) {
+        1 -> "🥇"
+        2 -> "🥈"
+        3 -> "🥉"
+        else -> "🏆"
+    }
+    val pillColor = when (badge.rank) {
+        1 -> Color(0xFFFFD700)
+        2 -> Color(0xFFC0C0C0)
+        3 -> Color(0xFFCD7F32)
+        else -> PrimaryAccent
+    }
+    val label = if (badge.type == "sector" && badge.sector != null) {
+        "#${badge.rank} ${badge.sector} (${badge.period})"
+    } else {
+        "#${badge.rank} Overall (${badge.period})"
+    }
+
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(pillColor.copy(alpha = 0.15f))
+            .border(1.dp, pillColor.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(medal, fontSize = 12.sp)
+        Text(label, color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Stats grid (non-owner)
+// ─────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun PortfolioStatsGrid(
+    portfolio: PortfolioResponse,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.White.copy(alpha = 0.06f))
+            .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp)),
+    ) {
+        StatColumn(value = "${portfolio.numStocks ?: 0}", label = "Stocks", modifier = Modifier.weight(1f))
+        StatColumnDivider()
+        StatColumn(value = "%.1f".format(portfolio.avgTradesPerWeek ?: 0.0), label = "Trades/Wk", modifier = Modifier.weight(1f))
+        StatColumnDivider()
+        StatColumn(value = "%.0f%%".format(portfolio.largeCapPct ?: 0.0), label = "Large Cap", modifier = Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun StatColumn(value: String, label: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.padding(vertical = 14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(value, color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text(label, color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun StatColumnDivider() {
+    Box(
+        modifier = Modifier
+            .width(0.5.dp)
+            .height(40.dp)
+            .background(Color.White.copy(alpha = 0.06f))
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Sector allocation
+// ─────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun SectorAllocationCard(
+    industryMix: Map<String, Double>,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(CardBackground)
+            .border(0.5.dp, CardBorder, RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = "SECTOR ALLOCATION",
+            color = TextMuted,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.8.sp,
+        )
+
+        // Stacked bar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(8.dp)
+                .clip(RoundedCornerShape(4.dp)),
+        ) {
+            val total = industryMix.values.sum().takeIf { it > 0 } ?: 1.0
+            industryMix.entries.sortedByDescending { it.value }.forEach { (name, pct) ->
+                Box(
+                    modifier = Modifier
+                        .weight((pct / total).toFloat().coerceAtLeast(0.005f))
+                        .fillMaxSize()
+                        .background(sectorColor(name))
+                )
+            }
+        }
+
+        // Legend
+        Row(
+            modifier = Modifier
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            industryMix.entries.sortedByDescending { it.value }.forEach { (name, pct) ->
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(CardBorder.copy(alpha = 0.3f))
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(sectorColor(name))
+                    )
+                    Text(name, color = TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                    Text("%.0f%%".format(pct), color = TextPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+private fun sectorColor(sector: String): Color {
+    val s = sector.lowercase()
+    return when {
+        "tech" in s -> Color(0xFF3B82F6)
+        "health" in s -> Color(0xFF22C55E)
+        "financ" in s -> Color(0xFFF59E0B)
+        "consumer d" in s -> Color(0xFFEC4899)
+        "communicat" in s -> Color(0xFF8B5CF6)
+        "industrial" in s -> Color(0xFF6366F1)
+        "consumer s" in s -> Color(0xFF14B8A6)
+        "energy" in s -> Color(0xFFEF4444)
+        "utilit" in s -> Color(0xFF64748B)
+        "real" in s -> Color(0xFFD97706)
+        "material" in s -> Color(0xFF78716C)
+        else -> Color(0xFF9CA3AF)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Action rows
+// ─────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun SubscribeAndShareRow(
+    slug: String,
+    period: String,
+    subscriptionPrice: Double,
+    onSubscribe: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Button(
+            onClick = onSubscribe,
+            modifier = Modifier
+                .weight(1f)
+                .height(48.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+            contentPadding = PaddingValues(0.dp),
+        ) {
+            Icon(Icons.Default.WorkspacePremium, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = "Try 7 Days Free, then $${subscriptionPrice.toInt()}/mo",
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        OutlinedButton(
+            onClick = {
+                val url = "https://apestogether.ai/p/$slug?period=$period"
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, "Check out this portfolio on Apes Together!\n$url")
+                }
+                ContextCompat.startActivity(
+                    context,
+                    Intent.createChooser(intent, "Share portfolio"),
+                    null,
+                )
+            },
+            modifier = Modifier.height(48.dp),
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
+            contentPadding = PaddingValues(horizontal = 16.dp),
+        ) {
+            Icon(Icons.Default.Share, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(13.dp))
+            Spacer(Modifier.width(5.dp))
+            Text("Share", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+private fun ShareIconButton(slug: String, period: String) {
+    val context = LocalContext.current
+    IconButton(
+        onClick = {
+            val url = "https://apestogether.ai/p/$slug?period=$period"
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, "Check out this portfolio on Apes Together!\n$url")
+            }
+            ContextCompat.startActivity(
+                context,
+                Intent.createChooser(intent, "Share portfolio"),
+                null,
+            )
+        }
+    ) {
+        Icon(Icons.Default.Share, contentDescription = "Share", tint = PrimaryAccent)
+    }
+}
+
+@Composable
+private fun OwnerBuySellRow(modifier: Modifier = Modifier) {
+    // Buy / Sell are TODOs (require TradeSheet UI). Buttons render so users
+    // see they exist, but tapping is a no-op for now.
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Button(
+            onClick = {},
+            modifier = Modifier.weight(1f).height(52.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Gains),
+        ) {
+            Icon(Icons.Default.AddCircle, null, tint = Color.White, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Buy", color = Color.White, fontWeight = FontWeight.Bold)
+        }
+
+        OutlinedButton(
+            onClick = {},
+            modifier = Modifier.weight(1f).height(52.dp),
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, Losses.copy(alpha = 0.3f)),
+            colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = Losses.copy(alpha = 0.15f),
+                contentColor = Losses,
+            ),
+        ) {
+            Icon(Icons.Default.RemoveCircle, null, tint = Losses, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Sell", color = Losses, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Holdings + Trades
+// ─────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun HoldingsSection(
+    holdings: List<Holding>,
+    showSwipeHint: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Holdings", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.weight(1f))
+            Text("${holdings.size} stocks", color = TextMuted, fontSize = 11.sp)
+        }
+        Spacer(Modifier.height(10.dp))
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(CardBackground)
+                .border(0.5.dp, CardBorder, RoundedCornerShape(16.dp)),
+        ) {
+            holdings.forEachIndexed { idx, h ->
+                HoldingRow(holding = h)
+                if (idx < holdings.size - 1) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(0.5.dp)
+                            .background(CardBorder)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HoldingRow(holding: Holding) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Ticker bubble
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(PrimaryAccent.copy(alpha = 0.1f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = holding.ticker.take(2),
+                color = PrimaryAccent,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+
+        Spacer(Modifier.width(12.dp))
+
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(holding.ticker, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                text = "${holding.quantity.toInt()} shares",
+                color = TextSecondary,
+                fontSize = 11.sp,
+            )
+        }
+
+        Spacer(Modifier.weight(1f))
+
+        Column(
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = "$" + "%.2f".format(holding.totalValue),
+                color = TextPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            holding.gainPercent?.let { gain ->
+                Text(
+                    text = formatPercent(gain, decimals = 1),
+                    color = if (gain >= 0) Gains else Losses,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            } ?: Text(
+                text = "$" + "%.2f".format(holding.displayPrice) + " avg",
+                color = TextMuted,
+                fontSize = 11.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecentTradesSection(
+    trades: List<Trade>,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        Text("Recent Trades", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(10.dp))
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(CardBackground)
+                .border(0.5.dp, CardBorder, RoundedCornerShape(16.dp)),
+        ) {
+            trades.forEachIndexed { idx, t ->
+                TradeRow(trade = t)
+                if (idx < trades.size - 1) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(0.5.dp)
+                            .background(CardBorder)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TradeRow(trade: Trade) {
+    val isBuy = trade.type.equals("buy", ignoreCase = true)
+    val accent = if (isBuy) Gains else Losses
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(accent.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = if (isBuy) Icons.Default.CallReceived else Icons.Default.CallMade,
+                contentDescription = null,
+                tint = accent,
+                modifier = Modifier.size(14.dp),
+            )
+        }
+
+        Column(
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+            modifier = Modifier.weight(1f),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = trade.type.uppercase(),
+                    color = accent,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = trade.ticker,
+                    color = TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            Text(
+                text = formatTradeDate(trade.timestamp),
+                color = TextMuted,
+                fontSize = 11.sp,
+            )
+        }
+
+        Text(
+            text = "${formatQuantity(trade.quantity)} @ $" + "%.2f".format(trade.price),
+            color = TextSecondary,
+            fontSize = 13.sp,
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Teasers + empty states
+// ─────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun BlurredHoldingsTeaser(
+    ownerName: String,
+    previewMessage: String?,
+    onSubscribe: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(CardBackground)
+            .border(0.5.dp, CardBorder, RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(Icons.Default.WorkspacePremium, null, tint = PrimaryAccent, modifier = Modifier.size(36.dp))
+        Text(
+            text = "$ownerName's holdings",
+            color = TextPrimary,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text = previewMessage ?: "Subscribe to see exactly what they're trading and get instant alerts.",
+            color = TextSecondary,
+            fontSize = 13.sp,
+        )
+        Button(
+            onClick = onSubscribe,
+            colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+            shape = RoundedCornerShape(12.dp),
+        ) {
+            Text("Subscribe", color = Color.White, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun OwnerEmptyState(modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Icon(Icons.Default.ShowChart, null, tint = PrimaryAccent.copy(alpha = 0.6f), modifier = Modifier.size(48.dp))
+        Text("No Holdings Yet", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text(
+            text = "Add your first stocks to start tracking performance",
+            color = TextSecondary,
+            fontSize = 14.sp,
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────
+
+private fun formatPercent(value: Double, decimals: Int): String {
+    val sign = if (value >= 0) "+" else "−"
+    val abs = value.absoluteValue
+    return "$sign${"%.${decimals}f".format(abs)}%"
+}
+
+private fun formatQuantity(quantity: Double): String {
+    if (quantity == quantity.toLong().toDouble() && quantity >= 1) return "%.0f".format(quantity)
+    if (quantity >= 1) return "%.2f".format(quantity)
+    val full = "%.4f".format(quantity)
+    var trimmed = full
+    while (trimmed.endsWith("0")) trimmed = trimmed.dropLast(1)
+    if (trimmed.endsWith(".")) trimmed = trimmed.dropLast(1)
+    return trimmed
+}
+
+private fun formatTradeDate(iso: String): String {
+    // Backend sends Python isoformat() output, sometimes with microseconds and
+    // sometimes without; sometimes with timezone offset, often without. Try
+    // each known shape until one parses.
+    val patterns = listOf(
+        "yyyy-MM-dd'T'HH:mm:ss.SSSSSS",
+        "yyyy-MM-dd'T'HH:mm:ss.SSS",
+        "yyyy-MM-dd'T'HH:mm:ssXXX",
+        "yyyy-MM-dd'T'HH:mm:ss",
+    )
+    val parsed: Date? = patterns.firstNotNullOfOrNull { p ->
+        runCatching { SimpleDateFormat(p, Locale.US).parse(iso) }.getOrNull()
+    }
+    val out = SimpleDateFormat("MMM d, h:mm:ss a", Locale.US)
+    return parsed?.let { out.format(it) } ?: iso
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// State + ViewModel
+// ─────────────────────────────────────────────────────────────────────────
+
+sealed interface PortfolioState {
+    data object Loading : PortfolioState
+    data class Loaded(
+        val portfolio: PortfolioResponse,
+        val chartData: List<com.apestogether.app.data.models.ChartPoint>,
+        val portfolioReturn: Double,
+        val sp500Return: Double,
+        val leaderboardEligible: Boolean,
+        val daysActive: Int,
+        val daysRequired: Int,
+        val eligibleDate: String?,
+    ) : PortfolioState
+
+    data class Error(val message: String) : PortfolioState
+}
+
+@HiltViewModel
+class PortfolioDetailViewModel @Inject constructor(
+    private val apiService: ApiService,
+) : ViewModel() {
+    private val _state = MutableStateFlow<PortfolioState>(PortfolioState.Loading)
+    val state: StateFlow<PortfolioState> = _state.asStateFlow()
+
+    private val _period = MutableStateFlow("1W")
+    val period: StateFlow<String> = _period.asStateFlow()
+
+    fun load(slug: String) {
+        if (slug.isBlank()) {
+            _state.value = PortfolioState.Error("Invalid portfolio")
+            return
+        }
+        viewModelScope.launch {
+            _state.value = PortfolioState.Loading
+            val portfolioResult = runCatching { apiService.getPortfolio(slug) }
+            val chartResult = runCatching { apiService.getPortfolioChart(slug, _period.value) }
+
+            val portfolio = portfolioResult.getOrNull()
+            if (portfolio == null) {
+                _state.value = PortfolioState.Error(
+                    portfolioResult.exceptionOrNull()?.message ?: "Failed to load portfolio"
+                )
+                return@launch
+            }
+
+            val chart = chartResult.getOrNull()
+            _state.value = PortfolioState.Loaded(
+                portfolio = portfolio,
+                chartData = chart?.chartData ?: emptyList(),
+                portfolioReturn = chart?.portfolioReturn ?: 0.0,
+                sp500Return = chart?.sp500Return ?: 0.0,
+                leaderboardEligible = chart?.leaderboardEligible ?: true,
+                daysActive = chart?.daysActive ?: 0,
+                daysRequired = chart?.daysRequired ?: 0,
+                eligibleDate = chart?.eligibleDate,
+            )
+        }
+    }
+
+    fun setPeriod(period: String, slug: String) {
+        _period.value = period
+        viewModelScope.launch {
+            val result = runCatching { apiService.getPortfolioChart(slug, period) }
+            val current = _state.value as? PortfolioState.Loaded ?: return@launch
+            val chart = result.getOrNull()
+            _state.value = current.copy(
+                chartData = chart?.chartData ?: emptyList(),
+                portfolioReturn = chart?.portfolioReturn ?: 0.0,
+                sp500Return = chart?.sp500Return ?: 0.0,
+                leaderboardEligible = chart?.leaderboardEligible ?: true,
+                daysActive = chart?.daysActive ?: 0,
+                daysRequired = chart?.daysRequired ?: 0,
+                eligibleDate = chart?.eligibleDate,
+            )
+        }
     }
 }
