@@ -1577,6 +1577,7 @@ const SystemHealth = ({ api }) => {
   const [trades, setTrades] = useState(null);
   const [drift, setDrift] = useState(null);
   const [driftRunning, setDriftRunning] = useState(false);
+  const [snapAudit, setSnapAudit] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // Drift-check endpoints live on the main Flask app, not /api/mobile.
@@ -1587,6 +1588,14 @@ const SystemHealth = ({ api }) => {
       if (!res.ok) return null;
       return await res.json();
     } catch (e) { console.error('drift fetch failed', e); return null; }
+  }, []);
+
+  const fetchSnapAudit = useCallback(async () => {
+    try {
+      const res = await fetch('/admin/last-snapshot-audit', { credentials: 'include' });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (e) { console.error('snap audit fetch failed', e); return null; }
   }, []);
 
   const runDriftCheck = useCallback(async () => {
@@ -1606,15 +1615,16 @@ const SystemHealth = ({ api }) => {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [c, t, d] = await Promise.all([
+      const [c, t, d, sa] = await Promise.all([
         api('/admin/bot/cron-health'),
         api('/admin/bot/trade-history?per_page=20'),
         fetchDrift(),
+        fetchSnapAudit(),
       ]);
-      setCron(c); setTrades(t); setDrift(d);
+      setCron(c); setTrades(t); setDrift(d); setSnapAudit(sa);
     } catch (e) { console.error(e); }
     setLoading(false);
-  }, [api, fetchDrift]);
+  }, [api, fetchDrift, fetchSnapAudit]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1721,6 +1731,95 @@ const SystemHealth = ({ api }) => {
             <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-muted)' }}>
               Or fix all in one shot: <a href="/admin/cash-tracking/full-rebuild?all=true&execute=true" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>/admin/cash-tracking/full-rebuild?all=true&execute=true</a>
             </div>
+          </div>
+        )}
+      </Card>
+
+      <Card>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>
+            Snapshot Drift
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400, marginLeft: 8 }}>
+              (per-day cash_proceeds + max_cash_deployed)
+            </span>
+          </div>
+          <a href="/api/cron/snapshot-audit" target="_blank" rel="noreferrer" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            (cron URL)
+          </a>
+        </div>
+
+        {(() => {
+          const sa = snapAudit;
+          const status = (() => {
+            if (!sa || sa.never_run) return { color: 'var(--text-muted)', label: 'Never run', shadow: '#88888844' };
+            const n = sa.users_with_issues || 0;
+            const bad = sa.total_bad_snapshots || 0;
+            if (n === 0) return { color: 'var(--green)', label: 'Clean', shadow: 'var(--green)44' };
+            if (n <= 3) return { color: 'var(--yellow)', label: `${n} users · ${bad} bad snapshots`, shadow: 'var(--yellow)44' };
+            return { color: 'var(--red)', label: `${n} users · ${bad} bad snapshots`, shadow: 'var(--red)44' };
+          })();
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: 'var(--bg-elevated)', borderRadius: 8, border: '1px solid var(--border)' }}>
+              <div style={{ width: 10, height: 10, borderRadius: '50%', background: status.color, boxShadow: `0 0 8px ${status.shadow}` }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>
+                  {status.label}
+                  {sa && !sa.never_run && sa.total_snapshots_checked != null && (
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400, marginLeft: 8 }}>
+                      ({sa.total_snapshots_checked} snapshots scanned across {sa.users_scanned} users)
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                  {sa && sa.never_run
+                    ? (sa.hint || 'Daily cron at 21:00 UTC will populate this.')
+                    : sa?.timestamp
+                      ? `Last check: ${sa.timestamp}`
+                      : 'No data'}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {snapAudit && Array.isArray(snapAudit.issues) && snapAudit.issues.length > 0 && (
+          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {snapAudit.issues.slice(0, 20).map((u, i) => (
+              <div key={i} style={{ padding: '10px 12px', background: 'var(--bg-elevated)', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <span style={{ fontWeight: 600 }}>{u.username}</span>
+                  <span style={{ color: 'var(--text-muted)' }}>id={u.user_id} · {u.role}</span>
+                </div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
+                  {u.bad_snapshot_count} bad snapshots · first {u.first_bad_date} · last {u.last_bad_date}
+                </div>
+                {Array.isArray(u.sample) && u.sample.length > 0 && (
+                  <div style={{ marginTop: 4, fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                    {u.sample.slice(0, 3).map((s, j) => (
+                      <div key={j}>
+                        {s.date}: cash Δ ${s.cash_drift?.toFixed(2)} · max Δ ${s.max_drift?.toFixed(2)}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <a
+                  href={`/admin/cash-tracking/full-rebuild?username=${encodeURIComponent(u.username)}&execute=true`}
+                  target="_blank" rel="noreferrer"
+                  style={{ color: 'var(--accent)', fontSize: 11, marginTop: 4, display: 'inline-block' }}
+                >
+                  Fix this user →
+                </a>
+              </div>
+            ))}
+            {snapAudit.issues.length > 20 && (
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                + {snapAudit.issues.length - 20} more not shown — use{' '}
+                <a href="/admin/audit-snapshot-cash-drift" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>
+                  full audit
+                </a>{' '}
+                for the complete list.
+              </div>
+            )}
           </div>
         )}
       </Card>

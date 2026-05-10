@@ -21,12 +21,19 @@ Whenever full-rebuild ran (we run it routinely to fix earlier corruption / drift
 ⚠️ **Audit caveat**: the audit's Option B replay can't distinguish (a) real bugs (stock rebuilt with after-close trades, cash not refreshed) from (b) snapshots that correctly reflect pre-after-close state on **both** sides (after-close BUY trades with both cash and stock excluded, smoothly picked up the next day). For (b), drift is reported but the snapshot is internally consistent and should NOT be "fixed". Triage manually by checking the next day's snapshot for smooth pickup.
 
 ### Fix
-`admin_cash_tracking.py:_snapshot_effective_date` now returns `ts.date()` (ET, no 16:00 cutoff). Daily snapshots written by full-rebuild now match the EOD cron's Option B semantics. Intraday snapshot logic (timestamp-granular replay via `txn_timeline`) is unchanged — that's correct as-is.
+`admin_cash_tracking.py:_snapshot_effective_date` now uses **20:05 UTC** as the cutoff — matching the actual EOD market-close cron schedule (`5 20 * * 1-5` in `vercel.json`). Trades < 20:05 UTC apply to that day's snapshot (the cron at 20:05 UTC saw them); trades >= 20:05 UTC roll to the next day's snapshot. UTC anchoring handles DST automatically.
+
+This produces snapshots that **match what the EOD cron actually wrote** — both stock_value (from live `Stock` holdings at 20:05 UTC) and cash_proceeds reflect the same point in time, so the chart is smooth on both after-close-sell days (panther2585 pattern) and after-close-buy days (fund.finance2024 pattern).
+
+The previous 16:00 ET cutoff was 5 minutes too early. It misclassified trades at 16:00-16:04 ET (which the 16:05 ET cron DID see) as next-day trades, causing the cash/stock mismatch.
+
+Intraday snapshot logic (timestamp-granular replay via `txn_timeline`) is unchanged — that's correct as-is.
 
 ### Lessons
 1. **Pick one snapshot-timing semantic and stick with it across every writer.** When two code paths write the same column with different rules, they corrupt each other every time both run.
-2. **The EOD market-close cron's "live `Stock` + replay-cash-by-date" pattern is the source of truth.** Anything that rebuilds historical snapshots must follow the same rule.
+2. **Anchor cutoffs to the actual cron schedule (in UTC), not to a market-time approximation.** The EOD cron fires at 20:05 UTC. Using 16:00 ET (which equals 20:00 UTC in EDT or 21:00 UTC in EST) introduces a 5–60 minute discrepancy depending on DST.
 3. **A drift detector that only checks `User.cash_proceeds` is insufficient.** It missed all of these snapshots because the User-level state was correct — it was only historical PortfolioSnapshot rows that were stale. The new audit endpoints close that gap.
+4. **Naive Option-B replays (no time-of-day cutoff) misclassify after-close trades in the OTHER direction.** Option B says "all trades on date D apply to D" — but the EOD cron at 16:05 ET physically can't have seen a trade at 16:09 ET. So Option B replay would put a trade in D's snapshot that the cron never saw, breaking consistency on after-close-buy days.
 
 ---
 

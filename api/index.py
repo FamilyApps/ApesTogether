@@ -2290,6 +2290,7 @@ def admin_audit_snapshot_cash_drift():
     """
     from models import db, User, Transaction, PortfolioSnapshot
     from sqlalchemy import text as _sql_text
+    from datetime import time as _dt_time, timedelta as _td
 
     try:
         threshold = float(request.args.get('threshold', '0.50'))
@@ -2298,6 +2299,18 @@ def admin_audit_snapshot_cash_drift():
     role_filter = request.args.get('role')
     limit_users_param = request.args.get('limit_users')
     apply_fix = request.args.get('fix', 'false').lower() == 'true'
+
+    # EOD cron fires at 20:05 UTC (`5 20 * * 1-5` in vercel.json). Trades < 20:05 UTC
+    # apply to that day's snapshot; trades >= 20:05 UTC roll to next day. This matches
+    # what the EOD cron actually saw at write time.
+    def _eff_date(ts):
+        if ts is None:
+            return None
+        ts_naive = ts.replace(tzinfo=None) if ts.tzinfo else ts
+        cron_firing = datetime.combine(ts_naive.date(), _dt_time(20, 5))
+        if ts_naive < cron_firing:
+            return ts_naive.date()
+        return ts_naive.date() + _td(days=1)
 
     q = User.query.order_by(User.id.asc())
     if role_filter:
@@ -2324,21 +2337,20 @@ def admin_audit_snapshot_cash_drift():
         if not snaps or not txns:
             continue
 
-        # Replay transactions chronologically. For each snapshot date, advance
-        # the replay to include every txn whose .date() <= snap.date, then
-        # compare snapshot.cash_proceeds to replay_cash at that point.
-        # We use Option B semantics (end-of-day, all trades of the day included).
+        # Replay transactions chronologically using the 20:05 UTC effective-date
+        # cutoff so the audit's "expected" matches what the EOD cron actually wrote
+        # at that moment. This eliminates after-close-buy false positives.
         replay_cash = 0.0
         replay_max = 0.0
         txn_idx = 0
 
         user_bad = []
         for snap in snaps:
-            # Advance through txns that occurred on or before this snapshot's date
+            # Advance through txns whose effective_date is on or before snap.date
             while txn_idx < len(txns):
                 txn = txns[txn_idx]
-                txn_date = txn.timestamp.date() if txn.timestamp else None
-                if txn_date is None or txn_date > snap.date:
+                txn_eff = _eff_date(txn.timestamp)
+                if txn_eff is None or txn_eff > snap.date:
                     break
                 val = (txn.quantity or 0) * (txn.price or 0)
                 if txn.transaction_type in ('buy', 'initial'):
@@ -2438,6 +2450,16 @@ def admin_audit_snapshot_max_cash_drift():
     """
     from models import db, User, Transaction, PortfolioSnapshot, Stock
     from sqlalchemy import text as _sql_text
+    from datetime import time as _dt_time, timedelta as _td
+
+    def _eff_date(ts):
+        if ts is None:
+            return None
+        ts_naive = ts.replace(tzinfo=None) if ts.tzinfo else ts
+        cron_firing = datetime.combine(ts_naive.date(), _dt_time(20, 5))
+        if ts_naive < cron_firing:
+            return ts_naive.date()
+        return ts_naive.date() + _td(days=1)
 
     try:
         threshold = float(request.args.get('threshold', '1.00'))
@@ -2473,12 +2495,14 @@ def admin_audit_snapshot_max_cash_drift():
             continue
 
         # Determine seeded_baseline: gap between first snapshot max_cash and
-        # what txns through first_snap.date can explain
+        # what txns through first_snap.date can explain (using 20:05 UTC cutoff
+        # so an after-close trade on first_snap.date is NOT counted — it would
+        # have rolled to first_snap.date+1).
         first_snap = snaps[0]
         rmf = 0.0
         rcf = 0.0
         for txn in txns:
-            t_date = txn.timestamp.date() if txn.timestamp else None
+            t_date = _eff_date(txn.timestamp)
             if t_date is None or t_date > first_snap.date:
                 break
             v = (txn.quantity or 0) * (txn.price or 0)
@@ -2501,7 +2525,7 @@ def admin_audit_snapshot_max_cash_drift():
         for snap in snaps:
             while txn_idx < len(txns):
                 txn = txns[txn_idx]
-                t_date = txn.timestamp.date() if txn.timestamp else None
+                t_date = _eff_date(txn.timestamp)
                 if t_date is None or t_date > snap.date:
                     break
                 v = (txn.quantity or 0) * (txn.price or 0)
@@ -2575,6 +2599,260 @@ def admin_audit_snapshot_max_cash_drift():
         'total_bad_snapshots': total_bad_snapshots,
         'issues': issues,
     })
+
+
+@app.route('/api/cron/snapshot-audit', methods=['GET', 'POST'])
+def cron_snapshot_audit():
+    """
+    Daily cron endpoint that detects PortfolioSnapshot rows whose cash_proceeds
+    or max_cash_deployed disagree with what the EOD market-close cron should
+    have written. Persists the result to admin.extra_data['last_snapshot_audit']
+    and emails ADMIN_NOTIFY_EMAIL if any drift is found.
+
+    Uses the same 20:05 UTC effective-date cutoff as the EOD cron itself, so
+    after-close trades that the cron physically didn't see don't get flagged
+    as false positives.
+
+    Schedule: daily at 21:00 UTC (17:00 EDT / 16:00 EST), well after the
+    market-close cron at 20:05 UTC has finished writing snapshots.
+    """
+    auth_error = verify_cron_request()
+    if auth_error:
+        return auth_error
+
+    from models import db, User, Transaction, PortfolioSnapshot
+    from datetime import time as _dt_time, timedelta as _td
+
+    def _eff_date(ts):
+        if ts is None:
+            return None
+        ts_naive = ts.replace(tzinfo=None) if ts.tzinfo else ts
+        cron_firing = datetime.combine(ts_naive.date(), _dt_time(20, 5))
+        if ts_naive < cron_firing:
+            return ts_naive.date()
+        return ts_naive.date() + _td(days=1)
+
+    cash_threshold = 1.00  # $1.00 — coarser than admin endpoint to avoid noise
+    max_cash_threshold = 1.00
+
+    issues = []
+    total_snapshots_checked = 0
+    total_bad_snapshots = 0
+
+    users = User.query.order_by(User.id.asc()).all()
+
+    for user in users:
+        txns = Transaction.query.filter_by(user_id=user.id).order_by(
+            Transaction.timestamp.asc()
+        ).all()
+        snaps = PortfolioSnapshot.query.filter_by(user_id=user.id).order_by(
+            PortfolioSnapshot.date.asc()
+        ).all()
+        if not snaps or not txns:
+            continue
+
+        # Compute seeded_baseline from first snapshot
+        first_snap = snaps[0]
+        rmf = 0.0
+        rcf = 0.0
+        for txn in txns:
+            t_date = _eff_date(txn.timestamp)
+            if t_date is None or t_date > first_snap.date:
+                break
+            v = (txn.quantity or 0) * (txn.price or 0)
+            if txn.transaction_type in ('buy', 'initial'):
+                if rcf >= v:
+                    rcf -= v
+                else:
+                    rmf += v - rcf
+                    rcf = 0
+            elif txn.transaction_type in ('sell', 'dividend'):
+                rcf += v
+        seeded_baseline = max(0.0, round(float(first_snap.max_cash_deployed or 0) - rmf, 2))
+
+        # Walk snapshots, replay transactions with effective-date cutoff
+        replay_cash = 0.0
+        replay_max = 0.0
+        txn_idx = 0
+        user_bad = []
+
+        for snap in snaps:
+            while txn_idx < len(txns):
+                txn = txns[txn_idx]
+                t_eff = _eff_date(txn.timestamp)
+                if t_eff is None or t_eff > snap.date:
+                    break
+                v = (txn.quantity or 0) * (txn.price or 0)
+                if txn.transaction_type in ('buy', 'initial'):
+                    if replay_cash >= v:
+                        replay_cash -= v
+                    else:
+                        replay_max += v - replay_cash
+                        replay_cash = 0
+                elif txn.transaction_type in ('sell', 'dividend'):
+                    replay_cash += v
+                txn_idx += 1
+
+            actual_cash = round(float(snap.cash_proceeds or 0), 2)
+            expected_cash = round(replay_cash, 2)
+            cash_drift = round(expected_cash - actual_cash, 2)
+
+            actual_max = round(float(snap.max_cash_deployed or 0), 2)
+            expected_max = round(seeded_baseline + replay_max, 2)
+            max_drift = round(expected_max - actual_max, 2)
+
+            total_snapshots_checked += 1
+            if abs(cash_drift) >= cash_threshold or abs(max_drift) >= max_cash_threshold:
+                total_bad_snapshots += 1
+                user_bad.append({
+                    'date': snap.date.isoformat(),
+                    'actual_cash': actual_cash,
+                    'expected_cash': expected_cash,
+                    'cash_drift': cash_drift,
+                    'actual_max': actual_max,
+                    'expected_max': expected_max,
+                    'max_drift': max_drift,
+                })
+
+        if user_bad:
+            issues.append({
+                'user_id': user.id,
+                'username': user.username,
+                'role': user.role,
+                'bad_snapshot_count': len(user_bad),
+                'first_bad_date': user_bad[0]['date'],
+                'last_bad_date': user_bad[-1]['date'],
+                'sample': user_bad[:5],
+            })
+
+    issues.sort(key=lambda x: -x['bad_snapshot_count'])
+
+    timestamp_str = datetime.utcnow().isoformat()
+    if issues:
+        prompt_lines = [
+            f"# Snapshot drift detected ({timestamp_str})",
+            f"# {total_bad_snapshots} bad snapshots across {len(issues)} users (of {len(users)} scanned).",
+            f"# 20:05 UTC effective-date cutoff in use, so these are NOT after-close-buy false positives.",
+            "",
+            "Investigate via:",
+            "  /admin/audit-snapshot-cash-drift  (full per-snapshot detail)",
+            "  /admin/audit-snapshot-max-cash-drift  (max_cash_deployed view)",
+            "  /admin/cash-tracking/full-rebuild?username=USER&execute=true  (apply repair)",
+        ]
+        prompt = "\n".join(prompt_lines)
+    else:
+        prompt = f"# No snapshot drift ({timestamp_str}) — {len(users)} users, {total_snapshots_checked} snapshots all clean."
+
+    response = {
+        'success': True,
+        'timestamp': timestamp_str,
+        'users_scanned': len(users),
+        'total_snapshots_checked': total_snapshots_checked,
+        'total_bad_snapshots': total_bad_snapshots,
+        'users_with_issues': len(issues),
+        'cash_threshold': cash_threshold,
+        'max_cash_threshold': max_cash_threshold,
+        'issues': issues,
+        'prompt': prompt,
+    }
+
+    # Persist to admin user
+    try:
+        from sqlalchemy.orm.attributes import flag_modified
+        admin = User.query.filter_by(email=os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')).first()
+        if admin:
+            extra = dict(admin.extra_data or {})
+            extra['last_snapshot_audit'] = {
+                'timestamp': timestamp_str,
+                'users_scanned': len(users),
+                'total_snapshots_checked': total_snapshots_checked,
+                'total_bad_snapshots': total_bad_snapshots,
+                'users_with_issues': len(issues),
+                'issues': issues,
+                'prompt': prompt,
+            }
+            admin.extra_data = extra
+            flag_modified(admin, 'extra_data')
+            db.session.commit()
+            response['persisted'] = True
+    except Exception as pe:
+        logger.warning(f"Could not persist snapshot-audit result: {pe}")
+        response['persisted'] = False
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+
+    # Email alert if drift found
+    if issues:
+        try:
+            import smtplib
+            from email.mime.text import MIMEText
+            notify_email = os.environ.get('ADMIN_NOTIFY_EMAIL', 'bobford00@gmail.com')
+            smtp_user = os.environ.get('SMTP_USER')
+            smtp_pass = os.environ.get('SMTP_PASS')
+
+            if smtp_user and smtp_pass:
+                body_lines = [
+                    f"PortfolioSnapshot drift detected on {timestamp_str}.",
+                    "",
+                    f"{total_bad_snapshots} bad snapshots across {len(issues)} of {len(users)} users.",
+                    f"Total snapshots checked: {total_snapshots_checked}",
+                    "",
+                    "Top affected users:",
+                ]
+                for issue in issues[:10]:
+                    body_lines.append(
+                        f"  - {issue['username']} ({issue['role']}): "
+                        f"{issue['bad_snapshot_count']} bad snapshots, "
+                        f"first={issue['first_bad_date']}, last={issue['last_bad_date']}"
+                    )
+                body_lines.extend([
+                    "",
+                    "===== Prompt-ready summary =====",
+                    "",
+                    prompt,
+                    "",
+                    "===== Full JSON =====",
+                    str(issues),
+                ])
+                msg = MIMEText("\n".join(body_lines))
+                msg['Subject'] = f'[ApesTogether] Snapshot drift: {len(issues)} users, {total_bad_snapshots} bad snapshots'
+                msg['From'] = smtp_user
+                msg['To'] = notify_email
+                with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+                    server.login(smtp_user, smtp_pass)
+                    server.send_message(msg)
+                response['email_sent'] = True
+                logger.info(f"Snapshot-audit alert email sent to {notify_email}: {len(issues)} users")
+            else:
+                response['email_sent'] = False
+                response['email_error'] = 'SMTP not configured'
+        except Exception as ee:
+            response['email_sent'] = False
+            response['email_error'] = str(ee)
+            logger.error(f"Snapshot-audit email failed: {ee}")
+
+    return jsonify(response)
+
+
+@app.route('/admin/last-snapshot-audit')
+@admin_required
+def admin_last_snapshot_audit():
+    """Return the most recently persisted snapshot-audit cron result."""
+    from models import User
+    admin = User.query.filter_by(
+        email=os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
+    ).first()
+    if not admin:
+        return jsonify({'error': 'admin user not found'}), 404
+    result = (admin.extra_data or {}).get('last_snapshot_audit')
+    if not result:
+        return jsonify({
+            'never_run': True,
+            'hint': 'Hit /api/cron/snapshot-audit (cron-auth) to populate, or wait for the daily 21:00 UTC schedule.',
+        })
+    return jsonify(result)
 
 
 @app.route('/admin/rename-user', methods=['POST'])

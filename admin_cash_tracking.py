@@ -984,37 +984,51 @@ def register_cash_tracking_routes(app, db):
 
         def _snapshot_effective_date(ts):
             """
-            For EOD daily snapshots: a transaction on date D applies to D's
-            snapshot, regardless of intraday timing.
+            For EOD daily snapshots: a transaction applies to the snapshot
+            written by the next EOD cron firing AFTER the transaction commits.
 
-            Rationale: this matches the EOD market-close cron's behavior, which
-            uses `func.date(Transaction.timestamp) <= target_date` (no 16:00 ET
-            cutoff) AND uses live `Stock` holdings for stock_value. Both stock
-            and cash therefore reflect "all trades on date D applied" =
-            Option B semantics.
+            The EOD market-close cron (`5 20 * * 1-5` in vercel.json) fires at
+            **20:05 UTC** every weekday. So:
+              - trade at ts <  20:05 UTC on date D  -> applies to D's snapshot
+                  (the cron at D's 20:05 UTC saw the committed trade)
+              - trade at ts >= 20:05 UTC on date D  -> applies to D+1's snapshot
+                  (the cron at D's 20:05 UTC ran before the trade committed,
+                   so the trade waits for the next day's cron)
 
-            The previous implementation (16:00 ET cutoff -> trades >= 16:00 ET
-            roll into next day) was Option A and produced DAILY snapshots whose
-            cash_proceeds disagreed with stock_value (which always reflected
-            live post-trade Stock state). That mismatch manifested as phantom
-            chart drops on after-close trade days followed by recoveries the
-            next day.
+            UTC anchoring handles DST automatically (the cron always fires at
+            the same UTC moment regardless of EDT/EST).
+
+            This matches the actual behavior of the EOD market-close cron in
+            `api/index.py:market_close_cron`, which:
+              - reads stock_value from live `Stock` holdings (whatever state
+                exists at 20:05 UTC)
+              - reads cash_proceeds via replay through `today_et` (which
+                includes any transaction whose UTC date <= today_et)
+            For trades < 20:05 UTC, both fields reflect post-trade state.
+            For trades >= 20:05 UTC, both fields reflect pre-trade state on D
+            and post-trade state on D+1.
+
+            The previous 16:00 ET cutoff was 5 minutes too early — it
+            misclassified trades at 16:00-16:04 ET (which the cron at 16:05 ET
+            DID see) as next-day trades, causing snapshot.cash_proceeds to
+            disagree with snapshot.stock_value on after-close-sell days.
+            That mismatch produced phantom chart drops.
 
             Intraday snapshots use TIMESTAMP-granular replay further below
-            (txn_timeline + snap_ts comparison) — that is correct as-is and is
-            unaffected by this change.
-
-            We use ET date (not UTC) so that any midnight-edge trades land on
-            the right business day, but for trades during US business hours
-            (the only time bots run) UTC date and ET date are identical.
+            (txn_timeline + snap_ts comparison) — unaffected by this logic.
             """
             if ts is None:
                 return None
-            if ts.tzinfo is None:
-                ts_et = ts.replace(tzinfo=_UTC_TZ).astimezone(_MARKET_TZ)
+            # Normalize to naive UTC for direct comparison with the cron time.
+            if ts.tzinfo is not None:
+                ts_utc = ts.astimezone(_UTC_TZ).replace(tzinfo=None)
             else:
-                ts_et = ts.astimezone(_MARKET_TZ)
-            return ts_et.date()
+                ts_utc = ts
+            # Cron fires at 20:05 UTC each weekday (see vercel.json: "5 20 * * 1-5")
+            cron_firing = datetime.combine(ts_utc.date(), _dt_time(20, 5))
+            if ts_utc < cron_firing:
+                return ts_utc.date()
+            return ts_utc.date() + _td(days=1)
 
         # 1. Compute current cost basis from holdings
         stocks = Stock.query.filter_by(user_id=user.id).all()
