@@ -658,6 +658,8 @@ def _compute_all_user_metrics(period='YTD'):
         all_metrics.append({
             'user_id': user.id,
             'username': user.username,
+            'display_name': user.display_name,
+            'public_name': user.public_name,
             'performance_percent': round(performance_percent, 2),
             'sparkline_data': sparkline,
             'small_cap_percent': round(small_cap_pct, 2),

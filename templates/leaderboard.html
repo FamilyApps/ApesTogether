@@ -15,7 +15,7 @@
     {
       "@type": "ListItem",
       "position": {{ loop.index }},
-      "name": "{{ entry.username }}",
+      "name": "{{ entry.public_name or entry.username }}",
       "description": "{% if (entry.performance_percent or 0) >= 0 %}+{% endif %}{{ '%.2f'|format(entry.performance_percent or 0) }}% {{ current_period }} return"
     }{% if not loop.last %},{% endif %}
     {% endfor %}
@@ -116,7 +116,7 @@
                                         {% endif %}
                                     </td>
                                     <td>
-                                        <strong>{{ entry.username }}</strong>
+                                        <strong>{{ entry.public_name or entry.username }}</strong>
                                         <span class="user-badge" data-user-id="{{ entry.user_id }}"></span>
                                     </td>
                                     <td>
