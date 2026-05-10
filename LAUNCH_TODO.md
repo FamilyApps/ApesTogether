@@ -13,10 +13,11 @@ This document is the single source of truth for what's still open before launch.
 
 Things to verify when the market is open and the bot pipeline is running. Hit each URL and report back.
 
-- [ ] **Drift detector still clean.** `/admin-panel` → System Health → Cash-Tracking Drift card. Click *Run now*. Should still report "Clean" (or specific drifted users to fix).
+- [ ] **Drift detector still clean.** `/admin-panel` → System Health → Cash-Tracking Drift card. Click *Run now*. After commit `34a01dc` (May 10), the drift report should be free of timing-edge false positives like `marblethehill72` 4/28 PLTR (16:05 ET) and `apex1575` 5/7 ZTS (16:04:27 ET). If those reappear, the tolerance-buffer logic is not firing.
 - [ ] **AlphaVantage logging populated.** `/admin-panel` → Bot Management → Market Research Data Sources. After the 9:45 AM ET wave finishes, News (NEWS_SENTIMENT) and Movers (TOP_GAINERS_LOSERS) rows should show non-zero call counts in the last 24h. If still showing `no_calls`, the HTTP fallback isn't firing — check Vercel logs for `/admin/bot/log-av-calls` POSTs.
 - [ ] **Bot trades show realistic prices.** `/admin-panel` → System Health → Recent Trades. Verify trades from this morning's wave have plausible prices (not $0.01, not $99999) and the right `Source` (`bot_research` or `bulk_api`).
-- [ ] **Display names render correctly on iOS.** Open the app, navigate to The Grok Portfolio (was marblethehill72) and Wolff's Flagship Fund (was CoastHillBear) on the leaderboard. Both should show the new public-facing names. Their portfolio detail headers and share-link previews should also use the new names.
+- [x] **Display names render correctly on iOS.** Confirmed May 10 — app shows "The Grok Portfolio" and "Wolff's Flagship Fund" everywhere after iOS Build 32 was archived.
+- [ ] **Push notifications fire for copytrade-bot trades.** After commit `8ce748c` (May 10), when a real Public.com trade-confirmation email lands and the GAS parser POSTs to `/api/mobile/admin/bot/email-trade`, bobford00 should receive a push notification on iPhone within ~30s. The endpoint response now includes a `notifications: {push_sent, email_sent, errors}` block — verify in Vercel logs.
 - [ ] **panther2585 1M chart fix verified.** After applying any chart fix from this session, navigate to panther2585's portfolio → 1M period. End of chart should not show ~20% drop unless real market moves justify it.
 - [ ] **bobford00 performance audit.** Verify 1D, 1W, 1M return percentages match expected market movement (since no recent trades, your performance should track your held stocks' price changes minus a rough benchmark).
 
@@ -30,7 +31,10 @@ Things to verify when the market is open and the bot pipeline is running. Hit ea
 - [x] Drift-detection System Health card in `/admin-panel`
 - [x] AlphaVantage API logging from GitHub Actions — batch endpoint + HTTP fallback in `_log_av_api_call`
 - [x] `display_name` column on User + serializers + iOS Models — public-facing names that bypass the username regex
-- [ ] **USER ACTION**: After deploy, hit `POST /api/mobile/admin/users/set-display-name` (admin 2FA) with `{updates: [{user_id: 13, display_name: "The Grok Portfolio"}, {user_id: 14, display_name: "Wolff's Flagship Fund"}]}` to install the column and set values
+- [x] **USER ACTION**: display_name values set May 10 via Supabase SQL Editor (`UPDATE "user" SET display_name = ... WHERE username = ...`) for `marblethehill72` ("The Grok Portfolio") and `CoastHillBear` ("Wolff's Flagship Fund"). Verified rendering on iOS.
+- [x] Audit-endpoint tolerance buffer for trades within ±60s of cron firing (commit `34a01dc`, May 10) — eliminates Vercel-cron-jitter false positives in `/admin/audit-snapshot-cash-drift`, `/admin/audit-snapshot-max-cash-drift`, and `/api/cron/snapshot-audit`.
+- [x] Push + email notification fan-out added to copytrade-bot email-trade endpoint (commit `8ce748c`, May 10). Notifications now use `public_name` so message reads "Wolff's Flagship Fund just bought…" instead of internal username.
+- [ ] **VERIFY (no rush)**: bobford00 has at least one active `device_token` row. Run in Supabase SQL Editor: `SELECT u.username, dt.id, dt.platform, dt.is_active, dt.created_at, dt.last_used_at FROM "user" u LEFT JOIN device_token dt ON dt.user_id = u.id WHERE u.username = 'bobford00';`. Zero active rows → iOS app never registered an APNs token (push will silently no-op). If empty, force a fresh app launch + grant permission to trigger registration.
 - [ ] Investigate panther2585 ~20% drop at end of 1M chart — see Monday checklist for diagnostic URL
 - [ ] Audit bobford00 1D/1W/1M performance — no recent trades so should track held stocks only
 - [ ] Audit other `mobile_api.py` admin endpoints for missing auth — I added auth to only one in this session; others may be similarly exposed
@@ -122,6 +126,13 @@ At the end of each session, the assistant should:
 ---
 
 ## Last updated
+
+**2026-05-10 (midday) — session 3 ended with:**
+- Audit tolerance buffer shipped (commit `34a01dc`) — Vercel cron jitter ±60s false positives no longer flagged.
+- Display name values set in DB for `marblethehill72` and `CoastHillBear`. iOS Build 32 archived, names confirmed rendering.
+- Copytrade-bot email-trade endpoint now fans out push + email to subscribers (commit `8ce748c`). Trade notifications switched from raw username to `public_name`.
+- Pending: verify push delivery on next real Public.com trade email; verify bobford00 has a `device_token` row.
+- Reviewed Section G launch-calendar reality: at Day 27 of 49, Phase 1 social-media foundation is unstarted. June 1 launch is officially deferred (LAUNCH_TODO line 4); see launch-playbook walkthrough below for re-sequenced priorities.
 
 **2026-05-09 (afternoon) — session 2 ended with:**
 - Drift indicator card live, drift check returned "Clean" (13 users scanned, $1.00 threshold)
