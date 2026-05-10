@@ -4599,7 +4599,12 @@ def _notify_admin_unroutable_trades(batch_id, trades):
         import smtplib
         from email.mime.text import MIMEText
         
-        admin_email = os.environ.get('ADMIN_NOTIFY_EMAIL', 'bobford00@gmail.com')
+        # Fallback chain: ADMIN_NOTIFY_EMAIL → ADMIN_EMAIL → hardcoded admin inbox.
+        admin_email = (
+            os.environ.get('ADMIN_NOTIFY_EMAIL')
+            or os.environ.get('ADMIN_EMAIL')
+            or 'bobford00@gmail.com'
+        )
         smtp_user = os.environ.get('SMTP_USER')
         smtp_pass = os.environ.get('SMTP_PASS')
         

@@ -42,6 +42,8 @@ Things to verify when the market is open and the bot pipeline is running. Hit ea
 - [ ] Verify weekly drift-detection cron fires on schedule (first scheduled run confirms; check `/admin/cash-tracking/last-drift-check` after)
 - [ ] Confirm `.env.production` has `ADMIN_TOTP_SECRET` and `ADMIN_API_KEY` set on Vercel
 - [ ] Load-test `/api/mobile/feed` at 100 concurrent users
+- [ ] Cash-Tracking-Drift card on `/admin-panel` System Health: shows "never been run" even after a successful manual run. Likely the timestamp display reads from a stored `last_drift_check` record that isn't updated on the synchronous "Run now" path. Low priority polish — functionality is correct (clean result is being computed), only the timestamp text is stale.
+- [x] Audit-cron email: fall back to `ADMIN_EMAIL` if `ADMIN_NOTIFY_EMAIL` is unset (commit pending May 10) — eliminates need for a duplicate Vercel env var; alerts will go to `fordutilityapps@gmail.com`.
 
 ## B. iOS App
 
@@ -55,14 +57,25 @@ Things to verify when the market is open and the bot pipeline is running. Hit ea
 
 ## C. Android App — large unfinished workstream
 
-- [ ] Google Play Console account set up
+**DECISION (May 10, 2026): Native Android in Kotlin / Jetpack Compose.** Wait for Android before public launch. No launch date set until Android is "fairly bug-free." Target: 1–2 weeks of focused Android work, then beta + parity verification, then begin marketing outreach in earnest.
+
+- [ ] Google Play Console account set up (Family Apps LLC)
 - [ ] Android app scaffolded (Kotlin / Jetpack Compose)
-- [ ] Google Play Billing integration (client + backend receipt validation)
-- [ ] Firebase Cloud Messaging (FCM) integration (backend + Android client)
+- [ ] Networking layer ports (mirror of `ApesTogetherApp/Services/APIService.swift` — base URL, auth header, snake_case JSON decoder, retry policy)
+- [ ] Auth: email/password + Google OAuth (matching iOS)
+- [ ] Core screens parity with iOS:
+  - [ ] Leaderboard (LeaderboardView)
+  - [ ] Portfolio detail (PortfolioView)
+  - [ ] Subscriptions tab
+  - [ ] Profile / Settings
+  - [ ] Sign-in / Sign-up
+- [ ] Charts: Compose-friendly chart library (e.g. Vico) replacing the Swift Charts code in `PerformanceChartView.swift`
+- [ ] Google Play Billing integration (client + backend receipt validation — backend endpoint will need a `/api/mobile/iap/google-validate` mirror of the existing iOS one)
+- [ ] Firebase Cloud Messaging (FCM) integration (backend can already send to FCM tokens via `push_notification_service.py`; Android client must register its FCM token via `/api/mobile/devices/register`)
 - [ ] `/public/.well-known/assetlinks.json` for App Links deep linking (mirror of existing `apple-app-site-association`)
-- [ ] 14-day Google Play closed testing window — **must start by Mon May 19 to launch June 1**
+- [ ] Display name + public_name decoder parity (Codable/Moshi/kotlinx.serialization equivalents)
+- [ ] 14-day Google Play closed testing window — must complete before public launch
 - [ ] Google Play store listing (copy already drafted in `docs/ASO_STRATEGY.md`)
-- [ ] **DECISION**: if Android isn't realistically shippable by June 1, announce iOS-only launch with "Android coming soon" and scale back Android mentions on landing page
 
 ## D. Legal / Compliance
 
@@ -77,9 +90,9 @@ Things to verify when the market is open and the bot pipeline is running. Hit ea
 - [x] Nav CTA → "Join the Beta"
 - [x] Waitlist segmentation (follow trader / earn as trader)
 - [x] Urgency text, trust bar, slider default, proof card attributions, footer socials, © 2026
-- [ ] **Replace app mockup image with real screenshot**
-- [ ] **Create social media accounts** (X, TikTok, IG, YouTube) — LAUNCH_PLAYBOOK §3, supposed to be Day 1 (Apr 14)
-- [ ] Updated screenshots for the site (depends on iOS Build 30+ being stable)
+- [x] **App mockup is a real screenshot** (May 10 confirmation; pricing in screenshot is dated but acceptable for now — refresh closer to launch)
+- [ ] Refresh landing screenshot once iOS app is final (current one has old pricing)
+- [ ] **Create social media accounts** (X, TikTok, IG, YouTube) — LAUNCH_PLAYBOOK §3. Originally Day 1 (Apr 14), now: do this weekend before Android work begins, just to lock the handles.
 - [ ] Test OG image at opengraph.xyz
 - [ ] Live waitlist counter ("Join N others on the waitlist")
 
@@ -93,12 +106,20 @@ Things to verify when the market is open and the bot pipeline is running. Hit ea
 
 ## G. Marketing / Launch Calendar
 
-See `docs/LAUNCH_PLAYBOOK.md` for the full 49-day calendar. The status of those items should be tracked separately in a spreadsheet or social-media scheduler, not here. This section only tracks **deviations and misses**.
+**The original Apr 14 – Jun 1 calendar in `docs/LAUNCH_PLAYBOOK.md` is now a template, not a deadline.** Sequencing reset on May 10:
 
-- [ ] LAUNCH_PLAYBOOK Phase 1 (Apr 14–20): social accounts were supposed to be set up Day 1 — confirm this happened. If not, **everything downstream in the content calendar is compressed**.
-- [ ] LAUNCH_PLAYBOOK Day 22 (Mon May 5): "Upload to TestFlight + Play Console. Invite 12+ Google Play testers (14-day clock starts)." — Google Play side likely not done; see section C decision
-- [ ] LAUNCH_PLAYBOOK Day 33 (Fri May 16): "Verify Google Play 14-day gate passed" — impossible if testing didn't start May 5
-- [ ] LAUNCH_PLAYBOOK Day 37 (Tue May 20): "Submit App Store + Google Play listings for review" — plan for this week
+1. Finish iOS stability + paid-sub E2E test + App Store assets (1–2 weeks)
+2. Build native Android app (Kotlin/Compose) to feature parity (target: 1–2 weeks of focused work, plus 14-day Google Play closed-testing gate)
+3. Beta both apps, fix bugs, declare "fairly bug-free"
+4. **Then** set a launch date and run the social-media + outreach phases of LAUNCH_PLAYBOOK at full speed
+
+This section only tracks **deferred / dropped items**:
+
+- [ ] LAUNCH_PLAYBOOK Day 38 — **$2 bill stunt deferred**. Don't order bills until launch week is in sight.
+- [ ] LAUNCH_PLAYBOOK Phase 1 social accounts: defer daily posting; only goal this weekend is to **register the handles** (X, TikTok, IG, YouTube, LinkedIn for the company) before someone else takes them. No posting yet.
+- [ ] LAUNCH_PLAYBOOK Day 22 (Mon May 5): "Upload to TestFlight + Play Console. Invite 12+ Google Play testers (14-day clock starts)." — Google Play side gated on Section C completion.
+- [ ] LAUNCH_PLAYBOOK Day 33 (Fri May 16): "Verify Google Play 14-day gate passed" — recompute target date once Section C scaffolding is done.
+- [ ] LAUNCH_PLAYBOOK Day 37 (Tue May 20): "Submit App Store + Google Play listings for review" — recompute.
 
 ## H. Operations / Data
 

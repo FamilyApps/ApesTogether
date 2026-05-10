@@ -2859,7 +2859,14 @@ def cron_snapshot_audit():
         try:
             import smtplib
             from email.mime.text import MIMEText
-            notify_email = os.environ.get('ADMIN_NOTIFY_EMAIL', 'bobford00@gmail.com')
+            # Fallback chain: ADMIN_NOTIFY_EMAIL → ADMIN_EMAIL → hardcoded admin inbox.
+            # Eliminates the need for a separate ADMIN_NOTIFY_EMAIL Vercel var when
+            # ADMIN_EMAIL is already where alerts should go (the common case).
+            notify_email = (
+                os.environ.get('ADMIN_NOTIFY_EMAIL')
+                or os.environ.get('ADMIN_EMAIL')
+                or 'bobford00@gmail.com'
+            )
             smtp_user = os.environ.get('SMTP_USER')
             smtp_pass = os.environ.get('SMTP_PASS')
 
