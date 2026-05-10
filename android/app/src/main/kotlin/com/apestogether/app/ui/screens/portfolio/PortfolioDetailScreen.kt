@@ -61,9 +61,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.apestogether.app.data.api.ApiService
+import com.apestogether.app.data.billing.BillingService
+import com.apestogether.app.data.billing.SubscriptionPlan
 import com.apestogether.app.data.models.Holding
 import com.apestogether.app.data.models.LeaderboardBadge
 import com.apestogether.app.data.models.PortfolioResponse
+import com.apestogether.app.data.models.PurchaseValidationRequest
 import com.apestogether.app.data.models.Trade
 import com.apestogether.app.ui.components.PerformanceChartCard
 import com.apestogether.app.ui.theme.AppBackground
@@ -171,8 +174,8 @@ fun PortfolioDetailScreen(
                 modifier = Modifier.padding(padding),
                 state = state,
                 period = period,
+                viewModel = viewModel,
                 onPeriodChange = { viewModel.setPeriod(it, slug) },
-                onSubscribe = { /* TODO Play Billing */ },
             )
         }
     } else {
@@ -181,8 +184,8 @@ fun PortfolioDetailScreen(
             modifier = Modifier.background(AppBackground),
             state = state,
             period = period,
+            viewModel = viewModel,
             onPeriodChange = { viewModel.setPeriod(it, slug) },
-            onSubscribe = { /* TODO Play Billing */ },
         )
     }
 }
@@ -192,9 +195,12 @@ private fun PortfolioBody(
     modifier: Modifier = Modifier,
     state: PortfolioState,
     period: String,
+    viewModel: PortfolioDetailViewModel,
     onPeriodChange: (String) -> Unit,
-    onSubscribe: () -> Unit,
 ) {
+    val selectedPlan by viewModel.selectedPlan.collectAsState()
+    val subscribeState by viewModel.subscribeState.collectAsState()
+    val activity = LocalContext.current.findActivity()
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -282,13 +288,31 @@ private fun PortfolioBody(
 
                     // Action buttons
                     if (!portfolio.isOwner && !portfolio.isSubscribed) {
-                        SubscribeAndShareRow(
-                            slug = portfolio.owner.portfolioSlug ?: "",
-                            period = period,
-                            subscriptionPrice = portfolio.subscriptionPrice,
-                            onSubscribe = onSubscribe,
+                        Column(
                             modifier = Modifier.padding(horizontal = 16.dp),
-                        )
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            CompactPlanToggle(
+                                selected = selectedPlan,
+                                onSelect = viewModel::setPlan,
+                            )
+                            SubscribeAndShareRow(
+                                slug = portfolio.owner.portfolioSlug ?: "",
+                                period = period,
+                                selectedPlan = selectedPlan,
+                                subscriptionPrice = portfolio.subscriptionPrice,
+                                subscribeState = subscribeState,
+                                onSubscribe = {
+                                    activity?.let {
+                                        viewModel.subscribe(it, portfolio.owner.id)
+                                    }
+                                },
+                            )
+                            SubscribeStatusBanner(
+                                state = subscribeState,
+                                onDismiss = viewModel::clearSubscribeState,
+                            )
+                        }
                     }
 
                     if (portfolio.isOwner) {
@@ -320,7 +344,11 @@ private fun PortfolioBody(
                             BlurredHoldingsTeaser(
                                 ownerName = portfolio.owner.publicName,
                                 previewMessage = portfolio.previewMessage,
-                                onSubscribe = onSubscribe,
+                                onSubscribe = {
+                                    activity?.let {
+                                        viewModel.subscribe(it, portfolio.owner.id)
+                                    }
+                                },
                                 modifier = Modifier.padding(horizontal = 16.dp),
                             )
                         }
@@ -607,34 +635,59 @@ private fun sectorColor(sector: String): Color {
 private fun SubscribeAndShareRow(
     slug: String,
     period: String,
+    selectedPlan: SubscriptionPlan,
     subscriptionPrice: Double,
+    subscribeState: SubscribeUiState,
     onSubscribe: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val processing = subscribeState is SubscribeUiState.Processing
+    val ctaText = when (selectedPlan) {
+        SubscriptionPlan.Annual -> "Try 7 Days Free, then $69/yr"
+        SubscriptionPlan.Monthly -> "Try 7 Days Free, then $${subscriptionPrice.toInt()}/mo"
+    }
+
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Button(
             onClick = onSubscribe,
+            enabled = !processing,
             modifier = Modifier
                 .weight(1f)
                 .height(48.dp),
             shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = PrimaryAccent,
+                disabledContainerColor = PrimaryAccent.copy(alpha = 0.5f),
+            ),
             contentPadding = PaddingValues(0.dp),
         ) {
-            Icon(Icons.Default.WorkspacePremium, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
-            Spacer(Modifier.width(6.dp))
-            Text(
-                text = "Try 7 Days Free, then $${subscriptionPrice.toInt()}/mo",
-                color = Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            if (processing) {
+                CircularProgressIndicator(
+                    color = Color.White,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(16.dp),
+                )
+            } else {
+                Icon(
+                    Icons.Default.WorkspacePremium,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(13.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = ctaText,
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
 
         OutlinedButton(
@@ -661,6 +714,137 @@ private fun SubscribeAndShareRow(
             Text("Share", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         }
     }
+}
+
+/**
+ * Two-pill plan toggle (Monthly / Annual). Annual is highlighted as
+ * default since it's a better deal per Family Apps's pricing
+ * (~$5.75/mo equivalent vs $9/mo monthly). Matches iOS CompactPlanToggle.
+ */
+@Composable
+private fun CompactPlanToggle(
+    selected: SubscriptionPlan,
+    onSelect: (SubscriptionPlan) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(CardBackground)
+            .border(0.5.dp, CardBorder, RoundedCornerShape(10.dp))
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        PlanChip(
+            label = "Annual",
+            sublabel = "$69/yr · save 36%",
+            isSelected = selected == SubscriptionPlan.Annual,
+            modifier = Modifier.weight(1f),
+            onClick = { onSelect(SubscriptionPlan.Annual) },
+        )
+        PlanChip(
+            label = "Monthly",
+            sublabel = "$9/mo",
+            isSelected = selected == SubscriptionPlan.Monthly,
+            modifier = Modifier.weight(1f),
+            onClick = { onSelect(SubscriptionPlan.Monthly) },
+        )
+    }
+}
+
+@Composable
+private fun PlanChip(
+    label: String,
+    sublabel: String,
+    isSelected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (isSelected) PrimaryAccent.copy(alpha = 0.15f) else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp, horizontal = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            text = label,
+            color = if (isSelected) PrimaryAccent else TextPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text = sublabel,
+            color = if (isSelected) PrimaryAccent.copy(alpha = 0.85f) else TextMuted,
+            fontSize = 10.sp,
+        )
+    }
+}
+
+/**
+ * Inline banner that pops below the Subscribe CTA after a billing attempt:
+ *  - Idle  → nothing
+ *  - Processing → already shown via spinner on the button
+ *  - Success → green "You're subscribed!" banner
+ *  - Error   → red banner with message + tap to dismiss
+ */
+@Composable
+private fun SubscribeStatusBanner(
+    state: SubscribeUiState,
+    onDismiss: () -> Unit,
+) {
+    when (state) {
+        is SubscribeUiState.Error -> {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Losses.copy(alpha = 0.1f))
+                    .border(0.5.dp, Losses.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                    .clickable(onClick = onDismiss)
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = state.message,
+                    color = Losses,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f),
+                )
+                Text("Dismiss", color = Losses.copy(alpha = 0.7f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        SubscribeUiState.Success -> {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Gains.copy(alpha = 0.1f))
+                    .border(0.5.dp, Gains.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "You're subscribed! Pull to refresh to see your alerts.",
+                    color = Gains,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+        }
+        SubscribeUiState.Idle, SubscribeUiState.Processing -> Unit
+    }
+}
+
+/** Walks the [Context] chain to find the host [Activity], or null if not on one. */
+private fun android.content.Context.findActivity(): android.app.Activity? = when (this) {
+    is android.app.Activity -> this
+    is android.content.ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 @Composable
@@ -1031,15 +1215,33 @@ sealed interface PortfolioState {
     data class Error(val message: String) : PortfolioState
 }
 
+/** Lightweight UX state for the Subscribe button flow. */
+sealed interface SubscribeUiState {
+    data object Idle : SubscribeUiState
+    data object Processing : SubscribeUiState
+    data class Error(val message: String) : SubscribeUiState
+    data object Success : SubscribeUiState
+}
+
 @HiltViewModel
 class PortfolioDetailViewModel @Inject constructor(
     private val apiService: ApiService,
+    private val billingService: BillingService,
 ) : ViewModel() {
     private val _state = MutableStateFlow<PortfolioState>(PortfolioState.Loading)
     val state: StateFlow<PortfolioState> = _state.asStateFlow()
 
     private val _period = MutableStateFlow("1W")
     val period: StateFlow<String> = _period.asStateFlow()
+
+    private val _selectedPlan = MutableStateFlow(SubscriptionPlan.Annual)
+    val selectedPlan: StateFlow<SubscriptionPlan> = _selectedPlan.asStateFlow()
+
+    private val _subscribeState = MutableStateFlow<SubscribeUiState>(SubscribeUiState.Idle)
+    val subscribeState: StateFlow<SubscribeUiState> = _subscribeState.asStateFlow()
+
+    /** Live Play Billing connection state — drives the Subscribe button disabled state. */
+    val billingConnectionState = billingService.connectionState
 
     fun load(slug: String) {
         if (slug.isBlank()) {
@@ -1070,6 +1272,13 @@ class PortfolioDetailViewModel @Inject constructor(
                 daysRequired = chart?.daysRequired ?: 0,
                 eligibleDate = chart?.eligibleDate,
             )
+
+            // Prefetch Play Billing products for snappier Subscribe UX. Failures are
+            // expected during development before Play Console is set up; the
+            // Subscribe button shows an error in that case.
+            if (!portfolio.isOwner && !portfolio.isSubscribed) {
+                runCatching { billingService.queryProducts() }
+            }
         }
     }
 
@@ -1088,6 +1297,75 @@ class PortfolioDetailViewModel @Inject constructor(
                 daysRequired = chart?.daysRequired ?: 0,
                 eligibleDate = chart?.eligibleDate,
             )
+        }
+    }
+
+    fun setPlan(plan: SubscriptionPlan) {
+        _selectedPlan.value = plan
+    }
+
+    /** Reset the subscribe error/success banner. */
+    fun clearSubscribeState() {
+        _subscribeState.value = SubscribeUiState.Idle
+    }
+
+    /**
+     * Launches the Play Billing flow for the [selectedPlan], then on success
+     * POSTs the resulting purchase token to the backend for validation.
+     * Mirrors the iOS [SubscriptionManager.subscribe] flow.
+     */
+    fun subscribe(activity: android.app.Activity, subscribedToId: Int) {
+        viewModelScope.launch {
+            _subscribeState.value = SubscribeUiState.Processing
+
+            val ensure = runCatching { billingService.ensureConnected() }.getOrNull()
+            if (ensure == null ||
+                ensure.responseCode != com.android.billingclient.api.BillingClient.BillingResponseCode.OK
+            ) {
+                _subscribeState.value = SubscribeUiState.Error(
+                    "Play Billing unavailable on this device. Please try again later."
+                )
+                return@launch
+            }
+
+            // Make sure product details are loaded (formattedPrice for the button).
+            if (billingService.productDetails.value.isEmpty()) {
+                runCatching { billingService.queryProducts() }
+            }
+
+            val result = billingService.purchase(activity, _selectedPlan.value.productId)
+            when (result) {
+                is BillingService.PurchaseResult.UserCanceled -> {
+                    _subscribeState.value = SubscribeUiState.Idle
+                }
+                is BillingService.PurchaseResult.Error -> {
+                    _subscribeState.value = SubscribeUiState.Error(result.message)
+                }
+                is BillingService.PurchaseResult.Success -> {
+                    val purchase = result.purchase
+                    val validation = runCatching {
+                        apiService.validatePurchase(
+                            PurchaseValidationRequest(
+                                platform = "google",
+                                subscribedToId = subscribedToId,
+                                purchaseToken = purchase.purchaseToken,
+                            )
+                        )
+                    }
+                    val resp = validation.getOrNull()
+                    if (resp?.success == true) {
+                        // Server happy → acknowledge with Play (idempotent).
+                        runCatching { billingService.acknowledge(purchase) }
+                        _subscribeState.value = SubscribeUiState.Success
+                    } else {
+                        _subscribeState.value = SubscribeUiState.Error(
+                            resp?.error
+                                ?: validation.exceptionOrNull()?.message
+                                ?: "Server failed to validate the purchase."
+                        )
+                    }
+                }
+            }
         }
     }
 }

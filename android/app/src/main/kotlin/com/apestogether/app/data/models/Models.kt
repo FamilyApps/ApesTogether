@@ -197,10 +197,10 @@ data class SubscriberUser(
 
 @Serializable
 data class PurchaseValidationRequest(
-    val platform: String,                          // "ios" or "android"
+    val platform: String,                          // "apple" or "google" (matches backend `Platform` enum)
     @SerialName("subscribed_to_id") val subscribedToId: Int,
-    @SerialName("receipt_data") val receiptData: String? = null,    // iOS
-    @SerialName("purchase_token") val purchaseToken: String? = null, // Android
+    @SerialName("receipt_data") val receiptData: String? = null,    // Apple: StoreKit 2 JWS or legacy base64 receipt
+    @SerialName("purchase_token") val purchaseToken: String? = null, // Google: Play Billing purchase token
 )
 
 @Serializable
