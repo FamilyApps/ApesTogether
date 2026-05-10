@@ -268,6 +268,10 @@ def notify_subscribers_via_email(db, trader_user_id, action, ticker, quantity, p
     failed = 0
     rate_limited = 0
 
+    # Use public_name (display_name or username fallback) so subscribers see the
+    # portfolio's public-facing name in the email subject/body, not the internal handle.
+    trader_name = getattr(trader, 'public_name', None) or trader.username
+
     for sub in active_subs:
         subscriber = User.query.get(sub.subscriber_id)
         if not subscriber or not subscriber.email:
@@ -278,7 +282,7 @@ def notify_subscribers_via_email(db, trader_user_id, action, ticker, quantity, p
             continue
 
         result = send_trade_notification_to_subscriber(
-            subscriber.email, trader.username, action, ticker, quantity, price, position_pct,
+            subscriber.email, trader_name, action, ticker, quantity, price, position_pct,
         )
         if result['status'] == 'sent':
             sent += 1

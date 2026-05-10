@@ -4230,6 +4230,9 @@ def bot_email_trade():
                         logger.info(f"Adjusting {ticker} sell qty: requested {quantity} -> actual {stock.quantity}")
                         quantity = stock.quantity
                 
+                # Capture pre-trade position so we can report % of position on sells.
+                pre_qty = float(stock.quantity) if stock else 0.0
+
                 # Process transaction through cash tracking
                 tx_result = process_transaction(
                     db, bot.id, ticker, quantity, price, action,
@@ -4247,13 +4250,19 @@ def bot_email_trade():
                         db.session.add(stock)
                 elif action == 'sell':
                     stock.quantity -= quantity
-                
+
+                # For sells, compute % of position sold (qty sold / pre-sell holdings).
+                position_pct = None
+                if action == 'sell' and pre_qty > 0:
+                    position_pct = round((quantity / pre_qty) * 100, 1)
+
                 results.append({
                     'ticker': ticker,
                     'action': action,
                     'quantity': quantity,
                     'price': price,
                     'total_value': round(quantity * price, 2),
+                    'position_pct': position_pct,
                     'status': 'executed',
                     'source': source
                 })
@@ -4265,7 +4274,43 @@ def bot_email_trade():
         db.session.commit()
         
         executed = [r for r in results if r.get('status') == 'executed']
-        
+
+        # ── Notification fan-out (push + email) for each successful trade ──
+        # Mirrors the regular email-trade path in services/trading_email.py so
+        # that copytrade bots (CoastHillBear, marblethehill72, etc.) trigger
+        # the SAME subscriber alerts as user-driven trades. Without this block,
+        # bobford00 (subscribed to CoastHillBear) sees the trade in the app's
+        # Subscriptions tab on next refresh but receives no push notification.
+        notify_summary = {'push_sent': 0, 'email_sent': 0, 'errors': []}
+        if executed:
+            try:
+                from services.notification_utils import notify_subscribers_via_email
+                from push_notification_service import notify_subscribers_of_trade
+                for r in executed:
+                    try:
+                        push_result = notify_subscribers_of_trade(
+                            db, bot.id, r['action'], r['ticker'],
+                            r['quantity'], r['price'],
+                            position_pct=r.get('position_pct'),
+                        )
+                        notify_summary['push_sent'] += int(push_result.get('success_count', 0) or 0)
+                    except Exception as pe:
+                        logger.warning(f"Push notify failed for {r['ticker']}: {pe}")
+                        notify_summary['errors'].append(f"push:{r['ticker']}:{pe}")
+                    try:
+                        email_result = notify_subscribers_via_email(
+                            db, bot.id, r['action'], r['ticker'],
+                            r['quantity'], r['price'],
+                            position_pct=r.get('position_pct'),
+                        )
+                        notify_summary['email_sent'] += int(email_result.get('sent', 0) or 0)
+                    except Exception as ee:
+                        logger.warning(f"Email notify failed for {r['ticker']}: {ee}")
+                        notify_summary['errors'].append(f"email:{r['ticker']}:{ee}")
+            except Exception as e:
+                logger.error(f"Notification fan-out top-level error: {e}")
+                notify_summary['errors'].append(f"top:{e}")
+
         return jsonify({
             'success': True,
             'bot_username': bot_username,
@@ -4273,7 +4318,8 @@ def bot_email_trade():
             'source': source,
             'trades_submitted': len(trades),
             'trades_executed': len(executed),
-            'results': results
+            'results': results,
+            'notifications': notify_summary,
         })
         
     except Exception as e:

@@ -434,11 +434,15 @@ def notify_subscribers_of_trade(
     if not device_tokens:
         return {'success_count': 0, 'failure_count': 0, 'no_tokens': True}
     
+    # Use public_name (display_name or username fallback) so subscribers see the
+    # portfolio's public-facing name in push titles, not the internal handle.
+    trader_name = getattr(trader, 'public_name', None) or trader.username
+
     # Send notifications
     tokens = [dt.token for dt in device_tokens]
     result = service.send_trade_notification(
         device_tokens=tokens,
-        trader_username=trader.username,
+        trader_username=trader_name,
         action=action,
         ticker=ticker,
         quantity=quantity,
@@ -454,7 +458,7 @@ def notify_subscribers_of_trade(
             user_id=dt.user_id,
             portfolio_owner_id=trader_user_id,
             device_token_id=dt.id,
-            title=f"{'🟢' if action.upper() == 'BUY' else '🔴'} {trader.username} {action.upper()}",
+            title=f"{'🟢' if action.upper() == 'BUY' else '🔴'} {trader_name} {action.upper()}",
             body=f"{quantity} {ticker} ({position_pct:.0f}% of position) @ ${price:.2f}" if position_pct is not None and action.upper() == 'SELL' else f"{quantity} {ticker} @ ${price:.2f}",
             data_payload={
                 'type': 'trade_alert',
