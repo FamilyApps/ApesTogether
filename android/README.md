@@ -16,7 +16,7 @@ Native Android client. Mirrors the iOS app at `../ios/ApesTogetherApp/`.
 | Push | Firebase Cloud Messaging |
 | Billing | Google Play Billing 7.x |
 | Min SDK | 26 (Android 8.0) |
-| Target SDK | 34 (Android 14) |
+| Target SDK | 35 (Android 15) |
 
 ## Project layout
 
@@ -121,7 +121,7 @@ The backend at `https://apestogether.ai/api/mobile/` already supports Android vi
 | `POST /purchase/validate` | accepts `platform: "google"` + `purchase_token` |
 | All read endpoints | unchanged from iOS |
 
-`iap_validation_service.py` already implements Google Play receipt validation — for production you'll need to set the `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` env var in Vercel with a service-account key that has Play Developer API access.
+`iap_validation_service.py` already implements Google Play receipt validation — for production you'll need to set the `GOOGLE_PLAY_CREDENTIALS_JSON` and `GOOGLE_PLAY_PACKAGE_NAME` env vars in Vercel. Full walkthrough in the **Google Play Billing setup** section below.
 
 ## App Links / deep linking
 
@@ -143,24 +143,115 @@ Android `https://apestogether.ai/p/<slug>` deep links are wired:
 
 `ApesFirebaseMessagingService` handles incoming messages and calls `/device/register` with the FCM token on rotation. The backend's `push_notification_service.py` already targets FCM, so **the same trade-alert payloads sent to iOS are also sent to Android with no backend changes** — provided the Firebase project is configured for both platforms (it is, after step 3 above).
 
+## Google Play Billing setup (required before Subscribe button works)
+
+The Android Subscribe CTA on `PortfolioDetailScreen` is fully wired (`data/billing/BillingService.kt` + `PortfolioDetailViewModel.subscribe()`), but actually charging a user requires three things outside the codebase. Follow them in order — Step 1 takes 1–3 days for Google to verify, so start it ASAP.
+
+### Step 1 — Register a Google Play Developer account
+
+One-time **$25 USD** fee (vs Apple's $99/yr).
+
+1. Go to https://play.google.com/console/u/0/signup
+2. Sign in with the Google account you want to own the developer profile.
+3. Choose **Organization** account type (not Personal) → enter **Family Apps LLC** as the organization name.
+4. Pay $25, upload a government ID + business document, wait 1–3 days for verification.
+
+### Step 2 — Create the app in Play Console
+
+Once verified, in https://play.google.com/console:
+
+1. **All apps → Create app.**
+2. App name: `Apes Together`. Default language: English (US). App or game: App. Free or paid: Free (we charge via subscriptions, not upfront).
+3. Accept developer program policies.
+4. After creation, complete the **Dashboard → Set up your app** checklist:
+   - App access (no login required for reviewers — provide test creds anyway)
+   - Ads, Content rating, Target audience, News app
+   - Data safety (mirror what iOS submitted)
+   - Privacy policy URL: `https://apestogether.ai/privacy`
+   - Store listing (icon, screenshots, short / full description — reuse iOS App Store copy)
+5. Set **package name** to `com.apestogether.app` (must match `applicationId` in `app/build.gradle.kts`).
+
+### Step 3 — Create the subscription products
+
+In **Monetize → Products → Subscriptions** click **Create subscription** twice and use these EXACT product IDs (must match iOS StoreKit and `BillingService.kt`):
+
+| Product ID | Name | Description | Base plan |
+|---|---|---|---|
+| `com.apestogether.subscription.monthly` | Monthly Subscription | Follow a trader's moves in real-time | Monthly, auto-renewing, $9.00 USD |
+| `com.apestogether.subscription.annual` | Annual Subscription | Follow a trader's moves in real-time — best value | Yearly, auto-renewing, $69.00 USD |
+
+For each subscription, add a **free trial offer**:
+- Eligibility: New customers acquiring this subscription for the first time
+- Phase 1: 7 days free
+- Phase 2: standard price (auto)
+
+Activate both subscriptions when the form lets you (you may need a fully completed store listing first).
+
+### Step 4 — Create a Google Cloud service account for the backend
+
+The backend (`iap_validation_service.py`) verifies purchase tokens by calling the Play Developer API. It needs a service account JSON:
+
+1. Go to https://console.cloud.google.com → select the Firebase / Play project.
+2. **IAM & Admin → Service Accounts → Create service account.**
+   - Name: `apes-play-billing-validator`
+   - Role: skip (we grant Play access separately)
+3. Open the new service account → **Keys → Add key → Create new key → JSON**. Save the file (it will look like `apes-...-abc123.json`).
+4. **Google Play Console → Setup → API access** (left sidebar).
+5. Find the service account in the list (it auto-imports from the linked Cloud project). Click **Grant access**.
+   - Permissions: **View financial data, orders, and cancellation survey responses** + **Manage orders and subscriptions**.
+   - App permissions: select Apes Together.
+   - Save.
+6. Open the downloaded JSON file → copy the entire contents (a multi-line JSON object).
+7. **Vercel → Project → Settings → Environment Variables → Add**:
+   - Name: `GOOGLE_PLAY_CREDENTIALS_JSON`
+   - Value: paste the entire JSON content.
+   - Environments: Production (and Preview if you want sandbox testing on previews).
+8. Also add: `GOOGLE_PLAY_PACKAGE_NAME` = `com.apestogether.app`
+9. Redeploy Vercel so the new env vars take effect.
+
+### Step 5 — Test on Internal Testing track
+
+Play Billing **only works on apps installed from the Play Store**, not sideloaded debug APKs. So:
+
+1. **Android Studio → Build → Generate Signed Bundle / APK → Android App Bundle (`.aab`)**
+   - Create a release keystore (or reuse one). Store the keystore file + passwords somewhere safe — re-uploading the app under a new key requires a new package name.
+   - Note: Google Play **App Signing** will re-sign the upload key with their managed key.
+2. **Play Console → Testing → Internal testing → Create new release** → upload the `.aab`.
+3. Add your Google account to the internal testers list. Save the **opt-in URL**.
+4. On your test device, open the opt-in URL while signed in with the same Google account. Tap **Become a tester**, then install from the Play Store link on that page.
+5. Open the app, navigate to a non-owned portfolio → tap Subscribe. The real Google Play sheet should appear.
+6. Use a **test card** (Google provides them automatically when you're listed as an internal tester — purchases are not charged) or a real card — Play will show your test card option in the payment sheet for testers.
+
+The full happy path: tap Subscribe → Play sheet → confirm → backend validates token → `MobileSubscription` row created → `subscribeState = Success` → green banner appears.
+
+### Troubleshooting
+
+| Symptom | Cause |
+|---|---|
+| `"Play Billing unavailable on this device"` | Running on emulator without Play Store, or sideloaded APK. Use a Play-installed build on a real device. |
+| `"Subscription product not available"` | Product IDs in Play Console don't exactly match `com.apestogether.subscription.{monthly,annual}`, or the products aren't yet **Active**. |
+| `"You already subscribed to this trader"` | `ITEM_ALREADY_OWNED` — Play sees an existing subscription for the same SKU. iOS uses subscription groups so users replace one with the other; Android handles this via the Play UI "change subscription" sheet. |
+| Server says `"server_config_error"` | `GOOGLE_PLAY_CREDENTIALS_JSON` not set in Vercel, or the service account lacks Play Developer API access. |
+| Server says `"invalid_purchase_token"` | The token was already consumed (acknowledged + recorded once already), or Play's API hasn't propagated the new purchase yet (retry after ~30s). |
+
 ## What's NOT done yet (in priority order)
 
 These are tracked in `../LAUNCH_TODO.md` Section C:
 
-1. Port `LeaderboardView` filter pills + sparkline (iOS file is 38KB / 1000+ lines).
-2. Port `PortfolioDetailView` (47KB — the largest iOS view).
-3. Port `MyPortfolioView` (9KB).
-4. Port `TopInfluencersView` (16KB).
-5. Port `SubscriptionsView` (18KB).
+1. ~~Port `LeaderboardView` filter pills + sparkline~~ ✅
+2. ~~Port `PortfolioDetailView`~~ ✅
+3. ~~Port `MyPortfolioView`~~ ✅
+4. ~~Port `TopInfluencersView`~~ ✅
+5. ~~Port `SubscriptionsView`~~ ✅
 6. Port `AddStocksView`, `WelcomeCarouselView`, `ReferralPreviewView`, `EarnNudgeView` — full referral onboarding flow.
-7. Compose chart equivalent of `PerformanceChartView.swift` using Vico.
-8. `LegalText.swift` → assets/legal/* + `SettingsScreen` linkouts.
-9. Google Play Billing client integration on `PortfolioDetailScreen` subscribe CTA.
+7. ~~Compose chart equivalent of `PerformanceChartView.swift` using Vico~~ ✅ (PerformanceChartCard).
+8. ~~`LegalText.swift` → assets/legal/\* + `SettingsScreen` linkouts~~ ✅ (SettingsScreen opens marketing site URLs).
+9. ~~Google Play Billing client integration on `PortfolioDetailScreen` subscribe CTA~~ ✅ (this commit). **Requires Play Console setup (see above) before live charges work.**
 10. End-to-end tested:
     - Google Sign-In → token exchange → `getCurrentUser` round trip.
     - Trade-alert FCM push lands while app backgrounded.
     - App Link from `https://apestogether.ai/p/<slug>` opens `PortfolioDetailScreen`.
-    - Subscribe via Play Billing → backend validation → MobileSubscription row appears.
+    - Subscribe via Play Billing → backend validation → `MobileSubscription` row appears.
     - 14-day Google Play closed-testing window for Production track release.
 
 ## How to extend
