@@ -1,4 +1,4 @@
-# Apes Together — Android
+﻿# Apes Together — Android
 
 Native Android client. Mirrors the iOS app at `../ios/ApesTogetherApp/`.
 
@@ -32,7 +32,7 @@ android/
     ├── google-services.json  # gitignored — download from Firebase console
     └── src/main/
         ├── AndroidManifest.xml
-        ├── kotlin/ai/apestogether/
+        ├── kotlin/com/apestogether/app/
         │   ├── ApesTogetherApplication.kt   # Hilt entry, FCM channel setup
         │   ├── MainActivity.kt              # Compose host, runtime permissions
         │   ├── data/
@@ -90,7 +90,7 @@ If you don't have `gradle` on your PATH, Android Studio will offer to generate t
 ### 3. Add the Android app to Firebase
 
 1. Go to https://console.firebase.google.com → existing Apes Together project.
-2. Add app → Android. Package name: `ai.apestogether`.
+2. Add app → Android. Package name: `com.apestogether.app`.
 3. SHA-1: get yours with
    ```bash
    keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android
@@ -135,8 +135,8 @@ Android `https://apestogether.ai/p/<slug>` deep links are wired:
   - **Release / Play app-signing fingerprint:** Google Play Console → app → Setup → App signing → "App signing key certificate" SHA-256.
 - Verify with:
   ```bash
-  adb shell pm verify-app-links --re-verify ai.apestogether
-  adb shell pm get-app-links ai.apestogether
+  adb shell pm verify-app-links --re-verify com.apestogether.app
+  adb shell pm get-app-links com.apestogether.app
   ```
 
 ## Push notifications (FCM)

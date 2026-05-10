@@ -1,4 +1,4 @@
-# Keep kotlinx.serialization classes (uses reflection at runtime for @Serializable lookups).
+﻿# Keep kotlinx.serialization classes (uses reflection at runtime for @Serializable lookups).
 -keep class kotlinx.serialization.** { *; }
 -keepclasseswithmembers class * {
     @kotlinx.serialization.Serializable <fields>;
@@ -12,7 +12,7 @@
 -keep class retrofit2.** { *; }
 
 # Keep all data classes in our models package (they are decoded by kotlinx.serialization).
--keep class ai.apestogether.data.models.** { *; }
+-keep class com.apestogether.app.data.models.** { *; }
 
 # Hilt / Dagger
 -keep class dagger.hilt.** { *; }

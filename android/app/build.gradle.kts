@@ -1,4 +1,4 @@
-import java.util.Properties
+﻿import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -19,11 +19,11 @@ fun secret(key: String, default: String = ""): String =
     secrets.getProperty(key) ?: System.getenv(key) ?: default
 
 android {
-    namespace = "ai.apestogether"
+    namespace = "com.apestogether.app"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "ai.apestogether"
+        applicationId = "com.apestogether.app"
         minSdk = 26
         targetSdk = 34
         versionCode = 1
@@ -51,8 +51,13 @@ android {
     buildTypes {
         debug {
             isMinifyEnabled = false
-            applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            // No applicationIdSuffix — debug builds share the package name
+            // with release so the same Firebase entry handles both. If you
+            // ever want debug + release on the same device, add the suffix
+            // back AND register `com.apestogether.app.debug` as a separate
+            // Android app in Firebase (or use a build-type-specific
+            // google-services.json under src/debug/).
         }
         release {
             isMinifyEnabled = true
