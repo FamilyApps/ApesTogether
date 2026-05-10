@@ -490,7 +490,7 @@ private fun LeaderboardCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .padding(horizontal = 14.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -677,7 +677,7 @@ private fun ExpandedDetail(
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Divider(
             color = CardBorder.copy(alpha = 0.3f),
@@ -692,7 +692,7 @@ private fun ExpandedDetail(
                 .clip(RoundedCornerShape(10.dp))
                 .background(AppBackground.copy(alpha = 0.5f))
                 .fillMaxWidth()
-                .padding(vertical = 8.dp),
+                .padding(vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             StatCell(
@@ -723,14 +723,14 @@ private fun ExpandedDetail(
         // Sector mix
         val mix = entry.industryMix?.takeIf { it.isNotEmpty() }
         if (mix != null) {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(
                     text = "PORTFOLIO MIX",
                     color = TextMuted,
-                    fontSize = 9.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 0.6.sp,
                     modifier = Modifier.padding(horizontal = 14.dp),
+                    style = tightTextStyle(9.sp),
                 )
 
                 StackedSectorBar(
@@ -758,19 +758,19 @@ private fun ExpandedDetail(
         // Action buttons (stacked, like iOS lines 690-727)
         Column(
             modifier = Modifier
-                .padding(horizontal = 14.dp, vertical = 0.dp)
-                .padding(bottom = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(horizontal = 14.dp)
+                .padding(bottom = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             OutlinedButton(
                 onClick = onOpenPortfolio,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 40.dp),
+                    .heightIn(min = 36.dp),
                 shape = RoundedCornerShape(10.dp),
                 border = BorderStroke(1.dp, PrimaryAccent.copy(alpha = 0.4f)),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = PrimaryAccent),
-                contentPadding = PaddingValues(vertical = 10.dp),
+                contentPadding = PaddingValues(vertical = 8.dp),
             ) {
                 Icon(
                     imageVector = Icons.Default.ShowChart,
@@ -782,8 +782,8 @@ private fun ExpandedDetail(
                 Text(
                     "View Portfolio",
                     color = PrimaryAccent,
-                    fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
+                    style = tightTextStyle(13.sp),
                 )
             }
 
@@ -791,10 +791,10 @@ private fun ExpandedDetail(
                 onClick = onSubscribe,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 40.dp),
+                    .heightIn(min = 36.dp),
                 shape = RoundedCornerShape(10.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
-                contentPadding = PaddingValues(vertical = 10.dp),
+                contentPadding = PaddingValues(vertical = 8.dp),
             ) {
                 Icon(
                     imageVector = Icons.Default.WorkspacePremium,
@@ -806,8 +806,8 @@ private fun ExpandedDetail(
                 Text(
                     text = "Try Free for 7 Days, then $${entry.subscriptionPrice.toInt()}/mo",
                     color = AppBackground,
-                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
+                    style = tightTextStyle(13.sp),
                 )
             }
         }
@@ -823,10 +823,20 @@ private fun StatCell(
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(3.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Text(value, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        Text(title, color = TextMuted, fontSize = 9.sp, fontWeight = FontWeight.Medium)
+        Text(
+            value,
+            color = TextPrimary,
+            fontWeight = FontWeight.Bold,
+            style = tightTextStyle(14.sp),
+        )
+        Text(
+            title,
+            color = TextMuted,
+            fontWeight = FontWeight.Medium,
+            style = tightTextStyle(9.sp),
+        )
     }
 }
 
@@ -835,7 +845,7 @@ private fun StatDivider() {
     Box(
         modifier = Modifier
             .width(0.5.dp)
-            .height(28.dp)
+            .height(24.dp)
             .background(CardBorder.copy(alpha = 0.4f))
     )
 }
@@ -877,8 +887,18 @@ private fun SectorChip(name: String, pct: Double) {
                 .clip(CircleShape)
                 .background(sectorColor(name))
         )
-        Text(name, color = TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Medium)
-        Text("%.0f%%".format(pct), color = TextPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text(
+            name,
+            color = TextSecondary,
+            fontWeight = FontWeight.Medium,
+            style = tightTextStyle(10.sp),
+        )
+        Text(
+            "%.0f%%".format(pct),
+            color = TextPrimary,
+            fontWeight = FontWeight.Bold,
+            style = tightTextStyle(10.sp),
+        )
     }
 }
 

@@ -254,6 +254,38 @@ private fun PortfolioBody(
                         }
                     }
 
+                    // Subscribe row + plan toggle — placed ABOVE the chart on
+                    // small Android screens (e.g. Pixel 7) so the conversion
+                    // CTA is visible without scrolling. iOS has more vertical
+                    // room and can afford to keep this below the chart.
+                    if (!portfolio.isOwner && !portfolio.isSubscribed) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            CompactPlanToggle(
+                                selected = selectedPlan,
+                                onSelect = viewModel::setPlan,
+                            )
+                            SubscribeAndShareRow(
+                                slug = portfolio.owner.portfolioSlug ?: "",
+                                period = period,
+                                selectedPlan = selectedPlan,
+                                subscriptionPrice = portfolio.subscriptionPrice,
+                                subscribeState = subscribeState,
+                                onSubscribe = {
+                                    activity?.let {
+                                        viewModel.subscribe(it, portfolio.owner.id)
+                                    }
+                                },
+                            )
+                            SubscribeStatusBanner(
+                                state = subscribeState,
+                                onDismiss = viewModel::clearSubscribeState,
+                            )
+                        }
+                    }
+
                     // Chart
                     PerformanceChartCard(
                         chartData = state.chartData,
@@ -283,35 +315,6 @@ private fun PortfolioBody(
                             industryMix = mix,
                             modifier = Modifier.padding(horizontal = 16.dp),
                         )
-                    }
-
-                    // Action buttons
-                    if (!portfolio.isOwner && !portfolio.isSubscribed) {
-                        Column(
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            CompactPlanToggle(
-                                selected = selectedPlan,
-                                onSelect = viewModel::setPlan,
-                            )
-                            SubscribeAndShareRow(
-                                slug = portfolio.owner.portfolioSlug ?: "",
-                                period = period,
-                                selectedPlan = selectedPlan,
-                                subscriptionPrice = portfolio.subscriptionPrice,
-                                subscribeState = subscribeState,
-                                onSubscribe = {
-                                    activity?.let {
-                                        viewModel.subscribe(it, portfolio.owner.id)
-                                    }
-                                },
-                            )
-                            SubscribeStatusBanner(
-                                state = subscribeState,
-                                onDismiss = viewModel::clearSubscribeState,
-                            )
-                        }
                     }
 
                     if (portfolio.isOwner) {
