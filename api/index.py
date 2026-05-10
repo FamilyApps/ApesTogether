@@ -2312,6 +2312,16 @@ def admin_audit_snapshot_cash_drift():
             return ts_naive.date()
         return ts_naive.date() + _td(days=1)
 
+    # Tolerance buffer: trades in [20:04:00, 20:06:00) UTC (±60s of cron firing)
+    # are inherently ambiguous — Vercel cron jitter means the trade may or may
+    # not have been captured by the EOD cron. For snapshot D, sum up |trade_value|
+    # of ambiguous trades whose timestamp falls on date D, and add that to the
+    # drift threshold before flagging. This eliminates timing-edge false positives
+    # like marblethehill72 4/28 PLTR (16:05 ET = 20:05 UTC) and apex1575 5/7 ZTS
+    # (20:04:27 UTC).
+    _amb_start = _dt_time(20, 4)
+    _amb_end = _dt_time(20, 6)
+
     q = User.query.order_by(User.id.asc())
     if role_filter:
         q = q.filter(User.role == role_filter)
@@ -2336,6 +2346,17 @@ def admin_audit_snapshot_cash_drift():
         ).all()
         if not snaps or not txns:
             continue
+
+        # Pre-compute per-date ambiguous-trade tolerance for this user
+        amb_tol_by_date = {}
+        for txn in txns:
+            if txn.timestamp is None:
+                continue
+            ts_n = txn.timestamp.replace(tzinfo=None) if txn.timestamp.tzinfo else txn.timestamp
+            if _amb_start <= ts_n.time() < _amb_end:
+                v = abs(float((txn.quantity or 0) * (txn.price or 0)))
+                d = ts_n.date()
+                amb_tol_by_date[d] = amb_tol_by_date.get(d, 0.0) + v
 
         # Replay transactions chronologically using the 20:05 UTC effective-date
         # cutoff so the audit's "expected" matches what the EOD cron actually wrote
@@ -2369,7 +2390,11 @@ def admin_audit_snapshot_cash_drift():
 
             total_snapshots_checked += 1
 
-            if abs(cash_drift) >= threshold:
+            # Apply ambiguous-trade tolerance for this snapshot's date
+            amb_tol = amb_tol_by_date.get(snap.date, 0.0)
+            effective_threshold = threshold + amb_tol
+
+            if abs(cash_drift) >= effective_threshold:
                 total_bad_snapshots += 1
                 user_bad.append({
                     'date': snap.date.isoformat(),
@@ -2381,6 +2406,7 @@ def admin_audit_snapshot_cash_drift():
                     'expected_total_value': round(
                         float(snap.stock_value or 0) + expected_cash, 2
                     ),
+                    'ambiguous_tolerance': round(amb_tol, 2) if amb_tol > 0 else None,
                 })
 
                 if apply_fix:
@@ -2461,6 +2487,10 @@ def admin_audit_snapshot_max_cash_drift():
             return ts_naive.date()
         return ts_naive.date() + _td(days=1)
 
+    # Tolerance buffer for ambiguous trades within ±60s of cron firing
+    _amb_start = _dt_time(20, 4)
+    _amb_end = _dt_time(20, 6)
+
     try:
         threshold = float(request.args.get('threshold', '1.00'))
     except (TypeError, ValueError):
@@ -2493,6 +2523,17 @@ def admin_audit_snapshot_max_cash_drift():
         ).all()
         if not snaps or not txns:
             continue
+
+        # Pre-compute per-date ambiguous-trade tolerance for this user
+        amb_tol_by_date = {}
+        for txn in txns:
+            if txn.timestamp is None:
+                continue
+            ts_n = txn.timestamp.replace(tzinfo=None) if txn.timestamp.tzinfo else txn.timestamp
+            if _amb_start <= ts_n.time() < _amb_end:
+                v = abs(float((txn.quantity or 0) * (txn.price or 0)))
+                d = ts_n.date()
+                amb_tol_by_date[d] = amb_tol_by_date.get(d, 0.0) + v
 
         # Determine seeded_baseline: gap between first snapshot max_cash and
         # what txns through first_snap.date can explain (using 20:05 UTC cutoff
@@ -2545,7 +2586,11 @@ def admin_audit_snapshot_max_cash_drift():
 
             total_snapshots_checked += 1
 
-            if abs(max_drift) >= threshold:
+            # Apply ambiguous-trade tolerance for this snapshot's date
+            amb_tol = amb_tol_by_date.get(snap.date, 0.0)
+            effective_threshold = threshold + amb_tol
+
+            if abs(max_drift) >= effective_threshold:
                 total_bad_snapshots += 1
                 user_bad.append({
                     'date': snap.date.isoformat(),
@@ -2553,6 +2598,7 @@ def admin_audit_snapshot_max_cash_drift():
                     'expected_max_cash_deployed': expected_max,
                     'drift': max_drift,
                     'seeded_baseline': seeded_baseline,
+                    'ambiguous_tolerance': round(amb_tol, 2) if amb_tol > 0 else None,
                 })
 
                 if apply_fix:
@@ -2632,6 +2678,13 @@ def cron_snapshot_audit():
             return ts_naive.date()
         return ts_naive.date() + _td(days=1)
 
+    # Tolerance buffer for ambiguous trades within ±60s of cron firing.
+    # Eliminates false positives like marblethehill72 4/28 PLTR (16:05 ET = 20:05 UTC)
+    # and apex1575 5/7 ZTS (20:04:27 UTC) where Vercel cron jitter determined
+    # whether the trade was captured by the EOD cron.
+    _amb_start = _dt_time(20, 4)
+    _amb_end = _dt_time(20, 6)
+
     cash_threshold = 1.00  # $1.00 — coarser than admin endpoint to avoid noise
     max_cash_threshold = 1.00
 
@@ -2650,6 +2703,17 @@ def cron_snapshot_audit():
         ).all()
         if not snaps or not txns:
             continue
+
+        # Pre-compute per-date ambiguous-trade tolerance for this user
+        amb_tol_by_date = {}
+        for txn in txns:
+            if txn.timestamp is None:
+                continue
+            ts_n = txn.timestamp.replace(tzinfo=None) if txn.timestamp.tzinfo else txn.timestamp
+            if _amb_start <= ts_n.time() < _amb_end:
+                v = abs(float((txn.quantity or 0) * (txn.price or 0)))
+                d = ts_n.date()
+                amb_tol_by_date[d] = amb_tol_by_date.get(d, 0.0) + v
 
         # Compute seeded_baseline from first snapshot
         first_snap = snaps[0]
@@ -2702,7 +2766,13 @@ def cron_snapshot_audit():
             max_drift = round(expected_max - actual_max, 2)
 
             total_snapshots_checked += 1
-            if abs(cash_drift) >= cash_threshold or abs(max_drift) >= max_cash_threshold:
+
+            # Apply ambiguous-trade tolerance for this snapshot's date
+            amb_tol = amb_tol_by_date.get(snap.date, 0.0)
+            cash_eff_threshold = cash_threshold + amb_tol
+            max_eff_threshold = max_cash_threshold + amb_tol
+
+            if abs(cash_drift) >= cash_eff_threshold or abs(max_drift) >= max_eff_threshold:
                 total_bad_snapshots += 1
                 user_bad.append({
                     'date': snap.date.isoformat(),
@@ -2712,6 +2782,7 @@ def cron_snapshot_audit():
                     'actual_max': actual_max,
                     'expected_max': expected_max,
                     'max_drift': max_drift,
+                    'ambiguous_tolerance': round(amb_tol, 2) if amb_tol > 0 else None,
                 })
 
         if user_bad:
