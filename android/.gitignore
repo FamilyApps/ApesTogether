@@ -3,6 +3,9 @@
 build/
 local.properties
 
+# Kotlin compiler session caches (Android Studio Panda)
+.kotlin/
+
 # Secrets (Google client IDs, signing config, etc.)
 secrets.properties
 keystore.properties
