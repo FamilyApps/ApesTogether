@@ -983,15 +983,37 @@ def register_cash_tracking_routes(app, db):
         _UTC_TZ = ZoneInfo('UTC')
 
         def _snapshot_effective_date(ts):
-            """Trades < 16:00 ET on D -> D.   Trades >= 16:00 ET on D -> D+1."""
+            """
+            For EOD daily snapshots: a transaction on date D applies to D's
+            snapshot, regardless of intraday timing.
+
+            Rationale: this matches the EOD market-close cron's behavior, which
+            uses `func.date(Transaction.timestamp) <= target_date` (no 16:00 ET
+            cutoff) AND uses live `Stock` holdings for stock_value. Both stock
+            and cash therefore reflect "all trades on date D applied" =
+            Option B semantics.
+
+            The previous implementation (16:00 ET cutoff -> trades >= 16:00 ET
+            roll into next day) was Option A and produced DAILY snapshots whose
+            cash_proceeds disagreed with stock_value (which always reflected
+            live post-trade Stock state). That mismatch manifested as phantom
+            chart drops on after-close trade days followed by recoveries the
+            next day.
+
+            Intraday snapshots use TIMESTAMP-granular replay further below
+            (txn_timeline + snap_ts comparison) — that is correct as-is and is
+            unaffected by this change.
+
+            We use ET date (not UTC) so that any midnight-edge trades land on
+            the right business day, but for trades during US business hours
+            (the only time bots run) UTC date and ET date are identical.
+            """
             if ts is None:
                 return None
             if ts.tzinfo is None:
                 ts_et = ts.replace(tzinfo=_UTC_TZ).astimezone(_MARKET_TZ)
             else:
                 ts_et = ts.astimezone(_MARKET_TZ)
-            if ts_et.time() >= _dt_time(16, 0):
-                return ts_et.date() + _td(days=1)
             return ts_et.date()
 
         # 1. Compute current cost basis from holdings
@@ -1243,7 +1265,13 @@ def register_cash_tracking_routes(app, db):
           /admin/cash-tracking/full-rebuild?all=true&after=foo&execute=true (resume after user 'foo')
 
         Behavior:
-          - Replays all transactions chronologically with 16:00 ET cutoff
+          - Replays all transactions chronologically
+          - Daily snapshots: trades on date D apply to D's snapshot
+            (Option B — matches EOD market-close cron's `func.date(timestamp)
+            <= target_date` filter and the live-Stock-holdings basis for
+            stock_value, so both fields are consistent post-trade state)
+          - Intraday snapshots: timestamp-granular replay (a snapshot at T
+            includes only transactions whose timestamp <= T)
           - Detects seeded baseline (preserved or cost_basis-derived)
           - Updates user.max_cash_deployed and user.cash_proceeds
           - Updates ALL daily AND intraday snapshots to match

@@ -1,5 +1,35 @@
 # Architecture Changelog
 
+## May 9, 2026 (evening) — Phantom Chart-Drop Bug: Snapshot Timing Inconsistency
+
+### Symptom
+Bot accounts (panther2585, fund.finance2024, apex1575, panther3765, marblethehill72, etc.) showed phantom drops on the daily portfolio chart on days where bot trades happened near or after market close (~16:00–16:09 ET), followed by a recovery the next day. Visible as 7%–12% one-day swings followed by inverse moves.
+
+### Root cause
+Two pieces of the snapshot pipeline disagreed on **which day's EOD snapshot an after-close trade should belong to**:
+
+1. **EOD market-close cron** (`api/index.py:5277` → `cash_tracking.calculate_portfolio_value_with_cash`): for `today_et`, computes `stock_value` from **live `Stock` table** (post-trade state) and `cash_proceeds` via `func.date(Transaction.timestamp) <= today_et` (no time-of-day cutoff). Both reflect "all trades of date D applied" = **Option B**.
+
+2. **`/admin/cash-tracking/full-rebuild`** (`admin_cash_tracking.py:_snapshot_effective_date`): used a 16:00 ET cutoff — trades at or after 16:00 ET on date D rolled into D+1's snapshot. **Option A.**
+
+Whenever full-rebuild ran (we run it routinely to fix earlier corruption / drift), it overwrote `cash_proceeds` on every daily snapshot with Option A semantics while leaving `stock_value` (Option B, written by the EOD cron) untouched. The result: snapshots whose `cash_proceeds` and `stock_value` reflected different points in time, producing a $X drop on the trade day and a $X recovery the next day on the chart.
+
+### Diagnostic added
+- `GET /admin/audit-snapshot-cash-drift` — walks every PortfolioSnapshot for every user and compares `cash_proceeds` to a chronological transaction replay (Option B). Flags drift; supports `?fix=true` to repair in place.
+- `GET /admin/audit-snapshot-max-cash-drift` — same idea for `max_cash_deployed`.
+
+⚠️ **Audit caveat**: the audit's Option B replay can't distinguish (a) real bugs (stock rebuilt with after-close trades, cash not refreshed) from (b) snapshots that correctly reflect pre-after-close state on **both** sides (after-close BUY trades with both cash and stock excluded, smoothly picked up the next day). For (b), drift is reported but the snapshot is internally consistent and should NOT be "fixed". Triage manually by checking the next day's snapshot for smooth pickup.
+
+### Fix
+`admin_cash_tracking.py:_snapshot_effective_date` now returns `ts.date()` (ET, no 16:00 cutoff). Daily snapshots written by full-rebuild now match the EOD cron's Option B semantics. Intraday snapshot logic (timestamp-granular replay via `txn_timeline`) is unchanged — that's correct as-is.
+
+### Lessons
+1. **Pick one snapshot-timing semantic and stick with it across every writer.** When two code paths write the same column with different rules, they corrupt each other every time both run.
+2. **The EOD market-close cron's "live `Stock` + replay-cash-by-date" pattern is the source of truth.** Anything that rebuilds historical snapshots must follow the same rule.
+3. **A drift detector that only checks `User.cash_proceeds` is insufficient.** It missed all of these snapshots because the User-level state was correct — it was only historical PortfolioSnapshot rows that were stale. The new audit endpoints close that gap.
+
+---
+
 ## May 9, 2026 — Display Name Field + Schema-Migration Lessons
 
 ### Summary
