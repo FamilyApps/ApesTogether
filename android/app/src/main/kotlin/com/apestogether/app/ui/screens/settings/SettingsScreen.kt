@@ -28,9 +28,9 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.Help
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Public
@@ -64,7 +64,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -220,7 +219,7 @@ fun SettingsScreen(
             // ── Help & Legal ──
             SettingsSection(title = "Help & Legal") {
                 NavRow(
-                    icon = Icons.Default.Help,
+                    icon = Icons.AutoMirrored.Filled.Help,
                     label = "FAQ",
                     onClick = { openUrl(context, "https://apestogether.ai/faq") },
                 )
@@ -490,12 +489,12 @@ private fun SignOutButton(onClick: () -> Unit) {
 
 private fun openUrl(context: Context, url: String) {
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-    runCatching { ContextCompat.startActivity(context, intent, null) }
+    runCatching { context.startActivity(intent) }
 }
 
 private fun openMailTo(context: Context, address: String) {
     val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:$address"))
-    runCatching { ContextCompat.startActivity(context, intent, null) }
+    runCatching { context.startActivity(intent) }
 }
 
 // ─────────────────────────────────────────────────────────────────────────

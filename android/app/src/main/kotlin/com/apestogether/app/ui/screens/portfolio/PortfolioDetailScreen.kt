@@ -24,12 +24,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.CallMade
+import androidx.compose.material.icons.automirrored.filled.CallReceived
+import androidx.compose.material.icons.automirrored.filled.ShowChart
 import androidx.compose.material.icons.filled.AddCircle
-import androidx.compose.material.icons.filled.CallMade
-import androidx.compose.material.icons.filled.CallReceived
 import androidx.compose.material.icons.filled.RemoveCircle
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -56,7 +56,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -697,10 +696,8 @@ private fun SubscribeAndShareRow(
                     type = "text/plain"
                     putExtra(Intent.EXTRA_TEXT, "Check out this portfolio on Apes Together!\n$url")
                 }
-                ContextCompat.startActivity(
-                    context,
+                context.startActivity(
                     Intent.createChooser(intent, "Share portfolio"),
-                    null,
                 )
             },
             modifier = Modifier.height(48.dp),
@@ -857,10 +854,8 @@ private fun ShareIconButton(slug: String, period: String) {
                 type = "text/plain"
                 putExtra(Intent.EXTRA_TEXT, "Check out this portfolio on Apes Together!\n$url")
             }
-            ContextCompat.startActivity(
-                context,
+            context.startActivity(
                 Intent.createChooser(intent, "Share portfolio"),
-                null,
             )
         }
     ) {
@@ -1058,7 +1053,7 @@ private fun TradeRow(trade: Trade) {
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                imageVector = if (isBuy) Icons.Default.CallReceived else Icons.Default.CallMade,
+                imageVector = if (isBuy) Icons.AutoMirrored.Filled.CallReceived else Icons.AutoMirrored.Filled.CallMade,
                 contentDescription = null,
                 tint = accent,
                 modifier = Modifier.size(14.dp),
@@ -1148,7 +1143,7 @@ private fun OwnerEmptyState(modifier: Modifier = Modifier) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Icon(Icons.Default.ShowChart, null, tint = PrimaryAccent.copy(alpha = 0.6f), modifier = Modifier.size(48.dp))
+        Icon(Icons.AutoMirrored.Filled.ShowChart, null, tint = PrimaryAccent.copy(alpha = 0.6f), modifier = Modifier.size(48.dp))
         Text("No Holdings Yet", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Text(
             text = "Add your first stocks to start tracking performance",

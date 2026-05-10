@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.FilterList
@@ -40,8 +41,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.SwapHoriz
-import androidx.compose.material.icons.filled.TrendingDown
-import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -63,7 +62,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -155,8 +157,8 @@ fun LeaderboardScreen(
                     EmptyPlaceholder(onRefresh = { viewModel.refresh() })
                 } else {
                     LazyColumn(
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         items(s.entries, key = { it.user.id }) { entry ->
                             val isExpanded =
@@ -434,6 +436,24 @@ private fun EmptyPlaceholder(onRefresh: () -> Unit) {
 // Card (mirrors iOS LeaderboardCard 471-756)
 // ─────────────────────────────────────────────────────────────────────────
 
+/**
+ * Compose's default [Text] adds significant vertical font padding
+ * (`includeFontPadding = true`) and uses Material3's `bodyLarge` line
+ * height (24sp) even when fontSize is overridden — together that's
+ * roughly +12dp per Text relative to SwiftUI. For dense list rows we
+ * disable both so 14sp text only occupies ~14dp instead of ~24dp,
+ * letting us match the iOS row count (~9 visible vs ~7.5 before).
+ */
+private fun tightTextStyle(fontSize: androidx.compose.ui.unit.TextUnit): TextStyle = TextStyle(
+    fontSize = fontSize,
+    lineHeight = fontSize,
+    platformStyle = PlatformTextStyle(includeFontPadding = false),
+    lineHeightStyle = LineHeightStyle(
+        alignment = LineHeightStyle.Alignment.Center,
+        trim = LineHeightStyle.Trim.Both,
+    ),
+)
+
 @Composable
 private fun LeaderboardCard(
     entry: LeaderboardEntry,
@@ -470,7 +490,7 @@ private fun LeaderboardCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+                .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -478,15 +498,15 @@ private fun LeaderboardCard(
 
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 Text(
                     text = entry.user.publicName,
                     color = TextPrimary,
-                    fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    style = tightTextStyle(14.sp),
                 )
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -522,18 +542,19 @@ private fun LeaderboardCard(
             Column(
                 horizontalAlignment = Alignment.End,
                 modifier = Modifier.widthIn(min = 56.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 Text(
                     text = formatPercent(alpha, decimals = 1),
                     color = if (alpha >= 0) Gains else Losses,
-                    fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
+                    style = tightTextStyle(15.sp),
                 )
                 Text(
                     text = "vs S&P",
                     color = TextMuted,
-                    fontSize = 8.sp,
                     fontWeight = FontWeight.Medium,
+                    style = tightTextStyle(8.sp),
                 )
             }
 
@@ -601,23 +622,24 @@ private fun RankBadge(rank: Int, rankChange: Int?) {
                 Text(
                     text = "—",
                     color = TextMuted.copy(alpha = 0.5f),
-                    fontSize = 10.sp,
                     fontWeight = FontWeight.Medium,
+                    style = tightTextStyle(10.sp),
                 )
             }
 
             rankChange > 0 -> Icon(
-                imageVector = Icons.Default.TrendingUp,
+                // Filled solid triangle, matches iOS `arrowtriangle.up.fill`.
+                imageVector = Icons.Default.ArrowDropUp,
                 contentDescription = null,
                 tint = Gains,
-                modifier = Modifier.size(10.dp),
+                modifier = Modifier.size(14.dp),
             )
 
             else -> Icon(
-                imageVector = Icons.Default.TrendingDown,
+                imageVector = Icons.Default.ArrowDropDown,
                 contentDescription = null,
                 tint = Losses,
-                modifier = Modifier.size(10.dp),
+                modifier = Modifier.size(14.dp),
             )
         }
     }
@@ -641,8 +663,8 @@ private fun SubBadge(
         Text(
             text = text,
             color = TextMuted,
-            fontSize = 10.sp,
             fontWeight = FontWeight.Medium,
+            style = tightTextStyle(10.sp),
         )
     }
 }
