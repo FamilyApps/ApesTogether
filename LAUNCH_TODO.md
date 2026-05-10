@@ -59,23 +59,47 @@ Things to verify when the market is open and the bot pipeline is running. Hit ea
 
 **DECISION (May 10, 2026): Native Android in Kotlin / Jetpack Compose.** Wait for Android before public launch. No launch date set until Android is "fairly bug-free." Target: 1–2 weeks of focused Android work, then beta + parity verification, then begin marketing outreach in earnest.
 
-- [ ] Google Play Console account set up (Family Apps LLC)
-- [ ] Android app scaffolded (Kotlin / Jetpack Compose)
-- [ ] Networking layer ports (mirror of `ApesTogetherApp/Services/APIService.swift` — base URL, auth header, snake_case JSON decoder, retry policy)
-- [ ] Auth: email/password + Google OAuth (matching iOS)
-- [ ] Core screens parity with iOS:
-  - [ ] Leaderboard (LeaderboardView)
-  - [ ] Portfolio detail (PortfolioView)
-  - [ ] Subscriptions tab
-  - [ ] Profile / Settings
-  - [ ] Sign-in / Sign-up
-- [ ] Charts: Compose-friendly chart library (e.g. Vico) replacing the Swift Charts code in `PerformanceChartView.swift`
-- [ ] Google Play Billing integration (client + backend receipt validation — backend endpoint will need a `/api/mobile/iap/google-validate` mirror of the existing iOS one)
-- [ ] Firebase Cloud Messaging (FCM) integration (backend can already send to FCM tokens via `push_notification_service.py`; Android client must register its FCM token via `/api/mobile/devices/register`)
-- [ ] `/public/.well-known/assetlinks.json` for App Links deep linking (mirror of existing `apple-app-site-association`)
-- [ ] Display name + public_name decoder parity (Codable/Moshi/kotlinx.serialization equivalents)
-- [ ] 14-day Google Play closed testing window — must complete before public launch
-- [ ] Google Play store listing (copy already drafted in `docs/ASO_STRATEGY.md`)
+### Foundation (completed May 10, session 3 — see commit + `android/README.md`)
+
+- [x] Android project scaffolded under `/android/` (Kotlin 2.0 / Compose / Hilt / Retrofit / kotlinx.serialization / DataStore + EncryptedSharedPreferences / Vico / Firebase / Play Billing). Min SDK 26, Target SDK 34.
+- [x] Networking layer (`ApiService.kt`, `AuthInterceptor.kt`, `ApiModule.kt`) — mirrors iOS `APIService.swift` 1:1. All read endpoints + auth + device registration + IAP validate + notification settings + trade execution + add stocks + tax status.
+- [x] Models (`data/models/Models.kt`) — full port of iOS `Models.swift` with `display_name` → `displayName` + `publicName` extension property. snake_case fields handled via `@SerialName`.
+- [x] Auth layer: `TokenStore` (encrypted) + `AuthRepository` with Google Sign-In via Credential Manager API (modern replacement for deprecated GoogleSignIn lib).
+- [x] FCM push: `ApesFirebaseMessagingService` listens for trade-alert payloads, registers FCM tokens via `/device/register?platform=android`. Uses the same backend `push_notification_service.notify_subscribers_of_trade` already serving iOS.
+- [x] App Links: AndroidManifest declares `https://apestogether.ai/p/<slug>` intent filter with `autoVerify=true`. `/public/.well-known/assetlinks.json` added with placeholder SHA-256 fingerprints. `vercel.json` updated to serve it as `application/json`.
+- [x] Theme/Color/Type: 1:1 port of iOS `Theme.swift` palette (PrimaryAccent #00D9A5, AppBackground #0A0F0D, Gains #22C55E, Losses #EF4444).
+- [x] Navigation: Compose Navigation graph with Login → MainTabs (4 tabs) + PortfolioDetail + Settings.
+- [x] Stub screens for all 4 tabs + PortfolioDetail + Settings (Login + Leaderboard + Settings have real impls; the rest are placeholders that compile and route correctly).
+- [x] Backend `/purchase/validate` already accepts `platform: "google"` + `purchase_token` and `iap_validation_service.py` already validates against Google Play Developer API. **No backend code changes required for Android billing**, only env var setup (see Section H).
+
+### USER ACTIONS — required before the Android app builds locally
+
+- [ ] **Google Play Console** account ($25 one-time, registered as Family Apps LLC). Create the app listing with package `ai.apestogether`.
+- [ ] **Firebase project**: add Android app `ai.apestogether` to the existing iOS Firebase project. Download `google-services.json` and place at `android/app/google-services.json` (gitignored).
+- [ ] **Google Cloud OAuth**: create a "Web application" OAuth Client ID. Copy into `android/secrets.properties` as `GOOGLE_WEB_CLIENT_ID`. Also create an "Android" OAuth Client ID with package + SHA-1 of debug + release keys.
+- [ ] **Generate Gradle wrapper**: from `/android/`, run `gradle wrapper --gradle-version 8.10` (or accept Android Studio's auto-prompt on first sync).
+- [ ] **Replace assetlinks.json placeholders**: `public/.well-known/assetlinks.json` has `REPLACE_WITH_RELEASE_SIGNING_CERT_SHA256` + `REPLACE_WITH_PLAY_APP_SIGNING_CERT_SHA256`. Get the debug fingerprint via `keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android` and the release fingerprint from Play Console once available.
+
+### Screens still to port from iOS
+
+- [ ] LeaderboardView filter pills (period/category/industry/frequency) + sparklines — current Android stub only loads default 1W
+- [ ] TopInfluencersView (`ios/.../TopInfluencersView.swift`, ~16KB)
+- [ ] MyPortfolioView (`ios/.../MyPortfolioView.swift`, ~9KB)
+- [ ] SubscriptionsView (`ios/.../SubscriptionsView.swift`, ~18KB)
+- [ ] PortfolioDetailView (`ios/.../PortfolioDetailView.swift`, ~47KB — largest iOS view)
+- [ ] PerformanceChartView equivalent using Vico (`ios/.../PerformanceChartView.swift`, ~13KB)
+- [ ] Google Play Billing client integration on PortfolioDetailScreen subscribe CTA (BillingClient connect + querySkuDetails + launchBillingFlow + acknowledgePurchase + POST to `/purchase/validate`)
+- [ ] WelcomeCarouselView, ReferralPreviewView, EarnNudgeView, AddStocksView — full referral onboarding flow
+- [ ] LegalText.swift content → assets/legal/ + SettingsScreen linkouts
+- [ ] FeaturePollView, TradeSheetView, W9FormView, PortfolioShareCardView (lower priority, not strictly needed for v1)
+
+### Pre-launch testing
+
+- [ ] Google Sign-In → token exchange → `/auth/user` round trip on a real device
+- [ ] Trade-alert FCM push delivers while app backgrounded
+- [ ] App Link from `https://apestogether.ai/p/<slug>` opens PortfolioDetailScreen (verified with `adb shell pm verify-app-links --re-verify ai.apestogether`)
+- [ ] Subscribe via Play Billing → backend validation → MobileSubscription row appears
+- [ ] 14-day Google Play closed-testing window for Production track release
 
 ## D. Legal / Compliance
 
@@ -127,6 +151,7 @@ This section only tracks **deferred / dropped items**:
 - [ ] Bot trade decisions cross-checked against AV sentiment data (sanity: do momentum bots actually trade differently on news-positive vs news-negative days?)
 - [ ] Xero sync — confirm daily subscription revenue and 70% payout sync still running cleanly
 - [ ] Xero — ghost subscriber tracking matches expected month-end payouts
+- [ ] Vercel env: `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` for Google Play purchase validation (read by `iap_validation_service.py`). Generate a service account in Google Cloud Console with Play Developer API access, paste the JSON key contents.
 
 ---
 
@@ -148,12 +173,14 @@ At the end of each session, the assistant should:
 
 ## Last updated
 
-**2026-05-10 (midday) — session 3 ended with:**
+**2026-05-10 (afternoon) — session 3 ended with:**
 - Audit tolerance buffer shipped (commit `34a01dc`) — Vercel cron jitter ±60s false positives no longer flagged.
 - Display name values set in DB for `marblethehill72` and `CoastHillBear`. iOS Build 32 archived, names confirmed rendering.
 - Copytrade-bot email-trade endpoint now fans out push + email to subscribers (commit `8ce748c`). Trade notifications switched from raw username to `public_name`.
-- Pending: verify push delivery on next real Public.com trade email; verify bobford00 has a `device_token` row.
-- Reviewed Section G launch-calendar reality: at Day 27 of 49, Phase 1 social-media foundation is unstarted. June 1 launch is officially deferred (LAUNCH_TODO line 4); see launch-playbook walkthrough below for re-sequenced priorities.
+- Pending: verify push delivery on next real Public.com trade email. Confirmed: bobford00 has 1 active `device_token` (token_id=2, ios, created Feb 27).
+- ADMIN_NOTIFY_EMAIL falls back to ADMIN_EMAIL (commit `ad799d8`) — eliminates need for duplicate Vercel env var.
+- **Native Android scaffold complete**: full project under `/android/` (Kotlin 2.0 / Compose / Hilt / Retrofit / Vico / Firebase / Play Billing). Auth, networking, FCM, deep-link config, Theme, Navigation graph, and 7 screens (3 real + 4 stubs) all in. iOS-equivalent feature surface enumerated in Section C "Screens still to port from iOS". `assetlinks.json` added; `vercel.json` serves it as application/json.
+- Reviewed Section G launch-calendar reality: at Day 27 of 49, Phase 1 social-media foundation is unstarted. June 1 launch is officially deferred; new sequencing is iOS finalize → Android port → beta → set launch date → run playbook content.
 
 **2026-05-09 (afternoon) — session 2 ended with:**
 - Drift indicator card live, drift check returned "Clean" (13 users scanned, $1.00 threshold)

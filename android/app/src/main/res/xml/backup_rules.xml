@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Auth tokens and other secrets MUST NOT be backed up. EncryptedSharedPreferences
+         lives under shared_prefs/secure_prefs.xml; we exclude it explicitly. -->
+    <exclude domain="sharedpref" path="secure_prefs.xml"/>
+</full-backup-content>

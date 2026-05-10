@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Status-bar notification icon. Must be a simple white-on-transparent vector;
+     Android tints it with `notification_accent` for color devices and uses
+     pure white on monochrome status bars. Replace with the real Apes Together
+     mark once the asset is ready (PNG mipmap variants are NOT used here). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,2L3,7v10l9,5l9,-5V7L12,2zM12,4.18L18.5,7.7L12,11.21L5.5,7.7L12,4.18zM5,9.5l6,3.32V19.93L5,16.61V9.5zM13,19.93V12.82l6,-3.32v7.11L13,19.93z"/>
+</vector>

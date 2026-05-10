@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Mirrors PrimaryAccent in Theme.kt — used for FCM notification accent
+         tint via meta-data in AndroidManifest.xml. -->
+    <color name="notification_accent">#FF00D9A5</color>
+    <color name="app_background">#FF0A0F0D</color>
+</resources>

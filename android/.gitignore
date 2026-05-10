@@ -1,0 +1,23 @@
+# Gradle
+.gradle/
+build/
+local.properties
+
+# Secrets (Google client IDs, signing config, etc.)
+secrets.properties
+keystore.properties
+*.keystore
+*.jks
+
+# Firebase config (committed only AFTER adding the Android app to Firebase project)
+app/google-services.json
+
+# IDE
+.idea/
+*.iml
+captures/
+.cxx/
+
+# OS
+.DS_Store
+Thumbs.db
