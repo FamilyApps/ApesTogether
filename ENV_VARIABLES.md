@@ -77,6 +77,46 @@ GOOGLE_PLAY_PACKAGE_NAME=com.apestogether.app
 JWT_SECRET=...  # Or falls back to SECRET_KEY
 ```
 
+### OAuth ID Token Verification (Pre-launch security blocker — Section A of LAUNCH_TODO.md)
+
+The mobile `/auth/token` endpoint must verify Google/Apple ID token signatures
+against the upstream JWKS before trusting the `sub` claim. Without this, any
+actor with any valid Google or Apple ID token can authenticate as any user by
+forging the `sub`. The fix is in `mobile_api.py` and is gated behind a feature
+flag for safe rollout.
+
+```bash
+# Master switch — set to "enforce" (or true/1/on/yes) to activate strict
+# verification. While unset/empty/false, the legacy decode-without-verification
+# path is used (insecure; logs CRITICAL on every request).
+STRICT_OAUTH_VERIFICATION=enforce
+
+# Google ID token audiences (the `aud` claim is matched against this whitelist).
+# iOS tokens have aud = iOS OAuth Client ID (CLIENT_ID in GoogleService-Info.plist).
+GOOGLE_IOS_CLIENT_ID=<value-of-CLIENT_ID-key-in-iOS-GoogleService-Info.plist>
+
+# Android tokens have aud = Web OAuth Client ID (the serverClientId passed to
+# Credential Manager's GetGoogleIdOption builder). Same as GOOGLE_WEB_CLIENT_ID
+# in android/secrets.properties — the "ApesTogether Web Client" you created
+# in Google Cloud Console.
+GOOGLE_ANDROID_CLIENT_ID=<same-as-GOOGLE_WEB_CLIENT_ID-in-android/secrets.properties>
+
+# Apple Sign In audience — already exists for IAP; reused here.
+APPLE_BUNDLE_ID=com.apestogether.ApesTogether
+```
+
+**Rollout playbook**:
+1. Deploy the code with `STRICT_OAUTH_VERIFICATION` unset → no behavior change.
+2. Add `GOOGLE_IOS_CLIENT_ID`, `GOOGLE_ANDROID_CLIENT_ID`, `APPLE_BUNDLE_ID` to
+   Vercel project env (Production + Preview).
+3. Set `STRICT_OAUTH_VERIFICATION=enforce` on Vercel and redeploy.
+4. Smoke test: sign in with Google on a real iOS device, then on Android. Sign
+   in with Apple on iOS. Verify `/api/mobile/auth/user` round-trip works after
+   each. If anything fails, set `STRICT_OAUTH_VERIFICATION=` (empty) and
+   redeploy to revert without a code rollback.
+5. Once verified, delete the legacy path from `mobile_api.py` in a follow-up
+   commit.
+
 ---
 
 ## 🔲 Need to Add (Week 2-3)

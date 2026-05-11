@@ -1531,11 +1531,171 @@ def update_username():
 # Authentication Endpoints
 # =============================================================================
 
+# ---------------------------------------------------------------------------
+# OAuth ID token signature verification (Google / Apple)
+#
+# Pre-launch security blocker (LAUNCH_TODO.md:41): the original /auth/token
+# below decoded ID tokens with `verify_signature=False`, which means any
+# actor in possession of any valid Google or Apple ID token could
+# authenticate as any user simply by forging a `sub` claim. The helpers
+# below verify signatures against the upstream JWKS, validate issuer,
+# expiration, and audience, and reject anything that doesn't match.
+#
+# Rollout safety: gated behind STRICT_OAUTH_VERIFICATION env var so we can
+# deploy this code without breaking iOS/Android users mid-rollout. When the
+# flag is unset (the default), the legacy unsafe path is used and a CRITICAL
+# warning is logged on every auth request so the gap is visible in Vercel
+# logs. Once the required client-ID env vars are configured on Vercel
+# (GOOGLE_IOS_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, APPLE_BUNDLE_ID), flip
+# STRICT_OAUTH_VERIFICATION=enforce to activate strict verification. A
+# follow-up commit should remove the legacy path entirely once verified.
+# ---------------------------------------------------------------------------
+
+GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs"
+GOOGLE_ALLOWED_ISSUERS = {"https://accounts.google.com", "accounts.google.com"}
+APPLE_JWKS_URL = "https://appleid.apple.com/auth/keys"
+APPLE_ISSUER = "https://appleid.apple.com"
+
+# Module-level JWKS clients, lazy-initialized. PyJWKClient caches keys
+# internally so we don't refetch JWKS on every request.
+_google_jwk_client = None
+_apple_jwk_client = None
+
+
+def _get_google_jwk_client():
+    """Lazy singleton for Google's JWKS client."""
+    global _google_jwk_client
+    if _google_jwk_client is None:
+        from jwt import PyJWKClient
+        _google_jwk_client = PyJWKClient(GOOGLE_JWKS_URL, cache_keys=True, max_cached_keys=16)
+    return _google_jwk_client
+
+
+def _get_apple_jwk_client():
+    """Lazy singleton for Apple's JWKS client."""
+    global _apple_jwk_client
+    if _apple_jwk_client is None:
+        from jwt import PyJWKClient
+        _apple_jwk_client = PyJWKClient(APPLE_JWKS_URL, cache_keys=True, max_cached_keys=16)
+    return _apple_jwk_client
+
+
+def _accepted_google_audiences():
+    """Return the set of acceptable `aud` claim values for Google ID tokens.
+
+    iOS apps using GIDSignIn produce ID tokens with aud = iOS OAuth client ID
+    (the CLIENT_ID key in GoogleService-Info.plist).
+
+    Android apps using Credential Manager's GetGoogleIdOption produce ID
+    tokens with aud = the *Web* OAuth client ID (the serverClientId), not the
+    Android-package-bound client ID. That same Web Client ID is what lives in
+    `android/secrets.properties` as GOOGLE_WEB_CLIENT_ID.
+
+    We accept the legacy web client ID too (GOOGLE_CLIENT_ID) only because
+    callers in some test flows may use it; the production web Authlib flow
+    does not hit /auth/token, so this is belt-and-suspenders.
+    """
+    auds = set()
+    for env_name in ("GOOGLE_IOS_CLIENT_ID", "GOOGLE_ANDROID_CLIENT_ID", "GOOGLE_CLIENT_ID"):
+        v = os.environ.get(env_name)
+        if v:
+            auds.add(v.strip())
+    return auds
+
+
+def _verify_google_id_token(id_token_str):
+    """Verify a Google ID token and return its payload.
+
+    Raises ValueError on any failure (caller maps to 401 response).
+    """
+    import jwt as pyjwt
+
+    audiences = _accepted_google_audiences()
+    if not audiences:
+        raise ValueError("server_misconfigured: no Google client IDs configured")
+
+    try:
+        signing_key = _get_google_jwk_client().get_signing_key_from_jwt(id_token_str)
+    except Exception as e:
+        raise ValueError(f"google_token_kid_lookup_failed: {e}")
+
+    try:
+        payload = pyjwt.decode(
+            id_token_str,
+            signing_key.key,
+            algorithms=["RS256"],
+            audience=list(audiences),
+            options={"require": ["exp", "iat", "iss", "sub", "aud"]},
+        )
+    except pyjwt.ExpiredSignatureError:
+        raise ValueError("google_token_expired")
+    except pyjwt.InvalidAudienceError:
+        raise ValueError("google_token_audience_mismatch")
+    except pyjwt.InvalidTokenError as e:
+        raise ValueError(f"google_token_invalid: {e}")
+
+    iss = payload.get("iss")
+    if iss not in GOOGLE_ALLOWED_ISSUERS:
+        raise ValueError(f"google_token_bad_issuer: {iss}")
+
+    return payload
+
+
+def _verify_apple_id_token(id_token_str):
+    """Verify an Apple ID token and return its payload.
+
+    Raises ValueError on any failure (caller maps to 401 response).
+    """
+    import jwt as pyjwt
+
+    # For native Sign in with Apple (AuthenticationServices on iOS), the
+    # `aud` claim is the iOS app's Bundle ID, which matches what's already
+    # configured for IAP receipt validation.
+    expected_aud = os.environ.get("APPLE_BUNDLE_ID")
+    if not expected_aud:
+        raise ValueError("server_misconfigured: APPLE_BUNDLE_ID not set")
+
+    try:
+        signing_key = _get_apple_jwk_client().get_signing_key_from_jwt(id_token_str)
+    except Exception as e:
+        raise ValueError(f"apple_token_kid_lookup_failed: {e}")
+
+    try:
+        payload = pyjwt.decode(
+            id_token_str,
+            signing_key.key,
+            algorithms=["RS256"],
+            audience=expected_aud,
+            issuer=APPLE_ISSUER,
+            options={"require": ["exp", "iat", "iss", "sub", "aud"]},
+        )
+    except pyjwt.ExpiredSignatureError:
+        raise ValueError("apple_token_expired")
+    except pyjwt.InvalidAudienceError:
+        raise ValueError("apple_token_audience_mismatch")
+    except pyjwt.InvalidIssuerError:
+        raise ValueError("apple_token_bad_issuer")
+    except pyjwt.InvalidTokenError as e:
+        raise ValueError(f"apple_token_invalid: {e}")
+
+    return payload
+
+
+def _strict_oauth_enabled():
+    """Read STRICT_OAUTH_VERIFICATION env var. Accepts any truthy spelling.
+
+    Default: off (legacy decode-without-verification path used). Set to
+    `enforce` (or `true`/`1`/`on`) on Vercel to activate strict verification.
+    """
+    v = os.environ.get("STRICT_OAUTH_VERIFICATION", "").strip().lower()
+    return v in ("1", "true", "on", "enforce", "yes")
+
+
 @mobile_api.route('/auth/token', methods=['POST'])
 def get_auth_token():
     """
     Exchange OAuth credentials for a JWT token
-    
+
     Request body:
     {
         "provider": "apple" or "google",
@@ -1544,44 +1704,65 @@ def get_auth_token():
     }
     """
     from models import db, User
-    
+
     data = request.get_json()
     if not data:
         return jsonify({'error': 'missing_request_body'}), 400
-    
+
     provider = data.get('provider')
     id_token = data.get('id_token')
-    
+
     if not provider or not id_token:
         return jsonify({'error': 'provider_and_id_token_required'}), 400
-    
+
+    strict = _strict_oauth_enabled()
+
     try:
-        # Verify the OAuth token
-        # In production, you would validate the token with Apple/Google
-        # For now, we'll decode it and trust the payload
-        
-        # This is a simplified version - production should validate properly
         if provider == 'apple':
-            # Apple ID token validation would go here
-            # For now, just decode without verification for development
-            import jwt as pyjwt
-            try:
-                # Decode without verification (development only!)
-                payload = pyjwt.decode(id_token, options={"verify_signature": False})
+            if strict:
+                try:
+                    payload = _verify_apple_id_token(id_token)
+                except ValueError as ve:
+                    logger.warning(f"Apple ID token rejected by strict verification: {ve}")
+                    return jsonify({'error': 'invalid_apple_token'}), 401
                 oauth_id = payload.get('sub')
                 email = payload.get('email') or data.get('email')
-            except Exception:
-                return jsonify({'error': 'invalid_apple_token'}), 400
-                
-        elif provider == 'google':
-            # Google ID token validation
-            try:
+            else:
+                # LEGACY (INSECURE) PATH — TEMPORARY. Remove after rollout.
+                logger.critical(
+                    "AUTH SECURITY: /auth/token Apple flow decoded without "
+                    "signature verification. Set STRICT_OAUTH_VERIFICATION=enforce."
+                )
                 import jwt as pyjwt
-                payload = pyjwt.decode(id_token, options={"verify_signature": False})
+                try:
+                    payload = pyjwt.decode(id_token, options={"verify_signature": False})
+                    oauth_id = payload.get('sub')
+                    email = payload.get('email') or data.get('email')
+                except Exception:
+                    return jsonify({'error': 'invalid_apple_token'}), 400
+
+        elif provider == 'google':
+            if strict:
+                try:
+                    payload = _verify_google_id_token(id_token)
+                except ValueError as ve:
+                    logger.warning(f"Google ID token rejected by strict verification: {ve}")
+                    return jsonify({'error': 'invalid_google_token'}), 401
                 oauth_id = payload.get('sub')
                 email = payload.get('email') or data.get('email')
-            except Exception:
-                return jsonify({'error': 'invalid_google_token'}), 400
+            else:
+                # LEGACY (INSECURE) PATH — TEMPORARY. Remove after rollout.
+                logger.critical(
+                    "AUTH SECURITY: /auth/token Google flow decoded without "
+                    "signature verification. Set STRICT_OAUTH_VERIFICATION=enforce."
+                )
+                import jwt as pyjwt
+                try:
+                    payload = pyjwt.decode(id_token, options={"verify_signature": False})
+                    oauth_id = payload.get('sub')
+                    email = payload.get('email') or data.get('email')
+                except Exception:
+                    return jsonify({'error': 'invalid_google_token'}), 400
         else:
             return jsonify({'error': 'invalid_provider'}), 400
         
