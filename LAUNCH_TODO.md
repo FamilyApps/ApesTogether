@@ -75,30 +75,33 @@ Things to verify when the market is open and the bot pipeline is running. Hit ea
 
 ### USER ACTIONS — required before the Android app builds locally
 
-- [ ] **Google Play Console** account ($25 one-time, registered as Family Apps LLC). Create the app listing with package `com.apestogether.app`.
+- [x] **Google Play Console** account paid (May 11, $25 one-time, Family Apps LLC). App listing creation with package `com.apestogether.app` still pending — needed before a real release SHA-256 fingerprint is available.
 - [x] **Firebase project**: Android app `com.apestogether.app` registered (May 10). `google-services.json` downloaded and placed at `android/app/google-services.json` (gitignored). Debug SHA-1 added to Firebase.
 - [x] **Google Cloud OAuth Web client** created ("ApesTogether Web Client") + Android client ("ApesTogether Android Client") with package `com.apestogether.app` + debug SHA-1. Web Client ID needs to be pasted into `android/secrets.properties`. Existing `GOOGLE_CLIENT_ID` Vercel env var ("Stock portfolio web client") is for the web app's Authlib redirect flow — leave it alone.
 - [x] **Gradle wrapper generated** by Android Studio Panda on first sync (May 10).
-- [ ] **Replace assetlinks.json placeholders**: `public/.well-known/assetlinks.json` has `REPLACE_WITH_RELEASE_SIGNING_CERT_SHA256` + `REPLACE_WITH_PLAY_APP_SIGNING_CERT_SHA256`. Get debug SHA-256 from `gradle :app:signingReport` (already done; save it), release SHA-256 comes from Play Console once available.
+- [ ] **Replace assetlinks.json placeholders**: `public/.well-known/assetlinks.json` has `REPLACE_WITH_RELEASE_SIGNING_CERT_SHA256` + `REPLACE_WITH_PLAY_APP_SIGNING_CERT_SHA256`. Get debug SHA-256 from `gradle :app:signingReport` (already done; save it), release SHA-256 comes from Play Console once the app listing is created and a release artifact is uploaded.
 
 ### Screens still to port from iOS
 
-- [ ] LeaderboardView filter pills (period/category/industry/frequency) + sparklines — current Android stub only loads default 1W
-- [ ] TopInfluencersView (`ios/.../TopInfluencersView.swift`, ~16KB)
-- [ ] MyPortfolioView (`ios/.../MyPortfolioView.swift`, ~9KB)
-- [ ] SubscriptionsView (`ios/.../SubscriptionsView.swift`, ~18KB)
-- [ ] PortfolioDetailView (`ios/.../PortfolioDetailView.swift`, ~47KB — largest iOS view)
-- [ ] PerformanceChartView equivalent using Vico (`ios/.../PerformanceChartView.swift`, ~13KB)
-- [ ] Google Play Billing client integration on PortfolioDetailScreen subscribe CTA (BillingClient connect + querySkuDetails + launchBillingFlow + acknowledgePurchase + POST to `/purchase/validate`)
-- [ ] WelcomeCarouselView, ReferralPreviewView, EarnNudgeView, AddStocksView — full referral onboarding flow
-- [ ] LegalText.swift content → assets/legal/ + SettingsScreen linkouts
+- [x] LeaderboardView filter pills + sparklines (commits `ca17442`, `988e93c`)
+- [x] TopInfluencersView (commit `d396ad8`)
+- [x] MyPortfolioView (commit `58b0be6`)
+- [x] SubscriptionsView (commit `58b0be6`, import fix `e6b7cfd`)
+- [x] PortfolioDetailView (commit `58b0be6`)
+- [x] PerformanceChartView via Vico (included in PortfolioDetail port `58b0be6`)
+- [x] Google Play Billing on PortfolioDetailScreen Subscribe CTA (commit `feb85f2`) — BillingClient connect + querySkuDetails + launchBillingFlow + acknowledgePurchase + POST `/purchase/validate` all wired.
+- [x] Onboarding flow — WelcomeCarouselView, ReferralPreviewView, EarnNudgeView, AddStocksView (commit `d1e20c3`)
+- [x] CompactPlanToggle iOS port (Save 36% pill + price-prominent typography, commit `9b65fd9`)
+- [x] App icon + themed-icons monochrome silhouette (commits `ca17442` through `e212107`, May 11). Photopea-flattened silhouette rescaled to align with foreground bbox.
+- [ ] LegalText.swift content → assets/legal/ + SettingsScreen linkouts (status unverified, needs check)
 - [ ] FeaturePollView, TradeSheetView, W9FormView, PortfolioShareCardView (lower priority, not strictly needed for v1)
+- [ ] Settings TODOs deferred to v1.1: Payment History screen, Tax Info / W-9 sheet, FAQ link (iOS also hasn't shipped these; matches parity)
 
 ### Pre-launch testing
 
 - [ ] Google Sign-In → token exchange → `/auth/user` round trip on a real device
 - [ ] Trade-alert FCM push delivers while app backgrounded
-- [ ] App Link from `https://apestogether.ai/p/<slug>` opens PortfolioDetailScreen (verified with `adb shell pm verify-app-links --re-verify ai.apestogether`)
+- [ ] App Link from `https://apestogether.ai/p/<slug>` opens PortfolioDetailScreen (verified with `adb shell pm verify-app-links --re-verify com.apestogether.app`)
 - [ ] Subscribe via Play Billing → backend validation → MobileSubscription row appears
 - [ ] 14-day Google Play closed-testing window for Production track release
 
@@ -173,6 +176,15 @@ At the end of each session, the assistant should:
 ---
 
 ## Last updated
+
+**2026-05-11 (afternoon) — session 4 ended with:**
+- **Android Section C "Screens still to port from iOS" is functionally complete.** All twelve iOS screens / flows / integrations are now on Android with parity: Leaderboard (filter pills + sparklines), TopInfluencers, MyPortfolio, Subscriptions, PortfolioDetail, PerformanceChartView (Vico), Play Billing E2E, full onboarding (Welcome / Referral / EarnNudge / AddStocks), CompactPlanToggle, and the app icon with themed-icons monochrome silhouette.
+- **App icon themed-icons** finished today (commits `30266c3` → `e212107`). Hit several gotchas worth recording: (1) Image Asset Studio prepends an AOSP Apache-2.0 license comment **above** the `<?xml ?>` declaration which malforms the XML and breaks `aapt2`; fix is to delete the boilerplate so the `<?xml ?>` is back on line 1. (2) Asset Studio's "Monochrome" tab does **not** auto-flatten gradient input — it writes the source verbatim. A gradient monochrome layer renders as an empty disc under themed icons. The fix is to hand-flatten in Photopea (lock transparency → fill with black) and re-import, then rescale to match the foreground's *monkey bbox* (not the whole foreground PNG, which has a darker plate). Pillow scripts in this session's commits handle the rescale.
+- **Google Play Console account paid** ($25, Family Apps LLC). App listing creation pending — required before release SHA-256 is available for `assetlinks.json`.
+- **CompactPlanToggle iOS port** shipped (`9b65fd9`) — Android now matches iOS's "Save 36%" pill on the Annual chip and price-prominent typography. Earlier commit `a64ba7b` tightened vertical padding 8dp → 4dp.
+- **Carousel skip race fixed** (`c67dcec`) and Image Asset Studio'd malformed XML resources fixed (`726898e`).
+- Remaining Android workstream: LegalText port status (needs check), pre-launch testing on a real device (5 items), `assetlinks.json` SHA-256 swap (gated on Play Console app listing), and v1.1-deferred screens.
+- **Pre-launch security blocker** (`mobile_api.py /auth/token` decoding ID tokens with `verify_signature=False`) is the next thing I'm tackling. Both iOS and Android currently rely on this code path; fix needs to preserve backward compat for both clients.
 
 **2026-05-10 (afternoon) — session 3 ended with:**
 - Audit tolerance buffer shipped (commit `34a01dc`) — Vercel cron jitter ±60s false positives no longer flagged.
