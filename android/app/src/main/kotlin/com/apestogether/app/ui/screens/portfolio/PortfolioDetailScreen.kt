@@ -59,6 +59,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.apestogether.app.data.api.ApiService
 import com.apestogether.app.data.billing.BillingService
+import com.apestogether.app.data.onboarding.OnboardingManager
 import com.apestogether.app.data.billing.SubscriptionPlan
 import com.apestogether.app.data.models.Holding
 import com.apestogether.app.data.models.LeaderboardBadge
@@ -293,7 +294,11 @@ private fun PortfolioBody(
                                 subscribeState = subscribeState,
                                 onSubscribe = {
                                     activity?.let {
-                                        viewModel.subscribe(it, portfolio.owner.id)
+                                        viewModel.subscribe(
+                                            activity = it,
+                                            subscribedToId = portfolio.owner.id,
+                                            subscribedToUsername = portfolio.owner.publicName,
+                                        )
                                     }
                                 },
                             )
@@ -351,7 +356,11 @@ private fun PortfolioBody(
                                 previewMessage = portfolio.previewMessage,
                                 onSubscribe = {
                                     activity?.let {
-                                        viewModel.subscribe(it, portfolio.owner.id)
+                                        viewModel.subscribe(
+                                            activity = it,
+                                            subscribedToId = portfolio.owner.id,
+                                            subscribedToUsername = portfolio.owner.publicName,
+                                        )
                                     }
                                 },
                                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -1072,6 +1081,7 @@ sealed interface PortfolioState {
 class PortfolioDetailViewModel @Inject constructor(
     private val apiService: ApiService,
     private val billingService: BillingService,
+    private val onboardingManager: OnboardingManager,
 ) : ViewModel() {
     private val _state = MutableStateFlow<PortfolioState>(PortfolioState.Loading)
     val state: StateFlow<PortfolioState> = _state.asStateFlow()
@@ -1159,7 +1169,11 @@ class PortfolioDetailViewModel @Inject constructor(
      * POSTs the resulting purchase token to the backend for validation.
      * Mirrors the iOS [SubscriptionManager.subscribe] flow.
      */
-    fun subscribe(activity: android.app.Activity, subscribedToId: Int) {
+    fun subscribe(
+        activity: android.app.Activity,
+        subscribedToId: Int,
+        subscribedToUsername: String,
+    ) {
         viewModelScope.launch {
             _subscribeState.value = SubscribeUiState.Processing
 
@@ -1202,6 +1216,9 @@ class PortfolioDetailViewModel @Inject constructor(
                         // Server happy → acknowledge with Play (idempotent).
                         runCatching { billingService.acknowledge(purchase) }
                         _subscribeState.value = SubscribeUiState.Success
+                        // Trigger the EarnNudge flow at the RootApp level —
+                        // mirrors iOS .didSubscribe NotificationCenter event.
+                        onboardingManager.notifyDidSubscribe(subscribedToUsername)
                     } else {
                         _subscribeState.value = SubscribeUiState.Error(
                             resp?.error

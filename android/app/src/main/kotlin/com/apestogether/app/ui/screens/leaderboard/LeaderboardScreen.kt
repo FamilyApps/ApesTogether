@@ -75,6 +75,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.apestogether.app.data.api.ApiService
 import com.apestogether.app.data.billing.BillingService
+import com.apestogether.app.data.onboarding.OnboardingManager
 import com.apestogether.app.data.billing.SubscriptionPlan
 import com.apestogether.app.data.models.LeaderboardEntry
 import com.apestogether.app.data.models.PurchaseValidationRequest
@@ -195,7 +196,11 @@ fun LeaderboardScreen(
                                 },
                                 onSubscribe = {
                                     activity?.let {
-                                        viewModel.subscribe(it, entry.user.id)
+                                        viewModel.subscribe(
+                                            activity = it,
+                                            subscribedToId = entry.user.id,
+                                            subscribedToUsername = entry.user.publicName,
+                                        )
                                     }
                                 },
                             )
@@ -1005,6 +1010,7 @@ sealed interface LeaderboardState {
 class LeaderboardViewModel @Inject constructor(
     private val apiService: ApiService,
     private val billingService: BillingService,
+    private val onboardingManager: OnboardingManager,
 ) : ViewModel() {
     private val _state = MutableStateFlow<LeaderboardState>(LeaderboardState.Loading)
     val state: StateFlow<LeaderboardState> = _state.asStateFlow()
@@ -1047,7 +1053,11 @@ class LeaderboardViewModel @Inject constructor(
      * same MobileSubscription row as subscribing from the portfolio detail
      * page.
      */
-    fun subscribe(activity: android.app.Activity, subscribedToId: Int) {
+    fun subscribe(
+        activity: android.app.Activity,
+        subscribedToId: Int,
+        subscribedToUsername: String,
+    ) {
         viewModelScope.launch {
             _subscribeState.value = SubscribeUiState.Processing
 
@@ -1089,6 +1099,9 @@ class LeaderboardViewModel @Inject constructor(
                     if (resp?.success == true) {
                         runCatching { billingService.acknowledge(purchase) }
                         _subscribeState.value = SubscribeUiState.Success
+                        // Trigger the EarnNudge flow at the RootApp level —
+                        // mirrors iOS .didSubscribe NotificationCenter event.
+                        onboardingManager.notifyDidSubscribe(subscribedToUsername)
                         // Refresh so newly-subscribed creators reflect the
                         // 'isSubscribed' state on next render.
                         refresh()

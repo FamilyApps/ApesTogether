@@ -1,63 +1,184 @@
 ﻿package com.apestogether.app.ui
 
-import com.apestogether.app.data.auth.AuthRepository
-import com.apestogether.app.ui.navigation.RootNavGraph
 import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.compose.rememberNavController
+import com.apestogether.app.data.auth.AuthRepository
+import com.apestogether.app.data.onboarding.OnboardingManager
+import com.apestogether.app.data.onboarding.OnboardingPreferences
+import com.apestogether.app.ui.navigation.RootNavGraph
+import com.apestogether.app.ui.navigation.Screen
+import com.apestogether.app.ui.navigation.extractSlugFromDeepLink
+import com.apestogether.app.ui.screens.onboarding.AddStocksScreen
+import com.apestogether.app.ui.screens.onboarding.EarnNudgeScreen
+import com.apestogether.app.ui.screens.onboarding.ReferralPreviewScreen
+import com.apestogether.app.ui.screens.onboarding.WelcomeCarouselScreen
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * Top-level composable hosted by [com.apestogether.app.MainActivity]. Owns the
- * NavController and observes auth state to choose between the login flow and
- * the main tab UI.
+ * Top-level composable hosted by [com.apestogether.app.MainActivity]. Owns
+ * the NavController and decides which top-level surface to show based on:
  *
- * Counterpart to the iOS [ContentView] root switch.
+ *  - Auth state (signed in / signed out)
+ *  - Onboarding completion flag (DataStore-backed)
+ *  - Pending referral slug (set when the app is cold-launched via the
+ *    `https://apestogether.ai/p/<slug>` intent filter while unauthed)
+ *  - Pending "you just subscribed" username (set by Subscribe ViewModels
+ *    after a successful Play Billing purchase)
+ *
+ * State machine — high to low priority:
+ *
+ *   Authed + post-subscribe nudge active + Add Stocks overlay → AddStocksScreen
+ *   Authed + post-subscribe nudge active                      → EarnNudgeScreen
+ *   Authed + everything else                                  → RootNavGraph (main)
+ *   Unauthed + pending slug                                   → ReferralPreviewScreen
+ *   Unauthed + onboarding incomplete                          → WelcomeCarouselScreen
+ *   Unauthed + onboarding complete                            → RootNavGraph (login)
+ *
+ * Mirrors iOS [ContentView]'s state-machine layout.
  */
 @Composable
 fun RootApp(initialDeepLinkUri: Uri? = null) {
     val rootViewModel: RootViewModel = hiltViewModel()
     val isAuthed by rootViewModel.isAuthenticated.collectAsState(initial = false)
+    val hasCompletedOnboarding by rootViewModel.hasCompletedOnboarding
+        .collectAsState(initial = true) // optimistic: avoids a carousel flash for returning users
+    val pendingSlug by rootViewModel.pendingSlug.collectAsState()
+    val subscribedToUsername by rootViewModel.subscribedToUsername.collectAsState()
+
     val navController = rememberNavController()
 
-    // On cold start (or whenever auth flips to true) hydrate the cached User
-    // object from the backend. Without this, [AuthRepository.currentUser]
-    // remains null after relaunch (we only have a token, not a user payload),
-    // which causes MyPortfolioScreen to render its empty state even when the
-    // signed-in user has a portfolio_slug. iOS does the equivalent in
-    // `AuthenticationManager.refreshUserData()` on `ContentView.onAppear`.
-    LaunchedEffect(isAuthed) {
-        if (isAuthed) {
-            rootViewModel.hydrateUser()
+    // Local state — these are intentionally not persisted across recomps.
+    var carouselDismissed by remember { mutableStateOf(false) }
+    var showAddStocksOverlay by remember { mutableStateOf(false) }
+
+    // ── Cold-start deep-link ingestion ──────────────────────────────────
+    // Drop the slug into the OnboardingManager exactly once on first
+    // composition. The post-auth LaunchedEffect below drains it and
+    // navigates after auth resolves, regardless of whether the user is
+    // already signed in or signs in via the Referral landing. Going
+    // through the manager (instead of calling navController directly here)
+    // avoids a double-navigation race when the auth flow flips while a
+    // slug is still pending.
+    LaunchedEffect(Unit) {
+        val slug = initialDeepLinkUri?.let { extractSlugFromDeepLink(it) }
+        if (!slug.isNullOrBlank()) {
+            rootViewModel.setPendingSlug(slug)
         }
     }
 
-    RootNavGraph(
-        navController = navController,
-        startAuthenticated = isAuthed,
-        initialDeepLinkUri = initialDeepLinkUri,
-    )
+    // ── Post-auth bookkeeping ───────────────────────────────────────────
+    // On every flip from unauthed → authed:
+    //   1. Re-hydrate the cached User object so MyPortfolio renders with
+    //      the user's portfolio_slug instead of the empty state.
+    //   2. Mark onboarding completed (covers users who jumped straight to
+    //      Login from a fresh install without seeing the carousel).
+    //   3. If a referral slug is still pending, drain it after a short
+    //      delay (so the NavHost has time to recompose with start = "main")
+    //      and route the user to that portfolio's detail page.
+    LaunchedEffect(isAuthed) {
+        if (isAuthed) {
+            rootViewModel.hydrateUser()
+            rootViewModel.markOnboardingCompleted()
+            val drained = rootViewModel.consumePendingSlug()
+            if (!drained.isNullOrBlank()) {
+                delay(300)
+                navController.navigate(Screen.PortfolioDetail.route(drained))
+            }
+        }
+    }
+
+    // ── State-driven render ─────────────────────────────────────────────
+    when {
+        // Post-subscribe → Add Stocks (chosen "Add Your Stocks" from EarnNudge)
+        isAuthed && showAddStocksOverlay -> {
+            AddStocksScreen(
+                onComplete = {
+                    showAddStocksOverlay = false
+                    rootViewModel.clearSubscribedToUsername()
+                },
+                showSkip = true,
+                showBack = false,
+            )
+        }
+
+        // Post-subscribe nudge — shown once per successful billing flow.
+        isAuthed && !subscribedToUsername.isNullOrBlank() -> {
+            EarnNudgeScreen(
+                subscribedToUsername = subscribedToUsername.orEmpty(),
+                onAddStocks = { showAddStocksOverlay = true },
+                onSkip = { rootViewModel.clearSubscribedToUsername() },
+            )
+        }
+
+        // Unauthed + referral slug landing.
+        !isAuthed && !pendingSlug.isNullOrBlank() -> {
+            ReferralPreviewScreen(
+                slug = pendingSlug.orEmpty(),
+                // onSignedIn fires *before* isAuthed flips in the
+                // collected state. We rely on the post-auth LaunchedEffect
+                // above to drain the slug + navigate.
+                onSignedIn = { /* no-op; handled by the effect */ },
+                onSkip = { rootViewModel.consumePendingSlug() },
+            )
+        }
+
+        // First-launch carousel.
+        !isAuthed && !hasCompletedOnboarding && !carouselDismissed -> {
+            WelcomeCarouselScreen(
+                onComplete = {
+                    carouselDismissed = true
+                    rootViewModel.markOnboardingCompleted()
+                },
+            )
+        }
+
+        // Default — everything else routes through the NavHost.
+        else -> {
+            RootNavGraph(
+                navController = navController,
+                startAuthenticated = isAuthed,
+            )
+        }
+    }
 }
 
 @HiltViewModel
 class RootViewModel @Inject constructor(
     private val authRepository: AuthRepository,
+    private val onboardingPreferences: OnboardingPreferences,
+    private val onboardingManager: OnboardingManager,
 ) : ViewModel() {
-    val isAuthenticated = authRepository.isAuthenticated
 
-    /** Refreshes [AuthRepository.currentUser] from the backend; safe to call
-     *  multiple times (network failures fall back to the existing value). */
+    val isAuthenticated = authRepository.isAuthenticated
+    val hasCompletedOnboarding = onboardingPreferences.hasCompletedOnboarding
+    val pendingSlug: StateFlow<String?> = onboardingManager.pendingSlug
+    val subscribedToUsername: StateFlow<String?> = onboardingManager.subscribedToUsername
+
     fun hydrateUser() {
-        viewModelScope.launch {
-            authRepository.refreshUserData()
-        }
+        viewModelScope.launch { authRepository.refreshUserData() }
     }
+
+    fun markOnboardingCompleted() {
+        viewModelScope.launch { onboardingPreferences.markCompleted() }
+    }
+
+    fun setPendingSlug(slug: String?) = onboardingManager.setPendingSlug(slug)
+
+    fun consumePendingSlug(): String? = onboardingManager.consumePendingSlug()
+
+    fun clearSubscribedToUsername() = onboardingManager.clearSubscribedToUsername()
 }

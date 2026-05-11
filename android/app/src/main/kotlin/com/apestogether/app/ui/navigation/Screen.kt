@@ -25,4 +25,11 @@ sealed class Screen(val route: String) {
         fun route(slug: String) = "portfolio/$slug"
         const val ARG_SLUG = "slug"
     }
+
+    // Pushed (no args). Reachable from MyPortfolio's empty-state CTA so
+    // first-launch users can populate their holdings without going through
+    // the post-subscribe onboarding nudge. The post-subscribe path
+    // (EarnNudge → Add Stocks) is handled at the RootApp level instead of
+    // via NavHost, mirroring iOS [ContentView]'s state-machine swap.
+    data object AddStocks : Screen("add_stocks")
 }

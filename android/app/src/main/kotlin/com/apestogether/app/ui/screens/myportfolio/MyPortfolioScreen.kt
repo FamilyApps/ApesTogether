@@ -51,8 +51,8 @@ import javax.inject.Inject
  *    [Intent.ACTION_SEND] chooser; iOS uses ShareCardGenerator to render an
  *    image, which is deferred to v1.1).
  *  - Empty state for users without a `portfolio_slug` yet, telling them to
- *    add stocks. The "Add Your Stocks" CTA is currently a no-op (depends on
- *    AddStocksScreen, which is also deferred until onboarding port).
+ *    add stocks. The "Add Your Stocks" CTA navigates to [AddStocksScreen]
+ *    via the [onOpenAddStocks] callback supplied by [MainTabsScreen].
  *
  * The header (NavLogo + Settings) is owned by [MainTabsScreen] above us, so
  * we render the embedded variant of the detail screen via
@@ -61,6 +61,7 @@ import javax.inject.Inject
 @Composable
 fun MyPortfolioScreen(
     modifier: Modifier = Modifier,
+    onOpenAddStocks: () -> Unit = {},
 ) {
     val viewModel: MyPortfolioViewModel = hiltViewModel()
     val user by viewModel.currentUser.collectAsState()
@@ -68,7 +69,7 @@ fun MyPortfolioScreen(
     val slug = user?.portfolioSlug
 
     if (slug.isNullOrBlank()) {
-        EmptyMyPortfolio(modifier = modifier)
+        EmptyMyPortfolio(modifier = modifier, onAddStocks = onOpenAddStocks)
     } else {
         Column(
             modifier = modifier
@@ -128,7 +129,10 @@ private fun ShareMyPerformanceButton(slug: String) {
 }
 
 @Composable
-private fun EmptyMyPortfolio(modifier: Modifier = Modifier) {
+private fun EmptyMyPortfolio(
+    modifier: Modifier = Modifier,
+    onAddStocks: () -> Unit,
+) {
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -152,9 +156,8 @@ private fun EmptyMyPortfolio(modifier: Modifier = Modifier) {
                 color = TextSecondary,
                 fontSize = 14.sp,
             )
-            // CTA is currently a no-op (AddStocksScreen is deferred to onboarding port).
             Button(
-                onClick = {},
+                onClick = onAddStocks,
                 colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
                 shape = RoundedCornerShape(12.dp),
             ) {

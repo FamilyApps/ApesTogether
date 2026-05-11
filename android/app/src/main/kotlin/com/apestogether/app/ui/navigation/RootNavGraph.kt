@@ -2,11 +2,11 @@
 
 import com.apestogether.app.ui.screens.login.LoginScreen
 import com.apestogether.app.ui.screens.main.MainTabsScreen
+import com.apestogether.app.ui.screens.onboarding.AddStocksScreen
 import com.apestogether.app.ui.screens.portfolio.PortfolioDetailScreen
 import com.apestogether.app.ui.screens.settings.SettingsScreen
 import android.net.Uri
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -18,28 +18,22 @@ import androidx.navigation.navArgument
  *
  * "auth" graph:    Login screen.
  * "main" graph:    Bottom-tab UI (Leaderboard / TopInfluencers /
- *                  MyPortfolio / Subscriptions). Settings + PortfolioDetail
- *                  are pushed on top of any tab.
+ *                  MyPortfolio / Subscriptions). Settings, PortfolioDetail,
+ *                  and AddStocks are pushed on top of any tab.
  *
- * Deep-link: `https://apestogether.ai/p/<slug>` opens
- * [Screen.PortfolioDetail]. The intent filter is declared in
- * AndroidManifest.xml; we read the URI in [RootApp] and consume it once on
- * first composition.
+ * Deep-link routing (`https://apestogether.ai/p/<slug>`) is handled by
+ * [com.apestogether.app.ui.RootApp] now — it either pre-empts the NavHost
+ * with the [com.apestogether.app.ui.screens.onboarding.ReferralPreviewScreen]
+ * (when unauthed) or invokes [navController] directly with the
+ * [Screen.PortfolioDetail] route (when authed). This file is therefore a
+ * pure NavHost wrapper with no implicit deep-link handling.
  */
 @Composable
 fun RootNavGraph(
     navController: NavHostController,
     startAuthenticated: Boolean,
-    initialDeepLinkUri: Uri? = null,
 ) {
     val startRoute = if (startAuthenticated) "main" else Screen.Login.route
-
-    LaunchedEffect(initialDeepLinkUri, startAuthenticated) {
-        val slug = initialDeepLinkUri?.let { extractSlugFromDeepLink(it) }
-        if (!slug.isNullOrBlank() && startAuthenticated) {
-            navController.navigate(Screen.PortfolioDetail.route(slug))
-        }
-    }
 
     NavHost(navController = navController, startDestination = startRoute) {
 
@@ -60,6 +54,9 @@ fun RootNavGraph(
                 },
                 onOpenSettings = {
                     navController.navigate(Screen.Settings.route)
+                },
+                onOpenAddStocks = {
+                    navController.navigate(Screen.AddStocks.route)
                 },
                 onSignedOut = {
                     navController.navigate(Screen.Login.route) {
@@ -92,11 +89,20 @@ fun RootNavGraph(
                 },
             )
         }
+
+        composable(Screen.AddStocks.route) {
+            AddStocksScreen(
+                showSkip = false,
+                showBack = true,
+                onBack = { navController.popBackStack() },
+                onComplete = { navController.popBackStack() },
+            )
+        }
     }
 }
 
 /** Pulls the portfolio slug out of `https://apestogether.ai/p/<slug>`. */
-private fun extractSlugFromDeepLink(uri: Uri): String? {
+internal fun extractSlugFromDeepLink(uri: Uri): String? {
     val segments = uri.pathSegments
     val pIdx = segments.indexOf("p")
     return if (pIdx >= 0 && pIdx + 1 < segments.size) segments[pIdx + 1] else null

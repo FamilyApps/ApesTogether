@@ -63,6 +63,7 @@ import com.apestogether.app.ui.theme.TextSecondary
 fun MainTabsScreen(
     onOpenPortfolio: (String) -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenAddStocks: () -> Unit,
     onSignedOut: () -> Unit,
 ) {
     var selectedTab by remember { mutableStateOf(0) }
@@ -132,6 +133,7 @@ fun MainTabsScreen(
             )
             2 -> MyPortfolioScreen(
                 modifier = Modifier.padding(padding),
+                onOpenAddStocks = onOpenAddStocks,
             )
             3 -> SubscriptionsScreen(
                 modifier = Modifier.padding(padding),
