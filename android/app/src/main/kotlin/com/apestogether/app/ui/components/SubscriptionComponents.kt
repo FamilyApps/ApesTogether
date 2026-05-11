@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,13 +23,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.apestogether.app.data.billing.SubscriptionPlan
-import com.apestogether.app.ui.theme.CardBackground
-import com.apestogether.app.ui.theme.CardBorder
+import com.apestogether.app.ui.theme.AppBackground
 import com.apestogether.app.ui.theme.Gains
 import com.apestogether.app.ui.theme.Losses
 import com.apestogether.app.ui.theme.PrimaryAccent
 import com.apestogether.app.ui.theme.TextMuted
 import com.apestogether.app.ui.theme.TextPrimary
+import com.apestogether.app.ui.theme.TextSecondary
 
 /**
  * Lightweight UX state for the Subscribe button flow. Shared between
@@ -47,7 +48,9 @@ sealed interface SubscribeUiState {
  * default — same pricing as iOS (`$69/yr`, ~36% savings vs `$9/mo`).
  *
  * Used both above the Subscribe CTA on `PortfolioDetailScreen` and inside
- * the expanded leaderboard card.
+ * the expanded leaderboard card. Direct port of iOS [CompactPlanToggle];
+ * keep dimensions/colors/typography in lockstep with that file when
+ * tweaking either platform.
  */
 @Composable
 fun CompactPlanToggle(
@@ -59,21 +62,23 @@ fun CompactPlanToggle(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(CardBackground)
-            .border(0.5.dp, CardBorder, RoundedCornerShape(10.dp))
-            .padding(4.dp),
+            .background(Color.White.copy(alpha = 0.06f))
+            .border(1.dp, Color.White.copy(alpha = 0.04f), RoundedCornerShape(10.dp))
+            .padding(3.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         PlanChip(
-            label = "Annual",
-            sublabel = "\$69/yr · save 36%",
+            title = "Annual",
+            price = "\$69/yr",
+            badge = "Save 36%",
             isSelected = selected == SubscriptionPlan.Annual,
             modifier = Modifier.weight(1f),
             onClick = { onSelect(SubscriptionPlan.Annual) },
         )
         PlanChip(
-            label = "Monthly",
-            sublabel = "\$9/mo",
+            title = "Monthly",
+            price = "\$9/mo",
+            badge = null,
             isSelected = selected == SubscriptionPlan.Monthly,
             modifier = Modifier.weight(1f),
             onClick = { onSelect(SubscriptionPlan.Monthly) },
@@ -83,32 +88,69 @@ fun CompactPlanToggle(
 
 @Composable
 private fun PlanChip(
-    label: String,
-    sublabel: String,
+    title: String,
+    price: String,
+    badge: String?,
     isSelected: Boolean,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    Column(
+    // iOS draws a 1px stroke at 55% PrimaryAccent alpha around the selected
+    // chip; unselected chips have no stroke at all (clear color in SwiftUI).
+    val borderModifier = if (isSelected) {
+        Modifier.border(1.dp, PrimaryAccent.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+    } else {
+        Modifier
+    }
+    Row(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
-            .background(if (isSelected) PrimaryAccent.copy(alpha = 0.15f) else Color.Transparent)
+            .background(if (isSelected) PrimaryAccent.copy(alpha = 0.12f) else Color.Transparent)
+            .then(borderModifier)
             .clickable(onClick = onClick)
-            .padding(vertical = 4.dp, horizontal = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+            .padding(vertical = 8.dp, horizontal = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = label,
-            color = if (isSelected) PrimaryAccent else TextPrimary,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-        )
-        Text(
-            text = sublabel,
-            color = if (isSelected) PrimaryAccent.copy(alpha = 0.85f) else TextMuted,
-            fontSize = 10.sp,
-        )
+        Column(horizontalAlignment = Alignment.Start) {
+            // Title row ("Annual" / "Monthly") — small, medium weight,
+            // muted for the unselected chip.
+            Text(
+                text = title,
+                color = if (isSelected) TextSecondary else TextMuted,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            // Price row ("$69/yr" / "$9/mo") — the prominent label.
+            Text(
+                text = price,
+                color = if (isSelected) TextPrimary else TextSecondary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        // Optional capsule badge (only Annual carries "Save 36%").
+        // iOS inverts the badge in the selected state — solid PrimaryAccent
+        // pill with dark text — and shows a translucent green pill with
+        // green text when unselected.
+        if (badge != null) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(
+                        if (isSelected) PrimaryAccent
+                        else PrimaryAccent.copy(alpha = 0.18f)
+                    )
+                    .padding(horizontal = 5.dp, vertical = 2.dp),
+            ) {
+                Text(
+                    text = badge,
+                    color = if (isSelected) AppBackground else PrimaryAccent,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
     }
 }
 
