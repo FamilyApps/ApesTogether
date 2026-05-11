@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive launcher icon for Android 8+. We deliberately omit the
+     <monochrome> element so the launcher does NOT apply Android 13+ themed
+     icons: the foreground here is a full-color monkey illustration, not a
+     silhouette, and themed-icons would tint it against a wallpaper-derived
+     background disc (showing up as a green/blue/etc. ring on Pixels). When
+     we ship a true single-color silhouette drawable we can re-add
+     <monochrome android:drawable="@drawable/ic_launcher_monochrome"/>. -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background"/>
     <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
-    <monochrome android:drawable="@mipmap/ic_launcher_foreground"/>
 </adaptive-icon>

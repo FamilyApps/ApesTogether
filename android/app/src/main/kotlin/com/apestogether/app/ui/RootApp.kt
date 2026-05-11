@@ -1,13 +1,18 @@
 ﻿package com.apestogether.app.ui
 
 import android.net.Uri
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -22,6 +27,7 @@ import com.apestogether.app.ui.screens.onboarding.AddStocksScreen
 import com.apestogether.app.ui.screens.onboarding.EarnNudgeScreen
 import com.apestogether.app.ui.screens.onboarding.ReferralPreviewScreen
 import com.apestogether.app.ui.screens.onboarding.WelcomeCarouselScreen
+import com.apestogether.app.ui.theme.AppBackground
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
@@ -53,9 +59,21 @@ import javax.inject.Inject
 @Composable
 fun RootApp(initialDeepLinkUri: Uri? = null) {
     val rootViewModel: RootViewModel = hiltViewModel()
-    val isAuthed by rootViewModel.isAuthenticated.collectAsState(initial = false)
-    val hasCompletedOnboarding by rootViewModel.hasCompletedOnboarding
-        .collectAsState(initial = true) // optimistic: avoids a carousel flash for returning users
+    // Tri-state — null until the underlying DataStore Flow emits its first
+    // value. We render a splash while these are null instead of guessing,
+    // because guessing wrong causes either:
+    //   - a flash of LoginScreen on cold launch for returning users
+    //     (when isAuthed defaults to false), or
+    //   - the WelcomeCarousel being skipped entirely on a fresh install
+    //     when DataStore takes ~50–150 ms to emit hasCompletedOnboarding.
+    val isAuthed: Boolean? by produceState<Boolean?>(initialValue = null, rootViewModel) {
+        rootViewModel.isAuthenticated.collect { value = it }
+    }
+    val hasCompletedOnboarding: Boolean? by produceState<Boolean?>(
+        initialValue = null, rootViewModel,
+    ) {
+        rootViewModel.hasCompletedOnboarding.collect { value = it }
+    }
     val pendingSlug by rootViewModel.pendingSlug.collectAsState()
     val subscribedToUsername by rootViewModel.subscribedToUsername.collectAsState()
 
@@ -90,7 +108,7 @@ fun RootApp(initialDeepLinkUri: Uri? = null) {
     //      delay (so the NavHost has time to recompose with start = "main")
     //      and route the user to that portfolio's detail page.
     LaunchedEffect(isAuthed) {
-        if (isAuthed) {
+        if (isAuthed == true) {
             rootViewModel.hydrateUser()
             rootViewModel.markOnboardingCompleted()
             val drained = rootViewModel.consumePendingSlug()
@@ -103,8 +121,14 @@ fun RootApp(initialDeepLinkUri: Uri? = null) {
 
     // ── State-driven render ─────────────────────────────────────────────
     when {
+        // Splash — DataStore hasn't returned yet. Solid app-bg avoids any
+        // flicker between this and whichever surface we end up rendering.
+        isAuthed == null || hasCompletedOnboarding == null -> {
+            Box(modifier = Modifier.fillMaxSize().background(AppBackground))
+        }
+
         // Post-subscribe → Add Stocks (chosen "Add Your Stocks" from EarnNudge)
-        isAuthed && showAddStocksOverlay -> {
+        isAuthed == true && showAddStocksOverlay -> {
             AddStocksScreen(
                 onComplete = {
                     showAddStocksOverlay = false
@@ -116,7 +140,7 @@ fun RootApp(initialDeepLinkUri: Uri? = null) {
         }
 
         // Post-subscribe nudge — shown once per successful billing flow.
-        isAuthed && !subscribedToUsername.isNullOrBlank() -> {
+        isAuthed == true && !subscribedToUsername.isNullOrBlank() -> {
             EarnNudgeScreen(
                 subscribedToUsername = subscribedToUsername.orEmpty(),
                 onAddStocks = { showAddStocksOverlay = true },
@@ -125,7 +149,7 @@ fun RootApp(initialDeepLinkUri: Uri? = null) {
         }
 
         // Unauthed + referral slug landing.
-        !isAuthed && !pendingSlug.isNullOrBlank() -> {
+        isAuthed == false && !pendingSlug.isNullOrBlank() -> {
             ReferralPreviewScreen(
                 slug = pendingSlug.orEmpty(),
                 // onSignedIn fires *before* isAuthed flips in the
@@ -137,7 +161,7 @@ fun RootApp(initialDeepLinkUri: Uri? = null) {
         }
 
         // First-launch carousel.
-        !isAuthed && !hasCompletedOnboarding && !carouselDismissed -> {
+        isAuthed == false && hasCompletedOnboarding == false && !carouselDismissed -> {
             WelcomeCarouselScreen(
                 onComplete = {
                     carouselDismissed = true
@@ -150,7 +174,7 @@ fun RootApp(initialDeepLinkUri: Uri? = null) {
         else -> {
             RootNavGraph(
                 navController = navController,
-                startAuthenticated = isAuthed,
+                startAuthenticated = isAuthed == true,
             )
         }
     }
