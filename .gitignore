@@ -20,5 +20,8 @@ GoogleService-Info.plist
 *.xcuserstate
 xcuserdata/
 
+# Android debug/preview artifacts (not part of the APK)
+android/icon_preview.png
+
 # Bot agent profile storage (tracked — needed by GitHub Actions for bot trading)
 # .bot_profiles/
