@@ -85,37 +85,67 @@ actor with any valid Google or Apple ID token can authenticate as any user by
 forging the `sub`. The fix is in `mobile_api.py` and is gated behind a feature
 flag for safe rollout.
 
+**Which clients currently hit `/auth/token`?** As of May 11, 2026:
+- **Android only** for Google: uses Credential Manager's `GetGoogleIdOption`
+  with `serverClientId = GOOGLE_WEB_CLIENT_ID`. The ID token's `aud` is that
+  Web Client ID.
+- **iOS only** for Apple: native `AuthenticationServices` framework. The
+  token's `aud` is the iOS app's bundle ID = `com.apestogether.app`.
+- **iOS does NOT have Google Sign-In** (see
+  `ios/ApesTogetherApp/Services/AuthenticationManager.swift`). Therefore
+  `GOOGLE_IOS_CLIENT_ID` is **not required today**.
+- **Legacy web Google** (`GOOGLE_CLIENT_ID`, the "Stock portfolio web client"
+  from months ago) goes through Flask Authlib in `app.py` → its own callback,
+  not `/auth/token`. Leave the existing value alone.
+
 ```bash
 # Master switch — set to "enforce" (or true/1/on/yes) to activate strict
 # verification. While unset/empty/false, the legacy decode-without-verification
 # path is used (insecure; logs CRITICAL on every request).
 STRICT_OAUTH_VERIFICATION=enforce
 
-# Google ID token audiences (the `aud` claim is matched against this whitelist).
-# iOS tokens have aud = iOS OAuth Client ID (CLIENT_ID in GoogleService-Info.plist).
-GOOGLE_IOS_CLIENT_ID=<value-of-CLIENT_ID-key-in-iOS-GoogleService-Info.plist>
+# Android Google token audience.
+# Set to the same value as GOOGLE_WEB_CLIENT_ID in android/secrets.properties
+# — i.e. the "ApesTogether Web Client" (type: Web application) created in
+# Google Cloud Console a few days ago. Do NOT use the "ApesTogether Android
+# Client" — that one never appears in any token's aud claim; it only
+# authenticates the calling app to Google by package + SHA-256.
+GOOGLE_ANDROID_CLIENT_ID=654567882865-4sklpa6uilpuogl30f1cnl6qqp53scc7.apps.googleusercontent.com
 
-# Android tokens have aud = Web OAuth Client ID (the serverClientId passed to
-# Credential Manager's GetGoogleIdOption builder). Same as GOOGLE_WEB_CLIENT_ID
-# in android/secrets.properties — the "ApesTogether Web Client" you created
-# in Google Cloud Console.
-GOOGLE_ANDROID_CLIENT_ID=<same-as-GOOGLE_WEB_CLIENT_ID-in-android/secrets.properties>
+# Apple Sign In audience — MUST equal the iOS app's bundle ID.
+# Per ios/ApesTogetherApp/GoogleService-Info.plist:BUNDLE_ID, the actual
+# built-app bundle is "com.apestogether.app". Some legacy code paths
+# (iap_validation_service.py default, apple-app-site-association) refer to
+# "com.apestogether.ApesTogether" — that string is wrong for the live app
+# and must NOT be the value here.
+APPLE_BUNDLE_ID=com.apestogether.app
 
-# Apple Sign In audience — already exists for IAP; reused here.
-APPLE_BUNDLE_ID=com.apestogether.ApesTogether
+# OPTIONAL — leave UNSET unless iOS later adds Google Sign-In.
+# GOOGLE_IOS_CLIENT_ID=<future-iOS-OAuth-client-ID>
 ```
 
 **Rollout playbook**:
-1. Deploy the code with `STRICT_OAUTH_VERIFICATION` unset → no behavior change.
-2. Add `GOOGLE_IOS_CLIENT_ID`, `GOOGLE_ANDROID_CLIENT_ID`, `APPLE_BUNDLE_ID` to
-   Vercel project env (Production + Preview).
-3. Set `STRICT_OAUTH_VERIFICATION=enforce` on Vercel and redeploy.
-4. Smoke test: sign in with Google on a real iOS device, then on Android. Sign
-   in with Apple on iOS. Verify `/api/mobile/auth/user` round-trip works after
-   each. If anything fails, set `STRICT_OAUTH_VERIFICATION=` (empty) and
-   redeploy to revert without a code rollback.
-5. Once verified, delete the legacy path from `mobile_api.py` in a follow-up
-   commit.
+1. Code is already deployed with `STRICT_OAUTH_VERIFICATION` unset → no
+   behavior change. The legacy decode-without-verification path is being
+   logged on every request as `CRITICAL` so you can see in Vercel logs that
+   it's still active.
+2. **Verify** `APPLE_BUNDLE_ID` on Vercel is exactly `com.apestogether.app`.
+   If it's `com.apestogether.ApesTogether`, change it to
+   `com.apestogether.app` (this is also the correct value for IAP receipt
+   validation against the live App Store build).
+3. Add `GOOGLE_ANDROID_CLIENT_ID` to Vercel env (Production + Preview).
+4. Set `STRICT_OAUTH_VERIFICATION=enforce` on Vercel and redeploy.
+5. Smoke test on real devices:
+   - Sign in with Google on Android (real device or emulator).
+   - Sign in with Apple on iOS (TestFlight build).
+   - After each, verify `/api/mobile/auth/user` round-trip works (i.e. the
+     app shows your portfolio).
+6. If anything fails, set `STRICT_OAUTH_VERIFICATION=` (empty) and redeploy
+   to revert instantly without a code rollback. Check Vercel logs for
+   `Google ID token rejected by strict verification: <reason>` or
+   `Apple ID token rejected by strict verification: <reason>` to diagnose.
+7. Once verified clean for ~24h, delete the legacy path in `mobile_api.py`
+   in a follow-up commit.
 
 ---
 

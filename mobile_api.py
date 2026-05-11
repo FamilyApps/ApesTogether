@@ -1583,17 +1583,25 @@ def _get_apple_jwk_client():
 def _accepted_google_audiences():
     """Return the set of acceptable `aud` claim values for Google ID tokens.
 
-    iOS apps using GIDSignIn produce ID tokens with aud = iOS OAuth client ID
-    (the CLIENT_ID key in GoogleService-Info.plist).
+    Current state of clients that hit /auth/token with provider=google:
 
-    Android apps using Credential Manager's GetGoogleIdOption produce ID
-    tokens with aud = the *Web* OAuth client ID (the serverClientId), not the
-    Android-package-bound client ID. That same Web Client ID is what lives in
-    `android/secrets.properties` as GOOGLE_WEB_CLIENT_ID.
+      * Android (com.apestogether.app) — uses Credential Manager's
+        GetGoogleIdOption with serverClientId = the *Web* OAuth client ID.
+        The issued ID token has aud = that Web Client ID. That same value
+        is GOOGLE_WEB_CLIENT_ID in android/secrets.properties; on Vercel
+        it must be exposed as GOOGLE_ANDROID_CLIENT_ID.
 
-    We accept the legacy web client ID too (GOOGLE_CLIENT_ID) only because
-    callers in some test flows may use it; the production web Authlib flow
-    does not hit /auth/token, so this is belt-and-suspenders.
+      * iOS — does NOT use Google Sign-In at all (Apple Sign-In only;
+        see ios/ApesTogetherApp/Services/AuthenticationManager.swift).
+        GOOGLE_IOS_CLIENT_ID is therefore unused today. It's still read
+        here so a future iOS Google flow can be enabled by setting one
+        env var without a code change.
+
+      * Legacy web (Flask Authlib in app.py / api/index.py) — uses
+        GOOGLE_CLIENT_ID for the browser OAuth round-trip and posts to
+        Authlib's own callback, NOT /auth/token. So GOOGLE_CLIENT_ID
+        landing here is belt-and-suspenders for any future caller; the
+        production web flow does not depend on it.
     """
     auds = set()
     for env_name in ("GOOGLE_IOS_CLIENT_ID", "GOOGLE_ANDROID_CLIENT_ID", "GOOGLE_CLIENT_ID"):
