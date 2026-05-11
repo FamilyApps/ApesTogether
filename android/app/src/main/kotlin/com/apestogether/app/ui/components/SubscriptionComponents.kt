@@ -94,7 +94,7 @@ private fun PlanChip(
             .clip(RoundedCornerShape(8.dp))
             .background(if (isSelected) PrimaryAccent.copy(alpha = 0.15f) else Color.Transparent)
             .clickable(onClick = onClick)
-            .padding(vertical = 8.dp, horizontal = 12.dp),
+            .padding(vertical = 4.dp, horizontal = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
