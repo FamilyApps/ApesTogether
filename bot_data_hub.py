@@ -606,6 +606,165 @@ def fetch_top_movers():
         return {'gainers': [], 'losers': [], 'most_active': []}
 
 
+# ── Finnhub Health Probe (for admin dashboard) ──────────────────────────────
+#
+# The admin "Market Research Data Sources" card needs to know whether each
+# Finnhub endpoint actually works. The free tier responds 200 to insider
+# transactions and 403 to social-sentiment + recommendation. Rather than
+# guess from the env-var presence, we ping each endpoint with a known ticker
+# (AAPL) and cache the result for 6h to avoid hammering the API.
+#
+# Cache is module-level so it survives within a Vercel warm process. Cold
+# starts will re-probe, which is fine — we expect at most a handful of
+# probe-cycles per day.
+
+_FINNHUB_HEALTH_CACHE = {'data': None, 'expires_at': 0}
+_FINNHUB_HEALTH_TTL_SECONDS = 60 * 60 * 6  # 6h
+
+
+def probe_finnhub_health(force=False):
+    """Ping each Finnhub endpoint with AAPL and return per-endpoint status.
+
+    Returns a dict like:
+        {
+            'last_probe_at': <unix ts>,
+            'cache_ttl_seconds': 21600,
+            'endpoints': {
+                'insider':  {status, http_status, latency_ms, note},
+                'social':   {...},
+                'analyst':  {...},
+            },
+        }
+
+    Status values:
+        'active'      — HTTP 200 and got data back (free-tier compatible)
+        'empty'       — HTTP 200 but empty response (endpoint works, no data for AAPL)
+        'forbidden'   — HTTP 403 (premium endpoint, free tier blocked)
+        'rate_limited' — HTTP 429
+        'error'       — Other HTTP error or network failure
+        'missing_key' — FINNHUB_API_KEY env var not set
+    """
+    from datetime import date as _date, timedelta as _td
+    now = time.time()
+
+    if (not force
+            and _FINNHUB_HEALTH_CACHE['data']
+            and _FINNHUB_HEALTH_CACHE['expires_at'] > now):
+        return _FINNHUB_HEALTH_CACHE['data']
+
+    if not FINNHUB_KEY:
+        result = {
+            'last_probe_at': now,
+            'cache_ttl_seconds': _FINNHUB_HEALTH_TTL_SECONDS,
+            'endpoints': {
+                'insider': {'status': 'missing_key', 'note': 'FINNHUB_API_KEY not set in env'},
+                'social': {'status': 'missing_key', 'note': 'FINNHUB_API_KEY not set in env'},
+                'analyst': {'status': 'missing_key', 'note': 'FINNHUB_API_KEY not set in env'},
+            },
+        }
+        _FINNHUB_HEALTH_CACHE['data'] = result
+        _FINNHUB_HEALTH_CACHE['expires_at'] = now + _FINNHUB_HEALTH_TTL_SECONDS
+        return result
+
+    today = _date.today().isoformat()
+    last_year = (_date.today() - _td(days=365)).isoformat()
+    last_quarter = (_date.today() - _td(days=90)).isoformat()
+
+    endpoints = {
+        # Insider transactions — works on free tier (this is what the bot fleet
+        # actually uses).
+        'insider': (
+            f"https://finnhub.io/api/v1/stock/insider-transactions"
+            f"?symbol=AAPL&from={last_quarter}&to={today}&token={FINNHUB_KEY}"
+        ),
+        # Social sentiment — Reddit/Twitter buzz. Premium endpoint; free tier
+        # returns HTTP 403 with a clear message in the response body.
+        'social': (
+            f"https://finnhub.io/api/v1/stock/social-sentiment"
+            f"?symbol=AAPL&from={last_year}&to={today}&token={FINNHUB_KEY}"
+        ),
+        # Analyst upgrades/downgrades. Also premium-only.
+        'analyst': (
+            f"https://finnhub.io/api/v1/stock/recommendation"
+            f"?symbol=AAPL&token={FINNHUB_KEY}"
+        ),
+    }
+
+    endpoint_results = {}
+    for name, url in endpoints.items():
+        t0 = time.time()
+        try:
+            resp = requests.get(url, timeout=5)
+            latency_ms = round((time.time() - t0) * 1000)
+            if resp.status_code == 200:
+                try:
+                    data = resp.json()
+                except ValueError:
+                    data = None
+                # Finnhub returns either a list or a dict depending on endpoint.
+                # Treat any non-empty response as "active". Empty list/dict means
+                # the endpoint is reachable but has no data for AAPL right now.
+                if isinstance(data, list):
+                    has_data = len(data) > 0
+                elif isinstance(data, dict):
+                    # 'data' key is the payload for some endpoints, otherwise
+                    # any non-empty body counts.
+                    has_data = bool(data) and (
+                        bool(data.get('data')) if 'data' in data else True
+                    )
+                else:
+                    has_data = False
+                endpoint_results[name] = {
+                    'status': 'active' if has_data else 'empty',
+                    'http_status': 200,
+                    'latency_ms': latency_ms,
+                    'note': 'Reachable, returns data on free tier' if has_data
+                            else 'Reachable but empty response for AAPL',
+                }
+            elif resp.status_code == 403:
+                endpoint_results[name] = {
+                    'status': 'forbidden',
+                    'http_status': 403,
+                    'latency_ms': latency_ms,
+                    'note': "Premium endpoint — Finnhub free tier returns 403",
+                }
+            elif resp.status_code == 429:
+                endpoint_results[name] = {
+                    'status': 'rate_limited',
+                    'http_status': 429,
+                    'latency_ms': latency_ms,
+                    'note': 'Rate limited — too many calls in the last minute',
+                }
+            else:
+                endpoint_results[name] = {
+                    'status': 'error',
+                    'http_status': resp.status_code,
+                    'latency_ms': latency_ms,
+                    'note': f"HTTP {resp.status_code}",
+                }
+        except requests.exceptions.Timeout:
+            endpoint_results[name] = {
+                'status': 'error',
+                'latency_ms': round((time.time() - t0) * 1000),
+                'note': 'Timeout (>5s)',
+            }
+        except Exception as e:
+            endpoint_results[name] = {
+                'status': 'error',
+                'latency_ms': round((time.time() - t0) * 1000),
+                'note': str(e)[:120],
+            }
+
+    result = {
+        'last_probe_at': now,
+        'cache_ttl_seconds': _FINNHUB_HEALTH_TTL_SECONDS,
+        'endpoints': endpoint_results,
+    }
+    _FINNHUB_HEALTH_CACHE['data'] = result
+    _FINNHUB_HEALTH_CACHE['expires_at'] = now + _FINNHUB_HEALTH_TTL_SECONDS
+    return result
+
+
 # ── Finnhub Social Sentiment ────────────────────────────────────────────────
 
 def fetch_social_sentiment(tickers, max_tickers=80):

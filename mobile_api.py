@@ -6309,14 +6309,65 @@ def bot_cron_health():
                 'note': 'Primary price + OHLCV source; no per-call tracking',
             })
             
-            # Finnhub
-            finnhub_key = os.environ.get('FINNHUB_API_KEY', '')
-            data_sources.append({
-                'name': 'Finnhub (social + analyst)', 'type': 'finnhub',
-                'calls_24h': None,
-                'status': 'configured' if finnhub_key else 'missing_key',
-                'note': 'Free tier: insider data only. Premium: social sentiment + analyst upgrades.' if finnhub_key else 'FINNHUB_API_KEY not set in env vars',
-            })
+            # Finnhub — actually probe each endpoint instead of just checking
+            # the env var. Cached for 6h so we don't hammer the API on every
+            # admin page load. Each endpoint becomes its own card row so the
+            # admin can see at a glance which signals are live and which are
+            # blocked by the free-tier paywall.
+            try:
+                from bot_data_hub import probe_finnhub_health
+                health = probe_finnhub_health()
+                ep = (health or {}).get('endpoints', {}) or {}
+                last_probe_iso = None
+                if health and health.get('last_probe_at'):
+                    try:
+                        last_probe_iso = datetime.utcfromtimestamp(health['last_probe_at']).isoformat() + 'Z'
+                    except Exception:
+                        last_probe_iso = None
+
+                # Map probe statuses to the card's status vocabulary.
+                # 'active' / 'empty' → active (endpoint reachable + working)
+                # 'forbidden' → error (paywalled — clearly not working for us)
+                # 'rate_limited' / 'error' → error
+                # 'missing_key' → missing_key
+                def _probe_card_status(probe_status):
+                    if probe_status in ('active', 'empty'):
+                        return 'active'
+                    if probe_status == 'missing_key':
+                        return 'missing_key'
+                    return 'error'
+
+                def _ep_entry(label, probe_key):
+                    p = ep.get(probe_key, {}) or {}
+                    note_parts = []
+                    if p.get('note'):
+                        note_parts.append(p['note'])
+                    if p.get('latency_ms') is not None:
+                        note_parts.append(f"{p['latency_ms']}ms")
+                    if last_probe_iso:
+                        note_parts.append(f"probed {last_probe_iso}")
+                    return {
+                        'name': label,
+                        'type': f'finnhub_{probe_key}',
+                        'calls_24h': None,
+                        'status': _probe_card_status(p.get('status', 'unknown')),
+                        'http_status': p.get('http_status'),
+                        'note': ' · '.join(note_parts) if note_parts else None,
+                    }
+
+                data_sources.append(_ep_entry('Finnhub: Insider Transactions', 'insider'))
+                data_sources.append(_ep_entry('Finnhub: Social Sentiment',     'social'))
+                data_sources.append(_ep_entry('Finnhub: Analyst Recommendations', 'analyst'))
+            except Exception as fh_err:
+                logger.warning(f"Finnhub health probe failed: {fh_err}")
+                # Fall back to the old env-var check so the card isn't empty.
+                finnhub_key = os.environ.get('FINNHUB_API_KEY', '')
+                data_sources.append({
+                    'name': 'Finnhub', 'type': 'finnhub',
+                    'calls_24h': None,
+                    'status': 'configured' if finnhub_key else 'missing_key',
+                    'note': f'Probe failed: {fh_err}' if finnhub_key else 'FINNHUB_API_KEY not set in env vars',
+                })
         except Exception as dq_err:
             logger.warning(f"Data quality check error: {dq_err}")
         
