@@ -5422,10 +5422,11 @@ def market_close_cron():
     """Market close cron job endpoint - creates EOD snapshots and updates leaderboards
     
     Pipeline phases:
+      0.5  – Dividend detection (must run BEFORE snapshots so today's dividends
+             are reflected in each user's cash_proceeds at snapshot-write time)
       1    – Portfolio snapshots
       1.5  – S&P 500 close data
       1.75 – Commit core data
-      1.8  – Dividend detection
       2    – Leaderboard JSON cache
       2.25 – Portfolio stats
       2.4  – Commit cache data
@@ -5483,6 +5484,42 @@ def market_close_cron():
         
         # ATOMIC MARKET CLOSE PIPELINE - All phases must succeed or all rollback
         try:
+            # PHASE 0.5: Automatic Dividend Detection (must run BEFORE snapshots)
+            # Check all held tickers for ex-dividend dates and credit users.
+            # This MUST happen before Phase 1 so that the snapshot's cash_proceeds
+            # field reflects today's dividends. calculate_cash_proceeds_as_of_date()
+            # in Phase 1 replays from the Transaction table, so dividend rows must
+            # already exist (committed or session-pending) when snapshots are written.
+            try:
+                logger.info("PHASE 0.5: Checking for dividends (pre-snapshot)...")
+                results['pipeline_phases'].append('dividends_started')
+                
+                from dividend_tracker import process_dividends_for_date
+                div_results = process_dividends_for_date(db, target_date=today_et)
+                
+                results['dividends_found'] = div_results.get('dividends_found', 0)
+                results['dividends_recorded'] = div_results.get('dividends_recorded', 0)
+                results['dividend_total_amount'] = div_results.get('total_amount', 0.0)
+                
+                if div_results.get('dividends_recorded', 0) > 0:
+                    db.session.commit()
+                    logger.info(f"✅ PHASE 0.5 Complete: {div_results['dividends_recorded']} dividends recorded (${div_results['total_amount']:.2f} total) BEFORE snapshots")
+                else:
+                    logger.info(f"PHASE 0.5 Complete: No dividends for {today_et}")
+                
+                results['pipeline_phases'].append('dividends_completed')
+                
+            except Exception as e:
+                logger.warning(f"PHASE 0.5 WARNING: Dividend check failed (non-critical): {e}")
+                results['errors'].append(f"Dividend check failed: {str(e)}")
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+                # Non-critical — continue with snapshot writes (snapshots will be
+                # missing today's dividends, but the next cron run / drift detector
+                # will catch any drift on the user.cash_proceeds front)
+            
             # PHASE 1: Create/Update Portfolio Snapshots
             logger.info("PHASE 1: Creating portfolio snapshots...")
             results['pipeline_phases'].append('snapshots_started')
@@ -5647,35 +5684,9 @@ def market_close_cron():
                     'results': results
                 }), 500
             
-            # PHASE 1.8: Automatic Dividend Detection
-            # Check all held tickers for ex-dividend dates and credit users
-            try:
-                logger.info("PHASE 1.8: Checking for dividends...")
-                results['pipeline_phases'].append('dividends_started')
-                
-                from dividend_tracker import process_dividends_for_date
-                div_results = process_dividends_for_date(db, target_date=today_et)
-                
-                results['dividends_found'] = div_results.get('dividends_found', 0)
-                results['dividends_recorded'] = div_results.get('dividends_recorded', 0)
-                results['dividend_total_amount'] = div_results.get('total_amount', 0.0)
-                
-                if div_results.get('dividends_recorded', 0) > 0:
-                    db.session.commit()
-                    logger.info(f"✅ PHASE 1.8 Complete: {div_results['dividends_recorded']} dividends recorded (${div_results['total_amount']:.2f} total)")
-                else:
-                    logger.info(f"PHASE 1.8 Complete: No dividends for {today_et}")
-                
-                results['pipeline_phases'].append('dividends_completed')
-                
-            except Exception as e:
-                logger.warning(f"PHASE 1.8 WARNING: Dividend check failed (non-critical): {e}")
-                results['errors'].append(f"Dividend check failed: {str(e)}")
-                try:
-                    db.session.rollback()
-                except Exception:
-                    pass
-                # Non-critical — continue with leaderboard updates
+            # PHASE 1.8: (moved to PHASE 0.5 — see top of pipeline)
+            # Dividend detection now runs BEFORE snapshot creation so today's
+            # dividends are reflected in each user's snapshot cash_proceeds.
             
             # PHASE 2: Update Leaderboard JSON Cache + Portfolio Stats
             # Charts are now generated ON-DEMAND (not pre-generated here)
