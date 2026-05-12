@@ -37,7 +37,9 @@ Things to verify when the market is open and the bot pipeline is running. Hit ea
 - [x] **VERIFIED May 12**: bobford00 has 2 active `device_token` rows — `id=2` (iOS, fresh FCM token after Build 34 refresh, `updated_at=2026-05-12T16:29`) and `id=3` (Android, `created_at=2026-05-10`). Test push delivered to both.
 - [ ] Investigate panther2585 ~20% drop at end of 1M chart — see Monday checklist for diagnostic URL
 - [ ] Audit bobford00 1D/1W/1M performance — no recent trades so should track held stocks only
-- [ ] Audit other `mobile_api.py` admin endpoints for missing auth — I added auth to only one in this session; others may be similarly exposed
+- [ ] **Audit other `mobile_api.py` admin endpoints for missing auth** — I added auth to only one in past sessions; others may be similarly exposed. This is a pre-launch security blocker: any `@mobile_api.route('/admin/...')` without `@require_admin_2fa`, `@require_cron_secret`, or `@require_admin_or_cron` is publicly exploitable.
+- [ ] **POST-LAUNCH CLEANUP**: Delete the OLD Firebase iOS app entry (bundle `com.apestogether.app`) from Firebase Console → Project Settings → Your apps. It still exists with its APNs key attached but is no longer referenced by any plist shipped to TestFlight (Build 34+ uses the new entry `com.apestogether.ApesTogether`). Cosmetic / hygiene; not blocking launch.
+- [ ] **POST-LAUNCH CLEANUP**: Add a "Test Push" button to the admin panel dashboard (`/admin-panel`) that wraps `/api/mobile/admin/test-push` so we don't have to paste JS into the browser console for future push diagnostics. Trivial UI work (1 fetch + 1 textarea for the JSON response).
 - [x] **Fixed stale Firebase bundle ID in iOS `GoogleService-Info.plist`** ✅ **SHIPPED + VERIFIED May 12 (Build 34).** Root cause confirmed: Builds 1-33 shipped with a plist whose `BUNDLE_ID=com.apestogether.app`, while the actual app bundle is `com.apestogether.ApesTogether`. Fix: added a second iOS app entry to Firebase project `apestogether-2c749` with the correct bundle ID, uploaded APNs Auth Key `A6FBSX239G` to it (team-wide key, also still serving the old entry), downloaded the new `GoogleService-Info.plist` with new `GOOGLE_APP_ID=1:1096138595577:ios:ef605a913d1d7aa3b75628`, replaced the file in `ios/ApesTogetherApp/`, archived Build 34, installed on bobford00's iPhone. Test push from `/api/mobile/admin/test-push` delivered successfully with FCM `message_id` returned. Push delivery on iOS now works for the first time since the app's existence. **Post-launch cleanup tasks** (deferred, low priority): (a) delete the OLD Firebase iOS app entry `com.apestogether.app` from Firebase Console; (b) resolve Android Firebase SHA-1 conflict warning (same SHA-1+package combo registered in two GCP projects — Firebase auto-generated client vs. manually created "ApesTogether Android Client" in legacy GCP project); (c) keep the `/admin/test-push` endpoint as a permanent diagnostic tool.
 - [x] **🚨 SECURITY (pre-launch blocker): Verify Google/Apple ID tokens properly.** ✅ **SHIPPED + VERIFIED May 11.** `mobile_api.py` now uses PyJWT's `PyJWKClient` (`_verify_google_id_token`, `_verify_apple_id_token`) to verify signature + issuer + audience + expiration against Google's and Apple's JWKS. Vercel env vars set: `STRICT_OAUTH_VERIFICATION=enforce`, `GOOGLE_ANDROID_CLIENT_ID=654567882865-4sklpa6uilpuogl30f1cnl6qqp53scc7.apps.googleusercontent.com`, `APPLE_BUNDLE_ID=com.apestogether.ApesTogether`. Smoke-tested May 11 ~9:30pm ET — Apple Sign-In works on iPhone (TestFlight build), Google Sign-In works on Android Studio Pixel 7 emulator (API 34, Google Play Store services). Audience-mismatch logs now surface the actual `aud` for fast diagnosis. **Follow-up (low priority, code hygiene only)**: delete the legacy decode-without-verification path + the `STRICT_OAUTH_VERIFICATION` shim from `mobile_api.py` once 24h of clean operation passes.
 - [ ] Ping cron `*/4 * * * *` → `/api/health` to prevent Vercel cold starts (from `IMPLEMENTATION_CHECKLIST.md:69-73`) — status unclear, verify if deployed
@@ -81,6 +83,7 @@ Things to verify when the market is open and the bot pipeline is running. Hit ea
 - [x] **Google Cloud OAuth Web client** created ("ApesTogether Web Client") + Android client ("ApesTogether Android Client") with package `com.apestogether.app` + debug SHA-1. Web Client ID needs to be pasted into `android/secrets.properties`. Existing `GOOGLE_CLIENT_ID` Vercel env var ("Stock portfolio web client") is for the web app's Authlib redirect flow — leave it alone.
 - [x] **Gradle wrapper generated** by Android Studio Panda on first sync (May 10).
 - [ ] **Replace assetlinks.json placeholders**: `public/.well-known/assetlinks.json` has `REPLACE_WITH_RELEASE_SIGNING_CERT_SHA256` + `REPLACE_WITH_PLAY_APP_SIGNING_CERT_SHA256`. Get debug SHA-256 from `gradle :app:signingReport` (already done; save it), release SHA-256 comes from Play Console once the app listing is created and a release artifact is uploaded.
+- [ ] **POST-LAUNCH CLEANUP**: Resolve the Android Firebase SHA-1 conflict warning. Same SHA-1 + `com.apestogether.app` package is registered in two GCP projects (Firebase auto-generated Android OAuth client + manually created "ApesTogether Android Client" in a legacy GCP project). Doesn't block today's work — Android sign-in + FCM are already working — but worth tidying up before launch so the Firebase Console doesn't keep flashing the warning.
 
 ### Screens still to port from iOS
 
@@ -158,6 +161,11 @@ This section only tracks **deferred / dropped items**:
 - [ ] Xero — ghost subscriber tracking matches expected month-end payouts
 - [ ] Vercel env: `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` for Google Play purchase validation (read by `iap_validation_service.py`). Generate a service account in Google Cloud Console with Play Developer API access, paste the JSON key contents.
 
+## I. Local Dev Hygiene (Mac)
+
+- [ ] Delete the stale clone at `/Users/macbookair/CascadeProjects/stock-portfolio-app` on the Mac. It predates the `ios/` folder being added to the repo and was the source of confusion on 2026-05-12 when `git pull` was attempted there. The active iOS-development clone is `/Users/macbookair/Documents/ApesTogether/`.
+- [ ] Commit the build-number bumps + `xcshareddata/` schemes that live as uncommitted edits on the Mac's iOS clone. Doesn't matter functionally but it'd clean up `git status` and make future iOS Build #s reproducible from Windows.
+
 ---
 
 ## Session cadence
@@ -177,6 +185,12 @@ At the end of each session, the assistant should:
 ---
 
 ## Last updated
+
+**2026-05-12 (afternoon) — session 5 ended with:**
+- **FCM iOS push notifications fixed and verified end-to-end.** Root cause: shipped builds 1-33 had a `GoogleService-Info.plist` with `BUNDLE_ID=com.apestogether.app` while the actual app bundle is `com.apestogether.ApesTogether`. Fix: created a second Firebase iOS app entry with the correct bundle, uploaded existing APNs Auth Key `A6FBSX239G` to it (team-wide; same `.p8` rescued from `/Users/macbookair/Downloads/`), downloaded new plist (new `GOOGLE_APP_ID=1:1096138595577:ios:ef605a913d1d7aa3b75628`), swapped into `ios/ApesTogetherApp/`, archived Build 34, installed on iPhone, verified `device_token.id=2` refreshed its token and a test push was delivered.
+- **Added `/api/mobile/admin/test-push` diagnostic endpoint** (commit `7a86dc0`) protected by `@require_admin_2fa`. Reports per-token success/failure with FCM `message_id` on success or error reason on failure. Worth keeping in the codebase permanently as cheap insurance against future push regressions.
+- **Saved Mac path layout to permanent memory** so future sessions don't fish for paths. Active iOS clone is `/Users/macbookair/Documents/ApesTogether/`; LaborOfLove at `/Users/macbookair/Developer/LaborOfLove/LOL_New_Design_2020/`. Apple Team `M8R8YVW472`. APNs key `A6FBSX239G` (ApesTogether). LaborOfLove APNs `53T7S48FGU`. SIWA key `Y7L9R28W87`.
+- **Pending**: smoke test of push delivery on next real Public.com trade email (passive — happens whenever the next bot trade fires). Vercel logs will show `notifications: {push_sent: N}` in the `/api/mobile/admin/bot/email-trade` response.
 
 **2026-05-11 (afternoon) — session 4 ended with:**
 - **Android Section C "Screens still to port from iOS" is functionally complete.** All twelve iOS screens / flows / integrations are now on Android with parity: Leaderboard (filter pills + sparklines), TopInfluencers, MyPortfolio, Subscriptions, PortfolioDetail, PerformanceChartView (Vico), Play Billing E2E, full onboarding (Welcome / Referral / EarnNudge / AddStocks), CompactPlanToggle, and the app icon with themed-icons monochrome silhouette.
