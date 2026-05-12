@@ -20,8 +20,57 @@ from models import User, Stock, Transaction, PortfolioSnapshot
 from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
 import logging
+import os
 
 logger = logging.getLogger(__name__)
+
+
+def _find_admin_user_for_persistence():
+    """Locate the User row to attach admin-persisted JSON (e.g., last_drift_check).
+
+    The naive pattern `User.query.filter_by(email=ADMIN_EMAIL).first()` was
+    silently failing for the synchronous admin path: if the DB record's email
+    casing/whitespace differs from the env var, lookup returns None and the
+    persistence block is skipped with no error. That's why the admin panel
+    Drift card kept showing 'Never run' even after the admin ran a manual
+    drift-check — the auth passed but the persistence silently no-op'd.
+
+    This helper tries multiple strategies in order:
+      1. `current_user` from Flask-Login (most reliable for browser-driven
+         admin-session requests — guaranteed same record that auth verified).
+      2. Case-insensitive email match against ADMIN_EMAIL env var (fallback
+         for cron-driven requests where there is no Flask-Login context).
+      3. Exact env-var match (legacy behavior, kept as last resort).
+
+    Returns the User row or None. Logs at WARNING level when all strategies
+    miss so the failure is visible in Vercel logs instead of being silent.
+    """
+    # Path 1: current_user (works for synchronous admin sessions)
+    try:
+        if current_user and current_user.is_authenticated and getattr(current_user, 'id', None):
+            return current_user._get_current_object() if hasattr(current_user, '_get_current_object') else current_user
+    except Exception:
+        pass  # Falls through to env-var lookup
+
+    admin_email = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
+
+    # Path 2: case-insensitive match (handles DB-vs-env casing drift)
+    from sqlalchemy import func
+    admin = User.query.filter(func.lower(User.email) == admin_email.lower()).first()
+    if admin:
+        return admin
+
+    # Path 3: legacy exact match
+    admin = User.query.filter_by(email=admin_email).first()
+    if admin:
+        return admin
+
+    logger.warning(
+        f"_find_admin_user_for_persistence: no User row matches ADMIN_EMAIL "
+        f"({admin_email!r}, case-insensitive). last_drift_check / "
+        f"last_snapshot_audit will not be persisted."
+    )
+    return None
 
 def register_cash_tracking_routes(app, db):
     """Register all cash tracking admin routes"""
@@ -1630,10 +1679,12 @@ def register_cash_tracking_routes(app, db):
 
             # ---- Persist last drift-check result on admin user (no SMTP required) ----
             # This lets the admin browse the result later via the dedicated endpoint
-            # below, even if SMTP isn't configured.
+            # below, even if SMTP isn't configured. See _find_admin_user_for_persistence
+            # docstring for the multi-strategy lookup that fixes the previously-silent
+            # 'Never run' bug on the admin panel Drift card.
             try:
                 from sqlalchemy.orm.attributes import flag_modified
-                admin = User.query.filter_by(email=_os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')).first()
+                admin = _find_admin_user_for_persistence()
                 if admin:
                     extra = dict(admin.extra_data or {})
                     extra['last_drift_check'] = {
@@ -1648,9 +1699,15 @@ def register_cash_tracking_routes(app, db):
                     flag_modified(admin, 'extra_data')
                     db.session.commit()
                     response['persisted'] = True
+                    response['persisted_user_id'] = admin.id
+                else:
+                    # _find_admin_user_for_persistence already logged the miss.
+                    response['persisted'] = False
+                    response['persisted_error'] = 'admin_user_not_found'
             except Exception as pe:
-                logger.warning(f"Could not persist drift-check result: {pe}")
+                logger.warning(f"Could not persist drift-check result: {pe}", exc_info=True)
                 response['persisted'] = False
+                response['persisted_error'] = str(pe)
                 try:
                     db.session.rollback()
                 except Exception:
@@ -1915,13 +1972,18 @@ def register_cash_tracking_routes(app, db):
         The weekly cron writes its result to admin.extra_data['last_drift_check'].
         This endpoint reads it back so you can see the drift status without
         needing SMTP configured. The 'prompt' field is paste-ready for me.
+
+        Uses _find_admin_user_for_persistence so the reader looks at the same
+        User row the writer wrote to. Previously a casing mismatch between the
+        DB and ADMIN_EMAIL could make this endpoint report 'never run' even
+        after a successful drift-check run.
         """
-        import os as _os
-        admin = User.query.filter_by(
-            email=_os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
-        ).first()
+        admin = _find_admin_user_for_persistence()
         if not admin:
-            return jsonify({'error': 'admin user not found'}), 404
+            return jsonify({
+                'error': 'admin user not found',
+                'hint': 'No User row matches the ADMIN_EMAIL env var. Check ADMIN_EMAIL on Vercel matches the admin User.email exactly (case-sensitive lookup falls back to case-insensitive).',
+            }), 404
         result = (admin.extra_data or {}).get('last_drift_check')
         if not result:
             return jsonify({

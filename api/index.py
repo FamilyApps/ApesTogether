@@ -2531,12 +2531,17 @@ def admin_audit_snapshot_max_cash_drift():
 
 
 @app.route('/api/cron/snapshot-audit', methods=['GET', 'POST'])
+@app.route('/admin/cash-tracking/snapshot-audit', methods=['GET', 'POST'])
 def cron_snapshot_audit():
     """
-    Daily cron endpoint that detects PortfolioSnapshot rows whose cash_proceeds
-    or max_cash_deployed disagree with what the EOD market-close cron should
-    have written. Persists the result to admin.extra_data['last_snapshot_audit']
-    and emails ADMIN_NOTIFY_EMAIL if any drift is found.
+    Detects PortfolioSnapshot rows whose cash_proceeds or max_cash_deployed
+    disagree with what the EOD market-close cron should have written.
+    Persists the result to admin.extra_data['last_snapshot_audit'] and emails
+    ADMIN_NOTIFY_EMAIL if any drift is found.
+
+    Dual-auth (matches the drift-check endpoint's pattern):
+      - /api/cron/snapshot-audit       → CRON_SECRET bearer token (Vercel cron)
+      - /admin/cash-tracking/snapshot-audit → admin session (Run-now button)
 
     Uses the same 20:05 UTC effective-date cutoff as the EOD cron itself, so
     after-close trades that the cron physically didn't see don't get flagged
@@ -2545,9 +2550,32 @@ def cron_snapshot_audit():
     Schedule: daily at 21:00 UTC (17:00 EDT / 16:00 EST), well after the
     market-close cron at 20:05 UTC has finished writing snapshots.
     """
-    auth_error = verify_cron_request()
-    if auth_error:
-        return auth_error
+    # Dual-auth: cron path requires bearer token; admin path requires admin session.
+    is_admin_path = request.path.startswith('/admin/')
+    if is_admin_path:
+        admin_email = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
+        session_email = session.get('email', '')
+        # Fall back to current_user.email when session.email is empty
+        # (Flask-Login OAuth flows sometimes don't populate session['email']).
+        if not session_email:
+            try:
+                from flask_login import current_user as _cu
+                if _cu and _cu.is_authenticated:
+                    session_email = getattr(_cu, 'email', '') or ''
+            except Exception:
+                session_email = ''
+        if session_email.lower() != admin_email.lower():
+            return jsonify({'error': 'admin_access_required'}), 403
+        # Also require 2FA flag (same posture as @admin_required)
+        if not session.get('admin_2fa_verified'):
+            return jsonify({
+                'error': '2fa_required',
+                'message': 'Complete 2FA at /admin-panel before triggering snapshot audit.',
+            }), 401
+    else:
+        auth_error = verify_cron_request()
+        if auth_error:
+            return auth_error
 
     from models import db, User, Transaction, PortfolioSnapshot
     from datetime import time as _dt_time, timedelta as _td
@@ -2710,10 +2738,15 @@ def cron_snapshot_audit():
         'prompt': prompt,
     }
 
-    # Persist to admin user
+    # Persist to admin user. Use the shared lookup helper (current_user →
+    # case-insensitive email → exact match) so the synchronous admin-path
+    # "Run-now" button writes to the same User row the reader endpoint will
+    # later read from — fixing the previously-silent 'Never run' bug on the
+    # admin Snapshot Drift card.
     try:
         from sqlalchemy.orm.attributes import flag_modified
-        admin = User.query.filter_by(email=os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')).first()
+        from admin_cash_tracking import _find_admin_user_for_persistence
+        admin = _find_admin_user_for_persistence()
         if admin:
             extra = dict(admin.extra_data or {})
             extra['last_snapshot_audit'] = {
@@ -2729,9 +2762,14 @@ def cron_snapshot_audit():
             flag_modified(admin, 'extra_data')
             db.session.commit()
             response['persisted'] = True
+            response['persisted_user_id'] = admin.id
+        else:
+            response['persisted'] = False
+            response['persisted_error'] = 'admin_user_not_found'
     except Exception as pe:
-        logger.warning(f"Could not persist snapshot-audit result: {pe}")
+        logger.warning(f"Could not persist snapshot-audit result: {pe}", exc_info=True)
         response['persisted'] = False
+        response['persisted_error'] = str(pe)
         try:
             db.session.rollback()
         except Exception:
@@ -2800,11 +2838,15 @@ def cron_snapshot_audit():
 @app.route('/admin/last-snapshot-audit')
 @admin_required
 def admin_last_snapshot_audit():
-    """Return the most recently persisted snapshot-audit cron result."""
-    from models import User
-    admin = User.query.filter_by(
-        email=os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
-    ).first()
+    """Return the most recently persisted snapshot-audit cron result.
+
+    Uses the shared admin-lookup helper so this reader looks at the same User
+    row the writer wrote to (current_user → case-insensitive email → exact).
+    Previously a casing mismatch between the DB and ADMIN_EMAIL could make
+    this endpoint silently return never_run after a successful audit run.
+    """
+    from admin_cash_tracking import _find_admin_user_for_persistence
+    admin = _find_admin_user_for_persistence()
     if not admin:
         return jsonify({'error': 'admin user not found'}), 404
     result = (admin.extra_data or {}).get('last_snapshot_audit')
