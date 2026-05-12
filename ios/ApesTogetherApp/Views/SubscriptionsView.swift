@@ -1,9 +1,27 @@
 import SwiftUI
 import Combine
+import UserNotifications
 
 struct SubscriptionsView: View {
     @StateObject private var viewModel = SubscriptionsViewModel()
     @State private var showSettings = false
+
+    /// Clear the app icon badge and the system-level delivered notifications
+    /// list. Called when the user opens the Subscriptions tab, since the Trade
+    /// Alerts list at the bottom of this view is the in-app destination that
+    /// surfaces those notifications. After viewing them here, the iOS home-
+    /// screen badge should reset to zero (matches user expectations and is
+    /// standard behavior for inbox-style screens).
+    private func clearNotificationBadge() {
+        Task {
+            // iOS 16+ unified API (deployment target is 16.0).
+            try? await UNUserNotificationCenter.current().setBadgeCount(0)
+        }
+        // Also remove delivered notifications from Notification Center so the
+        // user doesn't see a stale pile when they next swipe down. Pending /
+        // scheduled notifications are NOT touched.
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+    }
     
     var body: some View {
         NavigationView {
@@ -44,6 +62,13 @@ struct SubscriptionsView: View {
                 Text("You'll lose access to this trader's portfolio and trade alerts. You can resubscribe anytime.")
             }
             .onAppear {
+                // Clear the iOS home-screen badge each time the user opens
+                // this tab. The Trade Alerts list below is the in-app
+                // surface for the notifications that incremented the badge,
+                // so the badge should reset on every view (not just the
+                // first one). See clearNotificationBadge() docs above.
+                clearNotificationBadge()
+
                 if viewModel.subscriptions.isEmpty && viewModel.subscribers.isEmpty {
                     Task { await viewModel.loadAll() }
                 }
