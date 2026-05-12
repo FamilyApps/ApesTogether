@@ -1638,7 +1638,18 @@ def _verify_google_id_token(id_token_str):
     except pyjwt.ExpiredSignatureError:
         raise ValueError("google_token_expired")
     except pyjwt.InvalidAudienceError:
-        raise ValueError("google_token_audience_mismatch")
+        # Surface the actual aud the token carried so we can diagnose without
+        # a redeploy. The token signature was already verified above, so the
+        # aud value is trusted (not attacker-controlled).
+        try:
+            unverified = pyjwt.decode(id_token_str, options={"verify_signature": False})
+            actual_aud = unverified.get("aud")
+        except Exception:
+            actual_aud = "<unparseable>"
+        raise ValueError(
+            f"google_token_audience_mismatch: token_aud={actual_aud!r} "
+            f"expected_one_of={sorted(audiences)}"
+        )
     except pyjwt.InvalidTokenError as e:
         raise ValueError(f"google_token_invalid: {e}")
 
@@ -1680,7 +1691,17 @@ def _verify_apple_id_token(id_token_str):
     except pyjwt.ExpiredSignatureError:
         raise ValueError("apple_token_expired")
     except pyjwt.InvalidAudienceError:
-        raise ValueError("apple_token_audience_mismatch")
+        # Surface the actual aud so we can diagnose APPLE_BUNDLE_ID misconfigs
+        # without redeploying. Signature is already verified at this point.
+        try:
+            unverified = pyjwt.decode(id_token_str, options={"verify_signature": False})
+            actual_aud = unverified.get("aud")
+        except Exception:
+            actual_aud = "<unparseable>"
+        raise ValueError(
+            f"apple_token_audience_mismatch: token_aud={actual_aud!r} "
+            f"expected={expected_aud!r}"
+        )
     except pyjwt.InvalidIssuerError:
         raise ValueError("apple_token_bad_issuer")
     except pyjwt.InvalidTokenError as e:

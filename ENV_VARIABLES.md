@@ -113,12 +113,15 @@ STRICT_OAUTH_VERIFICATION=enforce
 GOOGLE_ANDROID_CLIENT_ID=654567882865-4sklpa6uilpuogl30f1cnl6qqp53scc7.apps.googleusercontent.com
 
 # Apple Sign In audience — MUST equal the iOS app's bundle ID.
-# Per ios/ApesTogetherApp/GoogleService-Info.plist:BUNDLE_ID, the actual
-# built-app bundle is "com.apestogether.app". Some legacy code paths
-# (iap_validation_service.py default, apple-app-site-association) refer to
-# "com.apestogether.ApesTogether" — that string is wrong for the live app
-# and must NOT be the value here.
-APPLE_BUNDLE_ID=com.apestogether.app
+# The source of truth is PRODUCT_BUNDLE_IDENTIFIER in
+# ios/ApesTogether/ApesTogether.xcodeproj/project.pbxproj, which is
+# "com.apestogether.ApesTogether". This is also what the AASA file and
+# iap_validation_service.py default to.
+# NOTE: ios/ApesTogetherApp/GoogleService-Info.plist:BUNDLE_ID says
+# "com.apestogether.app" — that file is STALE and a separate bug (likely
+# silently breaking Firebase Cloud Messaging push delivery). Do not use it
+# as a reference for the bundle ID.
+APPLE_BUNDLE_ID=com.apestogether.ApesTogether
 
 # OPTIONAL — leave UNSET unless iOS later adds Google Sign-In.
 # GOOGLE_IOS_CLIENT_ID=<future-iOS-OAuth-client-ID>
@@ -129,10 +132,10 @@ APPLE_BUNDLE_ID=com.apestogether.app
    behavior change. The legacy decode-without-verification path is being
    logged on every request as `CRITICAL` so you can see in Vercel logs that
    it's still active.
-2. **Verify** `APPLE_BUNDLE_ID` on Vercel is exactly `com.apestogether.app`.
-   If it's `com.apestogether.ApesTogether`, change it to
-   `com.apestogether.app` (this is also the correct value for IAP receipt
-   validation against the live App Store build).
+2. **Verify** `APPLE_BUNDLE_ID` on Vercel is exactly
+   `com.apestogether.ApesTogether` (matches the live TestFlight build's
+   PRODUCT_BUNDLE_IDENTIFIER). If it's `com.apestogether.app`, change it
+   back — that's the stale GoogleService-Info.plist value and is wrong.
 3. Add `GOOGLE_ANDROID_CLIENT_ID` to Vercel env (Production + Preview).
 4. Set `STRICT_OAUTH_VERIFICATION=enforce` on Vercel and redeploy.
 5. Smoke test on real devices:
