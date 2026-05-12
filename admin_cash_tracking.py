@@ -26,29 +26,44 @@ logger = logging.getLogger(__name__)
 
 
 def _find_admin_user_for_persistence():
-    """Locate the User row to attach admin-persisted JSON (e.g., last_drift_check).
+    """Locate the models.User row to attach admin-persisted JSON
+    (last_drift_check, last_snapshot_audit) to.
 
-    The naive pattern `User.query.filter_by(email=ADMIN_EMAIL).first()` was
-    silently failing for the synchronous admin path: if the DB record's email
-    casing/whitespace differs from the env var, lookup returns None and the
-    persistence block is skipped with no error. That's why the admin panel
-    Drift card kept showing 'Never run' even after the admin ran a manual
-    drift-check — the auth passed but the persistence silently no-op'd.
+    Why this helper exists:
+      The codebase has THREE different `User` classes mapped to the same
+      `"user"` DB table — `models.User`, `app.User`, and `api.index.User`.
+      Only `models.User` exposes the `extra_data` JSON column (mapped to the
+      `metadata` SQL column). `flask_login.current_user` is hydrated by the
+      LoginManager.user_loader, which on the Vercel handler returns an
+      `api.index.User` instance that does NOT have `extra_data`. Writing
+      `admin.extra_data = ...` against that instance raises AttributeError
+      and the persistence block aborts — which is exactly what produced
+      `persisted_error: "'User' object has no attribute 'extra_data'"` on
+      the drift-check endpoint and a 500 on `last-drift-check`.
 
-    This helper tries multiple strategies in order:
-      1. `current_user` from Flask-Login (most reliable for browser-driven
-         admin-session requests — guaranteed same record that auth verified).
-      2. Case-insensitive email match against ADMIN_EMAIL env var (fallback
-         for cron-driven requests where there is no Flask-Login context).
+    Strategy (in order):
+      1. Take `current_user.id` and re-query `models.User` so we get a row
+         that actually has the `extra_data` column. Works for browser-driven
+         admin-session requests (guaranteed same record auth verified).
+      2. Case-insensitive email match against ADMIN_EMAIL env var. Used by
+         cron-driven requests where there is no Flask-Login context.
       3. Exact env-var match (legacy behavior, kept as last resort).
 
-    Returns the User row or None. Logs at WARNING level when all strategies
-    miss so the failure is visible in Vercel logs instead of being silent.
+    All returns are validated with `hasattr(admin, 'extra_data')` so we
+    never hand back a User-shaped object that can't actually be persisted.
+
+    Returns the row or None. Logs WARNING on full miss so the failure is
+    visible in Vercel logs instead of being silent.
     """
-    # Path 1: current_user (works for synchronous admin sessions)
+    # Path 1: current_user.id → models.User (NOT current_user directly —
+    # the Flask-Login proxy may resolve to api.index.User which lacks extra_data).
     try:
-        if current_user and current_user.is_authenticated and getattr(current_user, 'id', None):
-            return current_user._get_current_object() if hasattr(current_user, '_get_current_object') else current_user
+        if current_user and current_user.is_authenticated:
+            cur_id = getattr(current_user, 'id', None)
+            if cur_id:
+                admin = User.query.get(cur_id)
+                if admin is not None and hasattr(admin, 'extra_data'):
+                    return admin
     except Exception:
         pass  # Falls through to env-var lookup
 
@@ -57,18 +72,18 @@ def _find_admin_user_for_persistence():
     # Path 2: case-insensitive match (handles DB-vs-env casing drift)
     from sqlalchemy import func
     admin = User.query.filter(func.lower(User.email) == admin_email.lower()).first()
-    if admin:
+    if admin is not None and hasattr(admin, 'extra_data'):
         return admin
 
     # Path 3: legacy exact match
     admin = User.query.filter_by(email=admin_email).first()
-    if admin:
+    if admin is not None and hasattr(admin, 'extra_data'):
         return admin
 
     logger.warning(
-        f"_find_admin_user_for_persistence: no User row matches ADMIN_EMAIL "
-        f"({admin_email!r}, case-insensitive). last_drift_check / "
-        f"last_snapshot_audit will not be persisted."
+        f"_find_admin_user_for_persistence: no models.User row found for "
+        f"current_user.id or ADMIN_EMAIL={admin_email!r} (case-insensitive). "
+        f"last_drift_check / last_snapshot_audit will not be persisted."
     )
     return None
 
