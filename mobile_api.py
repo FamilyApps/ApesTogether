@@ -6923,8 +6923,16 @@ def rebuild_leaderboard_cache_single(period):
 
 
 @mobile_api.route('/admin/debug-sparkline/<username>/<period>', methods=['GET'])
+@require_admin_2fa
+@with_db_retry
 def debug_sparkline(username, period):
-    """Compare cached sparkline vs live chart data for a user."""
+    """Compare cached sparkline vs live chart data for a user.
+
+    Auth: admin 2FA required. Without it this would publicly expose every
+    user's sparkline + performance time series by username (a useful
+    leaderboard-bypass for scraping individual performance curves), plus
+    clear the SP500 benchmark cache as a side effect on each call.
+    """
     import json
     from models import User, LeaderboardCache
     from performance_calculator import calculate_portfolio_performance, get_period_dates, _sp500_benchmark_cache
