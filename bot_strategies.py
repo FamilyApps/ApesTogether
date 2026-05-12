@@ -315,14 +315,25 @@ def generate_strategy_profile(strategy_name, industry='General'):
 
 # ── Signal Scoring ───────────────────────────────────────────────────────────
 
-def compute_signal_score(stock_data, profile):
+def compute_signal_components(stock_data, profile):
     """
-    Compute a composite buy/sell signal score for a stock given a bot's profile.
-    Returns a float from roughly -1.0 (strong sell) to +1.0 (strong buy).
+    Compute the per-category weighted contributions to the composite signal score.
+
+    Returns a dict mapping {component_name: weighted_contribution}, where each
+    contribution is `weight × signal_value` (the same term that gets summed by
+    `compute_signal_score`). Use this to attribute a trade decision to its
+    dominant data source (e.g., RSI, news, insider) for UX surfaces like the
+    admin Recent Trades 'Source' column.
+
+    Component names: 'rsi', 'macd', 'news', 'social', 'volume', 'insider',
+    'trend', 'mover'. Missing/unavailable signals contribute 0.
     """
     weights = dict(profile['indicator_weights'])  # copy so we can adjust
     strategy = profile['strategy']
-    score = 0.0
+    components = {
+        'rsi': 0.0, 'macd': 0.0, 'news': 0.0, 'social': 0.0,
+        'volume': 0.0, 'insider': 0.0, 'trend': 0.0, 'mover': 0.0,
+    }
 
     # Redistribute social_buzz weight if social data is missing (Finnhub premium)
     if stock_data.get('social_mentions', 0) == 0 and weights.get('social_buzz', 0) > 0:
@@ -372,7 +383,7 @@ def compute_signal_score(stock_data, profile):
                 rsi_signal = 0.2
             else:
                 rsi_signal = -0.5
-        score += weights.get('rsi', 0) * rsi_signal
+        components['rsi'] = weights.get('rsi', 0) * rsi_signal
 
     # ── MACD Signal ──
     macd_cross = stock_data.get('macd_cross', 'none')
@@ -387,7 +398,7 @@ def compute_signal_score(stock_data, profile):
         macd_signal = -0.3
     else:
         macd_signal = 0.0
-    score += weights.get('macd', 0) * macd_signal
+    components['macd'] = weights.get('macd', 0) * macd_signal
 
     # ── News Sentiment Signal ──
     news_sent = stock_data.get('news_sentiment', 0)
@@ -395,7 +406,7 @@ def compute_signal_score(stock_data, profile):
     # Amplify if high buzz
     buzz_multiplier = 1.5 if news_buzz == 'high' else 1.0 if news_buzz == 'medium' else 0.6
     news_signal = min(1.0, max(-1.0, news_sent * 2.5 * buzz_multiplier))
-    score += weights.get('news_sentiment', 0) * news_signal
+    components['news'] = weights.get('news_sentiment', 0) * news_signal
 
     # ── Social Buzz Signal ──
     social_mentions = stock_data.get('social_mentions', 0)
@@ -408,7 +419,7 @@ def compute_signal_score(stock_data, profile):
         social_signal = (social_ratio - 0.5) * 1.2
     else:
         social_signal = 0.0
-    score += weights.get('social_buzz', 0) * min(1.0, max(-1.0, social_signal))
+    components['social'] = weights.get('social_buzz', 0) * min(1.0, max(-1.0, social_signal))
 
     # ── Volume Signal ──
     vol_ratio = stock_data.get('volume_ratio', 1.0)
@@ -420,9 +431,9 @@ def compute_signal_score(stock_data, profile):
         volume_signal = -0.3  # Very low volume = no interest
     else:
         volume_signal = 0.0
-    score += weights.get('volume', 0) * volume_signal
+    components['volume'] = weights.get('volume', 0) * volume_signal
 
-    # ── Insider Signal ──
+    # ── Insider Signal (includes analyst-action bonus) ──
     insider_net = stock_data.get('insider_net', 'neutral')
     if insider_net == 'buying':
         insider_signal = 0.7
@@ -430,13 +441,13 @@ def compute_signal_score(stock_data, profile):
         insider_signal = -0.5
     else:
         insider_signal = 0.0
-    # Analyst action bonus
+    # Analyst action bonus (folded into insider component since it shares weight)
     analyst_action = stock_data.get('analyst_action', 'none')
     if analyst_action in ('up', 'upgrade'):
         insider_signal += 0.3
     elif analyst_action in ('down', 'downgrade'):
         insider_signal -= 0.3
-    score += weights.get('insider', 0) * min(1.0, max(-1.0, insider_signal))
+    components['insider'] = weights.get('insider', 0) * min(1.0, max(-1.0, insider_signal))
 
     # ── Price Trend Signal ──
     price_vs_sma20 = stock_data.get('price_vs_sma20', 'unknown')
@@ -467,16 +478,47 @@ def compute_signal_score(stock_data, profile):
         if price_vs_sma50 == 'above':
             trend_signal += 0.10
 
-    score += weights.get('price_trend', 0) * min(1.0, max(-1.0, trend_signal))
+    components['trend'] = weights.get('price_trend', 0) * min(1.0, max(-1.0, trend_signal))
 
-    # ── Top Mover Bonus ──
+    # ── Top Mover Bonus (unweighted flat addend) ──
     mover = stock_data.get('mover_status', 'normal')
     if mover == 'top_gainer' and strategy in ('momentum', 'social_momentum', 'news_reactor'):
-        score += 0.08  # Small bonus for momentum chasers
+        components['mover'] = 0.08  # Small bonus for momentum chasers
     elif mover == 'top_loser' and strategy == 'value':
-        score += 0.05  # Small bonus for contrarians
+        components['mover'] = 0.05  # Small bonus for contrarians
 
-    return round(score, 4)
+    return components
+
+
+def compute_signal_score(stock_data, profile):
+    """
+    Compute a composite buy/sell signal score for a stock given a bot's profile.
+    Returns a float from roughly -1.0 (strong sell) to +1.0 (strong buy).
+
+    Implemented as the sum of `compute_signal_components` so the breakdown
+    used for source attribution (admin Recent Trades column) is guaranteed
+    to be consistent with the score driving the decision.
+    """
+    components = compute_signal_components(stock_data, profile)
+    return round(sum(components.values()), 4)
+
+
+def dominant_signal(stock_data, profile):
+    """
+    Identify which signal category contributed the largest absolute amount
+    to the composite score. Used to label trades in the admin Source column
+    (e.g., 'rsi', 'news', 'insider').
+
+    Returns the component name with the largest |contribution|, or 'mixed'
+    if no component dominates (all contributions essentially zero).
+    """
+    components = compute_signal_components(stock_data, profile)
+    if not components:
+        return 'mixed'
+    name, value = max(components.items(), key=lambda kv: abs(kv[1]))
+    if abs(value) < 0.001:
+        return 'mixed'
+    return name
 
 
 def generate_trade_decisions(bot_profile, market_hub, current_holdings=None):
@@ -514,6 +556,7 @@ def generate_trade_decisions(bot_profile, market_hub, current_holdings=None):
             'score': signal,
             'price': stock_data.get('price', 0),
             'data': stock_data,
+            'dominant': dominant_signal(stock_data, bot_profile),
         })
 
     # ── SELL decisions: held stocks below sell threshold ──
@@ -535,6 +578,12 @@ def generate_trade_decisions(bot_profile, market_hub, current_holdings=None):
 
         should_sell = False
         reason = ''
+        # `signal_tag` is a compact, machine-readable label used by the admin
+        # Recent Trades 'Source' column to attribute the decision to its
+        # actual driver. For signal-driven sells we use the dominant data
+        # source; for risk-management sells we use a dedicated tag so the
+        # admin can distinguish a stop-loss from a fundamentals-driven exit.
+        signal_tag = dominant_signal(stock_data, bot_profile)
 
         # Signal-based sell
         if signal < sell_threshold:
@@ -542,17 +591,20 @@ def generate_trade_decisions(bot_profile, market_hub, current_holdings=None):
             reason = f"Signal {signal:.3f} below threshold {sell_threshold:.3f}"
 
         # Stop-loss (based on risk tolerance — lower risk = tighter stop)
+        # Stop-loss takes precedence over signal-based sells in `reason` AND `signal_tag`.
         stop_loss = -0.03 - (1 - bot_profile['risk_tolerance']) * 0.12
         if pnl_pct < stop_loss:
             should_sell = True
             reason = f"Stop-loss triggered: {pnl_pct:.1%} < {stop_loss:.1%}"
+            signal_tag = 'stoploss'
 
-        # Take-profit for short-term strategies
+        # Take-profit for short-term strategies (overrides signal_tag)
         if bot_profile['strategy'] in ('swing', 'social_momentum', 'news_reactor'):
             take_profit = 0.05 + bot_profile['risk_tolerance'] * 0.10
             if pnl_pct > take_profit:
                 should_sell = True
                 reason = f"Take-profit: {pnl_pct:.1%} > {take_profit:.1%}"
+                signal_tag = 'takeprofit'
 
         if should_sell:
             decisions.append({
@@ -562,6 +614,7 @@ def generate_trade_decisions(bot_profile, market_hub, current_holdings=None):
                 'reason': reason,
                 'price': price,
                 'pnl_pct': pnl_pct,
+                'signal_tag': signal_tag,
             })
 
     # ── BUY decisions: top-scored stocks above buy threshold ──
@@ -582,6 +635,7 @@ def generate_trade_decisions(bot_profile, market_hub, current_holdings=None):
             'score': candidate['score'],
             'reason': f"Signal {candidate['score']:.3f} above threshold {buy_threshold:.3f}",
             'price': candidate['price'],
+            'signal_tag': candidate.get('dominant', 'mixed'),
         })
 
     return decisions

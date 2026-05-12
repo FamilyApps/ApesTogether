@@ -3185,6 +3185,13 @@ def bot_execute_trade():
     quantity = data.get('quantity', 0)
     price = data.get('price', 0)
     trade_type = (data.get('type') or '').lower()
+    # `price_source` is set by bot_executor with values like 'bot_rsi',
+    # 'bot_news', 'bot_insider', 'bot_stoploss', 'bot_takeprofit', 'bot_fomo'
+    # so the admin Recent Trades 'Source' column can show what drove the trade.
+    # Defaults to 'bot_research' if the caller omits it. Truncated to 20 chars
+    # to fit Transaction.price_source's column width.
+    raw_source = (data.get('price_source') or '').strip() or 'bot_research'
+    price_source = raw_source[:20]
     
     if not user_id or not ticker or quantity <= 0:
         return jsonify({'error': 'user_id_ticker_quantity_required'}), 400
@@ -3216,7 +3223,8 @@ def bot_execute_trade():
         process_transaction(
             db, user_id, ticker, quantity, price, trade_type,
             timestamp=datetime.utcnow(),
-            position_before_qty=position_before_qty
+            position_before_qty=position_before_qty,
+            price_source=price_source
         )
         
         db.session.commit()

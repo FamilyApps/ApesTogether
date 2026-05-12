@@ -76,7 +76,7 @@ def get_bot_holdings(user_id):
 
 # ── Trade Execution ──────────────────────────────────────────────────────────
 
-def execute_trade(user_id, ticker, quantity, price, trade_type, reason=''):
+def execute_trade(user_id, ticker, quantity, price, trade_type, reason='', price_source=None):
     """
     Execute a single trade via the admin API.
 
@@ -86,7 +86,11 @@ def execute_trade(user_id, ticker, quantity, price, trade_type, reason=''):
         quantity: number of shares
         price: execution price
         trade_type: 'buy' or 'sell'
-        reason: human-readable reason for the trade
+        reason: human-readable reason for the trade (logged locally only)
+        price_source: optional compact label persisted to Transaction.price_source
+            and surfaced in the admin Recent Trades 'Source' column. Examples:
+            'bot_rsi', 'bot_news', 'bot_insider', 'bot_stoploss', 'bot_takeprofit',
+            'bot_fomo'. Defaults to 'bot_research' on the API side if omitted.
 
     Returns:
         (success: bool, result: dict)
@@ -102,6 +106,8 @@ def execute_trade(user_id, ticker, quantity, price, trade_type, reason=''):
         'price': price,
         'type': trade_type,
     }
+    if price_source:
+        data['price_source'] = price_source
 
     result, status = api_call('/admin/bot/execute-trade', 'POST', data)
 
@@ -145,6 +151,14 @@ def execute_bot_decisions(user_id, username, decisions, bot_profile, market_hub)
         ticker = decision['ticker']
         reason = decision.get('reason', '')
 
+        # Map the strategy's signal_tag to a Transaction.price_source value
+        # so the admin Recent Trades card can show what drove this trade.
+        # `signal_tag` examples from bot_strategies / bot_behaviors:
+        #   'rsi', 'macd', 'news', 'social', 'volume', 'insider', 'trend',
+        #   'mover', 'mixed', 'stoploss', 'takeprofit', 'fomo'
+        signal_tag = decision.get('signal_tag') or 'mixed'
+        price_source = f"bot_{signal_tag}"
+
         # Get current price from market hub (most recent)
         stock_data = market_hub.get_stock_data(ticker)
         if stock_data:
@@ -164,7 +178,7 @@ def execute_bot_decisions(user_id, username, decisions, bot_profile, market_hub)
         quantity = calculate_position_size(decision, bot_profile, portfolio_value)
 
         # Execute
-        success, result = execute_trade(user_id, ticker, quantity, price, action, reason)
+        success, result = execute_trade(user_id, ticker, quantity, price, action, reason, price_source=price_source)
 
         if success:
             executed.append({
@@ -183,7 +197,7 @@ def execute_bot_decisions(user_id, username, decisions, bot_profile, market_hub)
             if reduced_qty != quantity:
                 success2, result2 = execute_trade(
                     user_id, ticker, reduced_qty, price, action,
-                    reason + ' (reduced qty)')
+                    reason + ' (reduced qty)', price_source=price_source)
                 if success2:
                     executed.append({
                         'action': action,

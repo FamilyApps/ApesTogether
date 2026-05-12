@@ -1834,7 +1834,45 @@ const SystemHealth = ({ api }) => {
           { key: 'ticker', label: 'Ticker', render: v => <span style={{ fontWeight: 600 }}>{v}</span> },
           { key: 'quantity', label: 'Qty', render: fmtQty },
           { key: 'value', label: 'Value', render: v => `$${(v || 0).toFixed(2)}` },
-          { key: 'price_source', label: 'Source', render: v => <Badge text={v || '—'} color={v === 'bulk_api' ? 'var(--green)' : v === 'cached' ? 'var(--blue)' : v === 'single_api' ? 'var(--yellow)' : v === 'manual' ? 'var(--accent)' : v === 'email' ? 'var(--purple, #a855f7)' : v === 'bot_research' ? 'var(--blue)' : v === 'queued_email' ? 'var(--purple, #a855f7)' : (v && v.includes('copytrade')) ? 'var(--accent)' : 'var(--text-muted)'} /> },
+          // The Source column shows what drove the trade. For bot trades, this
+          // comes from the dominant signal in compute_signal_components()
+          // ('bot_rsi', 'bot_news', etc.) or a special tag for risk-management
+          // exits ('bot_stoploss', 'bot_takeprofit') and FOMO entries ('bot_fomo').
+          // For human trades, it's the price-fetch origin (bulk_api/cached/etc.)
+          // or the trade origin (manual/email/queued_email/copytrade).
+          { key: 'price_source', label: 'Source', render: v => {
+              if (!v) return <Badge text="—" color="var(--text-muted)" />;
+              // Human-friendly label + semantic color
+              const labelMap = {
+                bot_rsi: 'RSI', bot_macd: 'MACD', bot_trend: 'Trend', bot_volume: 'Volume',
+                bot_news: 'News', bot_social: 'Social', bot_mover: 'Top Mover',
+                bot_insider: 'Insider', bot_stoploss: 'Stop Loss', bot_takeprofit: 'Take Profit',
+                bot_fomo: 'FOMO', bot_mixed: 'Mixed', bot_research: 'Bot',
+                bulk_api: 'Bulk API', cached: 'Cached', single_api: 'API', manual: 'Manual',
+                email: 'Email', queued_email: 'Queued Email',
+              };
+              const colorMap = {
+                // TA signals — blue family
+                bot_rsi: 'var(--blue)', bot_macd: 'var(--blue)', bot_trend: 'var(--blue)', bot_volume: 'var(--blue)',
+                // Sentiment / external — purple
+                bot_news: 'var(--purple, #a855f7)', bot_social: 'var(--purple, #a855f7)', bot_mover: 'var(--purple, #a855f7)',
+                // Smart money — green
+                bot_insider: 'var(--green)',
+                // Risk events
+                bot_stoploss: 'var(--red)', bot_takeprofit: 'var(--green)',
+                // Impulse — yellow
+                bot_fomo: 'var(--yellow)',
+                // Generic bot fallbacks
+                bot_mixed: 'var(--text-muted)', bot_research: 'var(--blue)',
+                // Non-bot sources
+                bulk_api: 'var(--green)', cached: 'var(--blue)', single_api: 'var(--yellow)',
+                manual: 'var(--accent)', email: 'var(--purple, #a855f7)',
+                queued_email: 'var(--purple, #a855f7)',
+              };
+              const label = labelMap[v] || (v.includes('copytrade') ? 'Copy Trade' : v);
+              const color = colorMap[v] || (v.includes('copytrade') ? 'var(--accent)' : 'var(--text-muted)');
+              return <Badge text={label} color={color} />;
+          } },
         ]} data={trades?.trades || []} />
         {trades && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10 }}>Showing {trades.trades?.length || 0} of {trades.total || 0} total trades</div>}
       </Card>

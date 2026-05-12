@@ -205,6 +205,7 @@ def apply_fomo_trades(bot_profile, market_hub, current_decisions):
                 'reason': f"FOMO: +{change_pct:.1f}% today, {social_mentions} social mentions",
                 'price': stock_data.get('price', mover.get('price', 0)),
                 'is_fomo': True,
+                'signal_tag': 'fomo',  # surfaces in admin Recent Trades 'Source' column
             })
 
     # Max 1-2 FOMO trades per day
