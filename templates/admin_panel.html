@@ -1578,6 +1578,10 @@ const SystemHealth = ({ api }) => {
   const [drift, setDrift] = useState(null);
   const [driftRunning, setDriftRunning] = useState(false);
   const [snapAudit, setSnapAudit] = useState(null);
+  const [snapAuditRunning, setSnapAuditRunning] = useState(false);
+  const [testPushUser, setTestPushUser] = useState('bobford00');
+  const [testPushResult, setTestPushResult] = useState(null);
+  const [testPushRunning, setTestPushRunning] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // Drift-check endpoints live on the main Flask app, not /api/mobile.
@@ -1611,6 +1615,45 @@ const SystemHealth = ({ api }) => {
     } catch (e) { console.error('drift run failed', e); }
     setDriftRunning(false);
   }, [driftRunning]);
+
+  // Re-run the snapshot drift audit. Hits the dual-auth /admin path of
+  // cron_snapshot_audit (not the cron path — browsers can't send the bearer).
+  // The endpoint walks every user × every snapshot, so this can take 10–30s
+  // on the full DB; we keep the button disabled while running.
+  const runSnapAudit = useCallback(async () => {
+    if (snapAuditRunning) return;
+    setSnapAuditRunning(true);
+    try {
+      const res = await fetch('/admin/cash-tracking/snapshot-audit', {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const data = await res.json();
+      // Fresh-run response shape matches what /admin/last-snapshot-audit returns
+      // for a populated record, so we can drop it straight into state.
+      setSnapAudit(data);
+    } catch (e) { console.error('snap audit run failed', e); }
+    setSnapAuditRunning(false);
+  }, [snapAuditRunning]);
+
+  // Test push button — wraps /api/mobile/admin/test-push. Replaces the old
+  // workflow of pasting JS into the browser console for push diagnostics.
+  const runTestPush = useCallback(async () => {
+    const username = (testPushUser || '').trim().toLowerCase();
+    if (!username || testPushRunning) return;
+    setTestPushRunning(true);
+    setTestPushResult(null);
+    try {
+      const data = await api('/admin/test-push', {
+        method: 'POST',
+        body: { username },
+      });
+      setTestPushResult({ ok: true, data });
+    } catch (e) {
+      setTestPushResult({ ok: false, error: e.message || String(e) });
+    }
+    setTestPushRunning(false);
+  }, [api, testPushUser, testPushRunning]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1743,9 +1786,9 @@ const SystemHealth = ({ api }) => {
               (per-day cash_proceeds + max_cash_deployed)
             </span>
           </div>
-          <a href="/api/cron/snapshot-audit" target="_blank" rel="noreferrer" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-            (cron URL)
-          </a>
+          <Btn variant="secondary" small onClick={runSnapAudit} disabled={snapAuditRunning}>
+            {snapAuditRunning ? 'Running…' : 'Run now'}
+          </Btn>
         </div>
 
         {(() => {
@@ -1820,6 +1863,49 @@ const SystemHealth = ({ api }) => {
                 for the complete list.
               </div>
             )}
+          </div>
+        )}
+      </Card>
+
+      {/* Test Push card — wraps /api/mobile/admin/test-push so we don't need
+          to paste JS into the browser console for push diagnostics. Per-token
+          results (FCM message_id or error) are returned so misconfigurations
+          can be diagnosed in one shot. */}
+      <Card>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>
+          Test Push Notification
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400, marginLeft: 8 }}>
+            (FCM → APNs/Android, per-device-token result)
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+          <input
+            type="text"
+            value={testPushUser}
+            onChange={e => setTestPushUser(e.target.value)}
+            placeholder="username"
+            style={{
+              flex: 1, padding: '8px 12px', borderRadius: 6,
+              border: '1px solid var(--border)', background: 'var(--bg-elevated)',
+              color: 'var(--text-primary)', fontSize: 13,
+            }}
+            disabled={testPushRunning}
+          />
+          <Btn variant="primary" small onClick={runTestPush} disabled={testPushRunning || !testPushUser.trim()}>
+            {testPushRunning ? 'Sending…' : 'Send'}
+          </Btn>
+        </div>
+        {testPushResult && (
+          <div style={{
+            padding: '10px 12px', borderRadius: 6,
+            background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+            fontSize: 11, fontFamily: 'monospace', color: 'var(--text-secondary)',
+            whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+            maxHeight: 240, overflowY: 'auto',
+          }}>
+            {testPushResult.ok
+              ? JSON.stringify(testPushResult.data, null, 2)
+              : `Error: ${testPushResult.error}`}
           </div>
         )}
       </Card>
