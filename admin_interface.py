@@ -8,6 +8,11 @@ from datetime import datetime
 from models import db, User, Stock, Transaction, Subscription
 # Removed circular import - get_stock_data will be imported locally when needed
 
+# Use the shared 2FA-enforcing admin decorator. (Pre-2026-05-12 this module
+# had its own local `admin_required` that only checked email — replaced for
+# security: stolen credentials no longer bypass the /admin-panel 2FA gate.)
+from admin_auth import admin_required
+
 # Admin credentials from environment variables
 ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
 ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
@@ -41,24 +46,8 @@ def add_datatables(response):
             response.set_data(html)
     return response
 
-# Admin authentication check
-def admin_required(f):
-    """Decorator to check if user is an admin"""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        # Check if user is authenticated
-        if not current_user.is_authenticated:
-            flash('You must be logged in to access this page.', 'danger')
-            return redirect(url_for('login'))
-            
-        # Allow access for admin email regardless of username
-        if current_user.email == ADMIN_EMAIL:
-            return f(*args, **kwargs)
-            
-        flash('You must be an admin to access this page.', 'danger')
-        return redirect(url_for('index'))
-    decorated_function.__name__ = f.__name__
-    return decorated_function
+# Note: `admin_required` is imported from admin_auth (see top of file). The
+# decorator enforces admin email + 2FA flag, or accepts X-Admin-Key for scripts.
 
 # Admin dashboard
 @admin_bp.route('/')

@@ -331,17 +331,12 @@ def custom_login_required(f):
 # For backward compatibility, keep the original name
 login_required = custom_login_required
 
-def admin_required(f):
-    """Decorator: requires the user to be logged in AND be the admin."""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated:
-            flash('Please log in to access this page', 'danger')
-            return redirect(url_for('login', next=request.url))
-        if getattr(current_user, 'email', None) != ADMIN_EMAIL:
-            return jsonify({'error': 'Admin access required'}), 403
-        return f(*args, **kwargs)
-    return decorated_function
+# Admin decorators: imported from the shared admin_auth module, which (as of
+# 2026-05-12) enforces admin email + 2FA flag, or accepts X-Admin-Key for
+# scripts. Previously this file defined two separate local versions that only
+# checked the email — a stolen-credentials risk. The shared decorator closes
+# that gap. `admin_2fa_required` remains as an alias for explicitness.
+from admin_auth import admin_required, admin_2fa_required
 
 # Get environment variables with fallbacks
 # Check for DATABASE_URL first, then fall back to POSTGRES_PRISMA_URL if available
@@ -815,122 +810,10 @@ if VERCEL_ENV:
 # Flash message categories
 app.config['MESSAGE_CATEGORIES'] = ['success', 'info', 'warning', 'danger']
 
-# Admin authentication check
-def admin_required(f):
-    """Decorator to check if user is an admin (login + email check)"""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        # Check session cookie FIRST (no DB query needed)
-        email = session.get('email', '')
-        if email == ADMIN_EMAIL:
-            return f(*args, **kwargs)
-        # Fallback: check Flask-Login current_user (triggers DB query via load_user)
-        # Wrap in try/except so SSL drops here don't poison the session for the route
-        if not email:
-            try:
-                if current_user.is_authenticated:
-                    email = getattr(current_user, 'email', '')
-            except Exception:
-                # DB error loading user — clean up so route's db_retry starts fresh
-                app._nuke_session()
-        
-        # Allow access only for admin email
-        if email == ADMIN_EMAIL:
-            return f(*args, **kwargs)
-            
-        # Show access denied page with login form instead of redirecting
-        return render_template_string("""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Admin Access</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        .container { max-width: 800px; margin: 0 auto; }
-        .button { 
-            display: inline-block; 
-            background: #4CAF50; 
-            color: white; 
-            padding: 10px 20px; 
-            text-decoration: none; 
-            border-radius: 5px; 
-            margin-top: 20px;
-        }
-        .error {
-            background-color: #ffdddd;
-            border-left: 6px solid #f44336;
-            margin-bottom: 15px;
-            padding: 10px;
-            border-radius: 5px;
-        }
-        .form {
-            background-color: #f9f9f9;
-            padding: 20px;
-            border-radius: 5px;
-        }
-        input[type=text] {
-            width: 100%;
-            padding: 12px 20px;
-            margin: 8px 0;
-            box-sizing: border-box;
-        }
-        input[type=submit] {
-            background-color: #4CAF50;
-            color: white;
-            padding: 14px 20px;
-            margin: 8px 0;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Admin Access</h1>
-        
-        <div class="error">
-            <h2>Access Denied</h2>
-            <p>You must be logged in with the admin email to access this page.</p>
-        </div>
-        
-        <div class="form">
-            <h2>Admin Login</h2>
-            <form action="/login" method="post">
-                <label for="email">Admin Email:</label>
-                <input type="text" id="email" name="email" placeholder="Enter admin email">
-                <input type="submit" value="Login">
-            </form>
-        </div>
-        
-        <a href="/" class="button">Back to Home</a>
-    </div>
-</body>
-</html>
-    """)
-    return decorated_function
-
-def admin_2fa_required(f):
-    """Decorator: requires admin login + 2FA verification (admin_2fa_verified session flag).
-    Use this for endpoints that expose sensitive data (bot info, user data) or mutate state."""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        # First check admin login
-        email = session.get('email', '')
-        if not email:
-            try:
-                if current_user.is_authenticated:
-                    email = getattr(current_user, 'email', '')
-            except Exception:
-                pass
-        if email != ADMIN_EMAIL:
-            return jsonify({'error': 'admin_login_required'}), 403
-        # Then check 2FA
-        if not session.get('admin_2fa_verified'):
-            return jsonify({'error': '2fa_required', 'message': 'Visit /admin-panel and complete 2FA first'}), 401
-        return f(*args, **kwargs)
-    decorated_function.__name__ = f.__name__
-    return decorated_function
+# Admin decorators (`admin_required` and `admin_2fa_required`) are now imported
+# from the shared `admin_auth` module near the top of this file (~line 334).
+# The previous local versions in this spot did not enforce the 2FA flag, which
+# was a stolen-credentials security risk — closed 2026-05-12.
 
 # Simple HTML template for the home page
 HOME_HTML = """
