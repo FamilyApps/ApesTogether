@@ -4215,6 +4215,82 @@ def admin_record_dividend():
         return jsonify({'error': str(e)}), 500
 
 
+@mobile_api.route('/admin/test-push', methods=['POST'])
+@require_admin_2fa
+@with_db_retry
+def admin_test_push():
+    """Send a test push notification to all active device tokens for a user.
+
+    Diagnostic endpoint for verifying the FCM -> APNs/FCM-Android -> device
+    chain end-to-end. Returns per-token success/failure with the underlying
+    FCM error so misconfigurations (wrong bundle ID, revoked APNs key,
+    unregistered token, mismatched credential) can be diagnosed in one shot.
+
+    POST body (JSON):
+        username: str (required)
+        title: str (optional, default 'Test Push')
+        body: str (optional, default a timestamped message)
+    """
+    from models import db, User, DeviceToken
+    from push_notification_service import get_push_service
+
+    data = request.get_json() or {}
+    username = (data.get('username') or '').strip().lower()
+    if not username:
+        return jsonify({'error': 'username_required'}), 400
+
+    user = User.query.filter_by(username=username).first()
+    if not user:
+        return jsonify({'error': 'user_not_found', 'username': username}), 404
+
+    device_tokens = DeviceToken.query.filter_by(user_id=user.id, is_active=True).all()
+    if not device_tokens:
+        return jsonify({
+            'error': 'no_active_device_tokens',
+            'username': username,
+            'user_id': user.id,
+        }), 404
+
+    title = data.get('title') or 'Test Push'
+    body = data.get('body') or f'Test push at {datetime.utcnow().isoformat()}Z'
+
+    service = get_push_service()
+    if not service.is_available:
+        return jsonify({
+            'error': 'firebase_not_available',
+            'detail': 'FIREBASE_CREDENTIALS_JSON missing or initialization failed',
+        }), 500
+
+    # Send one-by-one (rather than multicast) so we can report per-token results.
+    # Multicast obscures which specific token caused which specific failure.
+    results = []
+    for dt in device_tokens:
+        r = service._send_single(dt.token, title, body, {'type': 'test_push'})
+        results.append({
+            'device_token_id': dt.id,
+            'platform': dt.platform,
+            'token_preview': (dt.token[:20] + '...') if dt.token else None,
+            'token_len': len(dt.token) if dt.token else 0,
+            'app_version': dt.app_version,
+            'os_version': dt.os_version,
+            'created_at': dt.created_at.isoformat() if dt.created_at else None,
+            'updated_at': dt.updated_at.isoformat() if dt.updated_at else None,
+            'success': r.get('success_count', 0) > 0,
+            'message_id': r.get('message_id'),
+            'error': r.get('error'),
+        })
+
+    success_total = sum(1 for x in results if x['success'])
+    return jsonify({
+        'username': username,
+        'user_id': user.id,
+        'tokens_attempted': len(results),
+        'tokens_succeeded': success_total,
+        'tokens_failed': len(results) - success_total,
+        'results': results,
+    })
+
+
 @mobile_api.route('/admin/bot/email-trade', methods=['POST'])
 @require_cron_secret
 @rate_limit(30)
