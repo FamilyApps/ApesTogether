@@ -18,7 +18,19 @@ import time
 import json
 import logging
 import requests
-import numpy as np
+# numpy is required by the technical-indicator + sentiment-aggregation
+# functions below, but those only run in the bot-trading pipeline (GitHub
+# Actions / a separate worker). On Vercel serverless the 250 MB function
+# bundle limit can cause numpy to be stripped from the deployment,
+# breaking lightweight admin paths like `probe_finnhub_health` that
+# import this module but don't need numpy. Make the import optional so
+# those paths keep working — any function that actually uses `np.*` will
+# raise NameError at call time, which is exactly the failure mode we
+# want for an environment that genuinely needs numpy.
+try:
+    import numpy as np
+except ImportError:
+    np = None  # type: ignore[assignment]
 from datetime import datetime, timedelta
 from collections import defaultdict
 
