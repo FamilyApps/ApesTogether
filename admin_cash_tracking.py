@@ -37,17 +37,29 @@ def _find_admin_user_for_persistence():
       LoginManager.user_loader, which on the Vercel handler returns an
       `api.index.User` instance that does NOT have `extra_data`. Writing
       `admin.extra_data = ...` against that instance raises AttributeError
-      and the persistence block aborts — which is exactly what produced
-      `persisted_error: "'User' object has no attribute 'extra_data'"` on
-      the drift-check endpoint and a 500 on `last-drift-check`.
+      and the persistence block aborts.
+
+      Additionally, on warm Vercel instances SQLAlchemy's identity-map can
+      hand back a CACHED `models.User` row from a prior request whose
+      `extra_data` reflects a stale snapshot. If two admin endpoints write
+      to `extra_data` in quick succession, the second one's read-modify-
+      write loop reads the stale dict and silently overwrites the first
+      one's commit (witnessed: `last_drift_check` getting clobbered by a
+      subsequent `last_snapshot_audit` write even though both writers
+      reported `persisted: true, persisted_user_id: 1`).
 
     Strategy (in order):
-      1. Take `current_user.id` and re-query `models.User` so we get a row
-         that actually has the `extra_data` column. Works for browser-driven
-         admin-session requests (guaranteed same record auth verified).
+      1. Take `current_user.id` and re-query `models.User` with
+         `populate_existing()` so we re-read the row from the DB instead
+         of getting a stale identity-map hit.
       2. Case-insensitive email match against ADMIN_EMAIL env var. Used by
          cron-driven requests where there is no Flask-Login context.
       3. Exact env-var match (legacy behavior, kept as last resort).
+
+    Before any lookup we call `db.session.expire_all()` so any objects the
+    session is already tracking get re-fetched on next access. This belt-
+    and-suspenders approach makes the read-modify-write pattern safe even
+    if the same User instance is touched twice in one request.
 
     All returns are validated with `hasattr(admin, 'extra_data')` so we
     never hand back a User-shaped object that can't actually be persisted.
@@ -55,13 +67,22 @@ def _find_admin_user_for_persistence():
     Returns the row or None. Logs WARNING on full miss so the failure is
     visible in Vercel logs instead of being silent.
     """
+    # Belt-and-suspenders: invalidate any cached state in the current
+    # session so the lookup below truly re-reads from the DB. Cheap.
+    try:
+        from models import db as _db
+        _db.session.expire_all()
+    except Exception:
+        pass
+
     # Path 1: current_user.id → models.User (NOT current_user directly —
-    # the Flask-Login proxy may resolve to api.index.User which lacks extra_data).
+    # the Flask-Login proxy may resolve to api.index.User which lacks
+    # extra_data). populate_existing() bypasses the identity-map cache.
     try:
         if current_user and current_user.is_authenticated:
             cur_id = getattr(current_user, 'id', None)
             if cur_id:
-                admin = User.query.get(cur_id)
+                admin = User.query.populate_existing().get(cur_id)
                 if admin is not None and hasattr(admin, 'extra_data'):
                     return admin
     except Exception:
@@ -71,12 +92,14 @@ def _find_admin_user_for_persistence():
 
     # Path 2: case-insensitive match (handles DB-vs-env casing drift)
     from sqlalchemy import func
-    admin = User.query.filter(func.lower(User.email) == admin_email.lower()).first()
+    admin = User.query.populate_existing().filter(
+        func.lower(User.email) == admin_email.lower()
+    ).first()
     if admin is not None and hasattr(admin, 'extra_data'):
         return admin
 
     # Path 3: legacy exact match
-    admin = User.query.filter_by(email=admin_email).first()
+    admin = User.query.populate_existing().filter_by(email=admin_email).first()
     if admin is not None and hasattr(admin, 'extra_data'):
         return admin
 
@@ -1702,6 +1725,11 @@ def register_cash_tracking_routes(app, db):
                 admin = _find_admin_user_for_persistence()
                 if admin:
                     extra = dict(admin.extra_data or {})
+                    # Diagnostic: which keys did we observe in extra_data
+                    # BEFORE writing? Helps detect read-modify-write races
+                    # where one writer's commit gets clobbered by another's
+                    # stale read.
+                    response['pre_existing_extra_data_keys'] = sorted(extra.keys())
                     extra['last_drift_check'] = {
                         'timestamp': timestamp_str,
                         'users_scanned': scanned,
@@ -1715,6 +1743,7 @@ def register_cash_tracking_routes(app, db):
                     db.session.commit()
                     response['persisted'] = True
                     response['persisted_user_id'] = admin.id
+                    response['post_commit_extra_data_keys'] = sorted(extra.keys())
                 else:
                     # _find_admin_user_for_persistence already logged the miss.
                     response['persisted'] = False

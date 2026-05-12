@@ -2749,6 +2749,10 @@ def cron_snapshot_audit():
         admin = _find_admin_user_for_persistence()
         if admin:
             extra = dict(admin.extra_data or {})
+            # Diagnostic: which keys did we observe in extra_data BEFORE
+            # writing? Helps detect read-modify-write races where one
+            # writer's commit gets clobbered by another's stale read.
+            response['pre_existing_extra_data_keys'] = sorted(extra.keys())
             extra['last_snapshot_audit'] = {
                 'timestamp': timestamp_str,
                 'users_scanned': len(users),
@@ -2763,6 +2767,7 @@ def cron_snapshot_audit():
             db.session.commit()
             response['persisted'] = True
             response['persisted_user_id'] = admin.id
+            response['post_commit_extra_data_keys'] = sorted(extra.keys())
         else:
             response['persisted'] = False
             response['persisted_error'] = 'admin_user_not_found'
