@@ -2738,22 +2738,20 @@ def cron_snapshot_audit():
         'prompt': prompt,
     }
 
-    # Persist to admin user. Use the shared lookup helper (current_user →
-    # case-insensitive email → exact match) so the synchronous admin-path
-    # "Run-now" button writes to the same User row the reader endpoint will
-    # later read from — fixing the previously-silent 'Never run' bug on the
-    # admin Snapshot Drift card.
+    # Persist to admin user via raw SQL with jsonb_set. Atomic merge —
+    # eliminates the read-modify-write race where two writers (drift-check
+    # and snapshot-audit) could clobber each other's keys in admin.extra_data.
+    # Also bypasses the dual-SQLAlchemy-instance footgun: raw SQL via
+    # db.session.execute() commits to the actual DB regardless of which
+    # `db` instance is in scope. See the same comment in
+    # admin_cash_tracking.py:drift_check_cash_tracking for the full write-up.
     try:
-        from sqlalchemy.orm.attributes import flag_modified
+        from sqlalchemy import text as _sql_text2
         from admin_cash_tracking import _find_admin_user_for_persistence
+        import json as _json_lib2
         admin = _find_admin_user_for_persistence()
         if admin:
-            extra = dict(admin.extra_data or {})
-            # Diagnostic: which keys did we observe in extra_data BEFORE
-            # writing? Helps detect read-modify-write races where one
-            # writer's commit gets clobbered by another's stale read.
-            response['pre_existing_extra_data_keys'] = sorted(extra.keys())
-            extra['last_snapshot_audit'] = {
+            payload = {
                 'timestamp': timestamp_str,
                 'users_scanned': len(users),
                 'total_snapshots_checked': total_snapshots_checked,
@@ -2762,12 +2760,21 @@ def cron_snapshot_audit():
                 'issues': issues,
                 'prompt': prompt,
             }
-            admin.extra_data = extra
-            flag_modified(admin, 'extra_data')
+            db.session.execute(_sql_text2("""
+                UPDATE "user"
+                SET metadata = jsonb_set(
+                    COALESCE(metadata::jsonb, '{}'::jsonb),
+                    '{last_snapshot_audit}',
+                    CAST(:payload AS jsonb)
+                )
+                WHERE id = :user_id
+            """), {
+                'payload': _json_lib2.dumps(payload),
+                'user_id': admin.id,
+            })
             db.session.commit()
             response['persisted'] = True
             response['persisted_user_id'] = admin.id
-            response['post_commit_extra_data_keys'] = sorted(extra.keys())
         else:
             response['persisted'] = False
             response['persisted_error'] = 'admin_user_not_found'

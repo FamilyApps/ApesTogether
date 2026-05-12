@@ -1716,21 +1716,32 @@ def register_cash_tracking_routes(app, db):
             }
 
             # ---- Persist last drift-check result on admin user (no SMTP required) ----
-            # This lets the admin browse the result later via the dedicated endpoint
-            # below, even if SMTP isn't configured. See _find_admin_user_for_persistence
-            # docstring for the multi-strategy lookup that fixes the previously-silent
-            # 'Never run' bug on the admin panel Drift card.
+            # Uses raw SQL with jsonb_set rather than the SQLAlchemy ORM.
+            # Three reasons:
+            #   1. The codebase has TWO separate SQLAlchemy instances bound
+            #      to the same DB — `models.db` (from models.py) and the
+            #      one created in api/index.py. `models.User` rows are
+            #      tracked by `models.db.session`, but
+            #      register_cash_tracking_routes(app, db) is called with
+            #      api/index.py's db. So a `db.session.commit()` inside
+            #      this closure commits the WRONG session and the change
+            #      to `admin.extra_data` is silently dropped. Witnessed:
+            #      writer reported persisted=true with the new key in
+            #      `post_commit_extra_data_keys`, but the next request's
+            #      read showed pre_existing_extra_data_keys still missing
+            #      that key.
+            #   2. Atomic merge: jsonb_set on the row eliminates the
+            #      read-modify-write race where two writers (drift-check
+            #      and snapshot-audit) clobber each other's keys.
+            #   3. Raw SQL goes straight to the DB connection regardless
+            #      of which SQLAlchemy instance is in scope, so this
+            #      works no matter how the route is registered.
             try:
-                from sqlalchemy.orm.attributes import flag_modified
+                from sqlalchemy import text as _sql_text
+                import json as _json_lib
                 admin = _find_admin_user_for_persistence()
                 if admin:
-                    extra = dict(admin.extra_data or {})
-                    # Diagnostic: which keys did we observe in extra_data
-                    # BEFORE writing? Helps detect read-modify-write races
-                    # where one writer's commit gets clobbered by another's
-                    # stale read.
-                    response['pre_existing_extra_data_keys'] = sorted(extra.keys())
-                    extra['last_drift_check'] = {
+                    payload = {
                         'timestamp': timestamp_str,
                         'users_scanned': scanned,
                         'drift_count': len(drift_users),
@@ -1738,14 +1749,22 @@ def register_cash_tracking_routes(app, db):
                         'drift_users': drift_users,
                         'prompt': prompt,
                     }
-                    admin.extra_data = extra
-                    flag_modified(admin, 'extra_data')
+                    db.session.execute(_sql_text("""
+                        UPDATE "user"
+                        SET metadata = jsonb_set(
+                            COALESCE(metadata::jsonb, '{}'::jsonb),
+                            '{last_drift_check}',
+                            CAST(:payload AS jsonb)
+                        )
+                        WHERE id = :user_id
+                    """), {
+                        'payload': _json_lib.dumps(payload),
+                        'user_id': admin.id,
+                    })
                     db.session.commit()
                     response['persisted'] = True
                     response['persisted_user_id'] = admin.id
-                    response['post_commit_extra_data_keys'] = sorted(extra.keys())
                 else:
-                    # _find_admin_user_for_persistence already logged the miss.
                     response['persisted'] = False
                     response['persisted_error'] = 'admin_user_not_found'
             except Exception as pe:
