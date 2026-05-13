@@ -1554,7 +1554,12 @@ def register_cash_tracking_routes(app, db):
         from sqlalchemy import text
 
         # ---- Auth ----
-        # Cron path: verify CRON_SECRET. Admin path: require admin session.
+        # Cron path: verify CRON_SECRET.
+        # Admin path: require admin email (case-insensitive) AND 2FA flag.
+        # This matches cron_snapshot_audit's posture — same endpoint class,
+        # same auth contract. Without the 2FA check a partially-authenticated
+        # admin session could disclose drift data, trigger the admin email
+        # alert, and write to admin.extra_data.
         is_cron_path = request.path.startswith('/api/cron/')
         if is_cron_path:
             cron_secret = _os.environ.get('CRON_SECRET', '')
@@ -1563,11 +1568,24 @@ def register_cash_tracking_routes(app, db):
             if not cron_secret or provided != cron_secret:
                 return jsonify({'error': 'unauthorized'}), 401
         else:
-            # Admin path: piggyback on existing admin auth
             admin_email = _os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
             session_email = _flask_session.get('email', '')
-            if session_email != admin_email:
+            # Fall back to current_user.email when session.email is empty
+            # (Flask-Login OAuth flows sometimes don't populate session['email']).
+            if not session_email:
+                try:
+                    from flask_login import current_user as _cu
+                    if _cu and _cu.is_authenticated:
+                        session_email = getattr(_cu, 'email', '') or ''
+                except Exception:
+                    session_email = ''
+            if session_email.lower() != admin_email.lower():
                 return jsonify({'error': 'admin_access_required'}), 403
+            if not _flask_session.get('admin_2fa_verified'):
+                return jsonify({
+                    'error': '2fa_required',
+                    'message': 'Complete 2FA at /admin-panel before triggering drift-check.',
+                }), 401
 
         # ---- Params ----
         send_email = request.args.get('email', 'true' if is_cron_path else 'false') == 'true'
