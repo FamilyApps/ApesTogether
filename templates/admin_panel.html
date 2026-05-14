@@ -1914,19 +1914,24 @@ const SystemHealth = ({ api }) => {
         <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>Recent Trades (All Users)</div>
         <Table columns={[
           { key: 'timestamp', label: 'Time', render: v => v ? new Date(v).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—' },
-          { key: 'username', label: 'User' },
+          // Render display_name (e.g. "Wolff's Flagship Fund") when set, fall
+          // back to raw username. Falls back to row.username if display_name
+          // is null/missing — old trade-history responses don't include it.
+          { key: 'display_name', label: 'User', render: (v, row) => v || row.username },
           { key: 'role', label: 'Role', render: v => <Badge text={v} color={v === 'agent' ? 'var(--blue)' : 'var(--accent)'} /> },
           { key: 'type', label: 'Type', render: v => <Badge text={v?.toUpperCase()} color={v === 'buy' ? 'var(--green)' : v === 'sell' ? 'var(--red)' : 'var(--text-muted)'} /> },
           { key: 'ticker', label: 'Ticker', render: v => <span style={{ fontWeight: 600 }}>{v}</span> },
           { key: 'quantity', label: 'Qty', render: fmtQty },
           { key: 'value', label: 'Value', render: v => `$${(v || 0).toFixed(2)}` },
-          // The Source column shows what drove the trade. For bot trades, this
-          // comes from the dominant signal in compute_signal_components()
+          // The Trigger column shows what drove the trade. For bot trades, this
+          // is the dominant signal from compute_signal_components()
           // ('bot_rsi', 'bot_news', etc.) or a special tag for risk-management
           // exits ('bot_stoploss', 'bot_takeprofit') and FOMO entries ('bot_fomo').
-          // For human trades, it's the price-fetch origin (bulk_api/cached/etc.)
-          // or the trade origin (manual/email/queued_email/copytrade).
-          { key: 'price_source', label: 'Source', render: v => {
+          // For human trades, it's the trade origin (manual/email/queued_email/
+          // copytrade) — NOT the data-fetch source. The price-data source
+          // (yfinance vs AlphaVantage) is tracked separately in Vercel logs +
+          // the AlphaVantage API log table, not on the Transaction row.
+          { key: 'price_source', label: 'Trigger', render: v => {
               if (!v) return <Badge text="—" color="var(--text-muted)" />;
               // Human-friendly label + semantic color
               const labelMap = {

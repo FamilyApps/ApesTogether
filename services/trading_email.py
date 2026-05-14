@@ -352,22 +352,11 @@ def _execute_single_trade(db, user, from_email, trade, prices, process_transacti
         + "\nExecuted via email.\n\n— Apes Together"
     )
 
-    try:
-        notify_subscribers_via_email(
-            db, user.id, action, ticker, quantity, price,
-            position_pct=position_pct
-        )
-    except Exception as e:
-        logger.warning(f"Subscriber email notification failed: {e}")
-
-    try:
-        from push_notification_service import notify_subscribers_of_trade
-        notify_subscribers_of_trade(
-            db, user.id, action, ticker, quantity, price,
-            position_pct=position_pct
-        )
-    except Exception as e:
-        logger.warning(f"Subscriber push notification failed: {e}")
+    # Subscriber push + email notifications are fired by
+    # process_transaction's internal fan-out above (cash_tracking.py).
+    # We used to fan out again here which caused duplicate notifications
+    # per trade (one with position_pct, one without). The single source
+    # of truth is now process_transaction, which receives position_before_qty.
 
     return {'status': 'success', 'trade': trade, 'price': price}
 
@@ -482,23 +471,10 @@ def process_queued_trades():
                 + f"\nOriginally queued at {qt.queued_at.strftime('%b %d, %I:%M %p')} UTC."
             )
 
-            # Notify subscribers
-            try:
-                notify_subscribers_via_email(
-                    db, qt.user_id, qt.action, qt.ticker, qt.quantity, price,
-                    position_pct=position_pct
-                )
-            except Exception as e:
-                logger.warning(f"Subscriber notification failed for queued trade: {e}")
-
-            try:
-                from push_notification_service import notify_subscribers_of_trade
-                notify_subscribers_of_trade(
-                    db, qt.user_id, qt.action, qt.ticker, qt.quantity, price,
-                    position_pct=position_pct
-                )
-            except Exception as e:
-                logger.warning(f"Push notification failed for queued trade: {e}")
+            # Subscriber push + email notifications already fired by
+            # process_transaction's internal fan-out above (cash_tracking.py).
+            # Duplicate fan-out used to live here and caused two pushes per
+            # trade. Single source of truth: process_transaction.
 
             logger.info(f"Queued trade executed: {user.username} {qt.action} {qt.quantity} {qt.ticker} @ ${price:.2f}")
 

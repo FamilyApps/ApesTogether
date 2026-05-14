@@ -2500,20 +2500,11 @@ def execute_trade():
             except Exception as meta_err:
                 logger.warning(f"Non-blocking: failed to auto-populate metadata for {ticker}: {meta_err}")
         
-        # Notify subscribers (email + push) — non-blocking
-        position_pct = None
-        if trade_type == 'sell' and position_before_qty and position_before_qty > 0:
-            position_pct = round((quantity / position_before_qty) * 100, 1)
-        try:
-            from services.notification_utils import notify_subscribers_via_email
-            notify_subscribers_via_email(db, g.user_id, trade_type, ticker, quantity, price, position_pct=position_pct)
-        except Exception as notif_err:
-            logger.warning(f"Non-blocking: subscriber email notification failed: {notif_err}")
-        try:
-            from push_notification_service import notify_subscribers_of_trade
-            notify_subscribers_of_trade(db, g.user_id, trade_type, ticker, quantity, price, position_pct=position_pct)
-        except Exception as push_err:
-            logger.warning(f"Non-blocking: subscriber push notification failed: {push_err}")
+        # Subscriber push + email notifications are fired by
+        # process_transaction's internal fan-out above (cash_tracking.py).
+        # We used to fan out again here which caused duplicate notifications
+        # per trade (one with position_pct, one without). The single source
+        # of truth is now process_transaction, which receives position_before_qty.
         
         return jsonify({
             'success': True,
@@ -3809,14 +3800,34 @@ def _execute_bot_trade_wave(wave, dry_run=False):
         
         for bot in bots:
             try:
-                # Load or generate profile
+                # Load strategy profile. Priority order:
+                #   1. extra_data['strategy_profile'] (set by batch-create /
+                #      auto-create — the canonical persisted location)
+                #   2. .bot_profiles/<id>.json (legacy file-based path; will
+                #      NOT exist on Vercel's read-only serverless filesystem)
+                #   3. Generate a fresh 'balanced' profile as a safety net
+                #
+                # Before May 14, only paths 2+3 existed, so every bot fell
+                # through to 'balanced' regardless of what was assigned at
+                # creation time — i.e., the strategy column in the admin
+                # panel was decorative only. Fixed in this commit.
                 import json, os
-                profile_path = os.path.join('.bot_profiles', f'{bot.id}.json')
-                if os.path.exists(profile_path):
-                    with open(profile_path) as f:
-                        profile = json.load(f)
-                else:
-                    profile = generate_strategy_profile('balanced', bot.industry or 'General')
+                _extra = bot.extra_data if isinstance(bot.extra_data, dict) else {}
+                profile = _extra.get('strategy_profile')
+                if not profile:
+                    profile_path = os.path.join('.bot_profiles', f'{bot.id}.json')
+                    if os.path.exists(profile_path):
+                        with open(profile_path) as f:
+                            profile = json.load(f)
+                if not profile:
+                    # Industry lives in extra_data, NOT as a User column.
+                    industry = _extra.get('industry', 'General')
+                    profile = generate_strategy_profile('balanced', industry)
+                    logger.warning(
+                        f"Bot {bot.username} (id={bot.id}) had no strategy_profile "
+                        f"in extra_data; falling back to 'balanced'. Re-create the "
+                        f"bot or POST /admin/bot/update-config to assign one."
+                    )
                 
                 # Check if bot should trade today
                 if not should_trade_today(profile):
@@ -4299,6 +4310,30 @@ def admin_test_push():
     })
 
 
+# ── Copytrade bot filter ─────────────────────────────────────────────────
+# Auto-match for Public.com email trades must restrict to TRUE copytrade
+# bots, NOT strategy bots. Strategy bots (auto-created personas like
+# `candle3873`) hold tickers from their own internal trading decisions and
+# would incorrectly capture inbound Public.com emails. Concrete example
+# (May 14 rebalance): Wolff's Flagship Fund sold REGN. A single-ticker
+# email for REGN landed, the auto-match scanned ALL role=='agent' users,
+# found that `candle3873` also held REGN, and routed the trade there.
+# Mark a bot as a copytrade bot by either:
+#   - Username in COPYTRADE_BOT_USERNAMES, or
+#   - extra_data['copytrade_bot'] = True (preferred for new bots)
+COPYTRADE_BOT_USERNAMES = ('CoastHillBear', 'marblethehill72')
+
+
+def _is_copytrade_bot(u) -> bool:
+    if not u:
+        return False
+    if u.username in COPYTRADE_BOT_USERNAMES:
+        return True
+    if isinstance(getattr(u, 'extra_data', None), dict) and u.extra_data.get('copytrade_bot') is True:
+        return True
+    return False
+
+
 @mobile_api.route('/admin/bot/email-trade', methods=['POST'])
 @require_cron_secret
 @rate_limit(30)
@@ -4350,8 +4385,19 @@ def bot_email_trade():
             if not email_tickers:
                 return jsonify({'error': 'No tickers found for auto-detection'}), 400
             
-            # Find all copytrade bot users
-            copytrade_bots = User.query.filter_by(role='agent').all()
+            # Restrict the candidate set to TRUE copytrade bots only — strategy
+            # bots (e.g. candle3873) also have role='agent' but hold tickers from
+            # their own internal trading logic, so matching them against an
+            # inbound Public.com email causes misattribution.
+            all_agents = User.query.filter_by(role='agent').all()
+            copytrade_bots = [u for u in all_agents if _is_copytrade_bot(u)]
+            if not copytrade_bots:
+                logger.warning(
+                    f"No copytrade bots configured among {len(all_agents)} agents; "
+                    f"all email trades will be deferred. Mark a bot with "
+                    f"extra_data.copytrade_bot=true or add its username to "
+                    f"COPYTRADE_BOT_USERNAMES."
+                )
             best_bot = None
             best_overlap = -1
             match_details = []
@@ -4527,10 +4573,18 @@ def bot_email_trade():
                 # Capture pre-trade position so we can report % of position on sells.
                 pre_qty = float(stock.quantity) if stock else 0.0
 
-                # Process transaction through cash tracking
+                # Process transaction through cash tracking.
+                # IMPORTANT: pass position_before_qty so the internal subscriber
+                # notification fan-out (cash_tracking.process_transaction) can
+                # report the correct % of position on sells. We used to omit
+                # this and fire a SECOND external fan-out below to compensate,
+                # which caused the duplicate-push bug (one notification with
+                # the % and one without). Single source of truth now.
+                position_before_for_tx = pre_qty if action == 'sell' else None
                 tx_result = process_transaction(
                     db, bot.id, ticker, quantity, price, action,
                     timestamp=datetime.utcnow(),
+                    position_before_qty=position_before_for_tx,
                     price_source=source or 'copytrade'
                 )
                 if action == 'buy':
@@ -4569,41 +4623,15 @@ def bot_email_trade():
         
         executed = [r for r in results if r.get('status') == 'executed']
 
-        # ── Notification fan-out (push + email) for each successful trade ──
-        # Mirrors the regular email-trade path in services/trading_email.py so
-        # that copytrade bots (CoastHillBear, marblethehill72, etc.) trigger
-        # the SAME subscriber alerts as user-driven trades. Without this block,
-        # bobford00 (subscribed to CoastHillBear) sees the trade in the app's
-        # Subscriptions tab on next refresh but receives no push notification.
-        notify_summary = {'push_sent': 0, 'email_sent': 0, 'errors': []}
-        if executed:
-            try:
-                from services.notification_utils import notify_subscribers_via_email
-                from push_notification_service import notify_subscribers_of_trade
-                for r in executed:
-                    try:
-                        push_result = notify_subscribers_of_trade(
-                            db, bot.id, r['action'], r['ticker'],
-                            r['quantity'], r['price'],
-                            position_pct=r.get('position_pct'),
-                        )
-                        notify_summary['push_sent'] += int(push_result.get('success_count', 0) or 0)
-                    except Exception as pe:
-                        logger.warning(f"Push notify failed for {r['ticker']}: {pe}")
-                        notify_summary['errors'].append(f"push:{r['ticker']}:{pe}")
-                    try:
-                        email_result = notify_subscribers_via_email(
-                            db, bot.id, r['action'], r['ticker'],
-                            r['quantity'], r['price'],
-                            position_pct=r.get('position_pct'),
-                        )
-                        notify_summary['email_sent'] += int(email_result.get('sent', 0) or 0)
-                    except Exception as ee:
-                        logger.warning(f"Email notify failed for {r['ticker']}: {ee}")
-                        notify_summary['errors'].append(f"email:{r['ticker']}:{ee}")
-            except Exception as e:
-                logger.error(f"Notification fan-out top-level error: {e}")
-                notify_summary['errors'].append(f"top:{e}")
+        # Subscriber push + email notifications are fired by
+        # process_transaction's internal fan-out (cash_tracking.py). We used
+        # to fan out again here, which produced TWO notifications per trade
+        # (the internal one with position_pct=None plus this one with the
+        # correct %). Single source of truth lives in process_transaction.
+        notify_summary = {
+            'sent_via': 'cash_tracking.process_transaction',
+            'trades_notified': len(executed),
+        }
 
         return jsonify({
             'success': True,
@@ -4660,8 +4688,10 @@ def bot_process_pending_trades():
             window_start = batch_created - timedelta(minutes=5)
             window_end = batch_created + timedelta(minutes=35)
             
-            # Look for recent transactions on copytrade bots
-            copytrade_bots = User.query.filter_by(role='agent').all()
+            # Look for recent transactions on copytrade bots ONLY (NOT strategy
+            # bots — see _is_copytrade_bot docstring for context).
+            _all_agents_retry = User.query.filter_by(role='agent').all()
+            copytrade_bots = [u for u in _all_agents_retry if _is_copytrade_bot(u)]
             matched_bot = None
             
             for candidate in copytrade_bots:
@@ -5490,10 +5520,12 @@ def bot_activity_feed():
         ).order_by(desc(Transaction.timestamp)).limit(limit).all()
         
         for txn, user in trades:
+            display = getattr(user, 'public_name', None) or user.display_name or user.username
             events.append({
                 'type': 'trade',
                 'timestamp': txn.timestamp.isoformat() if txn.timestamp else None,
                 'user': user.username,
+                'display_name': display,
                 'user_id': user.id,
                 'role': user.role or 'user',
                 'detail': f"{txn.transaction_type.upper()} {txn.quantity} {txn.ticker} @ ${txn.price:.2f}" if txn.price else f"{txn.transaction_type.upper()} {txn.quantity} {txn.ticker}",
@@ -6410,10 +6442,16 @@ def bot_trade_history():
         
         results = []
         for txn, user in trades:
+            # public_name = display_name when set, else username. Admin UI
+            # should render this so bots show as "Wolff's Flagship Fund"
+            # rather than "CoastHillBear". `username` kept for compat /
+            # disambiguation (e.g., search, gift-modal target).
+            display = getattr(user, 'public_name', None) or user.display_name or user.username
             results.append({
                 'id': txn.id,
                 'user_id': user.id,
                 'username': user.username,
+                'display_name': display,
                 'role': user.role or 'user',
                 'ticker': txn.ticker,
                 'quantity': txn.quantity,
