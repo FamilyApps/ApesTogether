@@ -4569,31 +4569,28 @@ def bot_email_trade():
             bot_username = bot.username
             source = f'auto_{source}' if not source.startswith('auto_') else source
             logger.info(f"Auto-detect: matched {email_tickers} to {bot_username} (overlap={best_overlap}). Details: {match_details}")
-            
-            # Check if there are pending trades that should now be routed to this same bot
-            # (trades from the last 30 min that couldn't be matched earlier)
-            from models import PendingTrade
-            pending = PendingTrade.query.filter_by(status='pending').filter(
-                PendingTrade.expires_at > datetime.utcnow()
-            ).all()
-            
-            if pending:
-                # Group by batch — if any trade in a batch's time window overlaps with
-                # this bot's tickers (now including the ones we just matched), route them
-                for pt in pending:
-                    pt.assigned_bot_id = bot.id
-                    pt.status = 'routed'
-                    pt.routed_at = datetime.utcnow()
-                    # Add this pending trade to the trades list for execution
-                    trades_list.append({
-                        'action': pt.action,
-                        'ticker': pt.ticker,
-                        'quantity': pt.quantity,
-                        'price': pt.price,
-                    })
-                    logger.info(f"Resolved pending trade: {pt.ticker} {pt.action} -> {bot_username} (batch={pt.email_batch_id})")
-                
-                db.session.commit()
+
+            # NOTE: We deliberately do NOT sweep PendingTrade rows from
+            # other email_batches here. Public.com sends ONE email per
+            # trade, so each unmatched trade lives in its own batch_id.
+            # An earlier version of this code looped over ALL pending
+            # trades (across every batch) and reassigned them to
+            # whichever bot won the *current* request's ticker-overlap
+            # match. That caused the May-2026 cross-bot misallocation:
+            # a flurry of single-ticker emails (CLSK, KTOS, MSTR, PGY,
+            # SOC, IREN) all came in within seconds. The first six had
+            # no ticker overlap with either bot → they deferred. The
+            # seventh (IREN) matched Wolff because Wolff held IREN from
+            # seed → the inline sweep yanked the previously-deferred
+            # six onto Wolff too, even though they were the *next*
+            # account's (Grok's) trades. Result: phantom CLSK/KTOS/etc.
+            # positions on Wolff that took hours of forensics to undo.
+            #
+            # Pending trades are now resolved exclusively by
+            # /admin/bot/process-pending-trades (called every 5 min by
+            # the GAS retry trigger). That handler iterates BY BATCH
+            # and uses a per-batch timestamp window to pick the most
+            # plausible bot, instead of cross-pollinating batches.
         else:
             # Find the bot user by explicit username
             bot = User.query.filter_by(username=bot_username, role='agent').first()
