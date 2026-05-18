@@ -6613,6 +6613,119 @@ def cleanup_intraday_data_cron():
         logger.error(f"Automated cleanup error: {str(e)}")
         return jsonify({'error': f'Cleanup error: {str(e)}'}), 500
 
+@app.route('/api/cron/refresh-daily-bars', methods=['GET', 'POST'])
+def refresh_daily_bars_cron():
+    """
+    Populate the `daily_price_bar` cache with the most recent ~100 trading
+    days of OHLCV bars for every ticker in the bot universe.
+
+    Runs once per weekday after market close (vercel.json: 22:30 UTC = 6:30 PM ET).
+    Uses AlphaVantage TIME_SERIES_DAILY concurrently, respecting the 150/min
+    premium rate limit. With ~100 tickers this takes ~45s — fits within
+    Vercel's 60s maxDuration.
+
+    Trade waves then read from this cache instead of refetching 100 days of
+    history on every wave (which was the root cause of the 9:45 AM 500s
+    when yfinance was unreliable on Vercel serverless IPs).
+    """
+    try:
+        auth_error = verify_cron_request()
+        if auth_error:
+            return auth_error
+
+        from bot_data_hub import (
+            get_all_tickers, fetch_av_daily_bars_concurrent, ALPHA_VANTAGE_KEY,
+            flush_av_logs,
+        )
+        from models import db, DailyPriceBar
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        if not ALPHA_VANTAGE_KEY:
+            return jsonify({
+                'success': False,
+                'error': 'no_av_key',
+                'message': 'ALPHA_VANTAGE_API_KEY env var is not set'
+            }), 200  # 200 with diagnostics, NOT 500 — config issue surfaced cleanly
+
+        tickers = get_all_tickers()
+        logger.info(f"refresh-daily-bars: fetching {len(tickers)} tickers from AlphaVantage")
+        started = datetime.utcnow()
+
+        # Concurrent fetch from AV (respects 140 req/min effective rate).
+        bars_by_ticker = fetch_av_daily_bars_concurrent(tickers, max_workers=4)
+        fetched_ms = int((datetime.utcnow() - started).total_seconds() * 1000)
+
+        # Upsert into daily_price_bar. Each ticker DF has up to 100 rows.
+        upserted = 0
+        failed_tickers = []
+        for ticker, df in bars_by_ticker.items():
+            try:
+                rows_to_upsert = []
+                for date_idx, row in df.iterrows():
+                    rows_to_upsert.append({
+                        'ticker': ticker,
+                        'date': date_idx.date() if hasattr(date_idx, 'date') else date_idx,
+                        'open': float(row['Open']),
+                        'high': float(row['High']),
+                        'low': float(row['Low']),
+                        'close': float(row['Close']),
+                        'volume': float(row['Volume']),
+                        'source': 'av',
+                        'fetched_at': datetime.utcnow(),
+                    })
+                if not rows_to_upsert:
+                    continue
+                # Postgres ON CONFLICT upsert (ticker+date is the unique key).
+                stmt = pg_insert(DailyPriceBar.__table__).values(rows_to_upsert)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=['ticker', 'date'],
+                    set_={
+                        'open': stmt.excluded.open,
+                        'high': stmt.excluded.high,
+                        'low': stmt.excluded.low,
+                        'close': stmt.excluded.close,
+                        'volume': stmt.excluded.volume,
+                        'source': stmt.excluded.source,
+                        'fetched_at': stmt.excluded.fetched_at,
+                    }
+                )
+                db.session.execute(stmt)
+                upserted += len(rows_to_upsert)
+            except Exception as e:
+                logger.warning(f"refresh-daily-bars upsert failed for {ticker}: {e}")
+                failed_tickers.append(ticker)
+
+        db.session.commit()
+        try:
+            flush_av_logs()
+        except Exception as flush_err:
+            logger.warning(f"flush_av_logs failed (non-fatal): {flush_err}")
+
+        finished = datetime.utcnow()
+        elapsed_s = (finished - started).total_seconds()
+        not_returned = [t for t in tickers if t not in bars_by_ticker]
+
+        return jsonify({
+            'success': True,
+            'tickers_total': len(tickers),
+            'tickers_fetched': len(bars_by_ticker),
+            'tickers_missing_from_av': not_returned[:25],
+            'tickers_missing_count': len(not_returned),
+            'tickers_upsert_failed': failed_tickers,
+            'rows_upserted': upserted,
+            'fetch_ms': fetched_ms,
+            'total_elapsed_s': round(elapsed_s, 1),
+        })
+    except Exception as e:
+        logger.error(f"refresh-daily-bars cron error: {e}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc(),
+        }), 500
+
+
 @app.route('/api/cron/bot-trade-wave', methods=['GET', 'POST'])
 def bot_trade_wave_cron():
     """
@@ -6652,9 +6765,21 @@ def bot_trade_wave_cron():
         
         from mobile_api import _execute_bot_trade_wave
         result = _execute_bot_trade_wave(wave)
-        if 'error' in result:
+
+        # Status taxonomy:
+        #   - success          : trades executed, no errors
+        #   - success+errors   : trades executed but some bots/data failed (partial)
+        #   - no_data          : core market data unavailable (soft-fail)
+        #   - traceback        : uncaught crash (hard-fail)
+        #
+        # We return 200 for soft-fails so the Vercel cron UI doesn't light up
+        # red on transient data-source hiccups. The BotWaveLog row + the
+        # response body's `error` / `error_detail` / `data_quality` fields
+        # carry the diagnostics. Only true crashes (traceback present) yield
+        # 500 — those genuinely need human attention.
+        if result.get('traceback'):
             return jsonify(result), 500
-        return jsonify(result)
+        return jsonify(result), 200
     
     except Exception as e:
         logger.error(f"Bot trade wave cron error: {e}")

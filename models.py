@@ -962,3 +962,88 @@ class BetaWaitlist(db.Model):
 # NOTE: W-9 / tax info collection is handled natively by Xero via the
 # '1099 Contractors' contact group. No in-app W-9 form or model needed.
 # See xero_service.py → contact_has_tax_number() for payout hold logic.
+
+
+# =============================================================================
+# BOT DATA INFRASTRUCTURE (May 2026)
+# Cached daily OHLCV bars so trade waves don't re-fetch 100 days of history
+# every wave. Populated once per day post-market by /api/cron/refresh-daily-bars
+# using AlphaVantage TIME_SERIES_DAILY (concurrent, respecting 150 req/min).
+# Trade waves read from here + append intraday quote from REALTIME_BULK_QUOTES.
+# =============================================================================
+
+class DailyPriceBar(db.Model):
+    """Cached daily OHLCV bar per (ticker, date). One row per ticker per trading day.
+
+    Populated by /api/cron/refresh-daily-bars post-market. Trade waves read from
+    this table to compute technical indicators, avoiding 100+ AV calls per wave.
+    """
+    __tablename__ = 'daily_price_bar'
+
+    id = db.Column(db.Integer, primary_key=True)
+    ticker = db.Column(db.String(20), nullable=False, index=True)
+    date = db.Column(db.Date, nullable=False, index=True)
+    open = db.Column(db.Float, nullable=True)
+    high = db.Column(db.Float, nullable=True)
+    low = db.Column(db.Float, nullable=True)
+    close = db.Column(db.Float, nullable=False)
+    volume = db.Column(db.Float, nullable=True)
+    # Provenance: 'av' (AlphaVantage TIME_SERIES_DAILY) or 'yfinance' fallback.
+    source = db.Column(db.String(20), nullable=False, default='av')
+    fetched_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('ticker', 'date', name='uq_daily_price_bar_ticker_date'),
+        db.Index('ix_daily_price_bar_ticker_date_desc', 'ticker', 'date'),
+    )
+
+    def __repr__(self):
+        return f"<DailyPriceBar {self.ticker} {self.date} close=${self.close}>"
+
+
+class BotWaveLog(db.Model):
+    """Per-wave execution log for diagnostics.
+
+    Every call to _execute_bot_trade_wave writes one row here so the admin
+    panel and post-mortem analysis can see exactly which data sources
+    succeeded/failed for each wave, which bots traded, and any errors.
+
+    This is the single source of truth for "why didn't the bots trade?"
+    """
+    __tablename__ = 'bot_wave_log'
+
+    id = db.Column(db.Integer, primary_key=True)
+    wave = db.Column(db.Integer, nullable=False)  # 1, 2, 3, 4
+    started_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    finished_at = db.Column(db.DateTime, nullable=True)
+    duration_ms = db.Column(db.Integer, nullable=True)
+
+    # Outcome
+    status = db.Column(db.String(30), nullable=False, default='running')
+    # 'success' = wave completed and at least one bot evaluated
+    # 'partial' = some data sources failed but trades still executed
+    # 'no_data' = core data unavailable, no trades attempted
+    # 'error'   = uncaught exception
+    # 'skipped' = outside market hours
+
+    bots_checked = db.Column(db.Integer, default=0)
+    bots_traded = db.Column(db.Integer, default=0)
+    trades_executed = db.Column(db.Integer, default=0)
+
+    # Data-source health snapshot at refresh time. Shape mirrors
+    # MarketDataHub.data_quality: {prices, indicators, news, social,
+    # analysts, insiders, movers}
+    data_quality = db.Column(db.JSON, nullable=True)
+    # Counts: {tickers_with_indicators, tickers_with_news, ...}
+    data_summary = db.Column(db.JSON, nullable=True)
+
+    # Per-bot decisions for forensics. List of {bot_id, username, action,
+    # ticker, score, signal_tag, status}.
+    decisions = db.Column(db.JSON, nullable=True)
+    # Free-form error list — uncaught exceptions, skipped trades, etc.
+    errors = db.Column(db.JSON, nullable=True)
+    # Top-level traceback if status='error'.
+    traceback_text = db.Column(db.Text, nullable=True)
+
+    def __repr__(self):
+        return f"<BotWaveLog wave={self.wave} status={self.status} trades={self.trades_executed} at={self.started_at}>"

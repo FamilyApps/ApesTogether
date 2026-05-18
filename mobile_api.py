@@ -3755,29 +3755,57 @@ def _execute_bot_trade_wave(wave, dry_run=False):
     Core bot trading logic for a specific wave. Called by both the POST endpoint
     and the Vercel cron GET wrapper.
     
-    Returns a dict with trade results.
+    Returns a dict with trade results. Also persists a BotWaveLog row for
+    every invocation (success or failure) so the admin panel and post-mortem
+    analysis have a single source of truth for "why didn't the bots trade?".
     """
     import random
     from datetime import timedelta
-    
+    from models import db, User, Stock
     try:
-        from models import db, User, Stock
-        
+        from models import BotWaveLog
+    except ImportError:
+        BotWaveLog = None  # type: ignore[assignment]
+
+    # ── Diagnostics: open a BotWaveLog row up-front so a CRASH still leaves
+    #    a trace. We commit it once at the end of this function in the
+    #    finally block — even if the body raises.
+    wave_log = None
+    if BotWaveLog is not None:
+        try:
+            wave_log = BotWaveLog(wave=wave, started_at=datetime.utcnow(), status='running')
+            db.session.add(wave_log)
+            db.session.commit()
+        except Exception as log_init_err:
+            db.session.rollback()
+            logger.warning(f"BotWaveLog init failed (non-fatal): {log_init_err}")
+            wave_log = None
+
+    # `results` is the dict returned to callers. It is ALSO read in the
+    # finally block to populate the BotWaveLog row, so every meaningful
+    # piece of state must land here (not in shadowing locals).
+    results = {
+        'wave': wave,
+        'dry_run': dry_run,
+        'bots_checked': 0,
+        'bots_traded': 0,
+        'trades_executed': 0,
+        'decisions': [],
+        'errors': [],
+        'log_id': wave_log.id if wave_log else None,
+    }
+    wave_started_at = datetime.utcnow()
+
+    try:
         # Get active bot users (bot_active is stored in extra_data JSON, not a column)
         all_bots = User.query.filter_by(role='agent').all()
         bots = [b for b in all_bots if (b.extra_data or {}).get('bot_active', True)]
+        results['bots_checked'] = len(bots)
         if not bots:
-            return {'success': True, 'message': 'No active bots', 'trades': 0}
-        
-        results = {
-            'wave': wave,
-            'dry_run': dry_run,
-            'bots_checked': len(bots),
-            'bots_traded': 0,
-            'trades_executed': 0,
-            'decisions': [],
-            'errors': []
-        }
+            results['success'] = True
+            results['message'] = 'No active bots'
+            results['trades'] = 0
+            return results
         
         # Lazy-import bot modules (heavy dependencies)
         try:
@@ -3785,17 +3813,32 @@ def _execute_bot_trade_wave(wave, dry_run=False):
             from bot_behaviors import should_trade_today, get_trade_wave, apply_human_biases, apply_fomo_trades
             from bot_data_hub import MarketDataHub
         except ImportError as e:
-            return {'error': f'Bot modules not available: {e}'}
-        
-        # Refresh market data once for all bots
+            results['error'] = f'Bot modules not available: {e}'
+            return results
+
+        # Refresh market data once for all bots. Failures here are diagnostic
+        # GOLD: they reveal whether AV credentials are missing, throttled, or
+        # the daily-bars cache is empty. We capture the data_quality snapshot
+        # BEFORE the availability check so the BotWaveLog row records which
+        # leg failed even when the wave returns early.
         hub = MarketDataHub()
-        hub.refresh(include_extras=True)
-        
+        try:
+            hub.refresh(include_extras=True)
+        except Exception as refresh_err:
+            logger.error(f"MarketDataHub.refresh raised: {refresh_err}")
+            results['errors'].append(f'refresh: {refresh_err}')
+
+        results['data_quality'] = getattr(hub, 'data_quality', None)
+        try:
+            results['data_summary'] = hub.summary()
+        except Exception:
+            results['data_summary'] = None
+
         if not hub.is_core_available():
-            return {'error': 'Market data unavailable'}
-        
-        results['data_quality'] = hub.data_quality
-        results['data_summary'] = hub.summary()
+            results['error'] = 'Market data unavailable'
+            results['error_detail'] = 'fetch_bulk_prices returned no data (DailyPriceBar cache empty AND live AV+yfinance both failed). Run /api/cron/refresh-daily-bars to populate the cache.'
+            return results
+
         logger.info(f"Data quality for wave {wave}: {hub.data_quality}")
         
         for bot in bots:
@@ -3882,7 +3925,16 @@ def _execute_bot_trade_wave(wave, dry_run=False):
                         ticker = d['ticker']
                         quantity = d.get('quantity', 1)
                         price = d.get('price', 0)
-                        
+                        # Map the strategy's signal_tag onto Transaction.price_source
+                        # so the admin Recent Trades 'Trigger' column can attribute
+                        # the trade to its actual driver instead of always saying
+                        # 'bot_research'. `generate_trade_decisions` returns a
+                        # signal_tag like 'rsi', 'news', 'insider', 'stoploss',
+                        # 'takeprofit', 'fomo', 'mixed' - see bot_strategies.py.
+                        signal_tag = d.get('signal_tag') or 'mixed'
+                        bot_price_source = f"bot_{signal_tag}"[:20]
+                        decision_info['signal_tag'] = signal_tag
+
                         if action == 'buy':
                             stock = Stock.query.filter_by(user_id=bot.id, ticker=ticker).first()
                             if stock:
@@ -3893,7 +3945,8 @@ def _execute_bot_trade_wave(wave, dry_run=False):
                                 stock = Stock(user_id=bot.id, ticker=ticker, quantity=quantity, purchase_price=price)
                                 db.session.add(stock)
                             
-                            pt_func(db, bot.id, ticker, quantity, price, 'buy', timestamp=datetime.utcnow(), price_source='bot_research')
+                            pt_func(db, bot.id, ticker, quantity, price, 'buy',
+                                    timestamp=datetime.utcnow(), price_source=bot_price_source)
                             
                         elif action == 'sell':
                             stock = Stock.query.filter_by(user_id=bot.id, ticker=ticker).first()
@@ -3901,7 +3954,8 @@ def _execute_bot_trade_wave(wave, dry_run=False):
                                 pos_before = stock.quantity
                                 stock.quantity -= quantity
                                 pt_func(db, bot.id, ticker, quantity, price, 'sell',
-                                       timestamp=datetime.utcnow(), position_before_qty=pos_before, price_source='bot_research')
+                                       timestamp=datetime.utcnow(), position_before_qty=pos_before,
+                                       price_source=bot_price_source)
                             else:
                                 decision_info['status'] = 'skipped_insufficient_shares'
                                 results['decisions'].append(decision_info)
@@ -3922,11 +3976,48 @@ def _execute_bot_trade_wave(wave, dry_run=False):
                 results['errors'].append(f'Bot {bot.id}: {str(e)}')
                 logger.error(f"Bot trade error for {bot.id}: {e}")
         
+        results['success'] = True
         return results
         
     except Exception as e:
+        import traceback as _tb
         logger.error(f"Bot trade wave {wave} error: {e}")
-        return {'error': str(e)}
+        results['error'] = str(e)
+        results['traceback'] = _tb.format_exc()
+        return results
+    finally:
+        # ── Persist the BotWaveLog row regardless of how we got here ──
+        # This is the single source of truth for wave-level diagnostics.
+        # Any 500 you see in Vercel logs SHOULD have a corresponding row
+        # in bot_wave_log explaining what failed and where.
+        if wave_log is not None:
+            try:
+                finished_at = datetime.utcnow()
+                wave_log.finished_at = finished_at
+                wave_log.duration_ms = int((finished_at - wave_started_at).total_seconds() * 1000)
+                wave_log.bots_checked = results.get('bots_checked', 0) or 0
+                wave_log.bots_traded = results.get('bots_traded', 0) or 0
+                wave_log.trades_executed = results.get('trades_executed', 0) or 0
+                wave_log.data_quality = results.get('data_quality')
+                wave_log.data_summary = results.get('data_summary')
+                # Cap decisions array at 200 entries to keep the JSON column small.
+                _decisions = results.get('decisions') or []
+                wave_log.decisions = _decisions[:200] if len(_decisions) > 200 else _decisions
+                wave_log.errors = results.get('errors') or []
+                wave_log.traceback_text = results.get('traceback')
+                if results.get('traceback'):
+                    wave_log.status = 'error'
+                elif results.get('error'):
+                    # Soft-fail (e.g. no market data) — distinct from uncaught crash.
+                    wave_log.status = 'no_data'
+                elif results.get('errors'):
+                    wave_log.status = 'partial'
+                else:
+                    wave_log.status = 'success'
+                db.session.commit()
+            except Exception as log_save_err:
+                db.session.rollback()
+                logger.warning(f"BotWaveLog save failed (non-fatal): {log_save_err}")
 
 
 @mobile_api.route('/admin/users/set-display-name', methods=['POST'])
@@ -5500,6 +5591,67 @@ def bot_remove_subscribers():
 
 
 # ── Dashboard API Endpoints ──────────────────────────────────────────────────
+
+@mobile_api.route('/admin/bot/last-wave-status', methods=['GET'])
+@require_admin_2fa
+@with_db_retry
+def bot_last_wave_status():
+    """Return the most recent BotWaveLog rows so the admin panel can show
+    why bots did or didn't trade in each wave.
+
+    Query params:
+        limit (int, default 10, max 50) — how many recent waves to include
+
+    Each row exposes:
+        wave, started_at, finished_at, duration_ms, status, bots_*,
+        trades_executed, data_quality, data_summary, decisions (list),
+        errors (list), traceback_text (truncated to 4 KB).
+
+    Status taxonomy:
+        success | partial | no_data | error | running | skipped
+    """
+    from models import db, BotWaveLog
+    from sqlalchemy import desc
+
+    try:
+        limit = min(int(request.args.get('limit', 10)), 50)
+    except (TypeError, ValueError):
+        limit = 10
+
+    try:
+        rows = (
+            BotWaveLog.query
+            .order_by(desc(BotWaveLog.started_at))
+            .limit(limit)
+            .all()
+        )
+    except Exception as e:
+        logger.error(f"bot_last_wave_status query failed: {e}")
+        return jsonify({'error': 'query_failed', 'detail': str(e)}), 500
+
+    def _serialize(r):
+        tb = r.traceback_text or None
+        if tb and len(tb) > 4096:
+            tb = tb[:4096] + '...[truncated]'
+        return {
+            'id': r.id,
+            'wave': r.wave,
+            'started_at': r.started_at.isoformat() if r.started_at else None,
+            'finished_at': r.finished_at.isoformat() if r.finished_at else None,
+            'duration_ms': r.duration_ms,
+            'status': r.status,
+            'bots_checked': r.bots_checked,
+            'bots_traded': r.bots_traded,
+            'trades_executed': r.trades_executed,
+            'data_quality': r.data_quality,
+            'data_summary': r.data_summary,
+            'decisions': r.decisions,
+            'errors': r.errors,
+            'traceback_text': tb,
+        }
+
+    return jsonify({'waves': [_serialize(r) for r in rows], 'count': len(rows)})
+
 
 @mobile_api.route('/admin/bot/activity-feed', methods=['GET'])
 @require_admin_2fa
