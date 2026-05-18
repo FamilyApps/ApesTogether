@@ -1577,6 +1577,8 @@ const SystemHealth = ({ api }) => {
   const [trades, setTrades] = useState(null);
   const [drift, setDrift] = useState(null);
   const [driftRunning, setDriftRunning] = useState(false);
+  const [waveStatus, setWaveStatus] = useState(null);
+  const [waveExpanded, setWaveExpanded] = useState(null);
   const [snapAudit, setSnapAudit] = useState(null);
   const [snapAuditRunning, setSnapAuditRunning] = useState(false);
   const [testPushUser, setTestPushUser] = useState('bobford00');
@@ -1658,13 +1660,14 @@ const SystemHealth = ({ api }) => {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [c, t, d, sa] = await Promise.all([
+      const [c, t, d, sa, w] = await Promise.all([
         api('/admin/bot/cron-health'),
         api('/admin/bot/trade-history?per_page=20'),
         fetchDrift(),
         fetchSnapAudit(),
+        api('/admin/bot/last-wave-status?limit=10').catch(() => ({ waves: [], count: 0 })),
       ]);
-      setCron(c); setTrades(t); setDrift(d); setSnapAudit(sa);
+      setCron(c); setTrades(t); setDrift(d); setSnapAudit(sa); setWaveStatus(w);
     } catch (e) { console.error(e); }
     setLoading(false);
   }, [api, fetchDrift, fetchSnapAudit]);
@@ -1708,6 +1711,149 @@ const SystemHealth = ({ api }) => {
           ))}
         </div>
         {cron?.server_time && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10 }}>Server time: {new Date(cron.server_time).toLocaleString()}</div>}
+      </Card>
+
+      {/* ── Bot Wave Diagnostics ─────────────────────────────────────────
+          Sources: GET /api/mobile/admin/bot/last-wave-status?limit=10
+          Each row is a `bot_wave_log` entry written by _execute_bot_trade_wave
+          in mobile_api.py. Status color:
+            success → green, partial → yellow, no_data → orange,
+            error → red, running → blue, skipped → gray. */}
+      <Card>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>Bot Wave Diagnostics</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            Last {waveStatus?.count || 0} waves
+          </div>
+        </div>
+        {(!waveStatus || (waveStatus.waves || []).length === 0) ? (
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: 8 }}>
+            No wave logs yet. After deploy, hit <code>/api/admin/run-migrations?step=6</code> to create the
+            <code> bot_wave_log</code> table, then trigger <code>/api/cron/bot-trade-wave</code> with the cron secret.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {(waveStatus.waves || []).map((w) => {
+              const statusColor = ({
+                success: 'var(--green)', partial: 'var(--yellow)',
+                no_data: '#f59e0b', error: 'var(--red)',
+                running: 'var(--blue)', skipped: 'var(--text-muted)',
+              })[w.status] || 'var(--text-muted)';
+              const isOpen = waveExpanded === w.id;
+              const dq = w.data_quality || {};
+              const failedLegs = Object.keys(dq).filter(k => dq[k] === false);
+              return (
+                <div key={w.id} style={{ background: 'var(--bg-elevated)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                  {/* Summary row (always visible) */}
+                  <div
+                    onClick={() => setWaveExpanded(isOpen ? null : w.id)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', cursor: 'pointer' }}
+                  >
+                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: statusColor, boxShadow: `0 0 8px ${statusColor}66`, flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>
+                        Wave {w.wave} · <span style={{ color: statusColor }}>{w.status}</span>
+                        {failedLegs.length > 0 && (
+                          <span style={{ fontSize: 11, color: 'var(--red)', fontWeight: 400, marginLeft: 8 }}>
+                            ({failedLegs.length} data legs failed)
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                        {w.started_at ? new Date(w.started_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'}
+                        {w.duration_ms != null && ` · ${(w.duration_ms / 1000).toFixed(1)}s`}
+                        {' · '}{w.bots_traded || 0}/{w.bots_checked || 0} bots traded · {w.trades_executed || 0} trades
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{isOpen ? '▼' : '▶'}</div>
+                  </div>
+                  {/* Expanded detail */}
+                  {isOpen && (
+                    <div style={{ padding: '0 14px 12px 14px', borderTop: '1px solid var(--border)' }}>
+                      {/* Data quality grid */}
+                      {Object.keys(dq).length > 0 && (
+                        <div style={{ marginTop: 10 }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>DATA SOURCES</div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                            {Object.entries(dq).map(([k, v]) => (
+                              <span key={k} style={{
+                                fontSize: 11, padding: '2px 8px', borderRadius: 4,
+                                background: v ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                                color: v ? 'var(--green)' : 'var(--red)',
+                                border: `1px solid ${v ? 'var(--green)' : 'var(--red)'}33`,
+                              }}>
+                                {v ? '✓' : '✗'} {k}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Data summary counts */}
+                      {w.data_summary && Object.keys(w.data_summary).length > 0 && (
+                        <div style={{ marginTop: 10 }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>COVERAGE</div>
+                          <div style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
+                            {Object.entries(w.data_summary).map(([k, v]) => `${k}=${v}`).join(' · ')}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Errors list */}
+                      {Array.isArray(w.errors) && w.errors.length > 0 && (
+                        <div style={{ marginTop: 10 }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--red)', marginBottom: 4 }}>ERRORS ({w.errors.length})</div>
+                          <div style={{ background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, padding: 8, maxHeight: 160, overflowY: 'auto' }}>
+                            {w.errors.slice(0, 20).map((err, idx) => (
+                              <div key={idx} style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', marginBottom: 4 }}>
+                                {String(err)}
+                              </div>
+                            ))}
+                            {w.errors.length > 20 && (
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>...and {w.errors.length - 20} more</div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Decisions sample */}
+                      {Array.isArray(w.decisions) && w.decisions.length > 0 && (
+                        <div style={{ marginTop: 10 }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>DECISIONS ({w.decisions.length})</div>
+                          <div style={{ maxHeight: 200, overflowY: 'auto', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6 }}>
+                            {w.decisions.slice(0, 30).map((d, idx) => (
+                              <div key={idx} style={{ fontSize: 11, padding: '4px 8px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 8, alignItems: 'center' }}>
+                                <span style={{ color: 'var(--text-muted)', minWidth: 80 }}>{d.username || `bot ${d.bot_id}`}</span>
+                                <span style={{ fontWeight: 600, minWidth: 36, color: d.action === 'buy' ? 'var(--green)' : d.action === 'sell' ? 'var(--red)' : 'var(--text-muted)' }}>{(d.action || '?').toUpperCase()}</span>
+                                <span style={{ minWidth: 50 }}>{d.ticker || '—'}</span>
+                                <span style={{ color: 'var(--text-muted)', minWidth: 70 }}>{d.signal_tag || '—'}</span>
+                                <span style={{ color: 'var(--text-muted)', minWidth: 60 }}>score: {d.score != null ? d.score.toFixed(2) : '—'}</span>
+                                <span style={{ color: d.status === 'executed' ? 'var(--green)' : 'var(--text-muted)', flex: 1, textAlign: 'right' }}>{d.status || '—'}</span>
+                              </div>
+                            ))}
+                            {w.decisions.length > 30 && (
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: 8 }}>...and {w.decisions.length - 30} more</div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Traceback (only on hard errors) */}
+                      {w.traceback_text && (
+                        <div style={{ marginTop: 10 }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--red)', marginBottom: 4 }}>TRACEBACK</div>
+                          <pre style={{ fontSize: 10, fontFamily: 'monospace', background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, padding: 8, overflowX: 'auto', maxHeight: 240, color: 'var(--text-secondary)' }}>
+                            {w.traceback_text}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </Card>
 
       <Card>

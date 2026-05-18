@@ -1180,8 +1180,9 @@ class MarketDataHub:
         self.top_movers = {}      # {gainers: [...], losers: [...]}
         self.last_refresh = None
         self.data_quality = {     # Track what succeeded
-            'prices': False,
-            'indicators': False,
+            'prices': False,      # 100-day OHLCV history (cache or live)
+            'quotes': False,      # current intraday quote (AV bulk)
+            'indicators': False,  # locally computed RSI/MACD/etc.
             'news': False,
             'social': False,
             'analysts': False,
@@ -1198,19 +1199,73 @@ class MarketDataHub:
         tickers = get_all_tickers()
         logger.info(f"=== MarketDataHub refresh: {len(tickers)} tickers ===")
 
-        # Phase 1: Bulk price data (yfinance primary, AV fallback)
+        # Phase 1: Bulk price history (cache → AV → yfinance fallback chain).
+        # Returns DataFrames containing daily bars THROUGH the last cache
+        # refresh (typically yesterday's close after the 6:30 PM ET cron).
         price_data = fetch_bulk_prices(tickers)
         self.data_quality['prices'] = len(price_data) > 0
 
-        # Phase 2: Technical indicators (local computation)
+        # Phase 2: Realtime quotes via AV REALTIME_BULK_QUOTES (~1s for 100
+        # tickers). Done BEFORE indicator computation so we can splice
+        # today's intraday close into the price history — this way RSI /
+        # MACD / trend signals reflect intraday moves, not just yesterday's
+        # close. Without this step, every wave during the trading day would
+        # be making decisions based on stale data.
+        quotes = fetch_realtime_quotes(tickers)
+        self.data_quality['quotes'] = len(quotes) > 0
+
+        # Phase 2b: Splice today's quote as a synthetic bar onto each
+        # ticker's history. The OHLC values all collapse to the current
+        # price (we don't have the day's true high/low intraday), but
+        # since indicators read mostly from `Close`, this is fine for
+        # RSI/MACD/trend purposes.
+        if price_data and quotes:
+            try:
+                import pandas as pd
+                # "Today" is anchored to NY market date — same as what AV
+                # returns for daily bars, so dedupe checks work correctly.
+                today_market_date = (
+                    pd.Timestamp.now(tz='America/New_York')
+                    .normalize().tz_localize(None)
+                )
+                appended = 0
+                for t, df in list(price_data.items()):
+                    if t not in quotes or df.empty:
+                        continue
+                    # If the cache already contains today's bar (e.g., the
+                    # daily-bars cron has already run for today after close),
+                    # don't double-stamp.
+                    if today_market_date in df.index:
+                        continue
+                    cur_price = float(quotes[t]['price'])
+                    cur_volume = float(quotes[t].get('volume') or 0)
+                    synthetic = pd.DataFrame(
+                        [{
+                            'Open': cur_price,
+                            'High': cur_price,
+                            'Low': cur_price,
+                            'Close': cur_price,
+                            'Volume': cur_volume,
+                        }],
+                        index=pd.DatetimeIndex([today_market_date], name=df.index.name),
+                    )
+                    price_data[t] = pd.concat([df, synthetic])
+                    appended += 1
+                if appended:
+                    logger.info(f"Appended intraday quote bar to {appended} tickers before indicator computation")
+            except Exception as e:
+                logger.warning(f"Intraday-quote append failed (non-fatal, indicators will use yesterday's close): {e}")
+
+        # Phase 3: Technical indicators (local computation, now incorporates
+        # today's intraday close where available).
         if price_data:
             self.indicators = compute_indicators(price_data)
             self.data_quality['indicators'] = len(self.indicators) > 0
         else:
             logger.error("No price data available — indicators will be empty")
 
-        # Phase 3: Realtime quotes (update current prices)
-        quotes = fetch_realtime_quotes(tickers)
+        # Phase 3b: Stamp current price/volume onto the indicators dict so
+        # downstream consumers see the same value used in the indicator math.
         for t, q in quotes.items():
             if t in self.indicators:
                 self.indicators[t]['price'] = q['price']
