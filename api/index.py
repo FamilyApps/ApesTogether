@@ -8820,7 +8820,15 @@ def public_portfolio_view(slug):
         
         # Build holdings from batch prices (no additional API calls).
         # Filter zombie 0-share rows (see /admin/cleanup-zero-share-stocks).
+        # Phase B additions:
+        #   - quantity_display: pre-formatted string so the Jinja template
+        #     can show 4 decimals for fractional positions (e.g. 0.5000)
+        #     and integer for whole positions (e.g. 10), avoiding the
+        #     "fractional shows as 0" rounding bug.
+        #   - pct_of_portfolio: position's share of total portfolio value
+        #     (including cash), as a 0-100 percent.
         holdings = []
+        cash_balance = float(getattr(user, 'cash_proceeds', 0.0) or 0.0)
         if is_subscriber:
             for stock in stocks:
                 if not stock.quantity or stock.quantity <= 0:
@@ -8829,15 +8837,24 @@ def public_portfolio_view(slug):
                 value = price * stock.quantity
                 gain_loss = value - (stock.purchase_price * stock.quantity)
                 gain_loss_pct = (gain_loss / (stock.purchase_price * stock.quantity) * 100) if stock.purchase_price > 0 else 0
-                
+                pct_of_portfolio = (value / current_value * 100) if current_value > 0 else 0
+
+                qty = float(stock.quantity)
+                if abs(qty - round(qty)) < 0.0001:
+                    quantity_display = f"{qty:.0f}"
+                else:
+                    quantity_display = f"{qty:.4f}"
+
                 holdings.append({
                     'ticker': stock.ticker,
                     'quantity': stock.quantity,
+                    'quantity_display': quantity_display,
                     'purchase_price': stock.purchase_price,
                     'current_price': price,
                     'value': value,
                     'gain_loss': gain_loss,
-                    'gain_loss_pct': gain_loss_pct
+                    'gain_loss_pct': gain_loss_pct,
+                    'pct_of_portfolio': pct_of_portfolio,
                 })
         
         # Get user's leaderboard positions (if in top 20)
@@ -8896,6 +8913,8 @@ def public_portfolio_view(slug):
             subscription_price=user.subscription_price or 4.00,
             is_subscriber=is_subscriber,
             holdings=holdings,
+            cash_balance=cash_balance,
+            cash_pct_of_portfolio=(cash_balance / current_value * 100) if current_value > 0 else 0,
             num_stocks=num_stocks,
             avg_trades_per_week=avg_trades_per_week,
             leaderboard_positions=leaderboard_positions,

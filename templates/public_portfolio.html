@@ -430,6 +430,7 @@
                             <th>Avg Cost</th>
                             <th>Price</th>
                             <th>Value</th>
+                            <th>% Port</th>
                             <th>P&L</th>
                         </tr>
                     </thead>
@@ -437,15 +438,28 @@
                         {% for h in holdings %}
                         <tr>
                             <td><span class="ticker-badge">{{ h.ticker }}</span></td>
-                            <td>{{ "%.2f"|format(h.quantity) }}</td>
+                            <td>{{ h.quantity_display }}</td>
                             <td>${{ "%.2f"|format(h.purchase_price) }}</td>
                             <td>${{ "%.2f"|format(h.current_price) }}</td>
                             <td>${{ "{:,.0f}".format(h.value) }}</td>
+                            <td>{% if h.pct_of_portfolio < 1 %}&lt;1%{% else %}{{ "%.0f"|format(h.pct_of_portfolio) }}%{% endif %}</td>
                             <td class="{% if h.gain_loss >= 0 %}gain-up{% else %}gain-down{% endif %}">
                                 {% if h.gain_loss >= 0 %}+{% endif %}{{ "%.1f"|format(h.gain_loss_pct) }}%
                             </td>
                         </tr>
                         {% endfor %}
+                        {# Cash line (only when there's actual cash on hand) #}
+                        {% if cash_balance and cash_balance > 0.005 %}
+                        <tr style="background: rgba(16, 185, 129, 0.04);">
+                            <td><span class="ticker-badge"><i class="fas fa-dollar-sign" style="color:var(--accent);margin-right:4px;"></i>Cash</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>${{ "{:,.2f}".format(cash_balance) }}</td>
+                            <td>{% if cash_pct_of_portfolio < 1 %}&lt;1%{% else %}{{ "%.0f"|format(cash_pct_of_portfolio) }}%{% endif %}</td>
+                            <td>—</td>
+                        </tr>
+                        {% endif %}
                     </tbody>
                 </table>
             </div>
@@ -461,13 +475,13 @@
             <!-- Fake blurred rows -->
             <div class="holdings-blur">
                 <table class="holdings-table">
-                    <thead><tr><th>Ticker</th><th>Shares</th><th>Avg Cost</th><th>Price</th><th>Value</th><th>P&L</th></tr></thead>
+                    <thead><tr><th>Ticker</th><th>Shares</th><th>Avg Cost</th><th>Price</th><th>Value</th><th>% Port</th><th>P&L</th></tr></thead>
                     <tbody>
-                        <tr><td>AAPL</td><td>42.00</td><td>$174.50</td><td>$198.32</td><td>$8,329</td><td class="gain-up">+13.6%</td></tr>
-                        <tr><td>NVDA</td><td>15.00</td><td>$482.10</td><td>$612.87</td><td>$9,193</td><td class="gain-up">+27.1%</td></tr>
-                        <tr><td>TSLA</td><td>28.50</td><td>$243.60</td><td>$221.15</td><td>$6,303</td><td class="gain-down">-9.2%</td></tr>
-                        <tr><td>AMZN</td><td>20.00</td><td>$142.30</td><td>$186.45</td><td>$3,729</td><td class="gain-up">+31.0%</td></tr>
-                        <tr><td>MSFT</td><td>18.00</td><td>$338.20</td><td>$412.55</td><td>$7,426</td><td class="gain-up">+22.0%</td></tr>
+                        <tr><td>AAPL</td><td>42</td><td>$174.50</td><td>$198.32</td><td>$8,329</td><td>23%</td><td class="gain-up">+13.6%</td></tr>
+                        <tr><td>NVDA</td><td>15</td><td>$482.10</td><td>$612.87</td><td>$9,193</td><td>26%</td><td class="gain-up">+27.1%</td></tr>
+                        <tr><td>TSLA</td><td>28.50</td><td>$243.60</td><td>$221.15</td><td>$6,303</td><td>17%</td><td class="gain-down">-9.2%</td></tr>
+                        <tr><td>AMZN</td><td>20</td><td>$142.30</td><td>$186.45</td><td>$3,729</td><td>10%</td><td class="gain-up">+31.0%</td></tr>
+                        <tr><td>MSFT</td><td>18</td><td>$338.20</td><td>$412.55</td><td>$7,426</td><td>21%</td><td class="gain-up">+22.0%</td></tr>
                     </tbody>
                 </table>
             </div>

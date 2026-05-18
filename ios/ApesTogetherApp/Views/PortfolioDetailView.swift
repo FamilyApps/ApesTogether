@@ -204,6 +204,7 @@ struct PortfolioDetailView: View {
                                         if portfolio.isOwner {
                                             SwipeableHoldingRow(
                                                 holding: holding,
+                                                portfolioValue: portfolio.portfolioValue,
                                                 onBuy: {
                                                     tradeSheet = TradeSheetInfo(
                                                         ticker: holding.ticker,
@@ -220,11 +221,16 @@ struct PortfolioDetailView: View {
                                                 }
                                             )
                                         } else {
-                                            HoldingRow(holding: holding)
+                                            HoldingRow(holding: holding, portfolioValue: portfolio.portfolioValue)
                                         }
                                         if index < holdings.count - 1 {
                                             AccentDivider()
                                         }
+                                    }
+                                    // Cash line (only when there's actual cash on hand).
+                                    if let cash = portfolio.cashBalance, cash > 0.005 {
+                                        AccentDivider()
+                                        CashRow(cashBalance: cash, portfolioValue: portfolio.portfolioValue)
                                     }
                                 }
                                 .cardStyle(padding: 0)
@@ -366,6 +372,7 @@ struct PortfolioDetailView: View {
 
 struct SwipeableHoldingRow: View {
     let holding: Holding
+    let portfolioValue: Double?
     let onBuy: () -> Void
     let onSell: () -> Void
     @State private var offset: CGFloat = 0
@@ -413,7 +420,7 @@ struct SwipeableHoldingRow: View {
             }
             
             // Foreground content
-            HoldingRow(holding: holding)
+            HoldingRow(holding: holding, portfolioValue: portfolioValue)
                 .background(Color.cardBackground)
                 .offset(x: offset)
                 .gesture(
@@ -468,7 +475,7 @@ struct SellPickerSheet: View {
                                         Text(holding.ticker)
                                             .font(.headline)
                                             .foregroundColor(.textPrimary)
-                                        Text("\(Int(holding.quantity)) shares")
+                                        Text("\(holding.formattedQuantity) share\(holding.quantity == 1 ? "" : "s")")
                                             .font(.caption)
                                             .foregroundColor(.textSecondary)
                                     }
@@ -503,9 +510,18 @@ struct SellPickerSheet: View {
 
 // MARK: - Holding Row
 
+/// Two-line holdings card.
+///
+/// Top row:    [TICKER badge]  TICKER                                 $TotalValue   X.X% port
+///             quantity shares · $X.XX avg                            +$X.XX (+X.X%)
+///
+/// `portfolioValue` is the OWNER's total portfolio value, used to compute
+/// the position's share of the portfolio. It's optional; if nil the
+/// percent is hidden gracefully.
 struct HoldingRow: View {
     let holding: Holding
-    
+    let portfolioValue: Double?
+
     var body: some View {
         HStack {
             // Ticker badge
@@ -522,7 +538,10 @@ struct HoldingRow: View {
                 Text(holding.ticker)
                     .font(.headline)
                     .foregroundColor(.textPrimary)
-                Text("\(Int(holding.quantity)) shares")
+                // Quantity + average cost on the same subtitle line so both
+                // pieces of info stay co-located. Cost basis only renders
+                // when we actually have it (purchasePrice > 0).
+                Text(quantityAndAvgLine)
                     .font(.caption)
                     .foregroundColor(.textSecondary)
             }
@@ -531,18 +550,100 @@ struct HoldingRow: View {
             Spacer()
             
             VStack(alignment: .trailing, spacing: 4) {
-                Text("$\(String(format: "%.2f", holding.totalValue))")
-                    .font(.subheadline.bold())
-                    .foregroundColor(.textPrimary)
-                if let gain = holding.gainPercent {
-                    Text(String(format: "%+.1f%%", gain))
+                // Top-right line: total value + (in muted text) % of portfolio.
+                HStack(spacing: 6) {
+                    Text("$\(String(format: "%.2f", holding.totalValue))")
+                        .font(.subheadline.bold())
+                        .foregroundColor(.textPrimary)
+                    if let pct = holding.percentOfPortfolio(portfolioValue) {
+                        Text(formattedPortfolioPct(pct))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.textMuted)
+                    }
+                }
+                // Bottom-right line: $ gain · % gain (color-coded). Falls back
+                // to a neutral "-" if cost basis is missing.
+                if let gainPct = holding.gainPercent, let gainDol = holding.gainDollars {
+                    Text("\(formattedSignedDollars(gainDol)) (\(String(format: "%+.1f%%", gainPct)))")
                         .font(.caption.weight(.semibold))
-                        .foregroundColor(gain >= 0 ? .gains : .losses)
+                        .foregroundColor(gainPct >= 0 ? .gains : .losses)
                 } else {
-                    Text("$\(String(format: "%.2f", holding.displayPrice)) avg")
+                    Text("—")
                         .font(.caption)
                         .foregroundColor(.textMuted)
                 }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    private var quantityAndAvgLine: String {
+        let qtyPart = "\(holding.formattedQuantity) share\(holding.quantity == 1 ? "" : "s")"
+        if holding.purchasePrice > 0 {
+            return "\(qtyPart) · $\(String(format: "%.2f", holding.purchasePrice)) avg"
+        }
+        return qtyPart
+    }
+
+    private func formattedSignedDollars(_ value: Double) -> String {
+        let sign = value >= 0 ? "+" : "-"
+        return "\(sign)$\(String(format: "%.2f", abs(value)))"
+    }
+
+    private func formattedPortfolioPct(_ pct: Double) -> String {
+        if pct < 1 { return "<1% port" }
+        return String(format: "%.0f%% port", pct)
+    }
+}
+
+// MARK: - Cash Row
+
+/// Renders the user's available cash (cash_proceeds) as the last entry in
+/// the Holdings list when present and > 0. Mirrors the visual structure of
+/// `HoldingRow` so the list reads as one cohesive table.
+struct CashRow: View {
+    let cashBalance: Double
+    let portfolioValue: Double?
+
+    var body: some View {
+        HStack {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.primaryAccent.opacity(0.1))
+                    .frame(width: 44, height: 44)
+                Image(systemName: "dollarsign.circle.fill")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.primaryAccent)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Cash")
+                    .font(.headline)
+                    .foregroundColor(.textPrimary)
+                Text("Available proceeds")
+                    .font(.caption)
+                    .foregroundColor(.textSecondary)
+            }
+            .padding(.leading, 4)
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text("$\(String(format: "%.2f", cashBalance))")
+                        .font(.subheadline.bold())
+                        .foregroundColor(.textPrimary)
+                    if let total = portfolioValue, total > 0 {
+                        let pct = (cashBalance / total) * 100
+                        Text(pct < 1 ? "<1% port" : String(format: "%.0f%% port", pct))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.textMuted)
+                    }
+                }
+                Text("—")
+                    .font(.caption)
+                    .foregroundColor(.textMuted)
             }
         }
         .padding(.horizontal, 14)

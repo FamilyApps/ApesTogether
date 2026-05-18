@@ -715,8 +715,14 @@ def get_portfolio(slug):
             if stock.quantity > 0:
                 price = batch_prices.get(stock.ticker.upper(), stock.purchase_price or 0)
                 portfolio_value += price * stock.quantity
-        portfolio_value += getattr(owner, 'cash_proceeds', 0.0) or 0.0
+        cash_balance = float(getattr(owner, 'cash_proceeds', 0.0) or 0.0)
+        portfolio_value += cash_balance
         response['portfolio_value'] = round(portfolio_value, 2)
+        # Expose cash separately so the iOS Holdings list can render a
+        # dedicated cash line (Phase B). Only included when there's
+        # meaningful cash on hand to avoid clutter for fully-invested users.
+        if cash_balance > 0.005:
+            response['cash_balance'] = round(cash_balance, 2)
         
         # If subscribed or owner, show full portfolio.
         # ── Filter out zombie 0-share Stock rows ───────────────────────────

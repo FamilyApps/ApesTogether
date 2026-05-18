@@ -91,6 +91,7 @@ struct PortfolioResponse: Codable {
     let avgTradesPerWeek: Double?
     let numStocks: Int?
     let portfolioValue: Double?
+    let cashBalance: Double?
 }
 
 struct LeaderboardBadge: Codable, Identifiable {
@@ -134,6 +135,33 @@ struct Holding: Codable, Identifiable {
     var gainPercent: Double? {
         guard purchasePrice > 0, let current = currentPrice, current > 0 else { return nil }
         return ((current - purchasePrice) / purchasePrice) * 100
+    }
+
+    /// Absolute $ gain on the position. Nil if `purchasePrice` is missing/0
+    /// (matches the same guard as `gainPercent` so the UI stays consistent).
+    var gainDollars: Double? {
+        guard purchasePrice > 0, let current = currentPrice, current > 0 else { return nil }
+        return (current - purchasePrice) * quantity
+    }
+
+    /// Quantity formatted for display.
+    /// - Whole-share positions (e.g. 10.0) show as "10"
+    /// - Fractional positions (e.g. 0.5, 1.2345) show with 4 decimals
+    /// This fixes the "fractional shares display as 0" bug — callers
+    /// were using `Int(quantity)` which truncated 0.5 to 0.
+    var formattedQuantity: String {
+        let rounded = quantity.rounded()
+        if abs(quantity - rounded) < 0.0001 {
+            return String(format: "%.0f", quantity)
+        }
+        return String(format: "%.4f", quantity)
+    }
+
+    /// Returns this position's share of the owner's portfolio as a percent
+    /// (0–100). Returns nil when `portfolioValue` is unavailable or zero.
+    func percentOfPortfolio(_ portfolioValue: Double?) -> Double? {
+        guard let total = portfolioValue, total > 0 else { return nil }
+        return (totalValue / total) * 100
     }
 }
 
