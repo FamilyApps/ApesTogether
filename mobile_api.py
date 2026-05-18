@@ -718,7 +718,15 @@ def get_portfolio(slug):
         portfolio_value += getattr(owner, 'cash_proceeds', 0.0) or 0.0
         response['portfolio_value'] = round(portfolio_value, 2)
         
-        # If subscribed or owner, show full portfolio
+        # If subscribed or owner, show full portfolio.
+        # ── Filter out zombie 0-share Stock rows ───────────────────────────
+        # Several bot trade paths (mobile_api.py:3955/4691/4839/4988) do
+        # `stock.quantity -= qty` on sells without deleting the row when it
+        # hits zero, so a user can accumulate Stock rows like PANW/PSN/BWXT
+        # with quantity=0 that still showed up in the holdings list. The
+        # render here now matches the price-fetch filter at line 706, which
+        # already skipped 0-quantity rows. Use `/admin/cleanup-zero-share-stocks`
+        # to garbage-collect existing zombies.
         if is_owner or is_subscribed:
             response['holdings'] = [
                 {
@@ -729,6 +737,7 @@ def get_portfolio(slug):
                     'purchase_date': stock.purchase_date.isoformat() if stock.purchase_date else None
                 }
                 for stock in all_stocks
+                if stock.quantity and stock.quantity > 0
             ]
             
             # Get recent transactions

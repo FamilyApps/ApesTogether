@@ -5376,6 +5376,396 @@ def run_migration():
         return jsonify({'success': False, 'step': step, 'column': f'{table}.{col}', 'error': str(e)})
 
 
+# ─── Phase A: Portfolio data correctness admin tools (May 2026) ─────────────
+#
+# These three endpoints fix the "Wolff has zombie 0-share rows", "SLA shows
+# 1100% gain", and "AV fetching GLTR/SOC?" issues all at once. They are SAFE
+# to run repeatedly — each is idempotent or read-only.
+#
+# Run order after deploy:
+#   1. POST /admin/cleanup-zero-share-stocks  (delete zombie rows)
+#   2. POST /admin/recompute-cost-basis       (fix stale Stock.purchase_price)
+#   3. GET  /admin/inspect-ticker?ticker=GLTR (verify AV fetches work)
+
+@app.route('/admin/cleanup-zero-share-stocks', methods=['GET', 'POST'])
+@admin_2fa_required
+def admin_cleanup_zero_share_stocks():
+    """Delete every Stock row where quantity is 0 or NULL.
+
+    Several bot-trade sell paths (`mobile_api.py`:3955, 4691, 4839, 4988) do
+    `stock.quantity -= qty` and forget to delete the row when it hits zero.
+    Over months of bot activity this accumulates zombie Stock rows that show
+    up in users' Holdings lists with no shares but still occupying space.
+
+    Idempotent. Returns per-user breakdown so you can audit which users were
+    affected. The Holdings render endpoints now also filter `quantity > 0`
+    client-side, so this is purely garbage collection — running it doesn't
+    change what users see, it just keeps the DB clean.
+
+    Use `?dry_run=1` to preview without deleting.
+    """
+    from models import db, Stock, User
+    from sqlalchemy import or_
+
+    dry_run = request.args.get('dry_run') in ('1', 'true', 'yes')
+
+    try:
+        zombies = Stock.query.filter(
+            or_(Stock.quantity == 0, Stock.quantity.is_(None))
+        ).all()
+
+        # Build a per-user summary BEFORE we delete (we lose the rows after).
+        by_user = {}
+        for s in zombies:
+            by_user.setdefault(s.user_id, []).append(s.ticker)
+
+        # Look up usernames so the response is human-readable.
+        user_lookup = {}
+        if by_user:
+            uids = list(by_user.keys())
+            for u in User.query.filter(User.id.in_(uids)).all():
+                user_lookup[u.id] = u.public_name
+
+        breakdown = [
+            {
+                'user_id': uid,
+                'username': user_lookup.get(uid, f'user_{uid}'),
+                'tickers': sorted(tickers),
+                'count': len(tickers),
+            }
+            for uid, tickers in by_user.items()
+        ]
+        breakdown.sort(key=lambda x: -x['count'])
+
+        if dry_run:
+            return jsonify({
+                'success': True,
+                'dry_run': True,
+                'total_zombies': len(zombies),
+                'breakdown': breakdown,
+            })
+
+        # Actually delete.
+        for s in zombies:
+            db.session.delete(s)
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'dry_run': False,
+            'deleted': len(zombies),
+            'breakdown': breakdown,
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"cleanup_zero_share_stocks failed: {e}")
+        import traceback
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
+@app.route('/admin/recompute-cost-basis', methods=['GET', 'POST'])
+@admin_2fa_required
+def admin_recompute_cost_basis():
+    """Replay every user's Transaction history to derive the *correct*
+    `Stock.purchase_price` (weighted-average cost basis).
+
+    Why this exists
+    ---------------
+    `Stock.purchase_price` is meant to be the running weighted-average cost
+    basis for a ticker, updated on every BUY using:
+        new_avg = (old_qty * old_avg + buy_qty * buy_price) / (old_qty + buy_qty)
+    However historical data has been hand-edited several times (chart fixes,
+    ticker symbol corrections, snapshot rebuilds) without preserving cost
+    basis. This is why some positions show absurd gains:
+        - SLA "+1100%" \u2014 purchase_price is stale at a tiny old value.
+        - AAPL "+205%" \u2014 same root cause.
+        - NVDA shows the avg price but no gain \u2014 purchase_price = 0/NULL,
+          which trips the `purchasePrice > 0` guard in `Holding.gainPercent`
+          (ios/Models.swift:134) so the UI falls back to the "$X avg" label.
+
+    Algorithm (FIFO weighted average)
+    ---------------------------------
+    For each (user, ticker), walk Transactions in chronological order:
+        running_cost = 0.0
+        running_qty  = 0.0
+        for txn in sorted_transactions:
+            if txn.type in ('buy', 'initial'):
+                running_cost += txn.qty * txn.price
+                running_qty  += txn.qty
+            elif txn.type == 'sell' and running_qty > 0:
+                # Sells DON'T change the average cost \u2014 they pull pro-rata
+                # cost off the books. avg_at_sell = running_cost / running_qty.
+                avg_at_sell = running_cost / running_qty
+                running_cost -= min(txn.qty, running_qty) * avg_at_sell
+                running_qty  -= min(txn.qty, running_qty)
+
+    Final `purchase_price = running_cost / running_qty` if `running_qty > 0`.
+
+    Query params:
+        user_id     \u2014 if set, only recompute that user. Otherwise all users.
+        dry_run     \u2014 ?dry_run=1 returns diffs without writing.
+        username    \u2014 alternative to user_id, looks up by username/display_name.
+
+    The endpoint NEVER touches `Stock.quantity` \u2014 only the cost basis. If a
+    user's current `quantity` doesn't match the sum of (buys - sells), that's
+    a separate data integrity issue and is reported in the response.
+    """
+    from models import db, Stock, User, Transaction
+    from sqlalchemy import asc
+
+    dry_run = request.args.get('dry_run') in ('1', 'true', 'yes')
+    user_id = request.args.get('user_id', type=int)
+    username = request.args.get('username')
+
+    # Resolve target user(s).
+    try:
+        if user_id:
+            users = User.query.filter_by(id=user_id).all()
+        elif username:
+            u = User.query.filter(
+                (User.username == username) | (User.display_name == username)
+            ).first()
+            users = [u] if u else []
+        else:
+            # Cap at 1000 to avoid runaway on Vercel. The realistic count is
+            # ~hundreds, so this is a generous ceiling.
+            users = User.query.limit(1000).all()
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'user lookup failed: {e}'}), 500
+
+    if not users:
+        return jsonify({'success': False, 'error': 'no matching users'}), 404
+
+    audit = []
+    updated = 0
+    quantity_mismatches = []
+
+    try:
+        for u in users:
+            stocks = Stock.query.filter_by(user_id=u.id).all()
+            if not stocks:
+                continue
+
+            # Pull all this user's transactions ONCE, sort by timestamp.
+            txns = (
+                Transaction.query
+                .filter_by(user_id=u.id)
+                .order_by(asc(Transaction.timestamp))
+                .all()
+            )
+            # Group by ticker (upper-cased to be safe).
+            by_ticker = {}
+            for t in txns:
+                by_ticker.setdefault((t.ticker or '').upper(), []).append(t)
+
+            for stock in stocks:
+                key = (stock.ticker or '').upper()
+                ticker_txns = by_ticker.get(key, [])
+                if not ticker_txns:
+                    # Stock row exists but no transaction history \u2014 leave alone.
+                    continue
+
+                running_cost = 0.0
+                running_qty = 0.0
+                for t in ticker_txns:
+                    ttype = (t.transaction_type or '').lower()
+                    qty = float(t.quantity or 0)
+                    price = float(t.price or 0)
+                    if qty <= 0:
+                        continue
+                    if ttype in ('buy', 'initial', 'purchase'):
+                        running_cost += qty * price
+                        running_qty += qty
+                    elif ttype in ('sell', 'sale'):
+                        if running_qty <= 0:
+                            continue
+                        avg_at_sell = running_cost / running_qty
+                        sold = min(qty, running_qty)
+                        running_cost -= sold * avg_at_sell
+                        running_qty -= sold
+
+                if running_qty <= 0:
+                    # Replayed history says they have no shares \u2014 but Stock
+                    # row still exists. Will be caught by cleanup endpoint.
+                    continue
+
+                new_avg = round(running_cost / running_qty, 6)
+                old_avg = round(float(stock.purchase_price or 0), 6)
+
+                # Sanity check: replayed quantity should match the current
+                # Stock.quantity. If it doesn't, the bot trade pipeline (which
+                # doesn't always write Transaction rows for every action) has
+                # drifted. We report but DON'T fix \u2014 quantity belongs to a
+                # different reconciliation pass.
+                cur_qty = round(float(stock.quantity or 0), 6)
+                if abs(cur_qty - round(running_qty, 6)) > 0.001:
+                    quantity_mismatches.append({
+                        'user_id': u.id,
+                        'username': u.public_name,
+                        'ticker': stock.ticker,
+                        'stock_quantity': cur_qty,
+                        'replayed_quantity': round(running_qty, 6),
+                        'delta': round(cur_qty - running_qty, 6),
+                    })
+
+                if abs(new_avg - old_avg) > 0.0001:
+                    audit.append({
+                        'user_id': u.id,
+                        'username': u.public_name,
+                        'ticker': stock.ticker,
+                        'old_purchase_price': old_avg,
+                        'new_purchase_price': new_avg,
+                        'quantity': cur_qty,
+                        'transactions_replayed': len(ticker_txns),
+                    })
+                    if not dry_run:
+                        stock.purchase_price = new_avg
+                        updated += 1
+
+        if not dry_run:
+            db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'dry_run': dry_run,
+            'users_scanned': len(users),
+            'cost_basis_updates': updated if not dry_run else len(audit),
+            'audit': audit[:200],  # cap response size
+            'audit_truncated': len(audit) > 200,
+            'quantity_mismatches': quantity_mismatches[:50],
+            'quantity_mismatch_count': len(quantity_mismatches),
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"recompute_cost_basis failed: {e}")
+        import traceback
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
+@app.route('/admin/inspect-ticker', methods=['GET'])
+@admin_2fa_required
+def admin_inspect_ticker():
+    """Diagnostic endpoint to verify that AlphaVantage is successfully
+    pricing a given ticker (e.g. GLTR, SOC) and that the daily-bars cache
+    is being populated for it.
+
+    Returns three blocks:
+
+    1. `live_av_quote` \u2014 hits AV REALTIME_BULK_QUOTES once for this single
+       ticker. Confirms AV recognizes the symbol and returns a fresh price.
+    2. `cached_daily_bars` \u2014 last N rows from the `daily_price_bar` table
+       (newest first). Lets you eyeball whether close prices are fluctuating
+       realistically day-to-day. If empty, the daily-bars cron hasn't run
+       yet for this ticker (or it's not in the bot universe).
+    3. `in_bot_universe` \u2014 boolean, whether this ticker is part of the
+       UNIVERSE dict in bot_data_hub.py (i.e., the bots will trade it).
+       GLTR/SOC are NOT in the universe today, which is fine \u2014 the
+       universe is for BOT trading, not for user holdings price tracking.
+
+    Query params:
+        ticker   \u2014 required, case-insensitive (e.g. ?ticker=GLTR)
+        days     \u2014 how many recent bars to return, default 15, max 100
+    """
+    from models import db, DailyPriceBar
+    from sqlalchemy import desc
+
+    ticker = (request.args.get('ticker') or '').upper().strip()
+    if not ticker:
+        return jsonify({'error': 'ticker query param required'}), 400
+
+    try:
+        days = min(int(request.args.get('days', 15)), 100)
+    except (TypeError, ValueError):
+        days = 15
+
+    response = {
+        'ticker': ticker,
+        'in_bot_universe': False,
+        'live_av_quote': None,
+        'cached_daily_bars': [],
+        'cached_bar_count': 0,
+    }
+
+    # ── (1) Bot universe membership ───────────────────────────────────────
+    try:
+        from bot_data_hub import get_all_tickers
+        response['in_bot_universe'] = ticker in get_all_tickers()
+    except Exception as e:
+        response['in_bot_universe_error'] = str(e)
+
+    # ── (2) Live AV quote (REALTIME_BULK_QUOTES for one symbol) ───────────
+    # This is the SAME path that powers user-holding price fetches via
+    # portfolio_performance.PortfolioPerformanceCalculator.get_batch_stock_data,
+    # so success here means GLTR/SOC will price correctly in Holdings too.
+    try:
+        import os as _os
+        import requests as _req
+        api_key = _os.environ.get('ALPHA_VANTAGE_API_KEY', '')
+        if not api_key:
+            response['live_av_quote'] = {'status': 'error', 'reason': 'ALPHA_VANTAGE_API_KEY not set'}
+        else:
+            url = (
+                f'https://www.alphavantage.co/query'
+                f'?function=REALTIME_BULK_QUOTES&symbol={ticker}'
+                f'&entitlement=realtime&apikey={api_key}'
+            )
+            r = _req.get(url, timeout=8)
+            data = r.json() if r.status_code == 200 else {}
+            bulk = data.get('data') or []
+            if bulk:
+                q = bulk[0]
+                response['live_av_quote'] = {
+                    'status': 'success',
+                    'price': float(q.get('close') or 0),
+                    'volume': int(float(q.get('volume') or 0)),
+                    'high': float(q.get('high') or 0),
+                    'low': float(q.get('low') or 0),
+                    'timestamp_utc': q.get('timestamp'),
+                    'http_status': r.status_code,
+                }
+            else:
+                # AV sometimes returns 200 with an error message body.
+                response['live_av_quote'] = {
+                    'status': 'no_data',
+                    'http_status': r.status_code,
+                    'body_preview': str(data)[:300],
+                }
+    except Exception as e:
+        response['live_av_quote'] = {'status': 'error', 'error': str(e)}
+
+    # ── (3) Cached daily bars (from DailyPriceBar table) ──────────────────
+    try:
+        bars = (
+            DailyPriceBar.query
+            .filter_by(ticker=ticker)
+            .order_by(desc(DailyPriceBar.date))
+            .limit(days)
+            .all()
+        )
+        response['cached_bar_count'] = len(bars)
+        response['cached_daily_bars'] = [
+            {
+                'date': b.date.isoformat() if b.date else None,
+                'open': float(b.open) if b.open is not None else None,
+                'high': float(b.high) if b.high is not None else None,
+                'low': float(b.low) if b.low is not None else None,
+                'close': float(b.close) if b.close is not None else None,
+                'volume': int(b.volume) if b.volume is not None else None,
+                'source': b.source,
+                'fetched_at': b.fetched_at.isoformat() if b.fetched_at else None,
+            }
+            for b in bars
+        ]
+    except Exception as e:
+        # Likely "relation daily_price_bar does not exist" \u2014 user hasn't
+        # hit /admin/run-migration?step=6 yet.
+        response['cached_daily_bars_error'] = str(e)
+
+    return jsonify(response)
+
+
 @app.route('/admin/manual-intraday-collection')
 @admin_2fa_required  
 def manual_intraday_collection():
@@ -7976,10 +8366,13 @@ def public_portfolio_view(slug):
         ).count()
         avg_trades_per_week = round(recent_trades / 4.3, 1)  # 30 days ≈ 4.3 weeks
         
-        # Build holdings from batch prices (no additional API calls)
+        # Build holdings from batch prices (no additional API calls).
+        # Filter zombie 0-share rows (see /admin/cleanup-zero-share-stocks).
         holdings = []
         if is_subscriber:
             for stock in stocks:
+                if not stock.quantity or stock.quantity <= 0:
+                    continue
                 price = batch_prices.get(stock.ticker.upper(), stock.purchase_price)
                 value = price * stock.quantity
                 gain_loss = value - (stock.purchase_price * stock.quantity)
