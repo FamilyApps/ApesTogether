@@ -5977,6 +5977,247 @@ def admin_inspect_position():
     })
 
 
+@app.route('/admin/set-cost-basis', methods=['GET', 'POST'])
+@admin_2fa_required
+def admin_set_cost_basis():
+    """Backfill a synthetic `initial` Transaction for shares that ended up
+    in a user's Stock row without ever writing a transaction (e.g. signup
+    seed flow, old admin tweaks, pre-2026 portfolio imports).
+
+    Workflow this slots into:
+        1. /admin/inspect-position\u2026 surfaces a `quantity_mismatch`
+        2. /admin/set-cost-basis  \u2026 writes the missing Transaction(s)
+        3. /admin/recompute-cost-basis\u2026 derives correct purchase_price
+           from the now-complete history.
+
+    Why not just set `purchase_price` directly?
+        Because the recompute pipeline is the single source of truth for
+        weighted-average cost basis (handles buys, sells, splits, sale
+        cost-pull). If we hand-edit purchase_price, future trades will
+        re-compute on top of a stale baseline and drift again. Always
+        write transactions, then let recompute derive the rest.
+
+    Query params:
+        username                 \u2014 required (or user_id)
+        user_id                  \u2014 alternative
+        ticker                   \u2014 required, case-insensitive
+        price                    \u2014 explicit per-share cost. Mutually
+                                   exclusive with `date`.
+        date                     \u2014 YYYY-MM-DD. We fetch AV TIME_SERIES_DAILY
+                                   adjusted close for that date.
+        quantity                 \u2014 how many shares to backfill. Defaults to
+                                   `Stock.quantity - sum_of_existing_buy_qty`
+                                   (i.e. exactly the unaccounted shares).
+        timestamp                \u2014 ISO8601 UTC; defaults to User.created_at.
+        dry_run=1                \u2014 don't write, just preview.
+
+    Returns the synthetic Transaction row (or what it would be) plus
+    `next_step` reminding you to run /admin/recompute-cost-basis.
+    """
+    from datetime import datetime as _dt
+    from models import db, Stock, User, Transaction
+    from sqlalchemy import asc
+
+    username = request.args.get('username')
+    user_id = request.args.get('user_id', type=int)
+    ticker_param = (request.args.get('ticker') or '').strip().upper()
+    price_param = request.args.get('price', type=float)
+    date_param = (request.args.get('date') or '').strip()
+    quantity_param = request.args.get('quantity', type=float)
+    timestamp_param = (request.args.get('timestamp') or '').strip()
+    dry_run = request.args.get('dry_run') in ('1', 'true', 'yes')
+
+    if not ticker_param:
+        return jsonify({'error': 'ticker query param required'}), 400
+    if price_param is None and not date_param:
+        return jsonify({'error': 'must supply either price=X or date=YYYY-MM-DD'}), 400
+    if price_param is not None and date_param:
+        return jsonify({'error': 'price and date are mutually exclusive'}), 400
+
+    # Resolve user.
+    user = None
+    if user_id:
+        user = User.query.filter_by(id=user_id).first()
+    elif username:
+        user = User.query.filter(
+            (User.username == username) | (User.display_name == username)
+        ).first()
+    if not user:
+        return jsonify({'error': 'user not found'}), 404
+
+    # Resolve Stock row.
+    stock = (
+        Stock.query.filter(Stock.user_id == user.id)
+        .filter(db.func.upper(Stock.ticker) == ticker_param)
+        .first()
+    )
+    if not stock:
+        return jsonify({'error': f'no Stock row for {ticker_param} on user {user.id}'}), 404
+
+    # Compute existing buy quantity from Transaction history.
+    txns = (
+        Transaction.query
+        .filter(Transaction.user_id == user.id)
+        .filter(db.func.upper(Transaction.ticker) == ticker_param)
+        .order_by(asc(Transaction.timestamp))
+        .all()
+    )
+    existing_buy_qty = 0.0
+    existing_sell_qty = 0.0
+    for t in txns:
+        ttype = (t.transaction_type or '').lower()
+        qty = float(t.quantity or 0)
+        if qty <= 0:
+            continue
+        if ttype in ('buy', 'initial', 'purchase'):
+            existing_buy_qty += qty
+        elif ttype in ('sell', 'sale'):
+            existing_sell_qty += qty
+
+    net_recorded = existing_buy_qty - existing_sell_qty
+    stock_qty = float(stock.quantity or 0)
+    missing_qty = round(stock_qty - net_recorded, 6)
+
+    # Quantity to backfill.
+    if quantity_param is not None:
+        backfill_qty = float(quantity_param)
+    else:
+        backfill_qty = missing_qty
+
+    if backfill_qty <= 0:
+        return jsonify({
+            'error': 'no missing shares to backfill',
+            'stock_quantity': stock_qty,
+            'recorded_buy_quantity': existing_buy_qty,
+            'recorded_sell_quantity': existing_sell_qty,
+            'net_recorded_quantity': net_recorded,
+            'missing_quantity': missing_qty,
+        }), 400
+
+    # Resolve cost basis price.
+    cost_basis_price = None
+    av_response_meta = None
+    if price_param is not None:
+        cost_basis_price = float(price_param)
+    else:
+        # Fetch AV TIME_SERIES_DAILY for the given date.
+        try:
+            import os as _os
+            import requests as _req
+            api_key = _os.environ.get('ALPHA_VANTAGE_API_KEY', '')
+            if not api_key:
+                return jsonify({'error': 'ALPHA_VANTAGE_API_KEY not set'}), 500
+            url = (
+                f'https://www.alphavantage.co/query'
+                f'?function=TIME_SERIES_DAILY&symbol={ticker_param}'
+                f'&outputsize=full&apikey={api_key}'
+            )
+            r = _req.get(url, timeout=15)
+            if r.status_code != 200:
+                return jsonify({'error': f'AV HTTP {r.status_code}', 'body': r.text[:300]}), 502
+            data = r.json() or {}
+            series = data.get('Time Series (Daily)') or {}
+            if not series:
+                return jsonify({'error': 'AV returned no time series', 'body_preview': str(data)[:300]}), 502
+            # Try exact date, then walk back up to 7 calendar days for weekends/holidays.
+            target = date_param
+            close_px = None
+            chosen_date = None
+            try:
+                cur = _dt.strptime(target, '%Y-%m-%d').date()
+            except ValueError:
+                return jsonify({'error': f'invalid date {target}, expected YYYY-MM-DD'}), 400
+            from datetime import timedelta as _td
+            for delta in range(0, 8):
+                candidate = (cur - _td(days=delta)).isoformat()
+                if candidate in series:
+                    close_px = float(series[candidate].get('4. close') or 0)
+                    chosen_date = candidate
+                    break
+            if close_px is None or close_px <= 0:
+                return jsonify({
+                    'error': f'no AV close found for {target} or up to 7 days before',
+                    'series_sample_dates': list(series.keys())[:5],
+                }), 404
+            cost_basis_price = close_px
+            av_response_meta = {
+                'requested_date': target,
+                'matched_market_date': chosen_date,
+                'close_price': close_px,
+            }
+        except Exception as e:
+            return jsonify({'error': f'AV fetch failed: {e}'}), 502
+
+    # Resolve timestamp for the synthetic transaction.
+    if timestamp_param:
+        try:
+            txn_timestamp = _dt.fromisoformat(timestamp_param.replace('Z', '+00:00'))
+        except ValueError:
+            return jsonify({'error': f'invalid timestamp {timestamp_param}'}), 400
+    else:
+        # Default: User.created_at if available, else Stock.purchase_date, else now.
+        txn_timestamp = (
+            getattr(user, 'created_at', None)
+            or stock.purchase_date
+            or _dt.utcnow()
+        )
+
+    payload = {
+        'success': True,
+        'dry_run': dry_run,
+        'user_id': user.id,
+        'username': user.public_name,
+        'ticker': ticker_param,
+        'stock_quantity': stock_qty,
+        'recorded_buy_quantity': existing_buy_qty,
+        'recorded_sell_quantity': existing_sell_qty,
+        'net_recorded_quantity': net_recorded,
+        'missing_quantity': missing_qty,
+        'backfill_quantity': backfill_qty,
+        'cost_basis_price': cost_basis_price,
+        'av_lookup': av_response_meta,
+        'synthetic_transaction': {
+            'user_id': user.id,
+            'ticker': ticker_param,
+            'transaction_type': 'initial',
+            'quantity': backfill_qty,
+            'price': cost_basis_price,
+            'timestamp': txn_timestamp.isoformat() if hasattr(txn_timestamp, 'isoformat') else str(txn_timestamp),
+        },
+        'user_created_at': user.created_at.isoformat() if getattr(user, 'created_at', None) else None,
+        'stock_purchase_date': stock.purchase_date.isoformat() if stock.purchase_date else None,
+    }
+
+    if dry_run:
+        payload['next_step'] = 'remove dry_run=1 to actually write the transaction'
+        return jsonify(payload)
+
+    # Write the synthetic transaction.
+    try:
+        new_txn = Transaction(
+            user_id=user.id,
+            ticker=ticker_param,
+            transaction_type='initial',
+            quantity=backfill_qty,
+            price=cost_basis_price,
+            timestamp=txn_timestamp,
+            price_source='admin_backfill',
+        )
+        db.session.add(new_txn)
+        db.session.commit()
+        payload['transaction_id'] = new_txn.id
+        payload['next_step'] = (
+            f'/admin/recompute-cost-basis?username={user.username}&dry_run=1 \u2014 '
+            'verify audit, then drop dry_run=1.'
+        )
+        return jsonify(payload)
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"set_cost_basis failed: {e}")
+        import traceback
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
 @app.route('/admin/manual-intraday-collection')
 @admin_2fa_required  
 def manual_intraday_collection():
