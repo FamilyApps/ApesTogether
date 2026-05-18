@@ -6691,6 +6691,400 @@ def admin_migrate_bot_holdings():
     return jsonify(response_base)
 
 
+@app.route('/admin/delete-transactions', methods=['GET', 'POST'])
+@admin_2fa_required
+def admin_delete_transactions():
+    """Surgically delete a user's Transaction rows and rebuild Stock rows +
+    user.cash_proceeds + user.max_cash_deployed from the remaining
+    transaction history.
+
+    Used to clean up accidentally-allocated trades (e.g. the 2026-05-05
+    13:43 batch that wrongly added CLSK/KTOS/MSTR/PGY/SOC + 30.83 IREN
+    shares to Wolff's portfolio). Pair with
+    /admin/recompute-portfolio-snapshots afterwards to smooth the chart.
+
+    Query params:
+        user_id  — required (we forbid cross-user batch deletes)
+        ids      — comma-separated Transaction IDs to delete
+        delete_stock_for_tickers — comma-separated tickers whose Stock row
+                   should be deleted entirely after replay (use this for
+                   tickers we want to fully remove regardless of whether
+                   replay leaves a small residue from un-deleted rows)
+        dry_run  — preview without writing (recommended first run)
+    """
+    from datetime import datetime as _dt
+    from models import db, Stock, User, Transaction
+    from cash_tracking import backfill_cash_tracking_for_user
+
+    user_id = request.args.get('user_id', type=int)
+    ids_param = (request.args.get('ids') or '').strip()
+    drop_param = (request.args.get('delete_stock_for_tickers') or '').strip()
+    dry_run = request.args.get('dry_run') in ('1', 'true', 'yes')
+
+    if not user_id or not ids_param:
+        return jsonify({'error': 'user_id and ids required'}), 400
+
+    try:
+        txn_ids = [int(x.strip()) for x in ids_param.split(',') if x.strip()]
+    except ValueError:
+        return jsonify({'error': 'ids must be comma-separated integers'}), 400
+    explicit_drop = {t.strip().upper() for t in drop_param.split(',') if t.strip()}
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': f'user_id {user_id} not found'}), 404
+
+    txns_to_delete = Transaction.query.filter(Transaction.id.in_(txn_ids)).all()
+    if len(txns_to_delete) != len(set(txn_ids)):
+        found = {t.id for t in txns_to_delete}
+        return jsonify({
+            'error': 'one or more transactions not found',
+            'requested': sorted(set(txn_ids)),
+            'found': sorted(found),
+            'missing': sorted(set(txn_ids) - found),
+        }), 404
+    cross_user = [t.id for t in txns_to_delete if t.user_id != user_id]
+    if cross_user:
+        return jsonify({
+            'error': 'transactions belong to other users — refusing',
+            'offending_ids': cross_user,
+        }), 400
+
+    delete_id_set = {t.id for t in txns_to_delete}
+    affected_tickers = sorted({t.ticker.upper() for t in txns_to_delete} | explicit_drop)
+
+    # ── Snapshot before-state ────────────────────────────────────────
+    before_user = {
+        'cash_proceeds': float(user.cash_proceeds or 0),
+        'max_cash_deployed': float(user.max_cash_deployed or 0),
+    }
+    before_stocks = {}
+    for tk in affected_tickers:
+        st = (
+            Stock.query.filter(Stock.user_id == user_id)
+            .filter(db.func.upper(Stock.ticker) == tk).first()
+        )
+        before_stocks[tk] = (
+            {'quantity': float(st.quantity or 0),
+             'purchase_price': float(st.purchase_price or 0)}
+            if st else None
+        )
+
+    # ── Predict per-ticker after-state via replay-of-kept-txns ───────
+    plan = []
+    for tk in affected_tickers:
+        all_t = (
+            Transaction.query.filter(Transaction.user_id == user_id)
+            .filter(db.func.upper(Transaction.ticker) == tk)
+            .order_by(Transaction.timestamp).all()
+        )
+        kept = [t for t in all_t if t.id not in delete_id_set]
+        deleted_for_this_ticker = [t for t in all_t if t.id in delete_id_set]
+
+        # Weighted-average replay
+        qty = 0.0
+        total_cost = 0.0
+        for txn in kept:
+            v = float(txn.quantity) * float(txn.price)
+            if txn.transaction_type in ('buy', 'initial'):
+                qty += float(txn.quantity)
+                total_cost += v
+            elif txn.transaction_type == 'sell':
+                if qty > 1e-9:
+                    avg = total_cost / qty
+                    qty -= float(txn.quantity)
+                    total_cost -= float(txn.quantity) * avg
+                else:
+                    qty -= float(txn.quantity)
+            # dividends don't affect holdings
+
+        avg_price = (total_cost / qty) if qty > 1e-9 else 0.0
+        will_drop = (tk in explicit_drop) or (qty <= 1e-6)
+
+        plan.append({
+            'ticker': tk,
+            'before_stock_row': before_stocks[tk],
+            'transactions_deleted': [
+                {'id': t.id, 'type': t.transaction_type,
+                 'qty': float(t.quantity), 'price': float(t.price),
+                 'timestamp': t.timestamp.isoformat() if t.timestamp else None}
+                for t in deleted_for_this_ticker
+            ],
+            'transactions_kept': len(kept),
+            'after_stock_row': (
+                None if will_drop else
+                {'quantity': round(qty, 6), 'purchase_price': round(avg_price, 6)}
+            ),
+            'stock_row_will_be_deleted': will_drop,
+        })
+
+    # ── Predict user-level after-state via replay-of-all-kept-txns ──
+    all_user_txns = (
+        Transaction.query.filter_by(user_id=user_id)
+        .order_by(Transaction.timestamp).all()
+    )
+    kept_user = [t for t in all_user_txns if t.id not in delete_id_set]
+    pred_cash = 0.0
+    pred_deployed = 0.0
+    for txn in kept_user:
+        v = float(txn.quantity) * float(txn.price)
+        if txn.transaction_type in ('buy', 'initial'):
+            if pred_cash >= v:
+                pred_cash -= v
+            else:
+                pred_deployed += (v - pred_cash)
+                pred_cash = 0.0
+        elif txn.transaction_type in ('sell', 'dividend'):
+            pred_cash += v
+
+    response = {
+        'user_id': user_id,
+        'username': user.username,
+        'dry_run': dry_run,
+        'transactions_to_delete_count': len(txns_to_delete),
+        'affected_tickers': affected_tickers,
+        'before_user': before_user,
+        'after_user_predicted': {
+            'cash_proceeds': round(pred_cash, 2),
+            'max_cash_deployed': round(pred_deployed, 2),
+        },
+        'plan': plan,
+    }
+
+    if dry_run:
+        response['next_step'] = (
+            f'/admin/delete-transactions?user_id={user_id}&ids={ids_param}'
+            + (f'&delete_stock_for_tickers={drop_param}' if drop_param else '')
+            + ' (drop dry_run=1 to execute)'
+        )
+        return jsonify(response)
+
+    # ── Execute ──────────────────────────────────────────────────────
+    try:
+        for t in txns_to_delete:
+            db.session.delete(t)
+
+        for entry in plan:
+            tk = entry['ticker']
+            st = (
+                Stock.query.filter(Stock.user_id == user_id)
+                .filter(db.func.upper(Stock.ticker) == tk).first()
+            )
+            if entry['stock_row_will_be_deleted']:
+                if st:
+                    db.session.delete(st)
+            else:
+                target_qty = entry['after_stock_row']['quantity']
+                target_avg = entry['after_stock_row']['purchase_price']
+                if st:
+                    st.quantity = target_qty
+                    st.purchase_price = target_avg
+                else:
+                    db.session.add(Stock(
+                        user_id=user_id, ticker=tk,
+                        quantity=target_qty, purchase_price=target_avg,
+                        purchase_date=_dt.utcnow(),
+                    ))
+
+        # Replay user.cash_proceeds + max_cash_deployed from the now-deleted set
+        backfill_cash_tracking_for_user(db, user_id)
+
+        db.session.commit()
+
+        # Re-read user for actual after-state
+        user = User.query.get(user_id)
+        response['executed'] = True
+        response['after_user_actual'] = {
+            'cash_proceeds': round(float(user.cash_proceeds or 0), 2),
+            'max_cash_deployed': round(float(user.max_cash_deployed or 0), 2),
+        }
+        response['next_step'] = (
+            f'/admin/recompute-portfolio-snapshots?user_id={user_id}&dry_run=1 '
+            'to smooth historical chart'
+        )
+        return jsonify(response)
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        return jsonify({
+            'error': f'execute failed: {e}',
+            'traceback': traceback.format_exc(),
+        }), 500
+
+
+@app.route('/admin/recompute-portfolio-snapshots', methods=['GET', 'POST'])
+@admin_2fa_required
+def admin_recompute_portfolio_snapshots():
+    """Walk every PortfolioSnapshot for a user and rebuild
+    portfolio_value / stock_value / cash_proceeds / max_cash_deployed
+    from the *current* Transaction history.
+
+    Used after /admin/delete-transactions surgically removed accidental
+    trades so the chart no longer shows the inflated values from those
+    phantom holdings.
+
+    For each snapshot date we:
+      1. Replay all transactions <= that date to derive holdings + cash
+      2. Look up close prices for each held ticker on that date
+         (MarketData first, AV TIME_SERIES_DAILY fallback — which also
+         bulk-populates ~100 days of MarketData per ticker per call)
+      3. Update the snapshot in place.
+
+    Query params:
+        user_id   — required
+        from      — ISO date (default: earliest snapshot)
+        to        — ISO date (default: latest snapshot)
+        limit     — max snapshots to process this call (Vercel timeout
+                    safety; default 200). If you have more snapshots
+                    than `limit`, run again with `from` set to the date
+                    after the last processed snapshot.
+        dry_run   — preview without writing
+    """
+    from datetime import datetime as _dt
+    from models import db, User, Transaction, PortfolioSnapshot
+    from sqlalchemy import func as _f
+    from portfolio_performance import PortfolioPerformanceCalculator
+
+    user_id = request.args.get('user_id', type=int)
+    if not user_id:
+        return jsonify({'error': 'user_id required'}), 400
+    dry_run = request.args.get('dry_run') in ('1', 'true', 'yes')
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': f'user_id {user_id} not found'}), 404
+
+    q = PortfolioSnapshot.query.filter_by(user_id=user_id)
+    try:
+        if request.args.get('from'):
+            q = q.filter(PortfolioSnapshot.date >= _dt.fromisoformat(request.args.get('from')).date())
+        if request.args.get('to'):
+            q = q.filter(PortfolioSnapshot.date <= _dt.fromisoformat(request.args.get('to')).date())
+    except ValueError as e:
+        return jsonify({'error': f'bad from/to date: {e}'}), 400
+
+    limit = request.args.get('limit', default=200, type=int)
+    snapshots = q.order_by(PortfolioSnapshot.date).limit(limit).all()
+    if not snapshots:
+        return jsonify({'error': 'no snapshots in range', 'user_id': user_id}), 404
+
+    # Pre-fetch ALL transactions once, sort by timestamp, walk in date order.
+    # Avoids N queries for N snapshots.
+    all_txns = (
+        Transaction.query.filter_by(user_id=user_id)
+        .order_by(Transaction.timestamp).all()
+    )
+
+    calc = PortfolioPerformanceCalculator()
+    changes = []
+    errors = []
+    missing_prices_summary = {}
+
+    for snap in snapshots:
+        try:
+            # Replay txns <= snap.date
+            holdings = {}
+            cash = 0.0
+            deployed = 0.0
+            for txn in all_txns:
+                if not txn.timestamp or txn.timestamp.date() > snap.date:
+                    break  # txns are timestamp-sorted
+                tk = (txn.ticker or '').upper()
+                v = float(txn.quantity or 0) * float(txn.price or 0)
+                if txn.transaction_type in ('buy', 'initial'):
+                    holdings[tk] = holdings.get(tk, 0.0) + float(txn.quantity or 0)
+                    if cash >= v:
+                        cash -= v
+                    else:
+                        deployed += (v - cash)
+                        cash = 0.0
+                elif txn.transaction_type == 'sell':
+                    holdings[tk] = holdings.get(tk, 0.0) - float(txn.quantity or 0)
+                    cash += v
+                elif txn.transaction_type == 'dividend':
+                    cash += v
+
+            # Stock value at snap.date prices
+            stock_value = 0.0
+            missing = []
+            for tk, qty in holdings.items():
+                if qty <= 1e-9:
+                    continue
+                price = calc.get_historical_price(tk, snap.date)
+                if price is None or price <= 0:
+                    missing.append(tk)
+                    missing_prices_summary[tk] = missing_prices_summary.get(tk, 0) + 1
+                    continue
+                stock_value += qty * float(price)
+
+            new_total = stock_value + cash
+
+            before = {
+                'total_value': round(float(snap.total_value or 0), 2),
+                'stock_value': round(float(snap.stock_value or 0), 2),
+                'cash_proceeds': round(float(snap.cash_proceeds or 0), 2),
+                'max_cash_deployed': round(float(snap.max_cash_deployed or 0), 2),
+            }
+            after = {
+                'total_value': round(new_total, 2),
+                'stock_value': round(stock_value, 2),
+                'cash_proceeds': round(cash, 2),
+                'max_cash_deployed': round(deployed, 2),
+            }
+            change = {
+                'date': snap.date.isoformat(),
+                'before': before,
+                'after': after,
+                'delta_total_value': round(after['total_value'] - before['total_value'], 2),
+                'missing_prices': missing,
+            }
+            changes.append(change)
+
+            if not dry_run:
+                snap.stock_value = stock_value
+                snap.cash_proceeds = cash
+                snap.max_cash_deployed = deployed
+                snap.total_value = new_total
+        except Exception as e:
+            errors.append({'date': snap.date.isoformat(), 'error': str(e)})
+
+    if not dry_run:
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': f'commit failed: {e}'}), 500
+
+    # Trim very long change lists for response readability (keep first 10
+    # and last 10 plus a summary). Full data only on dry-run.
+    truncated = False
+    sample = changes
+    if len(changes) > 25 and not dry_run:
+        sample = changes[:10] + [{'note': f'... {len(changes) - 20} more dates ...'}] + changes[-10:]
+        truncated = True
+
+    earliest = min((c['date'] for c in changes if 'date' in c), default=None)
+    latest = max((c['date'] for c in changes if 'date' in c), default=None)
+    total_delta = sum(c.get('delta_total_value', 0) for c in changes if 'delta_total_value' in c)
+
+    return jsonify({
+        'user_id': user_id,
+        'username': user.username,
+        'dry_run': dry_run,
+        'snapshots_processed': len(changes),
+        'date_range': {'earliest': earliest, 'latest': latest},
+        'sum_delta_total_value': round(total_delta, 2),
+        'errors': errors,
+        'missing_prices_summary': missing_prices_summary,
+        'changes': sample,
+        'changes_truncated': truncated,
+        'next_step': (
+            'remove dry_run=1 to execute' if dry_run
+            else f'verify @ /admin/inspect-portfolio?user_id={user_id} (or just check the iOS chart)'
+        ),
+    })
+
+
 @app.route('/admin/manual-intraday-collection')
 @admin_2fa_required  
 def manual_intraday_collection():
