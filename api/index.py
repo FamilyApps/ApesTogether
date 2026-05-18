@@ -6714,7 +6714,6 @@ def admin_delete_transactions():
     """
     from datetime import datetime as _dt
     from models import db, Stock, User, Transaction
-    from cash_tracking import backfill_cash_tracking_for_user
 
     user_id = request.args.get('user_id', type=int)
     ids_param = (request.args.get('ids') or '').strip()
@@ -6770,72 +6769,120 @@ def admin_delete_transactions():
             if st else None
         )
 
-    # ── Predict per-ticker after-state via replay-of-kept-txns ───────
+    # ── Predict per-ticker after-state via DELTA adjustment ──────────
+    #
+    # NOTE: We deliberately do NOT replay transactions from zero here.
+    # The bot accounts (and many seeded users) have positions written
+    # directly to the Stock table without corresponding Transaction
+    # rows (signup seed, /admin/bot/scale-holdings obfuscation event,
+    # etc.). A from-zero replay misses the seed + obfuscation entirely
+    # and would either drop the Stock row (qty goes negative) or
+    # massively understate quantity. Instead we start from the CURRENT
+    # Stock row state and reverse only the impact of the to-be-deleted
+    # transactions. This preserves accuracy for incomplete histories.
     plan = []
     for tk in affected_tickers:
-        all_t = (
-            Transaction.query.filter(Transaction.user_id == user_id)
-            .filter(db.func.upper(Transaction.ticker) == tk)
-            .order_by(Transaction.timestamp).all()
-        )
-        kept = [t for t in all_t if t.id not in delete_id_set]
-        deleted_for_this_ticker = [t for t in all_t if t.id in delete_id_set]
+        deleted_for_this_ticker = [t for t in txns_to_delete if t.ticker.upper() == tk]
 
-        # Weighted-average replay
-        qty = 0.0
-        total_cost = 0.0
-        for txn in kept:
-            v = float(txn.quantity) * float(txn.price)
-            if txn.transaction_type in ('buy', 'initial'):
-                qty += float(txn.quantity)
-                total_cost += v
-            elif txn.transaction_type == 'sell':
-                if qty > 1e-9:
-                    avg = total_cost / qty
-                    qty -= float(txn.quantity)
-                    total_cost -= float(txn.quantity) * avg
-                else:
-                    qty -= float(txn.quantity)
+        st_before = before_stocks[tk]
+        if st_before is None:
+            # No Stock row exists. Deleted txns shouldn't materialise one.
+            plan.append({
+                'ticker': tk,
+                'before_stock_row': None,
+                'transactions_deleted': [
+                    {'id': t.id, 'type': t.transaction_type,
+                     'qty': float(t.quantity), 'price': float(t.price),
+                     'timestamp': t.timestamp.isoformat() if t.timestamp else None}
+                    for t in deleted_for_this_ticker
+                ],
+                'after_stock_row': None,
+                'stock_row_will_be_deleted': True,
+            })
+            continue
+
+        old_qty = st_before['quantity']
+        old_price = st_before['purchase_price']
+        old_total_cost = old_qty * old_price
+
+        new_qty = old_qty
+        new_total_cost = old_total_cost
+        for txn in deleted_for_this_ticker:
+            tqty = float(txn.quantity)
+            tprice = float(txn.price)
+            tval = tqty * tprice
+            ttype = (txn.transaction_type or '').lower()
+            if ttype in ('buy', 'initial'):
+                # Reverse the buy: shares disappear, cost basis decreases
+                # by the buy notional.
+                new_qty -= tqty
+                new_total_cost -= tval
+            elif ttype == 'sell':
+                # Reverse the sell: shares come back at the average cost
+                # basis at the time of sell. We don't know that exactly
+                # without full replay, so we approximate with the
+                # *current* purchase_price (best signal we have).
+                new_qty += tqty
+                new_total_cost += tqty * old_price
             # dividends don't affect holdings
 
-        avg_price = (total_cost / qty) if qty > 1e-9 else 0.0
-        will_drop = (tk in explicit_drop) or (qty <= 1e-6)
+        will_drop = (tk in explicit_drop) or (new_qty <= 1e-6)
+        new_price = (new_total_cost / new_qty) if new_qty > 1e-9 else 0.0
+        # Floating-point safety: clamp tiny-negative cost basis to 0
+        if new_total_cost < 0 and abs(new_total_cost) < 1e-3:
+            new_total_cost = 0.0
+            new_price = 0.0
 
         plan.append({
             'ticker': tk,
-            'before_stock_row': before_stocks[tk],
+            'before_stock_row': st_before,
             'transactions_deleted': [
                 {'id': t.id, 'type': t.transaction_type,
                  'qty': float(t.quantity), 'price': float(t.price),
                  'timestamp': t.timestamp.isoformat() if t.timestamp else None}
                 for t in deleted_for_this_ticker
             ],
-            'transactions_kept': len(kept),
             'after_stock_row': (
                 None if will_drop else
-                {'quantity': round(qty, 6), 'purchase_price': round(avg_price, 6)}
+                {'quantity': round(new_qty, 6),
+                 'purchase_price': round(new_price, 6),
+                 'total_cost_basis': round(new_total_cost, 2)}
             ),
             'stock_row_will_be_deleted': will_drop,
         })
 
-    # ── Predict user-level after-state via replay-of-all-kept-txns ──
-    all_user_txns = (
-        Transaction.query.filter_by(user_id=user_id)
-        .order_by(Transaction.timestamp).all()
-    )
-    kept_user = [t for t in all_user_txns if t.id not in delete_id_set]
-    pred_cash = 0.0
-    pred_deployed = 0.0
-    for txn in kept_user:
+    # ── Predict user-level after-state via DELTA adjustment ──────────
+    #
+    # Same reasoning: replay-from-zero would drop max_cash_deployed
+    # below the real seed + obfuscation level. Delta logic:
+    #   - Removed BUY of $V: assume V was funded by capital
+    #     (max_cash_deployed -= V). For pure-bot-trade accounts this
+    #     under-counts when the buy was actually funded by accumulated
+    #     cash_proceeds, but for the bulk-allocation cleanup this is
+    #     the right model since cash_proceeds was small at trade time.
+    #   - Removed SELL of $V: cash_proceeds -= V (the inflow that
+    #     shouldn't have happened).
+    #   - If cash_proceeds would go negative after the delta, clamp at
+    #     zero and shift the deficit onto max_cash_deployed (because
+    #     that cash funded subsequent buys; without it the buys would
+    #     have deployed more capital).
+    pred_cash = before_user['cash_proceeds']
+    pred_deployed = before_user['max_cash_deployed']
+    for txn in txns_to_delete:
         v = float(txn.quantity) * float(txn.price)
-        if txn.transaction_type in ('buy', 'initial'):
-            if pred_cash >= v:
-                pred_cash -= v
-            else:
-                pred_deployed += (v - pred_cash)
-                pred_cash = 0.0
-        elif txn.transaction_type in ('sell', 'dividend'):
-            pred_cash += v
+        ttype = (txn.transaction_type or '').lower()
+        if ttype in ('buy', 'initial'):
+            pred_deployed -= v
+        elif ttype == 'sell':
+            pred_cash -= v
+        elif ttype == 'dividend':
+            pred_cash -= v
+    if pred_cash < 0:
+        deficit = -pred_cash
+        pred_cash = 0.0
+        pred_deployed += deficit
+    if pred_deployed < 0:
+        pred_deployed = 0.0
 
     response = {
         'user_id': user_id,
@@ -6886,8 +6933,11 @@ def admin_delete_transactions():
                         purchase_date=_dt.utcnow(),
                     ))
 
-        # Replay user.cash_proceeds + max_cash_deployed from the now-deleted set
-        backfill_cash_tracking_for_user(db, user_id)
+        # Apply DELTA-adjusted user state (do NOT call
+        # backfill_cash_tracking_for_user — see notes above on why
+        # replay-from-zero would corrupt seed/obfuscated accounts).
+        user.cash_proceeds = pred_cash
+        user.max_cash_deployed = pred_deployed
 
         db.session.commit()
 
