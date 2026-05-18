@@ -6245,13 +6245,20 @@ def admin_set_cost_basis():
 #  up for bobford00. Going through process_transaction here means a clean
 #  audit trail of buy/sell rows from this point forward.
 #
+# Note on obfuscation: scripts/obfuscate_bot_holdings.py multiplies both
+# shares AND cash by a per-bot factor (1.52 for Wolff, 1.37 for Grok) so
+# our public displays don't perfectly mirror the operator's real
+# brokerage account. The screenshots reflect the REAL Public.com state,
+# so when migrating we apply the same multiplier here to keep the
+# obfuscation in place.
 HOLDINGS_PRESETS_PHASE_C = {
     'wolff': {
         'user_id': 14,
         'username': 'CoastHillBear',
         'display_name': "Wolff's Flagship Fund",
-        'cash_balance': 12.45,
-        'target': {
+        'obfuscation_multiplier': 1.52,
+        'cash_balance_real': 12.45,  # brokerage value; multiplier applied below
+        'target_real': {  # screenshot share counts; multiplier applied below
             'AMD':   0.90988,
             'GLTR':  5.36815,
             'AMZN':  1.75114,
@@ -6278,8 +6285,9 @@ HOLDINGS_PRESETS_PHASE_C = {
         'user_id': 13,
         'username': 'marblethehill72',
         'display_name': 'The Grok Portfolio',
-        'cash_balance': 32.93,
-        'target': {
+        'obfuscation_multiplier': 1.37,
+        'cash_balance_real': 32.93,
+        'target_real': {
             'CLSK':  79.4603,
             'SOC':   76.85545,
             'KTOS':  16.54593,
@@ -6313,7 +6321,11 @@ def admin_migrate_bot_holdings():
                     all deltas are zero). Without `force=1` the endpoint
                     refuses the no-op execute to make accidental
                     double-runs safe.
-        eps       — quantity epsilon for "matches target" (default 0.000001)
+        eps       — quantity epsilon for "matches target" (default 1e-9 —
+                    only skips trades when the delta is pure floating-point
+                    noise. Even sub-cent deltas get executed so we never
+                    leave a residue when Wolff/Grok intended to zero out a
+                    position.)
 
     Response includes a full per-ticker plan (current_qty, target_qty,
     delta_qty, action, price, trade_value) and a summary block.
@@ -6326,9 +6338,9 @@ def admin_migrate_bot_holdings():
     dry_run = request.args.get('dry_run') in ('1', 'true', 'yes')
     force = request.args.get('force') in ('1', 'true', 'yes')
     try:
-        eps = float(request.args.get('eps') or '0.000001')
+        eps = float(request.args.get('eps') or '1e-9')
     except ValueError:
-        eps = 0.000001
+        eps = 1e-9
 
     if preset_key not in HOLDINGS_PRESETS_PHASE_C:
         return jsonify({
@@ -6363,7 +6375,12 @@ def admin_migrate_bot_holdings():
     current_qty = {s.ticker.upper(): float(s.quantity) for s in current_stocks}
     current_purchase_price = {s.ticker.upper(): float(s.purchase_price or 0) for s in current_stocks}
 
-    target_qty = {t.upper(): float(q) for t, q in preset['target'].items()}
+    # Apply per-bot obfuscation multiplier to convert brokerage screenshot
+    # share counts into the obfuscated values stored in our DB. Wolff uses
+    # 1.52x, Grok uses 1.37x — see comment block above.
+    multiplier = float(preset.get('obfuscation_multiplier', 1.0))
+    target_qty = {t.upper(): float(q) * multiplier for t, q in preset['target_real'].items()}
+    target_cash = float(preset['cash_balance_real']) * multiplier
 
     # ── Compute the set of affected tickers (union) ──────────────────
     affected_tickers = sorted(set(current_qty) | set(target_qty))
@@ -6455,7 +6472,7 @@ def admin_migrate_bot_holdings():
     target_stock_value = sum(
         (batch_prices.get(tk, 0) or 0) * q for tk, q in target_qty.items()
     )
-    target_cash = float(preset['cash_balance'])
+    # target_cash already computed above with obfuscation multiplier.
 
     summary = {
         'tickers_in_plan': len(plan),
@@ -6476,6 +6493,14 @@ def admin_migrate_bot_holdings():
         'user_id': user.id,
         'username': user.username,
         'display_name': user.display_name,
+        'obfuscation_multiplier': multiplier,
+        'real_brokerage_state': {
+            'cash_balance': round(float(preset['cash_balance_real']), 2),
+            'note': (
+                f'screenshot share counts and ${preset["cash_balance_real"]} cash '
+                f'are multiplied by {multiplier} to produce target_state below'
+            ),
+        },
         'sanity_warnings': sanity_warnings,
         'dry_run': dry_run,
         'current_state': {
