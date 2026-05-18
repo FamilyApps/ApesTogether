@@ -5766,6 +5766,217 @@ def admin_inspect_ticker():
     return jsonify(response)
 
 
+@app.route('/admin/inspect-position', methods=['GET'])
+@admin_2fa_required
+def admin_inspect_position():
+    """Dump everything we know about (user, ticker) tuples so we can debug
+    cost-basis / gain-percentage mismatches.
+
+    Why this exists
+    ---------------
+    `/admin/recompute-cost-basis` audit only returns rows where the new
+    weighted-average DIFFERS from the stored one AND there's at least one
+    Transaction row. Tickers like SLA / NVDA might have:
+        - no Transaction rows at all (was added via initial-seed or admin
+          tweak, never wrote a txn);
+        - Transaction rows under a different ticker symbol (renamed/merged);
+        - matching purchase_price already, masking a real bug.
+    This endpoint shows the raw truth so we know which case applies.
+
+    Query params:
+        username   \u2014 required (or user_id)
+        user_id    \u2014 alternative
+        tickers    \u2014 required, comma-separated (e.g. ?tickers=SLA,NVDA,AAPL)
+
+    Response per ticker:
+        stock_row             \u2014 current Stock row (qty, purchase_price, date)
+        transactions          \u2014 every Transaction for this user+ticker
+        replay_summary        \u2014 what recompute would compute (matches the
+                                weighted-avg algorithm in recompute-cost-basis)
+        current_market_price  \u2014 fresh AV REALTIME_BULK_QUOTES
+        gains                 \u2014 stored vs. replayed gain $ and %, so we can
+                                see exactly which numbers are inflated
+    """
+    from models import db, Stock, User, Transaction
+    from sqlalchemy import asc
+
+    username = request.args.get('username')
+    user_id = request.args.get('user_id', type=int)
+    tickers_param = (request.args.get('tickers') or '').strip()
+    if not tickers_param:
+        return jsonify({'error': 'tickers query param required (comma-separated)'}), 400
+
+    tickers = [t.strip().upper() for t in tickers_param.split(',') if t.strip()]
+    if not tickers:
+        return jsonify({'error': 'no valid tickers supplied'}), 400
+
+    # Resolve user.
+    user = None
+    if user_id:
+        user = User.query.filter_by(id=user_id).first()
+    elif username:
+        user = User.query.filter(
+            (User.username == username) | (User.display_name == username)
+        ).first()
+    if not user:
+        return jsonify({'error': 'user not found'}), 404
+
+    # Try to fetch live AV prices in one bulk call to keep this fast.
+    live_prices = {}
+    try:
+        import os as _os
+        import requests as _req
+        api_key = _os.environ.get('ALPHA_VANTAGE_API_KEY', '')
+        if api_key and tickers:
+            url = (
+                f'https://www.alphavantage.co/query'
+                f'?function=REALTIME_BULK_QUOTES&symbol={",".join(tickers)}'
+                f'&entitlement=realtime&apikey={api_key}'
+            )
+            r = _req.get(url, timeout=8)
+            data = r.json() if r.status_code == 200 else {}
+            for q in (data.get('data') or []):
+                sym = (q.get('symbol') or '').upper()
+                if sym:
+                    live_prices[sym] = float(q.get('close') or 0)
+    except Exception as e:
+        live_prices['_error'] = str(e)
+
+    results = []
+    for ticker in tickers:
+        block = {'ticker': ticker, 'user_id': user.id, 'username': user.public_name}
+
+        # Stock row.
+        stock = Stock.query.filter_by(user_id=user.id, ticker=ticker).first()
+        # Also try lowercase / alternate casing in case of legacy data.
+        if not stock:
+            stock = (
+                Stock.query.filter(Stock.user_id == user.id)
+                .filter(db.func.upper(Stock.ticker) == ticker)
+                .first()
+            )
+
+        if stock:
+            block['stock_row'] = {
+                'id': stock.id,
+                'ticker_as_stored': stock.ticker,
+                'quantity': float(stock.quantity or 0),
+                'purchase_price': float(stock.purchase_price or 0),
+                'purchase_date': stock.purchase_date.isoformat() if stock.purchase_date else None,
+            }
+        else:
+            block['stock_row'] = None
+
+        # All Transactions for this user+ticker (case-insensitive).
+        txns = (
+            Transaction.query
+            .filter(Transaction.user_id == user.id)
+            .filter(db.func.upper(Transaction.ticker) == ticker)
+            .order_by(asc(Transaction.timestamp))
+            .all()
+        )
+        block['transaction_count'] = len(txns)
+        block['transactions'] = [
+            {
+                'id': t.id,
+                'timestamp': t.timestamp.isoformat() if t.timestamp else None,
+                'type': t.transaction_type,
+                'quantity': float(t.quantity or 0),
+                'price': float(t.price or 0),
+                'notional': round(float(t.quantity or 0) * float(t.price or 0), 2),
+                'ticker_as_stored': t.ticker,
+            }
+            for t in txns
+        ]
+
+        # Replay (same algorithm as /admin/recompute-cost-basis).
+        running_cost = 0.0
+        running_qty = 0.0
+        for t in txns:
+            ttype = (t.transaction_type or '').lower()
+            qty = float(t.quantity or 0)
+            price = float(t.price or 0)
+            if qty <= 0:
+                continue
+            if ttype in ('buy', 'initial', 'purchase'):
+                running_cost += qty * price
+                running_qty += qty
+            elif ttype in ('sell', 'sale'):
+                if running_qty <= 0:
+                    continue
+                avg_at_sell = running_cost / running_qty
+                sold = min(qty, running_qty)
+                running_cost -= sold * avg_at_sell
+                running_qty -= sold
+
+        replay_avg = round(running_cost / running_qty, 6) if running_qty > 0 else None
+        block['replay_summary'] = {
+            'replayed_quantity': round(running_qty, 6),
+            'replayed_total_cost': round(running_cost, 2),
+            'replayed_avg_cost_per_share': replay_avg,
+        }
+
+        # Live price + gain calculations.
+        live_px = live_prices.get(ticker)
+        block['current_market_price'] = live_px
+
+        if stock and live_px is not None:
+            qty = float(stock.quantity or 0)
+            current_value = qty * live_px
+
+            # As stored (the number the UI is showing today).
+            stored_avg = float(stock.purchase_price or 0)
+            stored_basis = qty * stored_avg
+            block['gains'] = {
+                'stored': {
+                    'avg_cost_per_share': stored_avg,
+                    'total_cost_basis': round(stored_basis, 2),
+                    'current_value': round(current_value, 2),
+                    'gain_dollars': round(current_value - stored_basis, 2),
+                    'gain_percent': round(
+                        ((current_value - stored_basis) / stored_basis * 100)
+                        if stored_basis > 0 else 0, 2
+                    ),
+                },
+            }
+            # If we have a replay, show what gain WOULD become.
+            if replay_avg is not None:
+                replay_basis_at_full_qty = qty * replay_avg
+                block['gains']['after_recompute'] = {
+                    'avg_cost_per_share': replay_avg,
+                    'total_cost_basis': round(replay_basis_at_full_qty, 2),
+                    'current_value': round(current_value, 2),
+                    'gain_dollars': round(current_value - replay_basis_at_full_qty, 2),
+                    'gain_percent': round(
+                        ((current_value - replay_basis_at_full_qty) / replay_basis_at_full_qty * 100)
+                        if replay_basis_at_full_qty > 0 else 0, 2
+                    ),
+                }
+
+        # Diagnostic flags.
+        flags = []
+        if not stock:
+            flags.append('no_stock_row')
+        elif not txns:
+            flags.append('no_transaction_history')
+        elif replay_avg is not None and stock and abs(replay_avg - float(stock.purchase_price or 0)) > 0.01:
+            flags.append('cost_basis_mismatch')
+        if stock and txns and abs(float(stock.quantity or 0) - running_qty) > 0.001:
+            flags.append('quantity_mismatch')
+        if stock and (stock.purchase_price is None or float(stock.purchase_price or 0) == 0):
+            flags.append('zero_or_null_purchase_price')
+        block['flags'] = flags
+
+        results.append(block)
+
+    return jsonify({
+        'success': True,
+        'user_id': user.id,
+        'username': user.public_name,
+        'positions': results,
+    })
+
+
 @app.route('/admin/manual-intraday-collection')
 @admin_2fa_required  
 def manual_intraday_collection():
