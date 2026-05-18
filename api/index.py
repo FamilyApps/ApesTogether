@@ -6218,6 +6218,454 @@ def admin_set_cost_basis():
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
+#
+# ───────────────────────────────────────────────────────────────────
+#  Phase C: Bot holdings migration (Wolff + Grok)
+# ───────────────────────────────────────────────────────────────────
+#
+#  The screenshots the user shared on May 18 2026 reflect the
+#  authoritative target state for the two copytrade bots:
+#    - Wolff's Flagship Fund  (user_id=14, username=CoastHillBear)
+#    - The Grok Portfolio     (user_id=13, username=marblethehill72)
+#
+#  Strategy: DELTA migration, not a full replace.
+#    - Tickers that already match target qty → untouched (cost basis preserved)
+#    - Tickers where target_qty != current_qty → buy/sell only the delta at
+#      today's market close, via the canonical process_transaction so all
+#      cash-tracking side-effects fire correctly.
+#    - Tickers in current but not target → full liquidation
+#    - Tickers in target but not current → fresh buy
+#    - User.cash_proceeds is finally overridden to the cash value the user
+#      reported (12.45 for Wolff, 32.93 for Grok) so the resulting
+#      portfolio_value matches the brokerage account exactly.
+#
+#  Why not raw Stock-row writes? Because the original seed flow did exactly
+#  that (scripts/seed_bot_holdings.py via /admin/bot/add-stocks), which is
+#  what created the missing-transaction-history mess Phase A had to clean
+#  up for bobford00. Going through process_transaction here means a clean
+#  audit trail of buy/sell rows from this point forward.
+#
+HOLDINGS_PRESETS_PHASE_C = {
+    'wolff': {
+        'user_id': 14,
+        'username': 'CoastHillBear',
+        'display_name': "Wolff's Flagship Fund",
+        'cash_balance': 12.45,
+        'target': {
+            'AMD':   0.90988,
+            'GLTR':  5.36815,
+            'AMZN':  1.75114,
+            'SGOV':  15.35535,
+            'BN':    9.02496,
+            'NVDA':  1.82096,
+            'IREN':  19.40808,
+            'CIFR':  39.32004,
+            'MSFT':  1.78374,
+            'META':  1.17662,
+            'AVGO':  0.91787,
+            'NBIS':  2.63671,
+            'WULF':  21.0,
+            'MELI':  0.23545,
+            'GRAB':  109.3198,
+            'LLY':   0.49395,
+            'NOW':   4.17787,
+            'ELV':   1.44741,
+            'BRK.B': 1.03074,
+            'PLTR':  2.63571,
+        },
+    },
+    'grok': {
+        'user_id': 13,
+        'username': 'marblethehill72',
+        'display_name': 'The Grok Portfolio',
+        'cash_balance': 32.93,
+        'target': {
+            'CLSK':  79.4603,
+            'SOC':   76.85545,
+            'KTOS':  16.54593,
+            'PGY':   72.0,
+            'IREN':  20.2804,
+            'MSTR':  4.71046,
+            'MSFT':  2.25352,
+            'AVGO':  3.03088,
+            'NOC':   1.40361,
+            'LMT':   1.75932,
+            'DVN':   16.75203,
+            'WLDN':  12.0,
+            'VST':   7.43432,
+            'ORLA':  55.47196,
+            'MU':    1.73871,
+        },
+    },
+}
+
+
+@app.route('/admin/migrate-bot-holdings', methods=['GET', 'POST'])
+@admin_2fa_required
+def admin_migrate_bot_holdings():
+    """Phase C: delta-migrate a copytrade bot to its target holdings.
+
+    Query params:
+        preset    — 'wolff' | 'grok' (required)
+        dry_run   — 1/true → preview only, don't write (recommended first run)
+        force     — 1/true → allow re-running even if the previous run
+                    appears to have already converged the portfolio (i.e.
+                    all deltas are zero). Without `force=1` the endpoint
+                    refuses the no-op execute to make accidental
+                    double-runs safe.
+        eps       — quantity epsilon for "matches target" (default 0.000001)
+
+    Response includes a full per-ticker plan (current_qty, target_qty,
+    delta_qty, action, price, trade_value) and a summary block.
+    """
+    from datetime import datetime as _dt
+    from models import db, Stock, User, Transaction
+    from cash_tracking import process_transaction
+
+    preset_key = (request.args.get('preset') or '').lower().strip()
+    dry_run = request.args.get('dry_run') in ('1', 'true', 'yes')
+    force = request.args.get('force') in ('1', 'true', 'yes')
+    try:
+        eps = float(request.args.get('eps') or '0.000001')
+    except ValueError:
+        eps = 0.000001
+
+    if preset_key not in HOLDINGS_PRESETS_PHASE_C:
+        return jsonify({
+            'error': f'unknown preset',
+            'valid_presets': list(HOLDINGS_PRESETS_PHASE_C.keys()),
+        }), 400
+
+    preset = HOLDINGS_PRESETS_PHASE_C[preset_key]
+    user = User.query.filter_by(id=preset['user_id']).first()
+    if not user:
+        return jsonify({'error': f'user_id {preset["user_id"]} not found'}), 404
+    # Sanity-check that the user_id still maps to the bot we expect, in case
+    # IDs were reshuffled. We don't fail hard, just surface a warning.
+    sanity_warnings = []
+    if user.username != preset['username']:
+        sanity_warnings.append(
+            f"username mismatch: preset expected {preset['username']!r}, "
+            f"DB has {user.username!r} \u2014 verify before executing"
+        )
+    if getattr(user, 'display_name', None) != preset['display_name']:
+        sanity_warnings.append(
+            f"display_name mismatch: preset expected {preset['display_name']!r}, "
+            f"DB has {user.display_name!r}"
+        )
+
+    # ── Snapshot CURRENT holdings ─────────────────────────────────────
+    current_stocks = (
+        Stock.query.filter_by(user_id=user.id)
+        .filter(Stock.quantity > 0)
+        .all()
+    )
+    current_qty = {s.ticker.upper(): float(s.quantity) for s in current_stocks}
+    current_purchase_price = {s.ticker.upper(): float(s.purchase_price or 0) for s in current_stocks}
+
+    target_qty = {t.upper(): float(q) for t, q in preset['target'].items()}
+
+    # ── Compute the set of affected tickers (union) ──────────────────
+    affected_tickers = sorted(set(current_qty) | set(target_qty))
+
+    # ── Batch-fetch live prices for every affected ticker ────────────
+    from portfolio_performance import PortfolioPerformanceCalculator
+    calc = PortfolioPerformanceCalculator()
+    try:
+        batch_prices = calc.get_batch_stock_data(affected_tickers) if affected_tickers else {}
+    except Exception as e:
+        return jsonify({'error': f'AV batch price fetch failed: {e}'}), 502
+
+    def resolve_price(tk: str):
+        # get_batch_stock_data normalises to upper; fall back to purchase_price
+        # for the sell-side if AV doesn't have a quote, since the dollar
+        # amount of a sell mostly matters for cash_proceeds bookkeeping.
+        px = batch_prices.get(tk.upper())
+        if px and px > 0:
+            return float(px), 'av_live'
+        fallback = current_purchase_price.get(tk.upper())
+        if fallback and fallback > 0:
+            return float(fallback), 'stored_purchase_price'
+        return None, 'no_price'
+
+    # ── Build the per-ticker plan ────────────────────────────────────
+    plan = []
+    missing_prices = []
+    buys = 0
+    sells = 0
+    unchanged = 0
+    new_positions = 0
+    full_liquidations = 0
+    total_buy_value = 0.0
+    total_sell_value = 0.0
+
+    for tk in affected_tickers:
+        cur = current_qty.get(tk, 0.0)
+        tgt = target_qty.get(tk, 0.0)
+        delta = tgt - cur
+        price, price_source = resolve_price(tk)
+
+        entry = {
+            'ticker': tk,
+            'current_qty': round(cur, 6),
+            'target_qty': round(tgt, 6),
+            'delta_qty': round(delta, 6),
+            'price_per_share': round(price, 4) if price else None,
+            'price_source': price_source,
+        }
+
+        if abs(delta) < eps:
+            entry['action'] = 'skip'
+            entry['trade_value'] = 0.0
+            entry['note'] = 'matches target \u2014 no trade, cost basis preserved'
+            unchanged += 1
+        elif delta > 0:
+            entry['action'] = 'buy'
+            if cur < eps:
+                entry['note'] = 'new position'
+                new_positions += 1
+            if price is None:
+                entry['warning'] = 'NO PRICE AVAILABLE \u2014 buy will be skipped at execute time'
+                missing_prices.append(tk)
+            trade_value = (price or 0) * delta
+            entry['trade_value'] = round(trade_value, 2)
+            total_buy_value += trade_value
+            buys += 1
+        else:
+            entry['action'] = 'sell'
+            if tgt < eps:
+                entry['note'] = 'full liquidation (ticker not in target)'
+                full_liquidations += 1
+            if price is None:
+                entry['warning'] = 'NO PRICE AVAILABLE \u2014 sell will be skipped at execute time'
+                missing_prices.append(tk)
+            trade_value = (price or 0) * abs(delta)
+            entry['trade_value'] = round(trade_value, 2)
+            total_sell_value += trade_value
+            sells += 1
+
+        plan.append(entry)
+
+    # ── Current vs target portfolio value summary ─────────────────────
+    current_stock_value = sum(
+        (batch_prices.get(tk, current_purchase_price.get(tk, 0)) or 0) * q
+        for tk, q in current_qty.items()
+    )
+    current_cash = float(getattr(user, 'cash_proceeds', 0.0) or 0.0)
+    target_stock_value = sum(
+        (batch_prices.get(tk, 0) or 0) * q for tk, q in target_qty.items()
+    )
+    target_cash = float(preset['cash_balance'])
+
+    summary = {
+        'tickers_in_plan': len(plan),
+        'trades_to_execute': buys + sells,
+        'buys': buys,
+        'sells': sells,
+        'unchanged': unchanged,
+        'new_positions': new_positions,
+        'full_liquidations': full_liquidations,
+        'tickers_without_price': missing_prices,
+        'estimated_buy_dollars': round(total_buy_value, 2),
+        'estimated_sell_dollars': round(total_sell_value, 2),
+        'net_cash_flow_from_trades': round(total_sell_value - total_buy_value, 2),
+    }
+
+    response_base = {
+        'preset': preset_key,
+        'user_id': user.id,
+        'username': user.username,
+        'display_name': user.display_name,
+        'sanity_warnings': sanity_warnings,
+        'dry_run': dry_run,
+        'current_state': {
+            'stocks_count': len(current_qty),
+            'stock_value': round(current_stock_value, 2),
+            'cash_balance': round(current_cash, 2),
+            'portfolio_value': round(current_stock_value + current_cash, 2),
+        },
+        'target_state': {
+            'stocks_count': len(target_qty),
+            'stock_value': round(target_stock_value, 2),
+            'cash_balance': round(target_cash, 2),
+            'portfolio_value': round(target_stock_value + target_cash, 2),
+        },
+        'plan': plan,
+        'summary': summary,
+    }
+
+    # ── Dry run: return the plan only ─────────────────────────────────
+    if dry_run:
+        response_base['next_step'] = (
+            f'/admin/migrate-bot-holdings?preset={preset_key} '
+            '(drop dry_run=1 to execute)'
+        )
+        return jsonify(response_base)
+
+    # ── Idempotency guard: refuse no-op execute without ?force=1 ──────
+    if summary['trades_to_execute'] == 0 and not force:
+        response_base['next_step'] = (
+            'Portfolio already at target. Re-run with &force=1 if you want '
+            'to override cash_balance regardless.'
+        )
+        response_base['error'] = 'no_trades_to_execute'
+        return jsonify(response_base), 200
+
+    # ── Execute trades ───────────────────────────────────────────────
+    # Pattern matches the canonical buy/sell flow at api/index.py:3492-3692:
+    #   1. Update / create / decrement the Stock row first (cost-basis
+    #      math lives here; process_transaction doesn't touch Stock rows).
+    #   2. Call process_transaction to write the Transaction row and adjust
+    #      cash_proceeds / max_cash_deployed.
+    # Notifications are suppressed so a 20-trade rebalance doesn't push
+    # 20 alerts to every subscriber.
+    executed = []
+    failed = []
+    now = _dt.utcnow()
+    for entry in plan:
+        if entry['action'] == 'skip':
+            continue
+        if entry.get('warning'):
+            failed.append({**entry, 'reason': 'no_price'})
+            continue
+
+        tk = entry['ticker']
+        price = float(entry['price_per_share'])
+        qty_delta = abs(float(entry['delta_qty']))
+        is_buy = entry['action'] == 'buy'
+
+        try:
+            # Locate (or create) the Stock row. Case-insensitive match.
+            existing_stock = (
+                Stock.query.filter_by(user_id=user.id)
+                .filter(db.func.upper(Stock.ticker) == tk)
+                .first()
+            )
+
+            if is_buy:
+                # Decide between 'initial' and 'buy'. 'initial' only when
+                # the ticker has zero prior Transaction history for this
+                # user (matches add-trade convention at api/index.py:3524).
+                ticker_has_history = Transaction.query.filter(
+                    Transaction.user_id == user.id,
+                    db.func.upper(Transaction.ticker) == tk,
+                ).first() is not None
+                trade_type = 'buy' if ticker_has_history else 'initial'
+
+                if existing_stock and float(existing_stock.quantity or 0) > 0:
+                    # Weighted-average update of an existing position.
+                    old_qty = float(existing_stock.quantity)
+                    old_cost = old_qty * float(existing_stock.purchase_price or 0)
+                    new_cost = qty_delta * price
+                    new_qty = old_qty + qty_delta
+                    existing_stock.quantity = new_qty
+                    existing_stock.purchase_price = (old_cost + new_cost) / new_qty if new_qty > 0 else price
+                else:
+                    # Fresh position. If a zombie 0-qty row exists, reuse it
+                    # so we don't accumulate duplicate rows over time.
+                    if existing_stock:
+                        existing_stock.quantity = qty_delta
+                        existing_stock.purchase_price = price
+                        existing_stock.purchase_date = now
+                    else:
+                        new_stock = Stock(
+                            ticker=tk,
+                            quantity=qty_delta,
+                            purchase_price=price,
+                            purchase_date=now,
+                            user_id=user.id,
+                        )
+                        db.session.add(new_stock)
+            else:
+                # SELL. Stock row must exist with enough quantity; otherwise
+                # we surface the inconsistency rather than silently skip.
+                trade_type = 'sell'
+                if not existing_stock or float(existing_stock.quantity or 0) < qty_delta - 0.000001:
+                    raise ValueError(
+                        f"insufficient shares to sell {qty_delta} of {tk}: "
+                        f"have {float(existing_stock.quantity) if existing_stock else 0}"
+                    )
+                existing_stock.quantity = float(existing_stock.quantity) - qty_delta
+                # Cost basis (purchase_price) is intentionally unchanged on
+                # sells \u2014 weighted-average remains valid for the remaining
+                # shares.
+
+            result = process_transaction(
+                db, user.id, tk, qty_delta, price, trade_type,
+                timestamp=now,
+                price_source='phase_c_migration',
+                suppress_notifications=True,
+            )
+
+            executed.append({
+                'ticker': tk,
+                'action': trade_type,
+                'quantity': qty_delta,
+                'price': price,
+                'value': round(qty_delta * price, 2),
+                'cash_proceeds_after': float(result.get('cash_proceeds') if isinstance(result, dict) else 0),
+                'max_cash_deployed_after': float(result.get('max_cash_deployed') if isinstance(result, dict) else 0),
+            })
+        except Exception as e:
+            # Atomicity: rolling back here discards every earlier trade in
+            # this migration that hadn't been committed yet. We surface
+            # the failure and bail out so the operator can fix the
+            # underlying issue (typically insufficient shares to sell or
+            # an AV price hiccup) and re-run \u2014 the delta will be
+            # recomputed automatically.
+            db.session.rollback()
+            failed.append({
+                'ticker': tk,
+                'action': entry['action'],
+                'error': str(e),
+            })
+            response_base['executed_trades'] = []  # nothing committed
+            response_base['failed_trades'] = failed
+            response_base['error'] = (
+                f'aborted at {tk}: {e}. All earlier trades rolled back. '
+                'Fix the issue and retry.'
+            )
+            return jsonify(response_base), 500
+
+    # ── Override cash_proceeds to the target value the user reported ─
+    # This is the deliberate "books match brokerage" step. Trades above
+    # have already moved cash_proceeds around; this final assignment makes
+    # the portfolio_value equal exactly (stock_value + target_cash).
+    pre_override_cash = float(getattr(user, 'cash_proceeds', 0.0) or 0.0)
+    user.cash_proceeds = target_cash
+
+    # ── Cleanup zero-share Stock rows from full liquidations ─────────
+    zombies_deleted = 0
+    if executed:
+        zombie_rows = (
+            Stock.query.filter_by(user_id=user.id)
+            .filter(Stock.quantity <= 0.0000001)
+            .all()
+        )
+        for z in zombie_rows:
+            db.session.delete(z)
+            zombies_deleted += 1
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({**response_base, 'error': f'commit failed: {e}'}), 500
+
+    response_base['executed_trades'] = executed
+    response_base['failed_trades'] = failed
+    response_base['cash_override'] = {
+        'before': round(pre_override_cash, 2),
+        'after': round(target_cash, 2),
+    }
+    response_base['zombies_deleted'] = zombies_deleted
+    response_base['next_step'] = (
+        f'verify holdings @ /admin/inspect-position?username={user.username}'
+        f'&tickers={",".join(target_qty.keys())}'
+    )
+    return jsonify(response_base)
+
+
 @app.route('/admin/manual-intraday-collection')
 @admin_2fa_required  
 def manual_intraday_collection():

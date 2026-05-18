@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # Push notification integration flag - set to True when Firebase is configured
 PUSH_NOTIFICATIONS_ENABLED = True
 
-def process_transaction(db, user_id, ticker, quantity, price, transaction_type, timestamp=None, position_before_qty=None, price_source=None):
+def process_transaction(db, user_id, ticker, quantity, price, transaction_type, timestamp=None, position_before_qty=None, price_source=None, suppress_notifications=False):
     """
     Process a transaction and update user's cash tracking fields.
     
@@ -49,6 +49,10 @@ def process_transaction(db, user_id, ticker, quantity, price, transaction_type, 
         transaction_type: 'buy', 'sell', or 'initial'
         timestamp: Transaction timestamp (default: now)
         price_source: Where the price came from ('cached', 'bulk_api', 'single_api', 'manual', 'email')
+        suppress_notifications: If True, skip push + email notifications and
+            the daily-trade-cap check. Used by admin bulk migrations
+            (e.g. /admin/migrate-bot-holdings) so we don't spam every
+            subscriber when the migration emits 20+ trades back-to-back.
     
     Returns:
         dict with updated max_cash_deployed and cash_proceeds
@@ -131,8 +135,10 @@ def process_transaction(db, user_id, ticker, quantity, price, transaction_type, 
     if transaction_type == 'sell' and position_before_qty and position_before_qty > 0:
         position_pct = round((quantity / position_before_qty) * 100, 1)
 
-    # Send push notifications to subscribers (Phase 1 - Mobile App)
-    if PUSH_NOTIFICATIONS_ENABLED and transaction_type in ('buy', 'sell'):
+    # Send push notifications to subscribers (Phase 1 - Mobile App).
+    # Suppressed for admin bulk migrations so subscribers don't get spammed
+    # when we emit 20+ rebalancing trades in one shot.
+    if not suppress_notifications and PUSH_NOTIFICATIONS_ENABLED and transaction_type in ('buy', 'sell'):
         try:
             from push_notification_service import notify_subscribers_of_trade
             notification_result = notify_subscribers_of_trade(
@@ -150,7 +156,7 @@ def process_transaction(db, user_id, ticker, quantity, price, transaction_type, 
             logger.warning(f"Failed to send trade notifications: {e}")
 
     # Send email trade confirmation to trader + email notifications to subscribers
-    if transaction_type in ('buy', 'sell'):
+    if not suppress_notifications and transaction_type in ('buy', 'sell'):
         try:
             from services.notification_utils import send_trade_confirmation_email, notify_subscribers_via_email
             # Email confirmation to the trader (if they have email notifications on)
@@ -163,8 +169,10 @@ def process_transaction(db, user_id, ticker, quantity, price, transaction_type, 
         except Exception as e:
             logger.warning(f"Failed to send email notifications: {e}")
 
-    # Check daily trade frequency cap (non-blocking, best-effort)
-    if transaction_type in ('buy', 'sell'):
+    # Check daily trade frequency cap (non-blocking, best-effort).
+    # Also skipped under suppress_notifications since bulk migrations will
+    # blow past the cap immediately and the alert isn't actionable.
+    if not suppress_notifications and transaction_type in ('buy', 'sell'):
         try:
             _check_daily_trade_cap(db, user_id, user)
         except Exception as e:
