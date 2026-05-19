@@ -29,8 +29,21 @@ on:
 jobs:
   trade:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    
+    # Bumped from 10 to 15: MarketDataHub.refresh(include_extras=True) chains
+    # AV REALTIME_BULK_QUOTES, NEWS_SENTIMENT, TOP_GAINERS_LOSERS plus Finnhub
+    # social/analyst/insider for ~100 tickers. Wave 4 saw a 10m timeout on
+    # 2026-05-19 — bumping to 15 leaves headroom without masking real hangs.
+    timeout-minutes: 15
+
+    # Opt into Node.js 24 for JavaScript-based actions ahead of the
+    # June 2, 2026 default cutover and the Sept 16, 2026 Node 20 removal.
+    # This keeps actions/checkout@v4 + actions/setup-python@v5 working
+    # (they're still the latest verified-stable majors as of May 2026)
+    # while silencing the deprecation warning and avoiding any surprise
+    # break on June 2.
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
     steps:
       - uses: actions/checkout@v4
       
