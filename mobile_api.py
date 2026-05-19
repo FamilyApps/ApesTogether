@@ -4440,316 +4440,364 @@ def _is_copytrade_bot(u) -> bool:
     return False
 
 
+def _parse_email_received_at(iso_str):
+    """Parse an ISO 8601 timestamp (as produced by JS toISOString()) to a
+    naive UTC datetime, matching the DB schema convention. Returns None
+    on failure so the caller can fall back to utcnow()."""
+    if not iso_str:
+        return None
+    try:
+        from datetime import timezone
+        s = str(iso_str).replace('Z', '+00:00')
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+    except Exception as e:
+        logger.warning(f"Bad email_received_at '{iso_str}': {e}")
+        return None
+
+
+def _execute_single_bot_trade(bot, action, ticker, quantity, price, source, timestamp):
+    """Execute a single buy/sell for a copytrade bot.
+
+    Applies the bot's trade_multiplier (obfuscation), fetches the price
+    from AlphaVantage if missing, runs the trade through
+    cash_tracking.process_transaction (single source of truth for
+    subscriber push/email fan-out), and updates the Stock row.
+
+    Returns a result dict suitable for inclusion in an API response. Does
+    NOT commit — caller is responsible for db.session.commit/rollback.
+    """
+    from models import db, Stock
+    from cash_tracking import process_transaction
+
+    if action not in ('buy', 'sell'):
+        return {'ticker': ticker, 'error': f'Invalid action: {action}'}
+    if not ticker:
+        return {'error': 'ticker required'}
+
+    # Apply trade multiplier (obfuscation) — set per bot via
+    # extra_data['trade_multiplier'] by the scale-holdings endpoint.
+    trade_multiplier = 1.0
+    if bot.extra_data and isinstance(bot.extra_data, dict):
+        trade_multiplier = float(bot.extra_data.get('trade_multiplier', 1.0))
+    if trade_multiplier != 1.0:
+        original_qty = quantity
+        quantity = round(quantity * trade_multiplier, 6)
+        logger.info(f"Scaled {ticker} qty: {original_qty} -> {quantity} (x{trade_multiplier}) for {bot.username}")
+
+    # Fetch current price if not provided (NEVER fake prices)
+    if price in (None, ''):
+        try:
+            from portfolio_performance import PortfolioPerformanceCalculator
+            calc = PortfolioPerformanceCalculator()
+            price_data = calc.get_stock_data(ticker)
+            if price_data and price_data.get('price'):
+                price = price_data['price']
+                logger.info(f"Fetched price for {ticker}: ${float(price):.2f}")
+            else:
+                return {'ticker': ticker, 'error': 'Could not fetch price from AlphaVantage'}
+        except Exception as e:
+            logger.error(f"Price fetch failed for {ticker}: {e}")
+            return {'ticker': ticker, 'error': f'Price fetch failed: {e}'}
+
+    try:
+        price = float(price)
+    except (TypeError, ValueError):
+        return {'ticker': ticker, 'error': f'Invalid price: {price}'}
+
+    try:
+        stock = Stock.query.filter_by(user_id=bot.id, ticker=ticker).first()
+
+        # For sells: clamp/zero-means-all
+        if action == 'sell':
+            if not stock or (stock.quantity or 0) <= 0:
+                return {'ticker': ticker, 'error': f'Bot {bot.username} does not hold {ticker}'}
+            if quantity == 0 or quantity > stock.quantity:
+                logger.info(f"Adjusting {ticker} sell qty: requested {quantity} -> actual {stock.quantity}")
+                quantity = float(stock.quantity)
+
+        pre_qty = float(stock.quantity) if stock else 0.0
+        position_before_for_tx = pre_qty if action == 'sell' else None
+
+        process_transaction(
+            db, bot.id, ticker, quantity, price, action,
+            timestamp=timestamp,
+            position_before_qty=position_before_for_tx,
+            price_source=source or 'copytrade',
+        )
+
+        if action == 'buy':
+            if stock:
+                total_cost = (stock.quantity * stock.purchase_price) + (quantity * price)
+                stock.quantity += quantity
+                stock.purchase_price = total_cost / stock.quantity if stock.quantity > 0 else price
+            else:
+                stock = Stock(user_id=bot.id, ticker=ticker, quantity=quantity, purchase_price=price)
+                db.session.add(stock)
+        elif action == 'sell':
+            stock.quantity -= quantity
+
+        position_pct = None
+        if action == 'sell' and pre_qty > 0:
+            position_pct = round((quantity / pre_qty) * 100, 1)
+
+        return {
+            'ticker': ticker,
+            'action': action,
+            'quantity': quantity,
+            'price': price,
+            'total_value': round(quantity * price, 2),
+            'position_pct': position_pct,
+            'status': 'executed',
+            'source': source,
+        }
+    except Exception as e:
+        logger.error(f"_execute_single_bot_trade error {ticker}: {e}", exc_info=True)
+        return {'ticker': ticker, 'error': str(e)}
+
+
 @mobile_api.route('/admin/bot/email-trade', methods=['POST'])
 @require_cron_secret
 @rate_limit(30)
 @with_db_retry
 def bot_email_trade():
+    """Process trade notifications forwarded from Public.com emails.
+
+    ROUTING STRATEGY (auto mode):
+        - SELL with exactly one copytrade-bot holder → execute IMMEDIATELY
+          on that bot, using email_received_at as the Transaction timestamp.
+          This sell becomes a *cluster anchor* used to route deferred BUYs
+          in the same time cluster.
+        - All other trades (BUYs, SELLs with 0 or 2+ holders) → DEFER to
+          PendingTrade with created_at=email_received_at. They are routed
+          later by /admin/bot/process-pending-trades, which clusters
+          pending rows by email_received_at and matches each cluster to
+          the unique bot anchored by sells / single-holder buys in window.
+
+    Why per-trade + anchor (instead of batch-level overlap)? Public.com
+    sends one email per trade with NO bot-identifying info. The previous
+    "best-overlap-on-batch" heuristic misallocated trades whenever two
+    rebalances ran close together in time. Sells with exclusive ownership
+    are unambiguous anchors and let us route concurrent rebalances
+    correctly.
+
+    Request body (JSON):
+        bot_username: 'auto' for auto-routing, or a specific bot username
+        trades: list of {action, ticker, quantity, price?}
+        source: short source tag (e.g. 'public_email')
+        notes: raw email text snippet (truncated to 500 chars for audit)
+        email_subject: original Gmail subject (audit)
+        email_received_at: ISO 8601 timestamp from Gmail message.getDate()
+        email_message_id: Gmail message ID (audit)
+
+    Legacy single-trade format (action/ticker/quantity/price at top level)
+    is still supported.
     """
-    Process a trade notification forwarded from Public.com email.
-    Used for the Grok Portfolio and Wolff's Flagship Fund copy-trading bots.
-    
-    POST body (JSON):
-        bot_username: str — username of the copy-trading bot
-        trades: list of {action: 'buy'|'sell', ticker: str, quantity: float, price: float}
-        source: str — 'grok_portfolio' or 'wolffs_flagship'
-        notes: str (optional) — raw email text or description
-    
-    Or for simple single-trade format:
-        bot_username: str
-        action: 'buy' or 'sell'
-        ticker: str
-        quantity: float
-        price: float (optional — will fetch current price if omitted)
-        source: str
-    """
-    from models import db, User, Stock, Transaction
-    from cash_tracking import process_transaction
-    
+    from models import db, User, Stock, PendingTrade
+    from datetime import timedelta
+    import uuid
+
     data = request.get_json() or {}
     bot_username = data.get('bot_username')
     source = data.get('source', 'public_email')
     notes = data.get('notes', '')
-    
+    email_subject = data.get('email_subject', '')
+    email_message_id = data.get('email_message_id', '')
+
     if not bot_username:
         return jsonify({'error': 'bot_username required'}), 400
-    
-    # Cap batch size to prevent abuse
+
     raw_trades = data.get('trades', [])
     if isinstance(raw_trades, list) and len(raw_trades) > 50:
         return jsonify({'error': 'batch_too_large', 'max_trades_per_request': 50}), 400
-    
-    try:
-        # Auto-detect which bot this email is for by matching tickers
-        if bot_username == 'auto':
-            trades_list = data.get('trades', [])
-            if not trades_list and data.get('ticker'):
-                trades_list = [{'ticker': data.get('ticker', '')}]
-            
-            email_tickers = set(t.get('ticker', '').upper() for t in trades_list if t.get('ticker'))
-            
-            if not email_tickers:
-                return jsonify({'error': 'No tickers found for auto-detection'}), 400
-            
-            # Restrict the candidate set to TRUE copytrade bots only — strategy
-            # bots (e.g. candle3873) also have role='agent' but hold tickers from
-            # their own internal trading logic, so matching them against an
-            # inbound Public.com email causes misattribution.
-            all_agents = User.query.filter_by(role='agent').all()
-            copytrade_bots = [u for u in all_agents if _is_copytrade_bot(u)]
-            if not copytrade_bots:
-                logger.warning(
-                    f"No copytrade bots configured among {len(all_agents)} agents; "
-                    f"all email trades will be deferred. Mark a bot with "
-                    f"extra_data.copytrade_bot=true or add its username to "
-                    f"COPYTRADE_BOT_USERNAMES."
-                )
-            best_bot = None
-            best_overlap = -1
-            match_details = []
-            
-            for candidate in copytrade_bots:
-                held_tickers = set(
-                    s.ticker.upper() for s in Stock.query.filter_by(user_id=candidate.id).all()
-                    if s.quantity > 0
-                )
-                overlap = len(email_tickers & held_tickers)
-                match_details.append({
-                    'username': candidate.username,
-                    'user_id': candidate.id,
-                    'held_tickers': len(held_tickers),
-                    'overlap': overlap,
-                    'matching_tickers': sorted(email_tickers & held_tickers)
-                })
-                if overlap > best_overlap:
-                    best_overlap = overlap
-                    best_bot = candidate
-            
-            if not best_bot or best_overlap == 0:
-                # No match — defer these trades for up to 30 minutes
-                from models import PendingTrade
-                from datetime import timedelta
-                import uuid
-                
-                batch_id = str(uuid.uuid4())[:12]
-                email_subject = data.get('email_subject', '')
-                raw_snippet = notes[:500] if notes else ''
-                expires = datetime.utcnow() + timedelta(minutes=30)
-                
-                pending_count = 0
-                for t in trades_list:
-                    pt = PendingTrade(
-                        email_batch_id=batch_id,
-                        ticker=t.get('ticker', '').upper(),
-                        action=t.get('action', 'buy').lower(),
-                        quantity=float(t.get('quantity', 1)),
-                        price=float(t['price']) if t.get('price') else None,
-                        status='pending',
-                        source_email_subject=email_subject,
-                        raw_email_snippet=raw_snippet,
-                        expires_at=expires,
-                    )
-                    db.session.add(pt)
-                    pending_count += 1
-                
-                db.session.commit()
-                logger.warning(f"Auto-detect: no match for {email_tickers}. Stored {pending_count} pending trades (batch={batch_id}, expires={expires}). Details: {match_details}")
-                
-                return jsonify({
-                    'success': True,
-                    'status': 'deferred',
-                    'message': f'No bot matched. {pending_count} trades stored for deferred routing (30 min window).',
-                    'batch_id': batch_id,
-                    'email_tickers': sorted(email_tickers),
-                    'expires_at': expires.isoformat(),
-                    'candidates': match_details
-                })
-            
-            bot = best_bot
-            bot_username = bot.username
-            source = f'auto_{source}' if not source.startswith('auto_') else source
-            logger.info(f"Auto-detect: matched {email_tickers} to {bot_username} (overlap={best_overlap}). Details: {match_details}")
 
-            # NOTE: We deliberately do NOT sweep PendingTrade rows from
-            # other email_batches here. Public.com sends ONE email per
-            # trade, so each unmatched trade lives in its own batch_id.
-            # An earlier version of this code looped over ALL pending
-            # trades (across every batch) and reassigned them to
-            # whichever bot won the *current* request's ticker-overlap
-            # match. That caused the May-2026 cross-bot misallocation:
-            # a flurry of single-ticker emails (CLSK, KTOS, MSTR, PGY,
-            # SOC, IREN) all came in within seconds. The first six had
-            # no ticker overlap with either bot → they deferred. The
-            # seventh (IREN) matched Wolff because Wolff held IREN from
-            # seed → the inline sweep yanked the previously-deferred
-            # six onto Wolff too, even though they were the *next*
-            # account's (Grok's) trades. Result: phantom CLSK/KTOS/etc.
-            # positions on Wolff that took hours of forensics to undo.
-            #
-            # Pending trades are now resolved exclusively by
-            # /admin/bot/process-pending-trades (called every 5 min by
-            # the GAS retry trigger). That handler iterates BY BATCH
-            # and uses a per-batch timestamp window to pick the most
-            # plausible bot, instead of cross-pollinating batches.
-        else:
-            # Find the bot user by explicit username
+    # Email received-at: used as cluster key + Transaction timestamp. Falls
+    # back to wall-clock if GAS didn't send it (older GAS versions).
+    email_received_at = _parse_email_received_at(data.get('email_received_at'))
+    if email_received_at is None:
+        email_received_at = datetime.utcnow()
+
+    # Normalise trades list (support legacy single-trade format)
+    trades = list(raw_trades) if raw_trades else []
+    if not trades and data.get('ticker'):
+        trades = [{
+            'action': data.get('action', 'buy'),
+            'ticker': data.get('ticker', ''),
+            'quantity': data.get('quantity', 1),
+            'price': data.get('price'),
+        }]
+    if not trades:
+        return jsonify({'error': 'No trades specified'}), 400
+
+    try:
+        # ── Explicit bot username path (manual admin / test calls) ───
+        if bot_username != 'auto':
             bot = User.query.filter_by(username=bot_username, role='agent').first()
             if not bot:
                 return jsonify({'error': f'Bot user "{bot_username}" not found'}), 404
-        
-        # Check if bot has a trade multiplier for obfuscation
-        # (stored in extra_data['trade_multiplier'] by the scale-holdings endpoint)
-        trade_multiplier = 1.0
-        if bot.extra_data and isinstance(bot.extra_data, dict):
-            trade_multiplier = float(bot.extra_data.get('trade_multiplier', 1.0))
-        
-        # Parse trades — support both single-trade and batch format
-        trades = data.get('trades', [])
-        if not trades and data.get('action'):
-            trades = [{
-                'action': data['action'],
-                'ticker': data.get('ticker', '').upper(),
-                'quantity': data.get('quantity', 1),
-                'price': data.get('price')
-            }]
-        
-        if not trades:
-            return jsonify({'error': 'No trades specified'}), 400
-        
-        results = []
-        for trade in trades:
-            action = trade.get('action', '').lower()
-            ticker = trade.get('ticker', '').upper()
-            quantity = float(trade.get('quantity', 1))
-            price = trade.get('price')
-            
-            # Scale quantity by bot's trade multiplier for obfuscation
-            if trade_multiplier != 1.0:
-                original_qty = quantity
-                quantity = round(quantity * trade_multiplier, 6)
-                logger.info(f"Scaled {ticker} qty: {original_qty} -> {quantity} (x{trade_multiplier})")
-            
-            if action not in ('buy', 'sell'):
-                results.append({'ticker': ticker, 'error': f'Invalid action: {action}'})
-                continue
-            
-            if not ticker:
-                results.append({'error': 'ticker required'})
-                continue
-            
-            # Fetch current price if not provided — uses AlphaVantage with 90s cache
-            # NEVER use fake/simulated prices (user requirement)
-            if not price:
+
+            results = []
+            for t in trades:
+                action = (t.get('action') or '').lower()
+                ticker = (t.get('ticker') or '').upper()
+                quantity = float(t.get('quantity') or 1)
+                price = t.get('price')
                 try:
-                    from portfolio_performance import PortfolioPerformanceCalculator
-                    calc = PortfolioPerformanceCalculator()
-                    price_data = calc.get_stock_data(ticker)
-                    if price_data and price_data.get('price'):
-                        price = price_data['price']
-                        logger.info(f"Fetched price for {ticker}: ${price:.2f}")
-                    else:
-                        logger.warning(f"No price available for {ticker} from AlphaVantage")
-                        results.append({'ticker': ticker, 'error': 'Could not fetch price from AlphaVantage'})
-                        continue
+                    r = _execute_single_bot_trade(
+                        bot, action, ticker, quantity, price,
+                        source=source, timestamp=email_received_at,
+                    )
+                    results.append(r)
                 except Exception as e:
-                    logger.error(f"Price fetch failed for {ticker}: {e}")
-                    results.append({'ticker': ticker, 'error': f'Price fetch failed: {e}'})
-                    continue
-            
-            price = float(price)
-            
+                    db.session.rollback()
+                    results.append({'ticker': ticker, 'error': str(e)})
+            db.session.commit()
+
+            executed = [r for r in results if r.get('status') == 'executed']
+            return jsonify({
+                'success': True,
+                'bot_username': bot_username,
+                'bot_id': bot.id,
+                'source': source,
+                'trades_submitted': len(trades),
+                'trades_executed': len(executed),
+                'results': results,
+            })
+
+        # ── Auto-detect path ─────────────────────────────────────────
+        all_agents = User.query.filter_by(role='agent').all()
+        copytrade_bots = [u for u in all_agents if _is_copytrade_bot(u)]
+        if not copytrade_bots:
+            logger.warning(
+                f"No copytrade bots configured among {len(all_agents)} agents; "
+                f"all email trades will be deferred. Mark a bot with "
+                f"extra_data.copytrade_bot=true or add its username to "
+                f"COPYTRADE_BOT_USERNAMES."
+            )
+
+        # Build per-ticker holder map (positive-quantity holdings only)
+        holders_by_ticker = {}
+        for cb in copytrade_bots:
+            for s in Stock.query.filter_by(user_id=cb.id).all():
+                if (s.quantity or 0) > 0:
+                    tk = (s.ticker or '').upper()
+                    holders_by_ticker.setdefault(tk, []).append(cb)
+
+        batch_id = str(uuid.uuid4())[:12]
+        raw_snippet = (notes or '')[:500]
+        # Expiry is anchored on email_received_at so historical replays
+        # (e.g. reprocessTodaysTrades) age correctly.
+        expires = email_received_at + timedelta(minutes=30)
+
+        executed_results = []
+        deferred_results = []
+        auto_source = source if source.startswith('auto_') else f'auto_{source}'
+
+        for t in trades:
+            action = (t.get('action') or '').lower()
+            ticker = (t.get('ticker') or '').upper()
             try:
-                # Get current position
-                stock = Stock.query.filter_by(user_id=bot.id, ticker=ticker).first()
-                
-                # For sells: adjust quantity to match bot's actual position
-                if action == 'sell':
-                    if not stock or stock.quantity <= 0:
-                        logger.warning(f"Bot {bot_username} has no {ticker} to sell — skipping")
-                        results.append({'ticker': ticker, 'error': f'Bot does not hold {ticker}'})
-                        continue
-                    if quantity == 0 or quantity > stock.quantity:
-                        # qty=0 means "sell all" (Public.com emails), or qty exceeds holdings
-                        logger.info(f"Adjusting {ticker} sell qty: requested {quantity} -> actual {stock.quantity}")
-                        quantity = stock.quantity
-                
-                # Capture pre-trade position so we can report % of position on sells.
-                pre_qty = float(stock.quantity) if stock else 0.0
+                quantity = float(t.get('quantity') or 1)
+            except (TypeError, ValueError):
+                quantity = 1.0
+            price_raw = t.get('price')
+            price = price_raw if price_raw not in (None, '') else None
 
-                # Process transaction through cash tracking.
-                # IMPORTANT: pass position_before_qty so the internal subscriber
-                # notification fan-out (cash_tracking.process_transaction) can
-                # report the correct % of position on sells. We used to omit
-                # this and fire a SECOND external fan-out below to compensate,
-                # which caused the duplicate-push bug (one notification with
-                # the % and one without). Single source of truth now.
-                position_before_for_tx = pre_qty if action == 'sell' else None
-                tx_result = process_transaction(
-                    db, bot.id, ticker, quantity, price, action,
-                    timestamp=datetime.utcnow(),
-                    position_before_qty=position_before_for_tx,
-                    price_source=source or 'copytrade'
-                )
+            if not ticker or action not in ('buy', 'sell'):
+                executed_results.append({
+                    'ticker': ticker, 'action': action,
+                    'error': 'invalid action or ticker',
+                })
+                continue
+
+            holders = holders_by_ticker.get(ticker, [])
+            # Immediate execution ONLY for sells with a unique holder.
+            # These are the safest signals: a sell of a ticker only one
+            # bot holds is unambiguously that bot's trade, and it lays
+            # down a Transaction at email_received_at that the cluster
+            # resolver uses to anchor sibling buys.
+            anchor_bot = holders[0] if (action == 'sell' and len(holders) == 1) else None
+
+            if anchor_bot is not None:
+                try:
+                    r = _execute_single_bot_trade(
+                        anchor_bot, action, ticker, quantity, price,
+                        source=auto_source, timestamp=email_received_at,
+                    )
+                except Exception as e:
+                    db.session.rollback()
+                    r = {'ticker': ticker, 'error': str(e)}
+                r['routing'] = {
+                    'mode': 'sell_anchor',
+                    'bot_username': anchor_bot.username,
+                    'bot_id': anchor_bot.id,
+                }
+                executed_results.append(r)
+            else:
+                # Defer — cluster resolver will route via anchors
                 if action == 'buy':
-                    if stock:
-                        # Weighted average purchase price
-                        total_cost = (stock.quantity * stock.purchase_price) + (quantity * price)
-                        stock.quantity += quantity
-                        stock.purchase_price = total_cost / stock.quantity if stock.quantity > 0 else price
-                    else:
-                        stock = Stock(user_id=bot.id, ticker=ticker, quantity=quantity, purchase_price=price)
-                        db.session.add(stock)
-                elif action == 'sell':
-                    stock.quantity -= quantity
-
-                # For sells, compute % of position sold (qty sold / pre-sell holdings).
-                position_pct = None
-                if action == 'sell' and pre_qty > 0:
-                    position_pct = round((quantity / pre_qty) * 100, 1)
-
-                results.append({
+                    reason = 'buy_always_deferred'
+                elif len(holders) == 0:
+                    reason = 'sell_no_holder'
+                else:
+                    reason = 'sell_ambiguous_holders'
+                pt = PendingTrade(
+                    email_batch_id=batch_id,
+                    ticker=ticker,
+                    action=action,
+                    quantity=quantity,
+                    price=float(price) if price not in (None, '') else None,
+                    status='pending',
+                    source_email_subject=email_subject,
+                    raw_email_snippet=raw_snippet,
+                    created_at=email_received_at,
+                    expires_at=expires,
+                )
+                db.session.add(pt)
+                deferred_results.append({
                     'ticker': ticker,
                     'action': action,
                     'quantity': quantity,
-                    'price': price,
-                    'total_value': round(quantity * price, 2),
-                    'position_pct': position_pct,
-                    'status': 'executed',
-                    'source': source
+                    'status': 'deferred',
+                    'reason': reason,
+                    'holders': [h.username for h in holders],
                 })
-                
-            except Exception as e:
-                db.session.rollback()
-                results.append({'ticker': ticker, 'error': str(e)})
-        
-        db.session.commit()
-        
-        executed = [r for r in results if r.get('status') == 'executed']
 
-        # Subscriber push + email notifications are fired by
-        # process_transaction's internal fan-out (cash_tracking.py). We used
-        # to fan out again here, which produced TWO notifications per trade
-        # (the internal one with position_pct=None plus this one with the
-        # correct %). Single source of truth lives in process_transaction.
-        notify_summary = {
-            'sent_via': 'cash_tracking.process_transaction',
-            'trades_notified': len(executed),
-        }
+        db.session.commit()
+
+        executed_count = sum(1 for r in executed_results if r.get('status') == 'executed')
+        if executed_results and deferred_results:
+            status = 'mixed'
+        elif executed_results:
+            status = 'executed'
+        else:
+            status = 'deferred'
+
+        logger.info(
+            f"bot_email_trade auto: batch={batch_id} executed={executed_count} "
+            f"deferred={len(deferred_results)} received_at={email_received_at.isoformat()} "
+            f"msg_id={email_message_id or 'n/a'}"
+        )
 
         return jsonify({
             'success': True,
-            'bot_username': bot_username,
-            'bot_id': bot.id,
-            'source': source,
+            'status': status,
+            'batch_id': batch_id,
+            'email_received_at': email_received_at.isoformat(),
+            'email_message_id': email_message_id or None,
             'trades_submitted': len(trades),
-            'trades_executed': len(executed),
-            'results': results,
-            'notifications': notify_summary,
+            'trades_executed': executed_count,
+            'trades_deferred': len(deferred_results),
+            'executed': executed_results,
+            'deferred': deferred_results,
+            'expires_at': expires.isoformat() if deferred_results else None,
         })
-        
+
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Bot email trade error: {e}")
+        logger.error(f"Bot email trade error: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 
@@ -4758,125 +4806,245 @@ def bot_email_trade():
 @rate_limit(10)
 @with_db_retry
 def bot_process_pending_trades():
-    """
-    Retry routing pending trades. Called periodically (e.g. by GAS every 5 min).
-    
-    For each pending trade batch:
-    - Check if any bot executed trades in the same 30-min window
-    - If yes, route pending trades to that bot
-    - If expired (>30 min), mark as unroutable and notify admin
+    """Resolve PendingTrade rows by clustering on email_received_at and
+    routing each cluster to the copytrade bot uniquely anchored by
+    sells / single-holder buys in the cluster window.
+
+    Algorithm:
+        1. Load pending trades sorted by created_at (= email_received_at).
+        2. Split into CLUSTERS where adjacent trades are within
+           CLUSTER_GAP_SEC of each other.
+        3. For each cluster, compute candidate bots from two sources:
+             (a) sell_anchors = bots with auto_* Transactions in the
+                 cluster's [start-pad, end+pad] window. SELLs are
+                 strong signals (executed by bot_email_trade as a
+                 unique-holder sell).
+             (b) unique_buy_holders = for each pending BUY, the unique
+                 copytrade-bot holder of its ticker (if any).
+        4. Decide:
+             - If sell_anchors is non-empty and unique → route cluster
+               to that anchor.
+             - elif sell_anchors empty AND unique_buy_holders has
+               exactly one bot AND every pending BUY in cluster has
+               that holder (no "no-holder" buys polluting the cluster)
+               → route cluster to that bot.
+             - elif candidates is empty → leave pending, expire only
+               if any trade is past expires_at.
+             - else (multiple candidates / mixed) → mark cluster
+               unroutable + notify admin.
     """
     from models import db, User, Stock, PendingTrade, Transaction
-    from cash_tracking import process_transaction
     from datetime import timedelta
-    
+
+    # Tunables — feel free to tighten/loosen.
+    CLUSTER_GAP_SEC = 60     # max gap between adjacent emails in same cluster
+    WINDOW_PAD_SEC = 30      # tolerance when matching Transactions to cluster
+
     try:
         now = datetime.utcnow()
-        pending = PendingTrade.query.filter_by(status='pending').all()
-        
+        pending = (
+            PendingTrade.query.filter_by(status='pending')
+            .order_by(PendingTrade.created_at.asc())
+            .all()
+        )
         if not pending:
             return jsonify({'success': True, 'message': 'No pending trades', 'processed': 0})
-        
-        # Group by batch
-        batches = {}
+
+        # Cluster by email_received_at gap
+        clusters = []
+        current = []
         for pt in pending:
-            batches.setdefault(pt.email_batch_id, []).append(pt)
-        
+            if not current:
+                current = [pt]
+                continue
+            gap = (pt.created_at - current[-1].created_at).total_seconds()
+            if gap <= CLUSTER_GAP_SEC:
+                current.append(pt)
+            else:
+                clusters.append(current)
+                current = [pt]
+        if current:
+            clusters.append(current)
+
+        all_agents = User.query.filter_by(role='agent').all()
+        copytrade_bots = [u for u in all_agents if _is_copytrade_bot(u)]
+        copytrade_by_id = {b.id: b for b in copytrade_bots}
+        copytrade_ids = list(copytrade_by_id.keys())
+
+        # Pre-build per-ticker holder map (positive holdings only)
+        holders_by_ticker = {}
+        for cb in copytrade_bots:
+            for s in Stock.query.filter_by(user_id=cb.id).all():
+                if (s.quantity or 0) > 0:
+                    tk = (s.ticker or '').upper()
+                    holders_by_ticker.setdefault(tk, []).append(cb)
+
         routed_count = 0
         expired_count = 0
-        
-        for batch_id, trades in batches.items():
-            # Check if any bot had trades executed in the time window around these pending trades
-            batch_created = min(t.created_at for t in trades)
-            window_start = batch_created - timedelta(minutes=5)
-            window_end = batch_created + timedelta(minutes=35)
-            
-            # Look for recent transactions on copytrade bots ONLY (NOT strategy
-            # bots — see _is_copytrade_bot docstring for context).
-            _all_agents_retry = User.query.filter_by(role='agent').all()
-            copytrade_bots = [u for u in _all_agents_retry if _is_copytrade_bot(u)]
-            matched_bot = None
-            
-            for candidate in copytrade_bots:
-                recent_txns = Transaction.query.filter(
-                    Transaction.user_id == candidate.id,
-                    Transaction.timestamp >= window_start,
-                    Transaction.timestamp <= window_end
-                ).count()
-                
-                if recent_txns > 0:
-                    matched_bot = candidate
-                    break
-            
-            if matched_bot:
-                # Route all pending trades in this batch to the matched bot
-                trade_multiplier = 1.0
-                if matched_bot.extra_data and isinstance(matched_bot.extra_data, dict):
-                    trade_multiplier = float(matched_bot.extra_data.get('trade_multiplier', 1.0))
-                
-                for pt in trades:
-                    pt.assigned_bot_id = matched_bot.id
-                    pt.status = 'routed'
-                    pt.routed_at = now
-                    
-                    # Execute the trade
-                    qty = pt.quantity
-                    if trade_multiplier != 1.0:
-                        qty = round(qty * trade_multiplier, 6)
-                    
-                    price = pt.price
-                    if not price:
-                        try:
-                            from portfolio_performance import PortfolioPerformanceCalculator
-                            calc = PortfolioPerformanceCalculator()
-                            price_data = calc.get_stock_data(pt.ticker)
-                            price = price_data['price'] if price_data and price_data.get('price') else None
-                        except Exception:
-                            price = None
-                    
-                    if price:
-                        try:
-                            stock = Stock.query.filter_by(user_id=matched_bot.id, ticker=pt.ticker).first()
-                            pos_before = stock.quantity if stock and pt.action == 'sell' else None
-                            process_transaction(db, matched_bot.id, pt.ticker, qty, float(price), pt.action, timestamp=now, position_before_qty=pos_before)
-                            if pt.action == 'buy':
-                                if stock:
-                                    total_cost = (stock.quantity * stock.purchase_price) + (qty * float(price))
-                                    stock.quantity += qty
-                                    stock.purchase_price = total_cost / stock.quantity if stock.quantity > 0 else float(price)
-                                else:
-                                    stock = Stock(user_id=matched_bot.id, ticker=pt.ticker, quantity=qty, purchase_price=float(price))
-                                    db.session.add(stock)
-                            elif pt.action == 'sell' and stock and stock.quantity >= qty:
-                                stock.quantity -= qty
-                        except Exception as e:
-                            logger.error(f"Failed to execute deferred trade {pt.ticker}: {e}")
-                    
-                    routed_count += 1
-                    logger.info(f"Deferred route: {pt.ticker} {pt.action} -> {matched_bot.username} (batch={batch_id})")
-            
-            elif trades[0].expires_at <= now:
-                # Expired — mark as unroutable and notify admin
-                for pt in trades:
+        still_pending = 0
+        ambiguous_clusters_log = []
+        no_anchor_clusters_log = []
+        routed_clusters_log = []
+
+        for cluster in clusters:
+            c_start = cluster[0].created_at - timedelta(seconds=WINDOW_PAD_SEC)
+            c_end = cluster[-1].created_at + timedelta(seconds=WINDOW_PAD_SEC)
+
+            # (a) Sell anchors: auto_* Transactions on copytrade bots in window
+            sell_anchor_bot_ids = set()
+            anchor_txns_detail = []
+            if copytrade_ids:
+                anchor_txns = (
+                    Transaction.query
+                    .filter(
+                        Transaction.user_id.in_(copytrade_ids),
+                        Transaction.timestamp >= c_start,
+                        Transaction.timestamp <= c_end,
+                        Transaction.price_source.like('auto_%'),
+                    )
+                    .all()
+                )
+                for tx in anchor_txns:
+                    sell_anchor_bot_ids.add(tx.user_id)
+                    anchor_txns_detail.append({
+                        'user_id': tx.user_id,
+                        'ticker': tx.ticker,
+                        'type': tx.transaction_type,
+                        'timestamp': tx.timestamp.isoformat() if tx.timestamp else None,
+                        'price_source': tx.price_source,
+                    })
+
+            # (b) Per-BUY unique-holder analysis
+            buy_holder_bot_ids = set()
+            buy_no_holder_count = 0
+            buy_ambig_holder_count = 0
+            for pt in cluster:
+                if pt.action != 'buy':
+                    continue
+                holders = holders_by_ticker.get(pt.ticker.upper(), [])
+                if len(holders) == 1:
+                    buy_holder_bot_ids.add(holders[0].id)
+                elif len(holders) == 0:
+                    buy_no_holder_count += 1
+                else:
+                    buy_ambig_holder_count += 1
+
+            chosen_bot_id = None
+            decision_reason = None
+
+            if len(sell_anchor_bot_ids) == 1:
+                chosen_bot_id = next(iter(sell_anchor_bot_ids))
+                decision_reason = 'sell_anchor_unique'
+            elif len(sell_anchor_bot_ids) >= 2:
+                decision_reason = 'sell_anchors_conflict'
+            elif (
+                not sell_anchor_bot_ids
+                and len(buy_holder_bot_ids) == 1
+                and buy_no_holder_count == 0
+                and buy_ambig_holder_count == 0
+            ):
+                chosen_bot_id = next(iter(buy_holder_bot_ids))
+                decision_reason = 'unanimous_buy_holders'
+            elif len(buy_holder_bot_ids) >= 2:
+                decision_reason = 'buy_holders_conflict'
+            elif (
+                not sell_anchor_bot_ids
+                and len(buy_holder_bot_ids) == 1
+                and (buy_no_holder_count > 0 or buy_ambig_holder_count > 0)
+            ):
+                # Single holder match alongside no-holder/ambiguous buys.
+                # Refuse to auto-route — this is the May-2026 misallocation
+                # shape (one matching ticker + several unknowns).
+                decision_reason = 'mixed_holder_signals'
+            else:
+                decision_reason = 'no_signal'
+
+            cluster_info = {
+                'window_start': c_start.isoformat(),
+                'window_end': c_end.isoformat(),
+                'reason': decision_reason,
+                'sell_anchor_bot_ids': sorted(sell_anchor_bot_ids),
+                'buy_holder_bot_ids': sorted(buy_holder_bot_ids),
+                'buy_no_holder_count': buy_no_holder_count,
+                'buy_ambig_holder_count': buy_ambig_holder_count,
+                'anchor_txns': anchor_txns_detail,
+                'trades': [
+                    {'id': pt.id, 'ticker': pt.ticker, 'action': pt.action,
+                     'quantity': pt.quantity, 'received_at': pt.created_at.isoformat() if pt.created_at else None}
+                    for pt in cluster
+                ],
+            }
+
+            if chosen_bot_id is not None:
+                matched_bot = copytrade_by_id[chosen_bot_id]
+                for pt in cluster:
+                    r = _execute_single_bot_trade(
+                        matched_bot, pt.action, pt.ticker.upper(),
+                        float(pt.quantity), pt.price,
+                        source='auto_deferred',
+                        timestamp=pt.created_at,
+                    )
+                    if r.get('status') == 'executed':
+                        pt.assigned_bot_id = matched_bot.id
+                        pt.status = 'routed'
+                        pt.routed_at = now
+                        routed_count += 1
+                        logger.info(
+                            f"Cluster route: {pt.ticker} {pt.action} -> "
+                            f"{matched_bot.username} (reason={decision_reason})"
+                        )
+                    else:
+                        # Execution failed but routing decision was made;
+                        # mark unroutable so it doesn't loop forever.
+                        pt.status = 'unroutable'
+                        expired_count += 1
+                        logger.error(
+                            f"Cluster execute fail: {pt.ticker} {pt.action} "
+                            f"-> {matched_bot.username}: {r.get('error')}"
+                        )
+                cluster_info['routed_to'] = matched_bot.username
+                routed_clusters_log.append(cluster_info)
+
+            elif decision_reason in ('sell_anchors_conflict', 'buy_holders_conflict', 'mixed_holder_signals'):
+                for pt in cluster:
                     pt.status = 'unroutable'
                     expired_count += 1
-                
-                # Send admin notification email
-                _notify_admin_unroutable_trades(batch_id, trades)
-        
+                ambiguous_clusters_log.append(cluster_info)
+                _notify_admin_unroutable_trades(
+                    cluster[0].email_batch_id, cluster,
+                    reason=decision_reason, detail=cluster_info,
+                )
+
+            else:
+                # no_signal — wait unless any trade has expired
+                if any(pt.expires_at <= now for pt in cluster):
+                    for pt in cluster:
+                        pt.status = 'unroutable'
+                        expired_count += 1
+                    no_anchor_clusters_log.append(cluster_info)
+                    _notify_admin_unroutable_trades(
+                        cluster[0].email_batch_id, cluster,
+                        reason='no_anchor_30min', detail=cluster_info,
+                    )
+                else:
+                    still_pending += len(cluster)
+
         db.session.commit()
-        
+
         return jsonify({
             'success': True,
-            'pending_batches': len(batches),
+            'pending_clusters': len(clusters),
             'routed': routed_count,
             'expired': expired_count,
-            'still_pending': len(pending) - routed_count - expired_count
+            'still_pending': still_pending,
+            'routed_clusters': routed_clusters_log,
+            'ambiguous_clusters': ambiguous_clusters_log,
+            'no_anchor_clusters': no_anchor_clusters_log,
         })
-        
+
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Process pending trades error: {e}")
+        logger.error(f"Process pending trades error: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 
@@ -5020,12 +5188,23 @@ def bot_assign_pending_trades():
         return jsonify({'error': str(e)}), 500
 
 
-def _notify_admin_unroutable_trades(batch_id, trades):
-    """Send email notification to admin about unroutable trades."""
+def _notify_admin_unroutable_trades(batch_id, trades, reason='no_anchor_30min', detail=None):
+    """Send email notification to admin about unroutable trades.
+
+    Args:
+        batch_id: representative email_batch_id (for the assign endpoint).
+        trades: list of PendingTrade rows (the unroutable cluster).
+        reason: short reason code (e.g. 'sell_anchors_conflict',
+                'mixed_holder_signals', 'no_anchor_30min'). Used in the
+                subject + body so the admin can triage faster.
+        detail: optional dict with cluster diagnostics. Included verbatim
+                in the email body for forensics.
+    """
     try:
         import smtplib
+        import json as _json
         from email.mime.text import MIMEText
-        
+
         # Fallback chain: ADMIN_NOTIFY_EMAIL → ADMIN_EMAIL → hardcoded admin inbox.
         admin_email = (
             os.environ.get('ADMIN_NOTIFY_EMAIL')
@@ -5034,45 +5213,62 @@ def _notify_admin_unroutable_trades(batch_id, trades):
         )
         smtp_user = os.environ.get('SMTP_USER')
         smtp_pass = os.environ.get('SMTP_PASS')
-        
-        if not smtp_user or not smtp_pass:
-            # Fall back to just logging if SMTP not configured
-            tickers = ', '.join(t.ticker for t in trades)
-            logger.warning(f"UNROUTABLE TRADES (no SMTP configured) batch={batch_id}: {tickers}")
-            return
-        
+
         tickers = ', '.join(t.ticker for t in trades)
+
+        if not smtp_user or not smtp_pass:
+            logger.warning(
+                f"UNROUTABLE TRADES (no SMTP configured) batch={batch_id} "
+                f"reason={reason}: {tickers}"
+            )
+            return
+
         body = f"""Unroutable Trade Alert - Apes Together
-        
+
+Reason: {reason}
 Batch ID: {batch_id}
-Trades that could not be auto-routed to any bot after 30 minutes:
+Trades that could not be auto-routed:
 
 """
         for t in trades:
             body += f"  {t.action.upper()} {t.quantity} {t.ticker}"
             if t.price:
-                body += f" @ ${t.price:.2f}"
+                body += f" @ ${float(t.price):.2f}"
+            if t.created_at:
+                body += f" (received {t.created_at.isoformat()})"
             body += "\n"
-        
+
+        if detail:
+            try:
+                body += "\nCluster diagnostics:\n"
+                body += _json.dumps(detail, indent=2, default=str)
+                body += "\n"
+            except Exception:
+                pass
+
         body += f"""
+
 To manually assign these trades, call:
 POST /admin/bot/assign-pending-trades
 {{
     "batch_id": "{batch_id}",
     "bot_user_id": <13 for Grok, 14 for Wolff>
 }}
+
+Or inspect/list pending trades:
+GET /admin/bot/pending-trades?status=unroutable
 """
-        
+
         msg = MIMEText(body)
-        msg['Subject'] = f'[ApesTogether] Unroutable trades: {tickers}'
+        msg['Subject'] = f'[ApesTogether] Unroutable trades ({reason}): {tickers}'
         msg['From'] = smtp_user
         msg['To'] = admin_email
-        
+
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
             server.login(smtp_user, smtp_pass)
             server.send_message(msg)
-        
-        logger.info(f"Admin notified about unroutable trades batch={batch_id}")
+
+        logger.info(f"Admin notified about unroutable trades batch={batch_id} reason={reason}")
     except Exception as e:
         logger.error(f"Failed to send admin notification: {e}")
 

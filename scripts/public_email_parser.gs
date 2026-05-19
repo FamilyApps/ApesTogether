@@ -146,8 +146,15 @@ function processTradeEmail(message, config) {
 
   Logger.log(`Found ${trades.length} trades, sending for auto-detection: ${JSON.stringify(trades.map(t => t.ticker))}`);
 
+  // Capture the email's *received* timestamp + Gmail message ID so the
+  // backend can cluster trades that arrived together (regardless of
+  // when this 5-minute GAS poll happens to fire) and use sells as
+  // routing anchors when ticker-overlap is ambiguous.
+  const receivedAtIso = message.getDate().toISOString();
+  const messageId = message.getId();
+
   // Submit trades to the API (auto-detection will route to correct bot)
-  return submitTrades(config, botUsername, trades, source, body, subject);
+  return submitTrades(config, botUsername, trades, source, body, subject, receivedAtIso, messageId);
 }
 
 function parseTradesFromEmail(plainBody, htmlBody) {
@@ -266,7 +273,7 @@ function parseTradesFromEmail(plainBody, htmlBody) {
 
 // ── API Submission ─────────────────────────────────────────────────────────
 
-function submitTrades(config, botUsername, trades, source, rawEmail, emailSubject) {
+function submitTrades(config, botUsername, trades, source, rawEmail, emailSubject, emailReceivedAtIso, emailMessageId) {
   const url = `${config.API_BASE_URL}/admin/bot/email-trade`;
 
   const payload = {
@@ -274,7 +281,9 @@ function submitTrades(config, botUsername, trades, source, rawEmail, emailSubjec
     trades: trades,
     source: source,
     notes: rawEmail.substring(0, 500), // Truncate for storage
-    email_subject: emailSubject || ''
+    email_subject: emailSubject || '',
+    email_received_at: emailReceivedAtIso || null,
+    email_message_id: emailMessageId || null
   };
 
   const options = {
