@@ -7008,44 +7008,58 @@ def admin_delete_transactions():
 @app.route('/admin/recompute-portfolio-snapshots', methods=['GET', 'POST'])
 @admin_2fa_required
 def admin_recompute_portfolio_snapshots():
-    """Walk every PortfolioSnapshot for a user and rebuild
-    portfolio_value / stock_value / cash_proceeds / max_cash_deployed
-    from the *current* Transaction history.
+    """Walk every PortfolioSnapshot (and optionally PortfolioSnapshotIntraday)
+    for a user and rebuild portfolio_value / stock_value / cash_proceeds /
+    max_cash_deployed from the *current* Transaction history.
 
     Used after /admin/delete-transactions surgically removed accidental
     trades so the chart no longer shows the inflated values from those
     phantom holdings.
 
-    For each snapshot date we:
-      1. Replay all transactions <= that date to derive holdings + cash
+    For each snapshot we:
+      1. Replay all transactions <= that snapshot's date/timestamp to derive
+         holdings + cash, starting from a reconstructed seed state (so bot
+         accounts whose Stock rows predate any Transaction don't get zeroed).
       2. Look up close prices for each held ticker on that date
          (MarketData first, AV TIME_SERIES_DAILY fallback — which also
-         bulk-populates ~100 days of MarketData per ticker per call)
+         bulk-populates ~100 days of MarketData per ticker per call).
       3. Update the snapshot in place.
 
     Query params:
-        user_id   — required
-        from      — ISO date (default: earliest snapshot)
-        to        — ISO date (default: latest snapshot)
-        limit     — max snapshots to process this call (Vercel timeout
-                    safety; default 200). If you have more snapshots
-                    than `limit`, run again with `from` set to the date
-                    after the last processed snapshot.
-        dry_run   — preview without writing
+        user_id          — required (or pass `username` instead)
+        username         — alternative to user_id
+        from             — ISO date (default: earliest snapshot)
+        to               — ISO date (default: latest snapshot)
+        limit            — max DAILY snapshots to process (default 200).
+        include_intraday — if 1/true, ALSO recompute PortfolioSnapshotIntraday
+                           rows in the same date range.
+        intraday_only    — if 1/true, recompute ONLY intraday (skip daily).
+        intraday_limit   — max intraday snapshots to process (default 1000).
+        dry_run          — preview without writing
     """
-    from datetime import datetime as _dt
-    from models import db, User, Transaction, PortfolioSnapshot, Stock
+    from datetime import datetime as _dt, time as _time_t
+    from models import db, User, Transaction, PortfolioSnapshot, Stock, PortfolioSnapshotIntraday
     from sqlalchemy import func as _f
     from portfolio_performance import PortfolioPerformanceCalculator
 
+    # Accept either user_id or username for the operator's convenience.
     user_id = request.args.get('user_id', type=int)
-    if not user_id:
-        return jsonify({'error': 'user_id required'}), 400
+    username = request.args.get('username', type=str)
+    if not user_id and not username:
+        return jsonify({'error': 'user_id or username required'}), 400
     dry_run = request.args.get('dry_run') in ('1', 'true', 'yes')
+    include_intraday = request.args.get('include_intraday') in ('1', 'true', 'yes')
+    intraday_only = request.args.get('intraday_only') in ('1', 'true', 'yes')
+    if intraday_only:
+        include_intraday = True  # implied
 
-    user = User.query.get(user_id)
+    if user_id:
+        user = User.query.get(user_id)
+    else:
+        user = User.query.filter_by(username=username).first()
     if not user:
-        return jsonify({'error': f'user_id {user_id} not found'}), 404
+        return jsonify({'error': f'user not found (user_id={user_id} username={username})'}), 404
+    user_id = user.id
 
     q = PortfolioSnapshot.query.filter_by(user_id=user_id)
     try:
@@ -7057,9 +7071,37 @@ def admin_recompute_portfolio_snapshots():
         return jsonify({'error': f'bad from/to date: {e}'}), 400
 
     limit = request.args.get('limit', default=200, type=int)
-    snapshots = q.order_by(PortfolioSnapshot.date).limit(limit).all()
-    if not snapshots:
-        return jsonify({'error': 'no snapshots in range', 'user_id': user_id}), 404
+    if intraday_only:
+        snapshots = []  # skip daily
+    else:
+        snapshots = q.order_by(PortfolioSnapshot.date).limit(limit).all()
+        if not snapshots and not include_intraday:
+            return jsonify({'error': 'no snapshots in range', 'user_id': user_id}), 404
+
+    # Build the intraday query if requested. Use the same from/to date filters,
+    # converted to datetime boundaries (start-of-day to end-of-day).
+    intraday_snaps = []
+    if include_intraday:
+        iq = PortfolioSnapshotIntraday.query.filter_by(user_id=user_id)
+        try:
+            if request.args.get('from'):
+                _from_dt = _dt.combine(
+                    _dt.fromisoformat(request.args.get('from')).date(),
+                    _time_t.min,
+                )
+                iq = iq.filter(PortfolioSnapshotIntraday.timestamp >= _from_dt)
+            if request.args.get('to'):
+                _to_dt = _dt.combine(
+                    _dt.fromisoformat(request.args.get('to')).date(),
+                    _time_t.max,
+                )
+                iq = iq.filter(PortfolioSnapshotIntraday.timestamp <= _to_dt)
+        except ValueError as e:
+            return jsonify({'error': f'bad from/to date: {e}'}), 400
+        intraday_limit = request.args.get('intraday_limit', default=1000, type=int)
+        intraday_snaps = iq.order_by(PortfolioSnapshotIntraday.timestamp).limit(intraday_limit).all()
+        if not snapshots and not intraday_snaps:
+            return jsonify({'error': 'no snapshots in range (daily or intraday)', 'user_id': user_id}), 404
 
     # Pre-fetch ALL transactions once, sort by timestamp, walk in date order.
     # Avoids N queries for N snapshots.
@@ -7129,33 +7171,59 @@ def admin_recompute_portfolio_snapshots():
 
     calc = PortfolioPerformanceCalculator()
     changes = []
+    intraday_changes = []
     errors = []
     missing_prices_summary = {}
 
+    # Per-(ticker, date) price cache. Daily close prices don't change within
+    # the day, so for intraday processing this collapses ~27 lookups/day per
+    # ticker into one. Also benefits the daily loop when the same ticker is
+    # held across many dates.
+    price_cache = {}
+
+    def _priced(tk, dt_):
+        key = (tk, dt_)
+        if key in price_cache:
+            return price_cache[key]
+        p = calc.get_historical_price(tk, dt_)
+        price_cache[key] = p
+        return p
+
+    def _replay_to(cutoff):
+        """Walk transactions <= cutoff (date or datetime) starting from the
+        reconstructed seed state. Returns (holdings, cash, deployed)."""
+        holdings = dict(seed_holdings)
+        cash = seed_cash
+        deployed = seed_deployed
+        is_dt = isinstance(cutoff, _dt)
+        for txn in all_txns:
+            if not txn.timestamp:
+                continue
+            if is_dt:
+                if txn.timestamp > cutoff:
+                    break
+            else:
+                if txn.timestamp.date() > cutoff:
+                    break
+            tk = (txn.ticker or '').upper()
+            v = float(txn.quantity or 0) * float(txn.price or 0)
+            if txn.transaction_type in ('buy', 'initial'):
+                holdings[tk] = holdings.get(tk, 0.0) + float(txn.quantity or 0)
+                if cash >= v:
+                    cash -= v
+                else:
+                    deployed += (v - cash)
+                    cash = 0.0
+            elif txn.transaction_type == 'sell':
+                holdings[tk] = holdings.get(tk, 0.0) - float(txn.quantity or 0)
+                cash += v
+            elif txn.transaction_type == 'dividend':
+                cash += v
+        return holdings, cash, deployed
+
     for snap in snapshots:
         try:
-            # Replay txns <= snap.date, starting from the reconstructed
-            # seed state so seed-only-era snapshots don't get zeroed out.
-            holdings = dict(seed_holdings)
-            cash = seed_cash
-            deployed = seed_deployed
-            for txn in all_txns:
-                if not txn.timestamp or txn.timestamp.date() > snap.date:
-                    break  # txns are timestamp-sorted
-                tk = (txn.ticker or '').upper()
-                v = float(txn.quantity or 0) * float(txn.price or 0)
-                if txn.transaction_type in ('buy', 'initial'):
-                    holdings[tk] = holdings.get(tk, 0.0) + float(txn.quantity or 0)
-                    if cash >= v:
-                        cash -= v
-                    else:
-                        deployed += (v - cash)
-                        cash = 0.0
-                elif txn.transaction_type == 'sell':
-                    holdings[tk] = holdings.get(tk, 0.0) - float(txn.quantity or 0)
-                    cash += v
-                elif txn.transaction_type == 'dividend':
-                    cash += v
+            holdings, cash, deployed = _replay_to(snap.date)
 
             # Stock value at snap.date prices
             stock_value = 0.0
@@ -7163,7 +7231,7 @@ def admin_recompute_portfolio_snapshots():
             for tk, qty in holdings.items():
                 if qty <= 1e-9:
                     continue
-                price = calc.get_historical_price(tk, snap.date)
+                price = _priced(tk, snap.date)
                 if price is None or price <= 0:
                     missing.append(tk)
                     missing_prices_summary[tk] = missing_prices_summary.get(tk, 0) + 1
@@ -7201,6 +7269,60 @@ def admin_recompute_portfolio_snapshots():
         except Exception as e:
             errors.append({'date': snap.date.isoformat(), 'error': str(e)})
 
+    # ── Intraday loop ──────────────────────────────────────────────────
+    # PortfolioSnapshotIntraday is what 1D and 5D ("1W") charts read from.
+    # Without recomputing these, a phantom-cleanup leaves a visible cliff
+    # on the short-period charts even after daily snapshots are fixed.
+    # We use the daily close price (snap.timestamp.date()) for stock_value
+    # — intraday-grade prices aren't available historically, but daily
+    # close is a good enough approximation for these charts.
+    for snap in intraday_snaps:
+        try:
+            holdings, cash, deployed = _replay_to(snap.timestamp)
+
+            stock_value = 0.0
+            missing = []
+            snap_date = snap.timestamp.date()
+            for tk, qty in holdings.items():
+                if qty <= 1e-9:
+                    continue
+                price = _priced(tk, snap_date)
+                if price is None or price <= 0:
+                    missing.append(tk)
+                    missing_prices_summary[tk] = missing_prices_summary.get(tk, 0) + 1
+                    continue
+                stock_value += qty * float(price)
+
+            new_total = stock_value + cash
+
+            before = {
+                'total_value': round(float(snap.total_value or 0), 2),
+                'stock_value': round(float(snap.stock_value or 0), 2),
+                'cash_proceeds': round(float(snap.cash_proceeds or 0), 2),
+                'max_cash_deployed': round(float(snap.max_cash_deployed or 0), 2),
+            }
+            after = {
+                'total_value': round(new_total, 2),
+                'stock_value': round(stock_value, 2),
+                'cash_proceeds': round(cash, 2),
+                'max_cash_deployed': round(deployed, 2),
+            }
+            intraday_changes.append({
+                'timestamp': snap.timestamp.isoformat(),
+                'before': before,
+                'after': after,
+                'delta_total_value': round(after['total_value'] - before['total_value'], 2),
+                'missing_prices': missing,
+            })
+
+            if not dry_run:
+                snap.stock_value = stock_value
+                snap.cash_proceeds = cash
+                snap.max_cash_deployed = deployed
+                snap.total_value = new_total
+        except Exception as e:
+            errors.append({'timestamp': snap.timestamp.isoformat(), 'error': str(e)})
+
     if not dry_run:
         try:
             db.session.commit()
@@ -7208,32 +7330,139 @@ def admin_recompute_portfolio_snapshots():
             db.session.rollback()
             return jsonify({'error': f'commit failed: {e}'}), 500
 
-    # Trim very long change lists for response readability (keep first 10
-    # and last 10 plus a summary). Full data only on dry-run.
+    # Trim very long change lists for response readability. Full data only
+    # on dry-run, otherwise show first 10 + last 10 + a count placeholder.
     truncated = False
     sample = changes
     if len(changes) > 25 and not dry_run:
         sample = changes[:10] + [{'note': f'... {len(changes) - 20} more dates ...'}] + changes[-10:]
         truncated = True
 
+    intraday_truncated = False
+    intraday_sample = intraday_changes
+    if len(intraday_changes) > 25 and not dry_run:
+        intraday_sample = (
+            intraday_changes[:10]
+            + [{'note': f'... {len(intraday_changes) - 20} more timestamps ...'}]
+            + intraday_changes[-10:]
+        )
+        intraday_truncated = True
+
     earliest = min((c['date'] for c in changes if 'date' in c), default=None)
     latest = max((c['date'] for c in changes if 'date' in c), default=None)
     total_delta = sum(c.get('delta_total_value', 0) for c in changes if 'delta_total_value' in c)
+    intraday_total_delta = sum(
+        c.get('delta_total_value', 0) for c in intraday_changes if 'delta_total_value' in c
+    )
 
     return jsonify({
         'user_id': user_id,
         'username': user.username,
         'dry_run': dry_run,
         'snapshots_processed': len(changes),
+        'intraday_snapshots_processed': len(intraday_changes),
         'date_range': {'earliest': earliest, 'latest': latest},
         'sum_delta_total_value': round(total_delta, 2),
+        'sum_intraday_delta_total_value': round(intraday_total_delta, 2),
         'errors': errors,
         'missing_prices_summary': missing_prices_summary,
         'changes': sample,
         'changes_truncated': truncated,
+        'intraday_changes': intraday_sample,
+        'intraday_changes_truncated': intraday_truncated,
         'next_step': (
             'remove dry_run=1 to execute' if dry_run
-            else f'verify @ /admin/inspect-portfolio?user_id={user_id} (or just check the iOS chart)'
+            else (
+                f'invalidate caches @ /admin/invalidate-chart-cache?user_id={user_id}'
+                if include_intraday else
+                f'verify @ /admin/inspect-portfolio?user_id={user_id} (or just check the iOS chart)'
+            )
+        ),
+    })
+
+
+@app.route('/admin/invalidate-chart-cache', methods=['GET', 'POST'])
+@admin_2fa_required
+def admin_invalidate_chart_cache():
+    """Delete cached chart / leaderboard JSON so the next request regenerates
+    from the (possibly just-recomputed) snapshot tables.
+
+    Two caches are involved:
+      - UserPortfolioChartCache: per-user, per-period pre-rendered chart JSON.
+        Backs the iOS portfolio detail screen and leaderboard chart sparklines.
+      - LeaderboardCache: global per-period leaderboard rankings JSON. Only
+        invalidate this when corrections meaningfully change a user's ranking.
+
+    Query params:
+        user_id              — required (or pass `username` instead)
+        username             — alternative to user_id
+        clear_leaderboard    — if 1/true, also delete LeaderboardCache rows
+        dry_run              — preview without writing
+    """
+    from models import db, User, UserPortfolioChartCache, LeaderboardCache
+
+    user_id = request.args.get('user_id', type=int)
+    username = request.args.get('username', type=str)
+    if not user_id and not username:
+        return jsonify({'error': 'user_id or username required'}), 400
+    dry_run = request.args.get('dry_run') in ('1', 'true', 'yes')
+    clear_leaderboard = request.args.get('clear_leaderboard') in ('1', 'true', 'yes')
+
+    if user_id:
+        user = User.query.get(user_id)
+    else:
+        user = User.query.filter_by(username=username).first()
+    if not user:
+        return jsonify({'error': f'user not found (user_id={user_id} username={username})'}), 404
+    user_id = user.id
+
+    # Find rows that would be deleted so the response can preview them.
+    user_cache_rows = UserPortfolioChartCache.query.filter_by(user_id=user_id).all()
+    user_cache_summary = [
+        {
+            'period': c.period,
+            'generated_at': c.generated_at.isoformat() if c.generated_at else None,
+            'size_bytes': len(c.chart_data or ''),
+        }
+        for c in user_cache_rows
+    ]
+
+    leaderboard_rows = []
+    if clear_leaderboard:
+        leaderboard_rows = LeaderboardCache.query.all()
+    leaderboard_summary = [
+        {
+            'period': c.period,
+            'generated_at': c.generated_at.isoformat() if c.generated_at else None,
+        }
+        for c in leaderboard_rows
+    ]
+
+    deleted_user_cache = 0
+    deleted_leaderboard = 0
+    if not dry_run:
+        try:
+            deleted_user_cache = (
+                UserPortfolioChartCache.query.filter_by(user_id=user_id).delete()
+            )
+            if clear_leaderboard:
+                deleted_leaderboard = LeaderboardCache.query.delete()
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': f'commit failed: {e}'}), 500
+
+    return jsonify({
+        'user_id': user_id,
+        'username': user.username,
+        'dry_run': dry_run,
+        'user_chart_cache_rows': user_cache_summary,
+        'user_chart_cache_deleted': deleted_user_cache,
+        'leaderboard_cache_rows': leaderboard_summary if clear_leaderboard else 'not requested',
+        'leaderboard_cache_deleted': deleted_leaderboard,
+        'next_step': (
+            'remove dry_run=1 to execute' if dry_run
+            else 'open the iOS app and force-refresh the chart; cache regenerates on next request'
         ),
     })
 
