@@ -4018,7 +4018,22 @@ def _execute_bot_trade_wave(wave, dry_run=False):
                 # Cap decisions array at 200 entries to keep the JSON column small.
                 _decisions = results.get('decisions') or []
                 wave_log.decisions = _decisions[:200] if len(_decisions) > 200 else _decisions
-                wave_log.errors = results.get('errors') or []
+                # Combine the singular `error` (set by early-exit paths like
+                # the lazy bot-modules ImportError or "Market data unavailable")
+                # with the `errors` list (per-bot exceptions). Without this, a
+                # wave that fails at module-import time leaves no trace of WHY
+                # in the persisted log — only `status='no_data'` with empty
+                # errors[] and null data_quality. Concatenating them here
+                # closes that diagnostic gap permanently.
+                _errors = list(results.get('errors') or [])
+                _err_singular = results.get('error')
+                if _err_singular:
+                    _err_str = str(_err_singular)
+                    _detail = results.get('error_detail')
+                    if _detail:
+                        _err_str = f"{_err_str} | detail: {_detail}"
+                    _errors.insert(0, _err_str)
+                wave_log.errors = _errors
                 wave_log.traceback_text = results.get('traceback')
                 if results.get('traceback'):
                     wave_log.status = 'error'
@@ -5799,6 +5814,104 @@ def bot_remove_subscribers():
 
 
 # ── Dashboard API Endpoints ──────────────────────────────────────────────────
+
+@mobile_api.route('/admin/bot/diagnose-imports', methods=['GET'])
+@require_admin_2fa
+def bot_diagnose_imports():
+    """Synchronously attempt every import the bot trade wave needs and
+    report which one (if any) fails.
+
+    Why this exists
+    ---------------
+    `_execute_bot_trade_wave` lazy-imports `bot_strategies`, `bot_behaviors`,
+    and `bot_data_hub` inside a try/except ImportError. When that fires on
+    Vercel (e.g. numpy stripped from the function bundle, dep version
+    conflict), the wave aborts with status='no_data' and 0/12 bots traded
+    in 0.0s. The cron only runs every ~30-60 min, so debugging via that
+    log loop is slow.
+
+    This endpoint runs the same imports right now and tells you exactly
+    which import raised what. No waiting, no 0/12 mystery.
+
+    Returns:
+        {
+          'all_ok': bool,
+          'imports': [
+            {'name': 'bot_strategies', 'ok': True|False, 'error': str|None,
+             'symbols_resolved': bool, 'missing_symbols': [...]},
+            ...
+          ],
+          'numpy_version': str|None,
+          'pandas_version': str|None,
+          'yfinance_version': str|None,
+          'requests_version': str|None,
+        }
+    """
+    import importlib
+    import sys
+
+    targets = [
+        ('bot_strategies', [
+            'generate_strategy_profile', 'generate_trade_decisions',
+            'compute_signal_score',
+        ]),
+        ('bot_behaviors', [
+            'should_trade_today', 'get_trade_wave',
+            'apply_human_biases', 'apply_fomo_trades',
+        ]),
+        ('bot_data_hub', ['MarketDataHub']),
+    ]
+
+    results = []
+    all_ok = True
+    for module_name, expected_symbols in targets:
+        entry = {'name': module_name, 'ok': False, 'error': None,
+                 'symbols_resolved': False, 'missing_symbols': []}
+        try:
+            # Force a fresh import to avoid cached partial-failure state.
+            if module_name in sys.modules:
+                mod = importlib.reload(sys.modules[module_name])
+            else:
+                mod = importlib.import_module(module_name)
+            entry['ok'] = True
+            missing = [s for s in expected_symbols if not hasattr(mod, s)]
+            entry['missing_symbols'] = missing
+            entry['symbols_resolved'] = len(missing) == 0
+            if missing:
+                all_ok = False
+        except Exception as e:
+            import traceback as _tb
+            entry['error'] = f"{type(e).__name__}: {e}"
+            entry['traceback'] = _tb.format_exc()[:2048]
+            all_ok = False
+        results.append(entry)
+
+    # Also probe the heavy deps directly so we can tell numpy-missing from
+    # something-else-missing in one glance.
+    def _ver(mod_name):
+        try:
+            m = importlib.import_module(mod_name)
+            return getattr(m, '__version__', '<no __version__>')
+        except Exception as e:
+            return f'<import failed: {type(e).__name__}: {e}>'
+
+    return jsonify({
+        'all_ok': all_ok,
+        'imports': results,
+        'numpy_version': _ver('numpy'),
+        'pandas_version': _ver('pandas'),
+        'yfinance_version': _ver('yfinance'),
+        'requests_version': _ver('requests'),
+        'next_step': (
+            'Imports OK — wave failure must be downstream (hub.refresh / is_core_available). '
+            'Check /api/cron/refresh-daily-bars and AV credentials.'
+            if all_ok else
+            'One or more imports broken — see imports[].error. If numpy_version starts '
+            'with "<import failed", deploy bundle is missing numpy; check Vercel function '
+            'size limits or requirements.txt.'
+        ),
+    })
+
 
 @mobile_api.route('/admin/bot/last-wave-status', methods=['GET'])
 @require_admin_2fa
