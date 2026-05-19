@@ -7034,7 +7034,7 @@ def admin_recompute_portfolio_snapshots():
         dry_run   — preview without writing
     """
     from datetime import datetime as _dt
-    from models import db, User, Transaction, PortfolioSnapshot
+    from models import db, User, Transaction, PortfolioSnapshot, Stock
     from sqlalchemy import func as _f
     from portfolio_performance import PortfolioPerformanceCalculator
 
@@ -7068,6 +7068,65 @@ def admin_recompute_portfolio_snapshots():
         .order_by(Transaction.timestamp).all()
     )
 
+    # ── Seed-state reconstruction ─────────────────────────────────────
+    # Bot accounts (and many seeded users) have Stock rows created
+    # directly by the obfuscation/seed scripts without corresponding
+    # Transaction records. A naive replay-from-zero would treat those
+    # seed positions as if they didn't exist, zeroing out every
+    # snapshot before the first transaction and under-counting all
+    # subsequent snapshots by the seed quantity.
+    #
+    # We solve this by deriving the seed quantity for each ticker as:
+    #   seed_qty[tk] = current_Stock.quantity[tk]
+    #                  - sum(buy/initial qty across all txns)
+    #                  + sum(sell qty across all txns)
+    # The intuition: whatever quantity exists today minus everything
+    # transactions added equals what was already there before any
+    # transactions ran. This works for every case:
+    #   - Pure-seed ticker (no txns):    seed = current
+    #   - Seed + later sells (BAH/HALO): current=0, sells>0 → seed = sells
+    #   - Pure-phantom (post-cleanup):   no Stock row, no txns → 0
+    #   - Buy-only ticker (new):         current = buys → seed = 0
+    current_stocks = Stock.query.filter_by(user_id=user_id).all()
+    current_qty_by_ticker = {(s.ticker or '').upper(): float(s.quantity or 0)
+                             for s in current_stocks}
+    current_cost_by_ticker = {(s.ticker or '').upper(): float(s.purchase_price or 0)
+                              for s in current_stocks}
+
+    net_txn_qty = {}
+    earliest_txn_price = {}
+    for txn in all_txns:
+        tk = (txn.ticker or '').upper()
+        qty = float(txn.quantity or 0)
+        if txn.transaction_type in ('buy', 'initial'):
+            net_txn_qty[tk] = net_txn_qty.get(tk, 0.0) + qty
+        elif txn.transaction_type == 'sell':
+            net_txn_qty[tk] = net_txn_qty.get(tk, 0.0) - qty
+        if tk not in earliest_txn_price:
+            earliest_txn_price[tk] = float(txn.price or 0)
+
+    seed_holdings = {}
+    seed_total_cost = 0.0
+    all_relevant_tickers = set(current_qty_by_ticker.keys()) | set(net_txn_qty.keys())
+    for tk in all_relevant_tickers:
+        seed_qty = current_qty_by_ticker.get(tk, 0.0) - net_txn_qty.get(tk, 0.0)
+        if seed_qty > 1e-9:
+            seed_holdings[tk] = seed_qty
+            # For seed cost: prefer the live Stock.purchase_price (weighted
+            # average preserved across the user's history). For tickers
+            # whose Stock row was deleted (fully liquidated), fall back to
+            # the earliest transaction's price as a rough seed-price proxy.
+            cost_per_share = (
+                current_cost_by_ticker.get(tk)
+                or earliest_txn_price.get(tk, 0.0)
+            )
+            seed_total_cost += seed_qty * cost_per_share
+
+    # Bot accounts begin with all-stock-no-cash. max_cash_deployed at
+    # seed time is the cost basis of the seeded positions.
+    seed_cash = 0.0
+    seed_deployed = seed_total_cost
+
     calc = PortfolioPerformanceCalculator()
     changes = []
     errors = []
@@ -7075,10 +7134,11 @@ def admin_recompute_portfolio_snapshots():
 
     for snap in snapshots:
         try:
-            # Replay txns <= snap.date
-            holdings = {}
-            cash = 0.0
-            deployed = 0.0
+            # Replay txns <= snap.date, starting from the reconstructed
+            # seed state so seed-only-era snapshots don't get zeroed out.
+            holdings = dict(seed_holdings)
+            cash = seed_cash
+            deployed = seed_deployed
             for txn in all_txns:
                 if not txn.timestamp or txn.timestamp.date() > snap.date:
                     break  # txns are timestamp-sorted
