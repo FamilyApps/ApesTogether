@@ -6884,6 +6884,48 @@ def admin_delete_transactions():
     if pred_deployed < 0:
         pred_deployed = 0.0
 
+    # ── Cost-basis floor on max_cash_deployed ────────────────────────
+    #
+    # The linear delta above can drive max_cash_deployed below the
+    # actual capital still tied up in remaining holdings. That happens
+    # when the total notional of deleted buys exceeds the user's
+    # historical high-water mark (because intervening sells brought
+    # deployed_capital down between buys, so max was achieved at a
+    # different point than the sum-of-deleted-buys suggests).
+    #
+    # Concrete example (Grok cleanup):
+    #   max_cash_deployed = $24,680  (before)
+    #   deleted buys total $29,599   (ADBE + NOW + PLTR)
+    #   linear delta → -$4,919 → clamps to $0
+    # But Grok still holds DVN/LMT/MU/VST/WLDN/etc with thousands of
+    # dollars of cost basis. Capital that's *currently* deployed must
+    # have been deployed at some point, so max_cash_deployed ≥ current
+    # total cost basis of all (post-cleanup) holdings.
+    #
+    # Compute the floor by walking every Stock the user owns and
+    # substituting the post-cleanup (qty × purchase_price) for
+    # affected tickers.
+    after_stock_by_ticker = {}
+    for entry in plan:
+        tk = entry['ticker']
+        if entry['stock_row_will_be_deleted']:
+            after_stock_by_ticker[tk] = 0.0
+        elif entry['after_stock_row']:
+            asr = entry['after_stock_row']
+            after_stock_by_ticker[tk] = float(asr['quantity']) * float(asr['purchase_price'])
+        else:
+            after_stock_by_ticker[tk] = 0.0
+    cost_basis_floor = 0.0
+    all_user_stocks = Stock.query.filter(Stock.user_id == user_id).all()
+    for s in all_user_stocks:
+        tk = (s.ticker or '').upper()
+        if tk in after_stock_by_ticker:
+            cost_basis_floor += after_stock_by_ticker[tk]
+        else:
+            cost_basis_floor += float(s.quantity or 0) * float(s.purchase_price or 0)
+    if pred_deployed < cost_basis_floor:
+        pred_deployed = cost_basis_floor
+
     response = {
         'user_id': user_id,
         'username': user.username,
@@ -6894,6 +6936,7 @@ def admin_delete_transactions():
         'after_user_predicted': {
             'cash_proceeds': round(pred_cash, 2),
             'max_cash_deployed': round(pred_deployed, 2),
+            'cost_basis_floor': round(cost_basis_floor, 2),
         },
         'plan': plan,
     }
