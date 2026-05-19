@@ -879,6 +879,10 @@ def get_leaderboard():
     - active_edge: 1/0 — filter removing inactive/one-hit accounts (default: 1)
     - industry: filter by industry name (default: all)
     - frequency: day_trader, moderate, any (default: any)
+    - hide_fractional: 1/0 — Phase E: hide portfolios with any fractional
+      share position. Default 0 (show everyone). NULL flags treated as
+      "unknown / show" so users mid-rollout don't disappear before the
+      market-close cron has populated user_portfolio_stats.
     """
     from models import db, User, Stock, Transaction, UserPortfolioStats, PortfolioSnapshot, MarketData, Subscription
     from datetime import datetime, timedelta, date as dt_date
@@ -893,6 +897,7 @@ def get_leaderboard():
     active_edge = request.args.get('active_edge', '1') == '1'
     industry_filter = request.args.get('industry', 'all')
     frequency_filter = request.args.get('frequency', 'any')
+    hide_fractional = request.args.get('hide_fractional', '0') == '1'
     
     try:
         from leaderboard_utils import get_leaderboard_data, calculate_leaderboard_data, calculate_performance_metrics
@@ -1045,13 +1050,18 @@ def get_leaderboard():
             users_list = User.query.filter(User.id.in_(raw_user_ids)).all()
             users_map = {u.id: u for u in users_list}
         
-        # Batch load industry mix from UserPortfolioStats (single query)
+        # Batch load industry mix + fractional flag from UserPortfolioStats
+        # (single query feeds both the industry filter and the Phase E
+        # hide_fractional toggle).
         industry_stats_map = {}
+        has_fractional_map = {}
         if raw_user_ids:
             stats_list = UserPortfolioStats.query.filter(UserPortfolioStats.user_id.in_(raw_user_ids)).all()
             for s in stats_list:
                 if s.industry_mix and isinstance(s.industry_mix, dict):
                     industry_stats_map[s.user_id] = s.industry_mix
+                # NULL stays NULL on purpose: see filter below.
+                has_fractional_map[s.user_id] = s.has_fractional_holdings
         
         # Batch load last trade dates (single query using subquery)
         from sqlalchemy import func as sqla_func
@@ -1228,6 +1238,15 @@ def get_leaderboard():
             if frequency_filter == 'day_trader' and avg_trades_per_week < 5:
                 continue
             elif frequency_filter == 'moderate' and (avg_trades_per_week >= 5 or avg_trades_per_week < 0.5):
+                continue
+
+            # ── Hide-fractional filter (Phase E) ──
+            # Only hide when the flag is explicitly True. NULL = unknown
+            # (user not yet processed by the cron) is treated as "show" to
+            # avoid mass-hiding mid-rollout. Backfill via
+            # /admin/portfolio-stats/recompute-fractional flips NULLs to
+            # the correct True/False.
+            if hide_fractional and has_fractional_map.get(user_id) is True:
                 continue
             
             user_return = entry.get('performance_percent', 0.0)
@@ -2021,13 +2040,21 @@ def health_check():
 @require_auth
 def get_top_influencers():
     """
-    GET /api/mobile/top-influencers?industry=Technology&limit=20
+    GET /api/mobile/top-influencers?industry=Technology&limit=20&hide_fractional=0
     Returns users ranked by subscriber count, optionally filtered by industry.
+
+    Query params:
+    - industry: filter by industry name (default: all)
+    - limit: max entries (default 20, capped 50)
+    - hide_fractional: 1/0 — Phase E: hide portfolios with any fractional
+      share position. Default 0. NULL flags treated as "show" so users not
+      yet processed by the daily cron remain visible during rollout.
     """
     from models import User, UserPortfolioStats, MobileSubscription
     
     industry = request.args.get('industry', 'all')
     limit = min(int(request.args.get('limit', 20)), 50)
+    hide_fractional = request.args.get('hide_fractional', '0') == '1'
     
     try:
         # Build a combined subscriber count map from all sources:
@@ -2074,6 +2101,12 @@ def get_top_influencers():
                 continue
             stats = stats_map.get(uid)
             industry_mix = (stats.industry_mix if stats and stats.industry_mix else {}) or {}
+
+            # Hide-fractional filter (Phase E). Only hide when explicitly True;
+            # None / missing stats row means "unknown — show", so users with
+            # NULL flags survive until the cron has populated the column.
+            if hide_fractional and stats is not None and stats.has_fractional_holdings is True:
+                continue
             
             # Industry filter
             if industry and industry.lower() != 'all':
@@ -5604,6 +5637,8 @@ def bot_gift_subscribers():
             stats.unique_stocks_count = user_stats.get('unique_stocks_count', 0)
             stats.avg_trades_per_week = user_stats.get('avg_trades_per_week', 0)
             stats.industry_mix = user_stats.get('industry_mix', {})
+            # Phase E: fractional-shares flag for Discover/Leaderboard filter.
+            stats.has_fractional_holdings = user_stats.get('has_fractional_holdings', False)
         except Exception as stats_err:
             logger.warning(f"Non-blocking: failed to populate stats for user {user_id}: {stats_err}")
         
@@ -5814,6 +5849,100 @@ def bot_remove_subscribers():
 
 
 # ── Dashboard API Endpoints ──────────────────────────────────────────────────
+
+@mobile_api.route('/admin/portfolio-stats/recompute-fractional', methods=['POST'])
+@require_admin_2fa
+@with_db_retry
+def recompute_fractional_holdings():
+    """One-shot backfill for the Phase E `has_fractional_holdings` column on
+    `user_portfolio_stats`.
+
+    Why this exists
+    ---------------
+    The migration adds the column as nullable with no default. The daily
+    market-close cron will populate it via `calculate_user_portfolio_stats`
+    going forward, but that means existing rows stay NULL until the user has
+    a stats refresh — and the `hide_fractional` filter on /leaderboard +
+    /top-influencers treats NULL as "show" (correct for rollout safety, but
+    means the toggle does nothing until the column is populated).
+
+    This endpoint walks every user with active Stocks and computes the flag
+    directly, upserting `UserPortfolioStats` rows as needed. Idempotent —
+    safe to run repeatedly. After running once, the toggle works for
+    everyone immediately; the daily cron keeps it fresh.
+
+    Query params:
+        dry_run (1/0, default 0): preview without writing.
+
+    Returns:
+        {
+          'dry_run': bool,
+          'users_scanned': int,
+          'users_with_fractional': int,
+          'users_updated': int,    # rows actually changed
+          'users_created': int,    # new UserPortfolioStats rows
+          'duration_ms': int,
+        }
+    """
+    from models import db, User, Stock, UserPortfolioStats
+    from datetime import datetime as _dt
+    import time as _time
+
+    dry_run = request.args.get('dry_run', '0') == '1'
+    started = _time.time()
+
+    # Bulk fetch every Stock with quantity>0, group by user. Far cheaper than
+    # iterating users and querying Stocks per user.
+    stock_rows = Stock.query.filter(Stock.quantity > 0).all()
+    by_user = {}
+    for s in stock_rows:
+        if s.quantity is None:
+            continue
+        by_user.setdefault(s.user_id, []).append(s)
+
+    users_scanned = 0
+    users_with_fractional = 0
+    users_updated = 0
+    users_created = 0
+
+    for user_id, stocks in by_user.items():
+        users_scanned += 1
+        has_frac = any(
+            abs(s.quantity - round(s.quantity)) > 0.0001
+            for s in stocks
+        )
+        if has_frac:
+            users_with_fractional += 1
+
+        if dry_run:
+            continue
+
+        stats_row = UserPortfolioStats.query.filter_by(user_id=user_id).first()
+        if stats_row is None:
+            stats_row = UserPortfolioStats(
+                user_id=user_id,
+                has_fractional_holdings=has_frac,
+                last_updated=_dt.utcnow(),
+            )
+            db.session.add(stats_row)
+            users_created += 1
+        elif stats_row.has_fractional_holdings != has_frac:
+            stats_row.has_fractional_holdings = has_frac
+            stats_row.last_updated = _dt.utcnow()
+            users_updated += 1
+
+    if not dry_run:
+        db.session.commit()
+
+    return jsonify({
+        'dry_run': dry_run,
+        'users_scanned': users_scanned,
+        'users_with_fractional': users_with_fractional,
+        'users_updated': users_updated,
+        'users_created': users_created,
+        'duration_ms': int((_time.time() - started) * 1000),
+    })
+
 
 @mobile_api.route('/admin/bot/diagnose-imports', methods=['GET'])
 @require_admin_2fa

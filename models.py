@@ -416,6 +416,14 @@ class UserPortfolioStats(db.Model):
     # Industry mix (JSON: {'Technology': 45.2, 'Healthcare': 30.5, ...})
     industry_mix = db.Column(db.JSON)
     
+    # Phase E (May 2026): True iff at least one Stock row has a non-integer
+    # quantity (>= 0.0001 off integer). Powers the "Hide portfolios with
+    # fractional shares" toggle on Discover/Leaderboard. Recomputed daily by
+    # leaderboard_utils.calculate_user_portfolio_stats. NULL = not yet
+    # computed (treated as "show" by the filter to avoid hiding users
+    # mid-rollout). Migration: 20260519_add_has_fractional_holdings.py
+    has_fractional_holdings = db.Column(db.Boolean, nullable=True)
+    
     # Social metrics
     subscriber_count = db.Column(db.Integer, default=0)
     

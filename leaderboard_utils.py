@@ -1555,6 +1555,18 @@ def calculate_user_portfolio_stats(user_id):
     # 1. UNIQUE STOCKS COUNT
     stocks = Stock.query.filter_by(user_id=user_id).all()
     stats['unique_stocks_count'] = len(stocks)
+
+    # 1b. FRACTIONAL HOLDINGS FLAG (Phase E)
+    # True iff at least one position has a non-integer quantity. Powers the
+    # "Hide portfolios with fractional shares" toggle on Discover/Leaderboard.
+    # 0.0001 tolerance covers floating-point fuzz from cost-basis division /
+    # fee adjustments without flagging genuinely-whole-share portfolios.
+    stats['has_fractional_holdings'] = any(
+        s.quantity is not None
+        and s.quantity > 0
+        and abs(s.quantity - round(s.quantity)) > 0.0001
+        for s in stocks
+    )
     
     # 2. TRADING ACTIVITY
     # Get all transactions

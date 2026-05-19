@@ -3568,6 +3568,8 @@ def add_stock():
                 user_stats.market_cap_mix = market_cap_mix
                 user_stats.industry_mix = stats.get('industry_mix', {})
                 user_stats.subscriber_count = stats['subscriber_count']
+                # Phase E: keep the fractional flag fresh on every stats write.
+                user_stats.has_fractional_holdings = stats.get('has_fractional_holdings', False)
                 user_stats.updated_at = datetime.utcnow()
                 db.session.merge(user_stats)  # Use merge for cross-session safety
             else:
@@ -3579,7 +3581,8 @@ def add_stock():
                     avg_trades_per_week=stats['avg_trades_per_week'],
                     market_cap_mix=market_cap_mix,
                     industry_mix=stats.get('industry_mix', {}),
-                    subscriber_count=stats['subscriber_count']
+                    subscriber_count=stats['subscriber_count'],
+                    has_fractional_holdings=stats.get('has_fractional_holdings', False),
                 )
                 db.session.add(user_stats)
             
@@ -3718,6 +3721,8 @@ def sell_stock():
                 user_stats.market_cap_mix = market_cap_mix
                 user_stats.industry_mix = stats.get('industry_mix', {})
                 user_stats.subscriber_count = stats['subscriber_count']
+                # Phase E: keep the fractional flag fresh on every stats write.
+                user_stats.has_fractional_holdings = stats.get('has_fractional_holdings', False)
                 user_stats.updated_at = datetime.utcnow()
                 db.session.merge(user_stats)  # Use merge for cross-session safety
             else:
@@ -3729,7 +3734,8 @@ def sell_stock():
                     avg_trades_per_week=stats['avg_trades_per_week'],
                     market_cap_mix=market_cap_mix,
                     industry_mix=stats.get('industry_mix', {}),
-                    subscriber_count=stats['subscriber_count']
+                    subscriber_count=stats['subscriber_count'],
+                    has_fractional_holdings=stats.get('has_fractional_holdings', False),
                 )
                 db.session.add(user_stats)
             
@@ -7949,6 +7955,8 @@ def market_close_cron():
                             user_stats.small_cap_percent = stats['small_cap_percent']
                             user_stats.industry_mix = stats['industry_mix']
                             user_stats.subscriber_count = stats['subscriber_count']
+                            # Phase E: fractional-shares flag for Discover/Leaderboard filter.
+                            user_stats.has_fractional_holdings = stats.get('has_fractional_holdings', False)
                             user_stats.last_updated = stats['last_updated']
                             
                             stats_updated += 1
@@ -10664,6 +10672,8 @@ def admin_populate_portfolio_stats():
                     existing_stats.small_cap_percent = stats['small_cap_percent']
                     existing_stats.industry_mix = stats['industry_mix']
                     existing_stats.subscriber_count = stats['subscriber_count']
+                    # Phase E: fractional-shares flag for Discover/Leaderboard filter.
+                    existing_stats.has_fractional_holdings = stats.get('has_fractional_holdings', False)
                     existing_stats.last_updated = datetime.utcnow()
                     results['users_updated'] += 1
                     logger.info(f"Updated stats for user {user.id} ({user.username})")
@@ -10678,6 +10688,7 @@ def admin_populate_portfolio_stats():
                         small_cap_percent=stats['small_cap_percent'],
                         industry_mix=stats['industry_mix'],
                         subscriber_count=stats['subscriber_count'],
+                        has_fractional_holdings=stats.get('has_fractional_holdings', False),
                         last_updated=datetime.utcnow()
                     )
                     db.session.add(new_stats)
