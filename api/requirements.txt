@@ -1,3 +1,14 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# THIS is the requirements.txt that Vercel's @vercel/python builder actually
+# installs (because the build entrypoint is api/vercel.py — Vercel resolves
+# requirements.txt relative to that entrypoint, ignoring the root one).
+#
+# Keep this file in sync with the *runtime* needs of api/index.py and every
+# blueprint it imports (mobile_api.py, leaderboard_routes.py, bot_*.py, ...).
+# The root requirements.txt exists for *local* dev with newer Flask/SQLAlchemy
+# (3.x / 2.x), but it never gets installed on Vercel. When you add a new
+# top-level dependency to any prod-imported module, you MUST add it here too.
+# ─────────────────────────────────────────────────────────────────────────────
 Flask==2.3.3
 Werkzeug==2.3.7
 python-dotenv==1.0.0
@@ -19,3 +30,18 @@ gunicorn==21.2.0
 PyJWT==2.8.0
 firebase-admin==6.4.0
 httpx==0.27.0
+
+# ── Bot Agent Orchestrator (May 2026) ────────────────────────────────────────
+# bot_strategies.py:24 does a hard `import numpy as np` at module top, so the
+# bot wave aborts with "Bot modules not available: No module named 'numpy'"
+# when numpy is missing. Diagnosed via /api/mobile/admin/bot/diagnose-imports.
+# pandas is lazy-imported inside bot_data_hub functions that fetch prices
+# (refresh-daily-bars + the AV/quotes paths); needed at runtime even though
+# the top-level bot_data_hub import works without it.
+# yfinance is intentionally NOT pinned here: its `bot_data_hub` use is a
+# lazy try/except fallback for AV, and the comment in that file flags that
+# yfinance "is often blocked on Vercel" anyway. If we ever decide to install
+# it, fix the bogus `yfinance==1.2.0` pin in root requirements.txt first
+# (that version doesn't exist; yfinance is 0.2.x).
+numpy==2.1.3
+pandas==2.2.3
