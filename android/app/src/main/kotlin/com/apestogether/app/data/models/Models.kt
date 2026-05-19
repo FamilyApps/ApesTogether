@@ -112,6 +112,10 @@ data class PortfolioResponse(
     @SerialName("avg_trades_per_week") val avgTradesPerWeek: Double? = null,
     @SerialName("num_stocks") val numStocks: Int? = null,
     @SerialName("portfolio_value") val portfolioValue: Double? = null,
+    // Phase B: dedicated cash line in the Holdings list. Only populated by the
+    // mobile_api when cash_balance > $0.005, so a `null` here means
+    // "fully invested, no cash row to render". See mobile_api.py:721-725.
+    @SerialName("cash_balance") val cashBalance: Double? = null,
 )
 
 @Serializable

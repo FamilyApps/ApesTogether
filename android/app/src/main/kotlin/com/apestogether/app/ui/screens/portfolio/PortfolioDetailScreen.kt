@@ -337,6 +337,8 @@ private fun PortfolioBody(
                         holdings != null && holdings.isNotEmpty() -> {
                             HoldingsSection(
                                 holdings = holdings,
+                                cashBalance = portfolio.cashBalance,
+                                portfolioValue = portfolio.portfolioValue,
                                 showSwipeHint = portfolio.isOwner,
                                 modifier = Modifier.padding(horizontal = 16.dp),
                             )
@@ -773,9 +775,17 @@ private fun OwnerBuySellRow(modifier: Modifier = Modifier) {
 @Composable
 private fun HoldingsSection(
     holdings: List<Holding>,
+    cashBalance: Double?,
+    portfolioValue: Double?,
     showSwipeHint: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    // Phase B: render the cash line as the last row when cash > 0. The
+    // mobile_api only returns `cash_balance` when it's > $0.005, so a null
+    // here means "fully invested" — no cash row to render. Stock count in
+    // the header still reflects the holdings list only.
+    val showCash = (cashBalance ?: 0.0) > 0.005
+
     Column(modifier = modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Holdings", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -792,8 +802,8 @@ private fun HoldingsSection(
                 .border(0.5.dp, CardBorder, RoundedCornerShape(16.dp)),
         ) {
             holdings.forEachIndexed { idx, h ->
-                HoldingRow(holding = h)
-                if (idx < holdings.size - 1) {
+                HoldingRow(holding = h, portfolioValue = portfolioValue)
+                if (idx < holdings.size - 1 || showCash) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -802,12 +812,18 @@ private fun HoldingsSection(
                     )
                 }
             }
+            if (showCash) {
+                CashRow(
+                    cashBalance = cashBalance ?: 0.0,
+                    portfolioValue = portfolioValue,
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun HoldingRow(holding: Holding) {
+private fun HoldingRow(holding: Holding, portfolioValue: Double? = null) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -834,8 +850,12 @@ private fun HoldingRow(holding: Holding) {
 
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(holding.ticker, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            // Phase B fractional-share fix: was `quantity.toInt()` which
+            // truncated 0.5 to 0 (showed "0 shares"). `formatQuantity`
+            // matches iOS `formattedQuantity`: integers for whole positions,
+            // 4-decimal-trimmed for fractional.
             Text(
-                text = "${holding.quantity.toInt()} shares",
+                text = "${formatQuantity(holding.quantity)} shares",
                 color = TextSecondary,
                 fontSize = 11.sp,
             )
@@ -847,12 +867,26 @@ private fun HoldingRow(holding: Holding) {
             horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            Text(
-                text = "$" + "%.2f".format(holding.totalValue),
-                color = TextPrimary,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "$" + "%.2f".format(holding.totalValue),
+                    color = TextPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                if (portfolioValue != null && portfolioValue > 0.0) {
+                    val pct = (holding.totalValue / portfolioValue) * 100
+                    Text(
+                        text = if (pct < 1.0) "<1% port" else "%.0f%% port".format(pct),
+                        color = TextMuted,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
             holding.gainPercent?.let { gain ->
                 Text(
                     text = formatPercent(gain, decimals = 1),
@@ -862,6 +896,80 @@ private fun HoldingRow(holding: Holding) {
                 )
             } ?: Text(
                 text = "$" + "%.2f".format(holding.displayPrice) + " avg",
+                color = TextMuted,
+                fontSize = 11.sp,
+            )
+        }
+    }
+}
+
+/**
+ * Phase B cash line. Mirrors `CashRow` in the iOS PortfolioDetailView so the
+ * holdings list reads as a single cohesive table on both platforms. Only
+ * shown when [cashBalance] > $0.005 (controlled by the parent).
+ */
+@Composable
+private fun CashRow(cashBalance: Double, portfolioValue: Double?) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(PrimaryAccent.copy(alpha = 0.1f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "$",
+                color = PrimaryAccent,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+
+        Spacer(Modifier.width(12.dp))
+
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("Cash", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                text = "Available proceeds",
+                color = TextSecondary,
+                fontSize = 11.sp,
+            )
+        }
+
+        Spacer(Modifier.weight(1f))
+
+        Column(
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "$" + "%.2f".format(cashBalance),
+                    color = TextPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                if (portfolioValue != null && portfolioValue > 0.0) {
+                    val pct = (cashBalance / portfolioValue) * 100
+                    Text(
+                        text = if (pct < 1.0) "<1% port" else "%.0f%% port".format(pct),
+                        color = TextMuted,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
+            Text(
+                text = "—",
                 color = TextMuted,
                 fontSize = 11.sp,
             )
