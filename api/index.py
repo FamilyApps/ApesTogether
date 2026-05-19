@@ -7035,6 +7035,13 @@ def admin_recompute_portfolio_snapshots():
                            rows in the same date range.
         intraday_only    — if 1/true, recompute ONLY intraday (skip daily).
         intraday_limit   — max intraday snapshots to process (default 1000).
+        sync_user_state  — if 1/true, ALSO replay-to-now and write
+                           User.cash_proceeds + User.max_cash_deployed.
+                           Use this when the iOS header value /
+                           live portfolio_value (which reads from the
+                           User row) is wrong, AND/OR to make sure new
+                           intraday cron rows are computed from a
+                           correct cash state going forward.
         dry_run          — preview without writing
     """
     from datetime import datetime as _dt, time as _time_t
@@ -7050,6 +7057,7 @@ def admin_recompute_portfolio_snapshots():
     dry_run = request.args.get('dry_run') in ('1', 'true', 'yes')
     include_intraday = request.args.get('include_intraday') in ('1', 'true', 'yes')
     intraday_only = request.args.get('intraday_only') in ('1', 'true', 'yes')
+    sync_user_state = request.args.get('sync_user_state') in ('1', 'true', 'yes')
     if intraday_only:
         include_intraday = True  # implied
 
@@ -7098,8 +7106,15 @@ def admin_recompute_portfolio_snapshots():
                 iq = iq.filter(PortfolioSnapshotIntraday.timestamp <= _to_dt)
         except ValueError as e:
             return jsonify({'error': f'bad from/to date: {e}'}), 400
-        intraday_limit = request.args.get('intraday_limit', default=1000, type=int)
-        intraday_snaps = iq.order_by(PortfolioSnapshotIntraday.timestamp).limit(intraday_limit).all()
+        # Process most-recent snapshots first: after a phantom-cleanup,
+        # the recent rows are the ones most likely to be stale, so cap
+        # truncation (if any) hits the oldest history instead of the
+        # rows users actually see in current charts.
+        intraday_limit = request.args.get('intraday_limit', default=10000, type=int)
+        intraday_snaps = iq.order_by(PortfolioSnapshotIntraday.timestamp.desc()).limit(intraday_limit).all()
+        # Re-sort ascending so the replay walks chronologically (cash
+        # state is path-dependent — must replay in trade order).
+        intraday_snaps.sort(key=lambda s: s.timestamp)
         if not snapshots and not intraday_snaps:
             return jsonify({'error': 'no snapshots in range (daily or intraday)', 'user_id': user_id}), 404
 
@@ -7323,6 +7338,45 @@ def admin_recompute_portfolio_snapshots():
         except Exception as e:
             errors.append({'timestamp': snap.timestamp.isoformat(), 'error': str(e)})
 
+    # ── User row sync ──────────────────────────────────────────────────
+    # Snapshots reflect historical state but the live iOS header value
+    # (mobile_api.py:713-720) and the intraday cron's
+    # calculate_portfolio_value_with_cash both read from User.cash_proceeds
+    # / User.max_cash_deployed. If those are stale from a pre-cleanup era,
+    # every new intraday row will be wrong AND the header dollar value
+    # shown on the portfolio detail screen will be wrong — even when the
+    # snapshots themselves are perfect.
+    user_state_change = None
+    if sync_user_state:
+        try:
+            _, sync_cash, sync_deployed = _replay_to(_dt.utcnow())
+            # max_cash_deployed must respect current cost-basis floor.
+            # If the user currently holds positions worth more than the
+            # replay says was ever deployed, we trust the holdings (their
+            # capital had to come from somewhere). Mirrors logic in
+            # /admin/delete-transactions.
+            cost_basis_floor = 0.0
+            for s in current_stocks:
+                cost_basis_floor += float(s.quantity or 0) * float(s.purchase_price or 0)
+            if sync_deployed < cost_basis_floor:
+                sync_deployed = cost_basis_floor
+            user_state_change = {
+                'before': {
+                    'cash_proceeds': round(float(user.cash_proceeds or 0), 2),
+                    'max_cash_deployed': round(float(user.max_cash_deployed or 0), 2),
+                },
+                'after': {
+                    'cash_proceeds': round(sync_cash, 2),
+                    'max_cash_deployed': round(sync_deployed, 2),
+                },
+                'cost_basis_floor': round(cost_basis_floor, 2),
+            }
+            if not dry_run:
+                user.cash_proceeds = sync_cash
+                user.max_cash_deployed = sync_deployed
+        except Exception as e:
+            errors.append({'sync_user_state_error': str(e)})
+
     if not dry_run:
         try:
             db.session.commit()
@@ -7364,6 +7418,7 @@ def admin_recompute_portfolio_snapshots():
         'date_range': {'earliest': earliest, 'latest': latest},
         'sum_delta_total_value': round(total_delta, 2),
         'sum_intraday_delta_total_value': round(intraday_total_delta, 2),
+        'user_state_change': user_state_change,
         'errors': errors,
         'missing_prices_summary': missing_prices_summary,
         'changes': sample,
@@ -7375,7 +7430,7 @@ def admin_recompute_portfolio_snapshots():
             else (
                 f'invalidate caches @ /admin/invalidate-chart-cache?user_id={user_id}'
                 if include_intraday else
-                f'verify @ /admin/inspect-portfolio?user_id={user_id} (or just check the iOS chart)'
+                f'verify @ /admin/debug-user-snapshots?user_id={user_id} (or just check the iOS chart)'
             )
         ),
     })
