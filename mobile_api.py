@@ -3346,6 +3346,16 @@ def bot_list_users():
             bot_active = extra.get('bot_active', True) if u.role == 'agent' else None
             strategy = extra.get('trading_style', extra.get('strategy_name', None))
             
+            # Surface copytrade_bot flag so callers (bot_executor's
+            # get_active_bots → cmd_trade wave) can exclude bots that
+            # only trade via the Public.com email pipeline. The source
+            # of truth is _is_copytrade_bot() defined below in this
+            # module (username allowlist + extra_data.copytrade_bot).
+            # Without this, CoastHillBear / marblethehill72 were
+            # making real autonomous bot-wave trades (e.g. wave 4 on
+            # 2026-05-20 16:15 ET — marblethehill72 sold 1 LMT).
+            copytrade_bot = _is_copytrade_bot(u) if u.role == 'agent' else False
+
             user_list.append({
                 'id': u.id,
                 'username': u.username,
@@ -3357,6 +3367,7 @@ def bot_list_users():
                 'industry': industry,
                 'strategy': strategy,
                 'bot_active': bot_active,
+                'copytrade_bot': copytrade_bot,
                 'stock_count': stock_counts.get(u.id, 0),
                 'trade_count': trade_counts.get(u.id, 0),
                 'real_subscribers': real_sub_counts.get(u.id, 0),

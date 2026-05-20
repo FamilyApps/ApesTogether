@@ -51,7 +51,16 @@ def api_call(endpoint, method='GET', data=None, timeout=30):
 # ── Bot Discovery ────────────────────────────────────────────────────────────
 
 def get_active_bots():
-    """Fetch all active bot accounts from the API."""
+    """Fetch all active bot accounts from the API.
+
+    Filters out:
+      - bots with bot_active explicitly set to False (admin-disabled)
+      - copytrade bots (those trade only via the Public.com email
+        pipeline; running them through the wave would cause double
+        trades / wrong signals). Source of truth for copytrade_bot
+        is _is_copytrade_bot() in mobile_api.py; the flag is
+        included in the /admin/bot/list-users response.
+    """
     result, status = api_call('/admin/bot/list-users?role=agent')
     if status != 200:
         logger.error(f"Failed to fetch bots: {status}")
@@ -59,8 +68,13 @@ def get_active_bots():
 
     bots = result.get('users', [])
     active = [b for b in bots if b.get('bot_active') is not False]
-    logger.info(f"Found {len(active)} active bots (of {len(bots)} total)")
-    return active
+    copytrade_excluded = [b for b in active if b.get('copytrade_bot')]
+    autonomous = [b for b in active if not b.get('copytrade_bot')]
+    logger.info(
+        f"Found {len(autonomous)} active autonomous bots "
+        f"(of {len(bots)} total, {len(copytrade_excluded)} copytrade excluded)"
+    )
+    return autonomous
 
 
 def get_bot_holdings(user_id):
