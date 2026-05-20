@@ -71,6 +71,7 @@ interface ApiService {
         @Query("active_edge") activeEdge: Int = 1,
         @Query("industry") industry: String = "all",
         @Query("frequency") frequency: String = "any",
+        @Query("hide_fractional") hideFractional: Int = 0,
     ): LeaderboardResponse
 
     // ── Top Influencers ──────────────────────────────────────────────────

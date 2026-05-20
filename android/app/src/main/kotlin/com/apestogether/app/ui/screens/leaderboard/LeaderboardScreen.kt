@@ -75,6 +75,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.apestogether.app.data.api.ApiService
 import com.apestogether.app.data.billing.BillingService
+import com.apestogether.app.data.leaderboard.LeaderboardPreferences
 import com.apestogether.app.data.onboarding.OnboardingManager
 import com.apestogether.app.data.billing.SubscriptionPlan
 import com.apestogether.app.data.models.LeaderboardEntry
@@ -1011,6 +1012,7 @@ class LeaderboardViewModel @Inject constructor(
     private val apiService: ApiService,
     private val billingService: BillingService,
     private val onboardingManager: OnboardingManager,
+    private val leaderboardPreferences: LeaderboardPreferences,
 ) : ViewModel() {
     private val _state = MutableStateFlow<LeaderboardState>(LeaderboardState.Loading)
     val state: StateFlow<LeaderboardState> = _state.asStateFlow()
@@ -1020,6 +1022,17 @@ class LeaderboardViewModel @Inject constructor(
 
     private val _filters = MutableStateFlow(LeaderboardFilters())
     val filters: StateFlow<LeaderboardFilters> = _filters.asStateFlow()
+
+    init {
+        // Hydrate persisted hideFractional setting before first refresh so the
+        // initial leaderboard fetch already respects the user's preference.
+        viewModelScope.launch {
+            val persisted = leaderboardPreferences.hideFractionalNow()
+            if (persisted != _filters.value.hideFractional) {
+                _filters.value = _filters.value.copy(hideFractional = persisted)
+            }
+        }
+    }
 
     private val _selectedPlan = MutableStateFlow(SubscriptionPlan.Annual)
     val selectedPlan: StateFlow<SubscriptionPlan> = _selectedPlan.asStateFlow()
@@ -1033,7 +1046,14 @@ class LeaderboardViewModel @Inject constructor(
     }
 
     fun setFilters(filters: LeaderboardFilters) {
+        val oldHideFractional = _filters.value.hideFractional
         _filters.value = filters
+        // Persist only the hideFractional bit (matches iOS @AppStorage scope).
+        if (filters.hideFractional != oldHideFractional) {
+            viewModelScope.launch {
+                leaderboardPreferences.setHideFractional(filters.hideFractional)
+            }
+        }
         refresh()
     }
 
@@ -1130,6 +1150,7 @@ class LeaderboardViewModel @Inject constructor(
                     industry = if (filters.sectors.isEmpty()) "all"
                     else filters.sectors.sorted().joinToString(","),
                     frequency = filters.frequency,
+                    hideFractional = if (filters.hideFractional) 1 else 0,
                 )
             }
                 .onSuccess { resp ->

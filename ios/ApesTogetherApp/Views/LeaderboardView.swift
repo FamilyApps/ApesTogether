@@ -11,6 +11,8 @@ struct LeaderboardView: View {
     @State private var selectedSectors: Set<String> = []
     @State private var selectedFrequency = "any"
     @State private var hideLoQ = true
+    // Persisted across launches so power users don't have to re-enable it.
+    @AppStorage("leaderboard_hide_fractional") private var hideFractional: Bool = false
     @State private var showSettings = false
     @State private var showFilters = false
     @State private var expandedEntryId: Int? = nil
@@ -21,6 +23,7 @@ struct LeaderboardView: View {
     @State private var pendingSectors: Set<String> = []
     @State private var pendingFrequency = "any"
     @State private var pendingHideLoQ = true
+    @State private var pendingHideFractional = false
     
     private let periods = ["1D", "1W", "1M", "3M", "YTD", "1Y"]
     
@@ -37,6 +40,7 @@ struct LeaderboardView: View {
         if !selectedSectors.isEmpty { count += 1 }
         if selectedFrequency != "any" { count += 1 }
         if !hideLoQ { count += 1 }
+        if hideFractional { count += 1 }
         return count
     }
     
@@ -59,7 +63,7 @@ struct LeaderboardView: View {
             await viewModel.loadLeaderboard(
                 period: selectedPeriod, category: selectedCategory,
                 activeEdge: hideLoQ, industry: sectorFilterParam,
-                frequency: selectedFrequency
+                frequency: selectedFrequency, hideFractional: hideFractional
             )
         }
     }
@@ -69,6 +73,7 @@ struct LeaderboardView: View {
         pendingSectors = selectedSectors
         pendingFrequency = selectedFrequency
         pendingHideLoQ = hideLoQ
+        pendingHideFractional = hideFractional
         showFilters = true
     }
     
@@ -77,6 +82,7 @@ struct LeaderboardView: View {
         selectedSectors = pendingSectors
         selectedFrequency = pendingFrequency
         hideLoQ = pendingHideLoQ
+        hideFractional = pendingHideFractional
         showFilters = false
         expandedEntryId = nil
         autoExpandedTop = true
@@ -88,6 +94,7 @@ struct LeaderboardView: View {
         pendingSectors = []
         pendingFrequency = "any"
         pendingHideLoQ = true
+        pendingHideFractional = false
     }
     
     var body: some View {
@@ -227,7 +234,7 @@ struct LeaderboardView: View {
                             await viewModel.loadLeaderboard(
                                 period: selectedPeriod, category: selectedCategory,
                                 activeEdge: hideLoQ, industry: sectorFilterParam,
-                                frequency: selectedFrequency
+                                frequency: selectedFrequency, hideFractional: hideFractional
                             )
                         }
                     }
@@ -244,6 +251,7 @@ struct LeaderboardView: View {
                     sectors: $pendingSectors,
                     frequency: $pendingFrequency,
                     hideLoQ: $pendingHideLoQ,
+                    hideFractional: $pendingHideFractional,
                     allSectors: LeaderboardView.gicsSectors,
                     onApply: applyFilters,
                     onReset: resetFilters
@@ -262,6 +270,7 @@ struct FilterSheet: View {
     @Binding var sectors: Set<String>
     @Binding var frequency: String
     @Binding var hideLoQ: Bool
+    @Binding var hideFractional: Bool
     let allSectors: [String]
     let onApply: () -> Void
     let onReset: () -> Void
@@ -279,17 +288,31 @@ struct FilterSheet: View {
                         
                         // ── Quality ──
                         filterSection(title: "Quality") {
-                            Toggle(isOn: $hideLoQ) {
-                                HStack(spacing: 8) {
-                                    Image(systemName: hideLoQ ? "checkmark.shield.fill" : "shield")
-                                        .foregroundColor(.primaryAccent)
-                                        .font(.system(size: 14))
-                                    Text("Hide low quality")
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundColor(.textPrimary)
+                            VStack(spacing: 12) {
+                                Toggle(isOn: $hideLoQ) {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: hideLoQ ? "checkmark.shield.fill" : "shield")
+                                            .foregroundColor(.primaryAccent)
+                                            .font(.system(size: 14))
+                                        Text("Hide low quality")
+                                            .font(.system(size: 14, weight: .medium))
+                                            .foregroundColor(.textPrimary)
+                                    }
                                 }
+                                .tint(.primaryAccent)
+                                
+                                Toggle(isOn: $hideFractional) {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: hideFractional ? "chart.pie.fill" : "chart.pie")
+                                            .foregroundColor(.primaryAccent)
+                                            .font(.system(size: 14))
+                                        Text("Hide fractional shares")
+                                            .font(.system(size: 14, weight: .medium))
+                                            .foregroundColor(.textPrimary)
+                                    }
+                                }
+                                .tint(.primaryAccent)
                             }
-                            .tint(.primaryAccent)
                         }
                         
                         // ── Market Cap ──
@@ -791,14 +814,15 @@ class LeaderboardViewModel: ObservableObject {
     
     func loadLeaderboard(period: String, category: String = "all",
                          activeEdge: Bool = true, industry: String = "all",
-                         frequency: String = "any") async {
+                         frequency: String = "any", hideFractional: Bool = false) async {
         isLoading = true
         error = nil
         
         do {
             let response = try await APIService.shared.getLeaderboard(
                 period: period, category: category,
-                activeEdge: activeEdge, industry: industry, frequency: frequency
+                activeEdge: activeEdge, industry: industry, frequency: frequency,
+                hideFractional: hideFractional
             )
             entries = response.entries
             sp500Return = response.sp500Return ?? 0.0

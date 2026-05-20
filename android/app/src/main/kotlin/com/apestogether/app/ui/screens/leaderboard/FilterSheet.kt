@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.PieChart
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Verified
@@ -61,6 +62,7 @@ data class LeaderboardFilters(
     val sectors: Set<String> = emptySet(), // empty = all sectors
     val frequency: String = "any",         // "any" | "day_trader" | "moderate"
     val hideLoQ: Boolean = true,
+    val hideFractional: Boolean = false,   // Phase E — persisted via LeaderboardPreferences
 ) {
     val activeCount: Int
         get() = listOf(
@@ -68,6 +70,7 @@ data class LeaderboardFilters(
             sectors.isNotEmpty(),
             frequency != "any",
             !hideLoQ,
+            hideFractional,
         ).count { it }
 }
 
@@ -127,35 +130,67 @@ fun FilterSheet(
 
                 // ── Quality ──
                 FilterSection(title = "Quality") {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            imageVector = if (pending.hideLoQ) Icons.Default.Verified else Icons.Default.Shield,
-                            contentDescription = null,
-                            tint = PrimaryAccent,
-                            modifier = Modifier.size(14.dp),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            "Hide low quality",
-                            color = TextPrimary,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Switch(
-                            checked = pending.hideLoQ,
-                            onCheckedChange = { pending = pending.copy(hideLoQ = it) },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = AppBackground,
-                                checkedTrackColor = PrimaryAccent,
-                                uncheckedThumbColor = TextSecondary,
-                                uncheckedTrackColor = CardBackground,
-                                uncheckedBorderColor = CardBorder,
-                            ),
-                        )
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector = if (pending.hideLoQ) Icons.Default.Verified else Icons.Default.Shield,
+                                contentDescription = null,
+                                tint = PrimaryAccent,
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "Hide low quality",
+                                color = TextPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Switch(
+                                checked = pending.hideLoQ,
+                                onCheckedChange = { pending = pending.copy(hideLoQ = it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = AppBackground,
+                                    checkedTrackColor = PrimaryAccent,
+                                    uncheckedThumbColor = TextSecondary,
+                                    uncheckedTrackColor = CardBackground,
+                                    uncheckedBorderColor = CardBorder,
+                                ),
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PieChart,
+                                contentDescription = null,
+                                tint = if (pending.hideFractional) PrimaryAccent else TextMuted,
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "Hide fractional shares",
+                                color = TextPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Switch(
+                                checked = pending.hideFractional,
+                                onCheckedChange = { pending = pending.copy(hideFractional = it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = AppBackground,
+                                    checkedTrackColor = PrimaryAccent,
+                                    uncheckedThumbColor = TextSecondary,
+                                    uncheckedTrackColor = CardBackground,
+                                    uncheckedBorderColor = CardBorder,
+                                ),
+                            )
+                        }
                     }
                 }
 
