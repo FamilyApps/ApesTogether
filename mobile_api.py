@@ -240,6 +240,32 @@ def _generate_portfolio_slug():
     return ''.join(secrets.choice(alphabet) for _ in range(11))
 
 
+def _utc_iso(dt):
+    """Serialize a naive UTC datetime as ISO-8601 with explicit 'Z' suffix.
+
+    Why this exists
+    ---------------
+    All our DB datetimes are stored as naive UTC (set via datetime.utcnow()).
+    Calling .isoformat() on a naive datetime omits any timezone marker,
+    producing strings like '2026-05-20T16:00:50.123456'. The browser's
+    `new Date()` then parses datetime-only strings as LOCAL time per the
+    modern ECMAScript spec — so a 16:00 UTC timestamp displays as
+    '4:00 PM' regardless of the user's actual zone, instead of being
+    converted to the local zone (e.g., 12:00 PM ET).
+
+    Appending 'Z' makes the parse unambiguous (= UTC), allowing
+    toLocaleString()/toLocaleTimeString() in the admin panel to do the
+    right thing and convert to the viewer's local zone.
+
+    Use this for any endpoint surfaced by templates/admin_panel.html or
+    the mobile clients (which expect ISO-with-Z). Returns None if dt is
+    None so call-sites can keep their `if x else None` patterns concise.
+    """
+    if dt is None:
+        return None
+    return dt.isoformat() + 'Z'
+
+
 # =============================================================================
 # Device Registration Endpoints
 # =============================================================================
@@ -6212,8 +6238,8 @@ def bot_last_wave_status():
         return {
             'id': r.id,
             'wave': r.wave,
-            'started_at': r.started_at.isoformat() if r.started_at else None,
-            'finished_at': r.finished_at.isoformat() if r.finished_at else None,
+            'started_at': _utc_iso(r.started_at),
+            'finished_at': _utc_iso(r.finished_at),
             'duration_ms': r.duration_ms,
             'status': r.status,
             'bots_checked': r.bots_checked,
@@ -6251,7 +6277,7 @@ def bot_activity_feed():
             display = getattr(user, 'public_name', None) or user.display_name or user.username
             events.append({
                 'type': 'trade',
-                'timestamp': txn.timestamp.isoformat() if txn.timestamp else None,
+                'timestamp': _utc_iso(txn.timestamp),
                 'user': user.username,
                 'display_name': display,
                 'user_id': user.id,
@@ -6268,7 +6294,7 @@ def bot_activity_feed():
             for pt in pending:
                 events.append({
                     'type': 'pending_trade',
-                    'timestamp': pt.created_at.isoformat() if pt.created_at else None,
+                    'timestamp': _utc_iso(pt.created_at),
                     'detail': f"{pt.action.upper()} {pt.quantity} {pt.ticker} — {pt.status}",
                     'status': pt.status,
                     'ticker': pt.ticker,
@@ -7185,7 +7211,7 @@ def bot_trade_history():
                 'quantity': txn.quantity,
                 'price': txn.price,
                 'type': txn.transaction_type,
-                'timestamp': txn.timestamp.isoformat() if txn.timestamp else None,
+                'timestamp': _utc_iso(txn.timestamp),
                 'value': round(txn.quantity * txn.price, 2) if txn.price else 0,
                 'price_source': getattr(txn, 'price_source', None) or '—',
             })
