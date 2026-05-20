@@ -266,6 +266,51 @@ def _utc_iso(dt):
     return dt.isoformat() + 'Z'
 
 
+# ── Phase D: portfolio resizer helpers ───────────────────────────────────────
+# These helpers underpin the `scale_factor` math used by the subscribed-
+# portfolio view. The model columns live on MobileSubscription; the user
+# preference lives in User.extra_data['prefer_fractional'] (JSON-backed,
+# no schema migration). Keeping the helpers small + pure makes them easy
+# to unit-test if we add tests later.
+
+def _get_prefer_fractional(user):
+    """Read User.extra_data['prefer_fractional']. Default True.
+
+    True  → scaled views show up to 5 decimals (rounded, trailing zeros
+            stripped client-side by the iOS/Android share formatters)
+    False → scaled views floor to whole shares + "below 1 share" footnote
+    """
+    if not user:
+        return True
+    extra = user.extra_data or {}
+    val = extra.get('prefer_fractional')
+    if val is None:
+        return True
+    return bool(val)
+
+
+def _scale_qty(qty, scale, prefer_fractional):
+    """Apply scale_factor to a share quantity for display.
+
+    Args:
+        qty: raw share count from the creator's portfolio (float)
+        scale: subscription.scale_factor (float, >0; caller must validate)
+        prefer_fractional: bool from _get_prefer_fractional(subscriber)
+
+    Returns:
+        float when prefer_fractional is True (max 5 decimals, e.g. 0.30357)
+        float with integer value when prefer_fractional is False (floor)
+    """
+    if not scale or scale <= 0 or qty <= 0:
+        return 0.0
+    scaled = qty * scale
+    if prefer_fractional:
+        return round(scaled, 5)
+    # Floor to whole shares — never round up (we don't want the user to
+    # think they hold more than the scale-math actually grants them).
+    return float(int(scaled))
+
+
 # =============================================================================
 # Device Registration Endpoints
 # =============================================================================
@@ -582,10 +627,14 @@ def get_portfolio(slug):
         if not owner:
             return jsonify({'error': 'portfolio_not_found'}), 404
         
-        # Check if user is subscribed or is the owner
+        # Check if user is subscribed or is the owner. Capture the
+        # subscription object (not just the bool) so we can read the
+        # Phase D scale_factor / target_dollars further down when
+        # rendering holdings.
         is_owner = owner.id == g.user_id
         is_subscribed = False
-        
+        subscription = None
+
         if not is_owner:
             subscription = MobileSubscription.query.filter_by(
                 subscriber_id=g.user_id,
@@ -749,6 +798,35 @@ def get_portfolio(slug):
         # meaningful cash on hand to avoid clutter for fully-invested users.
         if cash_balance > 0.005:
             response['cash_balance'] = round(cash_balance, 2)
+
+        # ── Phase D: portfolio resizer ────────────────────────────────────
+        # If the viewer is a subscriber AND has set a scale on this
+        # subscription, scale the displayed quantities + portfolio_value.
+        # The owner viewing their own portfolio NEVER sees scaling.
+        scale = None
+        prefer_fractional = True
+        if is_subscribed and subscription is not None:
+            sf = getattr(subscription, 'scale_factor', None)
+            if sf and sf > 0:
+                scale = float(sf)
+                # The subscriber's preference (not the owner's) controls
+                # how scaled fractions render.
+                viewer = User.query.get(g.user_id)
+                prefer_fractional = _get_prefer_fractional(viewer)
+
+                # Scale portfolio_value + cash_balance for display.
+                # The dollar amount the subscriber sees should match the
+                # target_dollars they set, modulo subsequent market drift.
+                scaled_value = round(portfolio_value * scale, 2)
+                response['portfolio_value'] = scaled_value
+                response['scale'] = {
+                    'scale_factor': round(scale, 6),
+                    'target_dollars': round(float(subscription.target_dollars or 0), 2),
+                    'scale_set_at': _utc_iso(getattr(subscription, 'scale_set_at', None)),
+                    'unscaled_portfolio_value': round(portfolio_value, 2),
+                }
+                if 'cash_balance' in response:
+                    response['cash_balance'] = round(cash_balance * scale, 2)
         
         # If subscribed or owner, show full portfolio.
         # ── Filter out zombie 0-share Stock rows ───────────────────────────
@@ -760,19 +838,38 @@ def get_portfolio(slug):
         # already skipped 0-quantity rows. Use `/admin/cleanup-zero-share-stocks`
         # to garbage-collect existing zombies.
         if is_owner or is_subscribed:
-            response['holdings'] = [
-                {
+            holdings_list = []
+            below_one_share_count = 0  # tracks Phase D "below 1 share" footer
+            for stock in all_stocks:
+                if not (stock.quantity and stock.quantity > 0):
+                    continue
+                qty = stock.quantity
+                if scale is not None:
+                    qty = _scale_qty(stock.quantity, scale, prefer_fractional)
+                    # In floor mode (prefer_fractional=False), drop holdings
+                    # that round to 0 shares but keep a count for the UI
+                    # to surface "N positions below 1 share at this scale".
+                    if qty <= 0:
+                        below_one_share_count += 1
+                        continue
+                holdings_list.append({
                     'ticker': stock.ticker,
-                    'quantity': stock.quantity,
+                    'quantity': qty,
                     'purchase_price': stock.purchase_price or 0,
                     'current_price': round(batch_prices.get(stock.ticker.upper(), stock.purchase_price or 0), 2),
                     'purchase_date': stock.purchase_date.isoformat() if stock.purchase_date else None
-                }
-                for stock in all_stocks
-                if stock.quantity and stock.quantity > 0
-            ]
+                })
+            response['holdings'] = holdings_list
+            if scale is not None and below_one_share_count > 0:
+                # iOS/Android render this as "+N positions below 1 share at
+                # this scale — toggle 'Show fractional' in settings to see".
+                response['below_one_share_count'] = below_one_share_count
             
-            # Get recent transactions
+            # Get recent transactions. Quantities are intentionally NOT
+            # scaled in the recent_trades feed — the feed is a historical
+            # log of the creator's actual trades, and scaling individual
+            # historical share counts would be misleading (they don't
+            # add up to the displayed scaled holdings).
             recent_trades = Transaction.query.filter_by(
                 user_id=owner.id
             ).order_by(Transaction.timestamp.desc()).limit(20).all()
@@ -1337,6 +1434,221 @@ def get_leaderboard():
 # =============================================================================
 # Notification Settings
 # =============================================================================
+
+# ── Phase D: portfolio resizer endpoints ────────────────────────────────────
+# UX flow (per gameplan 2026-05-20):
+#   1. Subscriber opens a subscribed portfolio's detail view.
+#   2. Taps a "Set your investment size" button.
+#   3. Enters a dollar amount (e.g. $10,000).
+#   4. Mobile POSTs /subscriptions/<id>/scale with {target_dollars: 10000}.
+#   5. Backend computes scale_factor at the moment of the call (FROZEN).
+#   6. Subsequent GET /portfolio/<slug> calls return scaled holdings.
+#   7. To clear scaling, mobile sends DELETE /subscriptions/<id>/scale.
+#
+# Why "frozen" scale_factor: if we recomputed scale on every view, a
+# creator's price drift would change the subscriber's share counts —
+# weird UX. Frozen at set-time mirrors how brokerages copy-trade.
+
+def _compute_portfolio_value(user_id):
+    """Calculate a user's current portfolio value (holdings + cash).
+
+    Used by /subscriptions/<id>/scale to compute scale_factor at set-time.
+    Reuses the same batch-price logic as get_portfolio so the dollar
+    targets are consistent between "what the subscriber sees" and "what
+    we used to compute scale_factor".
+
+    Returns 0.0 on any failure (caller should reject the scale request
+    with a clear error rather than silently writing scale=infinity).
+    """
+    from models import Stock
+    try:
+        stocks = Stock.query.filter_by(user_id=user_id).all()
+        stocks = [s for s in stocks if s.quantity and s.quantity > 0]
+        if not stocks:
+            # Cash-only portfolios are unusual but valid — fall through to
+            # the cash_balance read below.
+            pass
+
+        # Batch price fetch (premium tier: 150 calls/min)
+        batch_prices = {}
+        try:
+            from portfolio_performance import PortfolioPerformanceCalculator
+            calc = PortfolioPerformanceCalculator()
+            tickers = [s.ticker for s in stocks if s.ticker]
+            if tickers:
+                batch_prices = calc.get_batch_stock_data(tickers)
+        except Exception as e:
+            logger.warning(f"_compute_portfolio_value: batch price failed: {e}")
+
+        total = 0.0
+        for s in stocks:
+            price = batch_prices.get((s.ticker or '').upper(), s.purchase_price or 0)
+            total += float(price or 0) * float(s.quantity or 0)
+
+        # Cash component
+        from models import User
+        owner = User.query.get(user_id)
+        cash = float(getattr(owner, 'cash_proceeds', 0.0) or 0.0) if owner else 0.0
+        total += cash
+
+        return round(total, 2)
+    except Exception as e:
+        logger.error(f"_compute_portfolio_value failed for user_id={user_id}: {e}")
+        return 0.0
+
+
+@mobile_api.route('/subscriptions/<int:sub_id>/scale', methods=['POST'])
+@require_auth
+def set_subscription_scale(sub_id):
+    """Set or update a subscription's scale (Phase D portfolio resizer).
+
+    Request body:
+        { "target_dollars": 10000.00 }
+
+    The server computes scale_factor = target_dollars / current_target_value
+    using the SAME batch-pricing path GET /portfolio/<slug> uses, so the
+    scale will faithfully render the requested dollar size.
+
+    Auth: subscriber must own the subscription. Owner-of-portfolio cannot
+    set scale on their own creation (would be meaningless — the field
+    is for copy-trader subscribers).
+
+    Response:
+        {
+          "success": true,
+          "scale_factor": 0.1234,
+          "target_dollars": 10000.00,
+          "scale_set_at": "<iso>",
+          "target_portfolio_value": 81037.00  // what was scaled FROM
+        }
+
+    Common errors:
+        404 subscription_not_found       — sub_id doesn't exist or isn't theirs
+        400 target_dollars_required      — missing or non-positive
+        400 target_portfolio_empty       — creator has $0 portfolio, can't scale
+    """
+    from models import db, MobileSubscription
+
+    data = request.get_json() or {}
+    try:
+        target_dollars = float(data.get('target_dollars') or 0)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'target_dollars_must_be_number'}), 400
+    if target_dollars <= 0:
+        return jsonify({'error': 'target_dollars_required'}), 400
+
+    try:
+        sub = MobileSubscription.query.filter_by(
+            id=sub_id, subscriber_id=g.user_id, status='active'
+        ).first()
+        if not sub:
+            return jsonify({'error': 'subscription_not_found'}), 404
+
+        target_value = _compute_portfolio_value(sub.subscribed_to_id)
+        if target_value <= 0:
+            return jsonify({'error': 'target_portfolio_empty'}), 400
+
+        scale = target_dollars / target_value
+        now = datetime.utcnow()
+        sub.scale_factor = scale
+        sub.target_dollars = target_dollars
+        sub.scale_set_at = now
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'scale_factor': round(scale, 6),
+            'target_dollars': round(target_dollars, 2),
+            'scale_set_at': _utc_iso(now),
+            'target_portfolio_value': target_value,
+        })
+    except Exception as e:
+        logger.error(f"set_subscription_scale failed: {e}")
+        db.session.rollback()
+        return jsonify({'error': 'scale_update_failed'}), 500
+
+
+@mobile_api.route('/subscriptions/<int:sub_id>/scale', methods=['DELETE'])
+@require_auth
+def clear_subscription_scale(sub_id):
+    """Clear a subscription's scale, returning to the unscaled (full
+    portfolio) view. NULLs scale_factor, target_dollars, scale_set_at."""
+    from models import db, MobileSubscription
+
+    try:
+        sub = MobileSubscription.query.filter_by(
+            id=sub_id, subscriber_id=g.user_id, status='active'
+        ).first()
+        if not sub:
+            return jsonify({'error': 'subscription_not_found'}), 404
+
+        sub.scale_factor = None
+        sub.target_dollars = None
+        sub.scale_set_at = None
+        db.session.commit()
+
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f"clear_subscription_scale failed: {e}")
+        db.session.rollback()
+        return jsonify({'error': 'scale_clear_failed'}), 500
+
+
+@mobile_api.route('/settings/portfolio-preferences', methods=['GET'])
+@require_auth
+def get_portfolio_preferences():
+    """Read the current user's portfolio display preferences.
+
+    Currently exposes `prefer_fractional` (default True). The field
+    drives the Phase D scaled-view share formatter and may eventually
+    drive other display options too — return them as a single dict so
+    we can grow without bumping the endpoint.
+    """
+    from models import User
+    user = User.query.get(g.user_id)
+    if not user:
+        return jsonify({'error': 'user_not_found'}), 404
+    return jsonify({
+        'prefer_fractional': _get_prefer_fractional(user),
+    })
+
+
+@mobile_api.route('/settings/portfolio-preferences', methods=['PUT'])
+@require_auth
+def update_portfolio_preferences():
+    """Update portfolio display preferences.
+
+    Request body (all fields optional, only provided ones are changed):
+        { "prefer_fractional": true }
+
+    Stored in User.extra_data (JSON) so adding fields later doesn't
+    require a schema migration.
+    """
+    from models import db, User
+    data = request.get_json() or {}
+    user = User.query.get(g.user_id)
+    if not user:
+        return jsonify({'error': 'user_not_found'}), 404
+
+    extra = dict(user.extra_data or {})
+    if 'prefer_fractional' in data:
+        extra['prefer_fractional'] = bool(data['prefer_fractional'])
+
+    user.extra_data = extra
+    # SQLAlchemy doesn't always detect in-place JSON mutations; force the
+    # ORM to mark the column dirty with flag_modified so the change
+    # actually hits the DB.
+    try:
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(user, 'extra_data')
+    except Exception:
+        pass
+    db.session.commit()
+    return jsonify({
+        'success': True,
+        'prefer_fractional': _get_prefer_fractional(user),
+    })
+
 
 @mobile_api.route('/notifications/settings', methods=['PUT'])
 @require_auth

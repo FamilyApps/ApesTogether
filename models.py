@@ -908,7 +908,28 @@ class MobileSubscription(db.Model):
     
     # Notification preferences
     push_notifications_enabled = db.Column(db.Boolean, default=True)
-    
+
+    # ── Phase D: portfolio resizer ──────────────────────────────────────
+    # When the subscriber sets a personal "investment size" for this
+    # subscription, all three columns are populated together. NULL on any
+    # = no scale applied (show full target portfolio as-is).
+    #
+    # `target_dollars`  — the dollar amount the subscriber chose to put
+    #                     into copying this creator (e.g. $10,000).
+    # `scale_factor`    — target_dollars / target_portfolio_value at the
+    #                     moment scale was set. Frozen — does NOT track
+    #                     the creator's portfolio drift afterwards, since
+    #                     copy-traders want predictable share counts.
+    # `scale_set_at`    — when the subscriber configured this. UI uses
+    #                     this to surface "set 3 weeks ago" hints.
+    #
+    # All migrations: see scripts/migrations/2026_05_20_mobile_subscription_scale.sql
+    # (run that in Supabase SQL Editor BEFORE deploying code that reads
+    # these columns — see the Phase D rollout notes in the gameplan).
+    scale_factor = db.Column(db.Float, nullable=True)
+    target_dollars = db.Column(db.Float, nullable=True)
+    scale_set_at = db.Column(db.DateTime, nullable=True)
+
     # Relationships
     subscriber = db.relationship('User', foreign_keys=[subscriber_id], backref='mobile_subscriptions_made')
     subscribed_to = db.relationship('User', foreign_keys=[subscribed_to_id], backref='mobile_subscribers')
