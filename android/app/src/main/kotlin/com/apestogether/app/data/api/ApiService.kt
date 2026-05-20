@@ -12,9 +12,13 @@ import com.apestogether.app.data.models.NotificationSettingsRequest
 import com.apestogether.app.data.models.PollResponse
 import com.apestogether.app.data.models.PollVoteRequest
 import com.apestogether.app.data.models.PollVoteResponse
+import com.apestogether.app.data.models.PortfolioPreferencesResponse
 import com.apestogether.app.data.models.PortfolioResponse
 import com.apestogether.app.data.models.PurchaseValidationRequest
 import com.apestogether.app.data.models.PurchaseValidationResponse
+import com.apestogether.app.data.models.SetScaleRequest
+import com.apestogether.app.data.models.SetScaleResponse
+import com.apestogether.app.data.models.UpdatePortfolioPreferencesRequest
 import com.apestogether.app.data.models.StockPriceResponse
 import com.apestogether.app.data.models.SubscriptionsResponse
 import com.apestogether.app.data.models.TaxStatusResponse
@@ -109,6 +113,24 @@ interface ApiService {
 
     @DELETE("unsubscribe/{id}")
     suspend fun unsubscribe(@Path("id") subscriptionId: Int): UnsubscribeResponse
+
+    // ── Phase D: portfolio resizer ───────────────────────────────────────
+    @POST("subscriptions/{id}/scale")
+    suspend fun setSubscriptionScale(
+        @Path("id") subscriptionId: Int,
+        @Body request: SetScaleRequest,
+    ): SetScaleResponse
+
+    @DELETE("subscriptions/{id}/scale")
+    suspend fun clearSubscriptionScale(@Path("id") subscriptionId: Int): EmptyResponse
+
+    @GET("settings/portfolio-preferences")
+    suspend fun getPortfolioPreferences(): PortfolioPreferencesResponse
+
+    @PUT("settings/portfolio-preferences")
+    suspend fun updatePortfolioPreferences(
+        @Body request: UpdatePortfolioPreferencesRequest,
+    ): PortfolioPreferencesResponse
 
     // ── Notification history ─────────────────────────────────────────────
     @GET("notifications/history")

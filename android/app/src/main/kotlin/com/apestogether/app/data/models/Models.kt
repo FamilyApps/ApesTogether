@@ -100,6 +100,11 @@ data class PortfolioResponse(
     val owner: PortfolioOwner,
     @SerialName("is_owner") val isOwner: Boolean,
     @SerialName("is_subscribed") val isSubscribed: Boolean,
+    // Phase D: subscription_id surfaced by GET /portfolio/<slug> when the
+    // viewer is the subscriber, so the Compose UI can call
+    // POST/DELETE /subscriptions/<id>/scale directly. Null for owner-view
+    // and not-subscribed-view.
+    @SerialName("subscription_id") val subscriptionId: Int? = null,
     @SerialName("subscription_price") val subscriptionPrice: Double,
     @SerialName("subscriber_count") val subscriberCount: Int,
     val holdings: List<Holding>? = null,
@@ -116,6 +121,33 @@ data class PortfolioResponse(
     // mobile_api when cash_balance > $0.005, so a `null` here means
     // "fully invested, no cash row to render". See mobile_api.py:721-725.
     @SerialName("cash_balance") val cashBalance: Double? = null,
+    // ── Phase D: portfolio resizer ──────────────────────────────────────
+    // When non-null, the holdings.quantity / portfolioValue / cashBalance
+    // in this response are ALREADY SCALED. Only populated when the viewer
+    // is a subscriber whose subscription has scale_factor set on the
+    // server. See mobile_api._scale_qty + the `scale` block.
+    val scale: PortfolioScale? = null,
+    // Count of positions that floor-rounded to 0 shares at the current
+    // scale (only set when prefer_fractional is false). UI renders this
+    // as "+N positions below 1 share at this scale" footer.
+    @SerialName("below_one_share_count") val belowOneShareCount: Int? = null,
+)
+
+/**
+ * Phase D scale metadata for a scaled subscriber view. Null when the
+ * subscription has no scale set (= full unscaled portfolio).
+ */
+@Serializable
+data class PortfolioScale(
+    /** Multiplier applied to all share quantities. e.g. 0.1234. */
+    @SerialName("scale_factor") val scaleFactor: Double,
+    /** Dollar amount the subscriber chose at set-time. Frozen. */
+    @SerialName("target_dollars") val targetDollars: Double,
+    /** ISO-8601 timestamp (UTC, with Z) of when scale was set. */
+    @SerialName("scale_set_at") val scaleSetAt: String? = null,
+    /** Unscaled creator portfolio total at this moment. UI shows
+     *  "Scaled from $81,037" using this. */
+    @SerialName("unscaled_portfolio_value") val unscaledPortfolioValue: Double,
 )
 
 @Serializable
@@ -151,6 +183,30 @@ data class Holding(
         if (purchasePrice <= 0.0 || cur <= 0.0) return null
         return ((cur - purchasePrice) / purchasePrice) * 100
     }
+
+    /**
+     * Quantity formatted for display.
+     *  - Whole shares (e.g. 10.0) → "10"
+     *  - Fractional → up to 5 decimals, trailing zeros trimmed
+     *
+     * 5 decimals is the precision used by Phase D scaled views — a $100
+     * scale on a 50-share position can yield qty like 0.06173. Whole-
+     * share positions still render as integers without trailing dots.
+     */
+    val formattedQuantity: String
+        get() {
+            val rounded = kotlin.math.round(quantity)
+            if (kotlin.math.abs(quantity - rounded) < 0.000005) {
+                return rounded.toLong().toString()
+            }
+            val raw = "%.5f".format(quantity)
+            // Strip trailing zeros + dangling '.'
+            var trimmed = raw
+            if ('.' in trimmed) {
+                trimmed = trimmed.trimEnd('0').trimEnd('.')
+            }
+            return trimmed
+        }
 }
 
 @Serializable
@@ -377,6 +433,38 @@ data class UnsubscribeResponse(
 data class NotificationSettingsRequest(
     @SerialName("subscription_id") val subscriptionId: Int,
     @SerialName("push_notifications_enabled") val pushNotificationsEnabled: Boolean,
+)
+
+// ── Phase D: portfolio resizer ───────────────────────────────────────────
+
+/** Body for POST /subscriptions/<id>/scale. */
+@Serializable
+data class SetScaleRequest(
+    @SerialName("target_dollars") val targetDollars: Double,
+)
+
+/** Response from POST /subscriptions/<id>/scale. Mirrors mobile_api. */
+@Serializable
+data class SetScaleResponse(
+    val success: Boolean,
+    @SerialName("scale_factor") val scaleFactor: Double,
+    @SerialName("target_dollars") val targetDollars: Double,
+    @SerialName("scale_set_at") val scaleSetAt: String? = null,
+    @SerialName("target_portfolio_value") val targetPortfolioValue: Double,
+)
+
+/** Response from GET/PUT /settings/portfolio-preferences. */
+@Serializable
+data class PortfolioPreferencesResponse(
+    @SerialName("prefer_fractional") val preferFractional: Boolean,
+    val success: Boolean? = null,
+)
+
+/** Body for PUT /settings/portfolio-preferences. All fields optional —
+ *  only provided fields are mutated. */
+@Serializable
+data class UpdatePortfolioPreferencesRequest(
+    @SerialName("prefer_fractional") val preferFractional: Boolean? = null,
 )
 
 // ── Tax status ────────────────────────────────────────────────────────────

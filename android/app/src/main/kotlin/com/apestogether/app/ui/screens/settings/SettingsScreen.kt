@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.PieChart
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.Shield
@@ -69,6 +70,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.apestogether.app.data.api.ApiService
 import com.apestogether.app.data.auth.AuthRepository
+import com.apestogether.app.data.models.UpdatePortfolioPreferencesRequest
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import com.apestogether.app.ui.theme.AppBackground
 import com.apestogether.app.ui.theme.CardBackground
 import com.apestogether.app.ui.theme.CardBorder
@@ -108,6 +113,8 @@ fun SettingsScreen(
 ) {
     val viewModel: SettingsViewModel = hiltViewModel()
     val user by viewModel.currentUser.collectAsState()
+    val preferFractional by viewModel.preferFractional.collectAsState()
+    val preferFractionalLoaded by viewModel.preferFractionalLoaded.collectAsState()
     val context = LocalContext.current
 
     var allowSubscribers by remember { mutableStateOf(true) }
@@ -198,6 +205,18 @@ fun SettingsScreen(
                     label = "Allow Subscribers",
                     checked = allowSubscribers,
                     onChange = { allowSubscribers = it },
+                )
+                Divider()
+                // Phase D: persists to /settings/portfolio-preferences and
+                // controls whether scaled subscriber views show fractional
+                // shares (5 decimals) or floor to whole shares.
+                ToggleRowWithSubtitle(
+                    icon = Icons.Default.PieChart,
+                    label = "Show Fractional Shares",
+                    subtitle = "In scaled portfolio views",
+                    checked = preferFractional,
+                    enabled = preferFractionalLoaded,
+                    onChange = { viewModel.setPreferFractional(it) },
                 )
             }
 
@@ -424,6 +443,45 @@ private fun ToggleRow(
     }
 }
 
+/** ToggleRow variant with a subtitle line, used for Phase D's "Show
+ *  Fractional Shares" preference (the subtitle clarifies it only
+ *  applies inside scaled portfolio views). */
+@Composable
+private fun ToggleRowWithSubtitle(
+    icon: ImageVector,
+    label: String,
+    subtitle: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, color = TextPrimary, fontSize = 14.sp)
+            Text(subtitle, color = TextMuted, fontSize = 11.sp)
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onChange,
+            enabled = enabled,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = AppBackground,
+                checkedTrackColor = PrimaryAccent,
+                uncheckedThumbColor = TextMuted,
+                uncheckedTrackColor = CardBorder,
+                uncheckedBorderColor = CardBorder,
+            ),
+        )
+    }
+}
+
 @Composable
 private fun Divider() {
     Box(
@@ -507,6 +565,44 @@ class SettingsViewModel @Inject constructor(
     private val apiService: ApiService,
 ) : ViewModel() {
     val currentUser = authRepository.currentUser
+
+    // ── Phase D: portfolio display preferences ───────────────────────
+    // `preferFractional` is the cached current value, `*Loaded` flips
+    // to true after the initial GET completes so the UI can disable
+    // the toggle while we're still hydrating. Default true matches the
+    // server-side default in `_get_prefer_fractional`.
+    private val _preferFractional = MutableStateFlow(true)
+    val preferFractional: StateFlow<Boolean> = _preferFractional.asStateFlow()
+
+    private val _preferFractionalLoaded = MutableStateFlow(false)
+    val preferFractionalLoaded: StateFlow<Boolean> = _preferFractionalLoaded.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            runCatching { apiService.getPortfolioPreferences() }
+                .onSuccess { _preferFractional.value = it.preferFractional }
+            // Always flip the loaded flag — even on failure — so the
+            // toggle becomes interactive (with the default value).
+            _preferFractionalLoaded.value = true
+        }
+    }
+
+    /** Optimistically flip the local state, then PUT to the server.
+     *  Rolls back the local state on failure so it stays in sync. */
+    fun setPreferFractional(value: Boolean) {
+        val previous = _preferFractional.value
+        _preferFractional.value = value
+        viewModelScope.launch {
+            runCatching {
+                apiService.updatePortfolioPreferences(
+                    UpdatePortfolioPreferencesRequest(preferFractional = value)
+                )
+            }.onFailure {
+                // Roll back on network/server error.
+                _preferFractional.value = previous
+            }
+        }
+    }
 
     fun signOut() {
         viewModelScope.launch { authRepository.signOut() }

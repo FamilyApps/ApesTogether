@@ -4,6 +4,7 @@ import android.content.Intent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,8 +28,12 @@ import androidx.compose.material.icons.automirrored.filled.CallMade
 import androidx.compose.material.icons.automirrored.filled.CallReceived
 import androidx.compose.material.icons.automirrored.filled.ShowChart
 import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.RemoveCircle
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -37,14 +42,22 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.window.Dialog
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,7 +77,9 @@ import com.apestogether.app.data.billing.SubscriptionPlan
 import com.apestogether.app.data.models.Holding
 import com.apestogether.app.data.models.LeaderboardBadge
 import com.apestogether.app.data.models.PortfolioResponse
+import com.apestogether.app.data.models.PortfolioScale
 import com.apestogether.app.data.models.PurchaseValidationRequest
+import com.apestogether.app.data.models.SetScaleRequest
 import com.apestogether.app.data.models.Trade
 import com.apestogether.app.ui.components.CompactPlanToggle
 import com.apestogether.app.ui.components.PerformanceChartCard
@@ -174,6 +189,7 @@ fun PortfolioDetailScreen(
         ) { padding ->
             PortfolioBody(
                 modifier = Modifier.padding(padding),
+                slug = slug,
                 state = state,
                 period = period,
                 viewModel = viewModel,
@@ -184,6 +200,7 @@ fun PortfolioDetailScreen(
         // Embedded mode (MyPortfolioScreen wraps us inside its own Scaffold).
         PortfolioBody(
             modifier = Modifier.background(AppBackground),
+            slug = slug,
             state = state,
             period = period,
             viewModel = viewModel,
@@ -195,6 +212,7 @@ fun PortfolioDetailScreen(
 @Composable
 private fun PortfolioBody(
     modifier: Modifier = Modifier,
+    slug: String,
     state: PortfolioState,
     period: String,
     viewModel: PortfolioDetailViewModel,
@@ -203,6 +221,15 @@ private fun PortfolioBody(
     val selectedPlan by viewModel.selectedPlan.collectAsState()
     val subscribeState by viewModel.subscribeState.collectAsState()
     val activity = LocalContext.current.findActivity()
+
+    // ── Phase D: portfolio resizer state ────────────────────────────────
+    // The dialog amount is bound to a String (numeric input). It's pre-
+    // filled with the current target_dollars on edit. `scaleSaving` is
+    // surfaced from the ViewModel so the button can show a spinner.
+    var showScaleDialog by remember { mutableStateOf(false) }
+    var scaleAmountInput by remember { mutableStateOf("") }
+    var scaleErrorText by remember { mutableStateOf<String?>(null) }
+    val scaleSaving by viewModel.scaleSaving.collectAsState()
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -331,6 +358,29 @@ private fun PortfolioBody(
                         )
                     }
 
+                    // ── Phase D: Portfolio Resizer Card (subscriber-only) ──
+                    // Hidden for the owner viewing their own page and for
+                    // non-subscribers (where the holdings are blurred). Two
+                    // states: no scale set (CTA) or scale active (badge +
+                    // Edit/Clear actions).
+                    if (portfolio.isSubscribed && !portfolio.isOwner && portfolio.subscriptionId != null) {
+                        ScaleCard(
+                            scale = portfolio.scale,
+                            onTapEdit = {
+                                scaleAmountInput = portfolio.scale
+                                    ?.targetDollars
+                                    ?.let { "%.0f".format(it) }
+                                    ?: ""
+                                scaleErrorText = null
+                                showScaleDialog = true
+                            },
+                            onTapClear = {
+                                viewModel.clearScale(slug = slug, subscriptionId = portfolio.subscriptionId)
+                            },
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                        )
+                    }
+
                     // Holdings
                     val holdings = portfolio.holdings
                     when {
@@ -342,6 +392,14 @@ private fun PortfolioBody(
                                 showSwipeHint = portfolio.isOwner,
                                 modifier = Modifier.padding(horizontal = 16.dp),
                             )
+
+                            // Phase D: below-1-share footnote (floor mode only)
+                            portfolio.belowOneShareCount?.takeIf { it > 0 }?.let { count ->
+                                BelowOneShareFooter(
+                                    count = count,
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                )
+                            }
 
                             portfolio.recentTrades?.takeIf { it.isNotEmpty() }?.let { trades ->
                                 RecentTradesSection(
@@ -376,6 +434,45 @@ private fun PortfolioBody(
                 }
             }
         }
+    }
+
+    // ── Phase D: scale-setting dialog ────────────────────────────────────
+    // Lives outside the Box (overlay) so dismiss-by-tap-outside works
+    // cleanly. Reads the current portfolio (for owner name / value) from
+    // the loaded state.
+    if (showScaleDialog) {
+        val loaded = state as? PortfolioState.Loaded
+        val portfolio = loaded?.portfolio
+        SetScaleDialog(
+            ownerName = portfolio?.owner?.publicName ?: "this portfolio",
+            creatorPortfolioValue = portfolio?.scale?.unscaledPortfolioValue
+                ?: portfolio?.portfolioValue,
+            currentTargetDollars = portfolio?.scale?.targetDollars,
+            amount = scaleAmountInput,
+            onAmountChange = { scaleAmountInput = it },
+            isSaving = scaleSaving,
+            errorText = scaleErrorText,
+            onCancel = { showScaleDialog = false },
+            onSubmit = { dollars ->
+                val subId = portfolio?.subscriptionId
+                if (subId == null) {
+                    scaleErrorText = "Subscription not found"
+                    return@SetScaleDialog
+                }
+                viewModel.setScale(
+                    slug = slug,
+                    subscriptionId = subId,
+                    targetDollars = dollars,
+                    onResult = { ok, message ->
+                        if (ok) {
+                            showScaleDialog = false
+                        } else {
+                            scaleErrorText = message ?: "Failed to set scale"
+                        }
+                    },
+                )
+            },
+        )
     }
 }
 
@@ -1206,6 +1303,10 @@ class PortfolioDetailViewModel @Inject constructor(
     /** Live Play Billing connection state — drives the Subscribe button disabled state. */
     val billingConnectionState = billingService.connectionState
 
+    // ── Phase D: portfolio resizer ───────────────────────────────────────
+    private val _scaleSaving = MutableStateFlow(false)
+    val scaleSaving: StateFlow<Boolean> = _scaleSaving.asStateFlow()
+
     fun load(slug: String) {
         if (slug.isBlank()) {
             _state.value = PortfolioState.Error("Invalid portfolio")
@@ -1334,6 +1435,320 @@ class PortfolioDetailViewModel @Inject constructor(
                                 ?: "Server failed to validate the purchase."
                         )
                     }
+                }
+            }
+        }
+    }
+
+    // ── Phase D: portfolio resizer ───────────────────────────────────────
+    /**
+     * Set the subscriber's scale (target dollar amount) for this portfolio.
+     * Reloads the portfolio on success so holdings + scale banner reflect
+     * the new state. [onResult] is invoked with (success, errorMessage)
+     * so the dialog can dismiss or surface the error inline.
+     */
+    fun setScale(
+        slug: String,
+        subscriptionId: Int,
+        targetDollars: Double,
+        onResult: (Boolean, String?) -> Unit,
+    ) {
+        viewModelScope.launch {
+            _scaleSaving.value = true
+            val result = runCatching {
+                apiService.setSubscriptionScale(
+                    subscriptionId = subscriptionId,
+                    request = SetScaleRequest(targetDollars = targetDollars),
+                )
+            }
+            _scaleSaving.value = false
+            result.onSuccess {
+                load(slug)            // re-fetch so scaled holdings populate
+                onResult(true, null)
+            }.onFailure { e ->
+                onResult(false, e.message)
+            }
+        }
+    }
+
+    /** Clear the subscriber's scale (return to unscaled view). Reloads
+     *  the portfolio so the scale banner disappears immediately. */
+    fun clearScale(slug: String, subscriptionId: Int) {
+        viewModelScope.launch {
+            runCatching { apiService.clearSubscriptionScale(subscriptionId) }
+                .onSuccess { load(slug) }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Phase D: Portfolio Resizer Components
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Card shown above the Holdings list for subscribers. Two states:
+ *   • No scale set: "Set Investment Size" CTA
+ *   • Scale active: badge with target_dollars + Edit/Clear actions
+ *
+ * Mirrors the iOS [ScaleCard]. Hidden by the parent for the owner viewing
+ * their own page and for non-subscribers.
+ */
+@Composable
+private fun ScaleCard(
+    scale: PortfolioScale?,
+    onTapEdit: () -> Unit,
+    onTapClear: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (scale != null) {
+        // Active-scale state
+        Row(
+            modifier = modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(CardBackground)
+                .border(0.5.dp, CardBorder, RoundedCornerShape(16.dp))
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Default.Tune,
+                contentDescription = null,
+                tint = PrimaryAccent,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Scaled to ${formatCompactDollars(scale.targetDollars)}",
+                    color = TextPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "From ${formatCompactDollars(scale.unscaledPortfolioValue)} creator portfolio",
+                    color = TextMuted,
+                    fontSize = 11.sp,
+                )
+            }
+            OutlinedButton(
+                onClick = onTapEdit,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                border = BorderStroke(1.dp, PrimaryAccent.copy(alpha = 0.5f)),
+            ) {
+                Icon(Icons.Default.Edit, contentDescription = "Edit", tint = PrimaryAccent, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("Edit", color = PrimaryAccent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(Modifier.width(6.dp))
+            IconButton(onClick = onTapClear, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Clear scale",
+                    tint = TextMuted,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        }
+    } else {
+        // No-scale CTA
+        Row(
+            modifier = modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(CardBackground)
+                .border(0.5.dp, CardBorder, RoundedCornerShape(16.dp))
+                .clickable { onTapEdit() }
+                .padding(horizontal = 14.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Default.Tune,
+                contentDescription = null,
+                tint = PrimaryAccent,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = "Set Your Investment Size",
+                color = TextPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.CallMade,
+                contentDescription = null,
+                tint = TextMuted,
+                modifier = Modifier.size(14.dp),
+            )
+        }
+    }
+}
+
+/** Compact dollar formatter: $10K, $1.2M, $500. Mirrors the iOS helper
+ *  in [ScaleCard.formatDollars] so both platforms render the same. */
+private fun formatCompactDollars(value: Double): String = when {
+    value >= 1_000_000 -> "$%.1fM".format(value / 1_000_000)
+    value >= 10_000 -> "$%.0fK".format(value / 1_000)
+    value >= 1_000 -> "$%.1fK".format(value / 1_000)
+    else -> "$%.0f".format(value)
+}
+
+/**
+ * Footer that surfaces the count of positions which floor-rounded to 0
+ * shares at the current scale. Only rendered in floor mode
+ * (prefer_fractional=false). The string mirrors the iOS copy verbatim.
+ */
+@Composable
+private fun BelowOneShareFooter(count: Int, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier.padding(top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Default.Info,
+            contentDescription = null,
+            tint = TextMuted,
+            modifier = Modifier.size(12.dp),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = "$count position${if (count == 1) "" else "s"} below 1 share at this scale — enable Show Fractional Shares in Settings to see them.",
+            color = TextMuted,
+            fontSize = 11.sp,
+        )
+    }
+}
+
+/**
+ * Modal dialog presented when the subscriber taps "Set Investment Size"
+ * or "Edit". Lets them type a dollar amount (numeric keyboard) and
+ * submits to /subscriptions/<id>/scale.
+ */
+@Composable
+private fun SetScaleDialog(
+    ownerName: String,
+    creatorPortfolioValue: Double?,
+    currentTargetDollars: Double?,
+    amount: String,
+    onAmountChange: (String) -> Unit,
+    isSaving: Boolean,
+    errorText: String?,
+    onCancel: () -> Unit,
+    onSubmit: (Double) -> Unit,
+) {
+    Dialog(onDismissRequest = onCancel) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(CardBackground)
+                .border(0.5.dp, CardBorder, RoundedCornerShape(20.dp))
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            // Headline + body
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = if (currentTargetDollars == null) "Set your investment size"
+                    else "Update your investment size",
+                    color = TextPrimary,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "All holdings on $ownerName's portfolio will be scaled to match. The scale is frozen at the moment you set it.",
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                )
+            }
+
+            // Creator portfolio context
+            if (creatorPortfolioValue != null && creatorPortfolioValue > 0) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(AppBackground)
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Creator portfolio", color = TextMuted, fontSize = 12.sp)
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        text = "$%.0f".format(creatorPortfolioValue),
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+
+            // Dollar input (uses OutlinedTextField for the standard Compose
+            // experience — the leading "$" prefix is rendered as a
+            // leadingIcon so the actual TextField content stays numeric).
+            OutlinedTextField(
+                value = amount,
+                onValueChange = { v ->
+                    // Strip non-digit chars so paste/dictation can't sneak
+                    // in commas or "$" — server expects a clean float.
+                    onAmountChange(v.filter { it.isDigit() })
+                },
+                placeholder = { Text("0", color = TextMuted, fontSize = 24.sp) },
+                leadingIcon = {
+                    Text("$", color = TextSecondary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = AppBackground,
+                    unfocusedContainerColor = AppBackground,
+                    focusedTextColor = TextPrimary,
+                    unfocusedTextColor = TextPrimary,
+                    cursorColor = PrimaryAccent,
+                    focusedBorderColor = PrimaryAccent,
+                    unfocusedBorderColor = CardBorder,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            if (errorText != null) {
+                Text(text = errorText, color = Losses, fontSize = 12.sp)
+            }
+
+            // Actions
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(
+                    onClick = onCancel,
+                    border = BorderStroke(1.dp, CardBorder),
+                    modifier = Modifier.weight(1f),
+                    enabled = !isSaving,
+                ) {
+                    Text("Cancel", color = TextSecondary, fontWeight = FontWeight.SemiBold)
+                }
+                Button(
+                    onClick = {
+                        val dollars = amount.toDoubleOrNull() ?: 0.0
+                        if (dollars > 0) onSubmit(dollars)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                    modifier = Modifier.weight(1f),
+                    enabled = !isSaving && amount.toDoubleOrNull()?.let { it > 0 } == true,
+                ) {
+                    if (isSaving) {
+                        CircularProgressIndicator(
+                            color = Color.White,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                    }
+                    Text(
+                        text = if (isSaving) "Saving..." else "Apply Scale",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                    )
                 }
             }
         }
