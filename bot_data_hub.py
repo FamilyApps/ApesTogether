@@ -57,6 +57,14 @@ logger = logging.getLogger('bot_data_hub')
 ALPHA_VANTAGE_KEY = os.environ.get('ALPHA_VANTAGE_API_KEY', '')
 FINNHUB_KEY = os.environ.get('FINNHUB_API_KEY', '')
 
+# Set FINNHUB_PREMIUM=true (or 1/yes) when the Finnhub key is on a paid plan
+# that includes social sentiment + analyst upgrades/downgrades endpoints.
+# When unset/false (free tier), those calls are skipped entirely — they would
+# otherwise return 403 and only after wasting ~2 min per wave on rate-limit
+# pauses + per-ticker request roundtrips. Insider transactions remain enabled
+# because Finnhub docs say they're available on the free tier.
+FINNHUB_PREMIUM = os.environ.get('FINNHUB_PREMIUM', '').lower() in ('1', 'true', 'yes')
+
 # ── Ticker Universe ──────────────────────────────────────────────────────────
 # Master list of all tickers across all industries
 
@@ -1022,6 +1030,10 @@ def fetch_social_sentiment(tickers, max_tickers=80):
         logger.warning("No FINNHUB_API_KEY — skipping social sentiment")
         return {}
 
+    if not FINNHUB_PREMIUM:
+        logger.info("FINNHUB_PREMIUM unset — skipping social sentiment (premium-only endpoint)")
+        return {}
+
     result = {}
     batch = tickers[:max_tickers]
 
@@ -1083,6 +1095,10 @@ def fetch_analyst_data(tickers, max_tickers=40):
     NOTE: This is a Finnhub PREMIUM endpoint. Free tier returns 403.
     """
     if not FINNHUB_KEY:
+        return {}
+
+    if not FINNHUB_PREMIUM:
+        logger.info("FINNHUB_PREMIUM unset — skipping analyst upgrades/downgrades (premium-only endpoint)")
         return {}
 
     result = {}
