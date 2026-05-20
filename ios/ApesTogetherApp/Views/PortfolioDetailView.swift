@@ -187,7 +187,7 @@ struct PortfolioDetailView: View {
                         
                         // ── Phase D: Portfolio Resizer Card (subscriber-only) ──
                         // Renders one of two states:
-                        //   • No scale set yet → "Set Investment Size" CTA
+                        //   • No scale set yet → "Adjust Portfolio Size" CTA
                         //   • Scale active     → badge with current $ + Edit/Clear
                         // Hidden for the portfolio owner viewing their own page
                         // and for non-subscribers (where the holdings are blurred
@@ -1335,7 +1335,7 @@ struct BlurredHoldingsTeaser: View {
 // ─────────────────────────────────────────────────────────────────────────
 
 /// Card shown above the Holdings list for subscribers. Two states:
-///   • No scale set: gradient "Set Investment Size" CTA
+///   • No scale set: gradient "Adjust Portfolio Size" CTA
 ///   • Scale active: badge with target_dollars + Edit/Clear actions
 struct ScaleCard: View {
     let scale: PortfolioScale?
@@ -1389,7 +1389,7 @@ struct ScaleCard: View {
                 HStack(spacing: 10) {
                     Image(systemName: "scale.3d")
                         .font(.system(size: 16))
-                    Text("Set Your Investment Size")
+                    Text("Adjust Portfolio Size")
                         .font(.subheadline.weight(.semibold))
                     Spacer()
                     Image(systemName: "chevron.right")
@@ -1420,7 +1420,7 @@ struct ScaleCard: View {
     }
 }
 
-/// Sheet presented when the subscriber taps "Set Investment Size" or
+/// Sheet presented when the subscriber taps "Adjust Portfolio Size" or
 /// "Edit" on the ScaleCard. Lets them type a dollar amount, submits to
 /// /subscriptions/<id>/scale, and dismisses on success.
 struct SetScaleSheet: View {
@@ -1444,14 +1444,20 @@ struct SetScaleSheet: View {
                     // Headline
                     VStack(alignment: .leading, spacing: 6) {
                         Text(currentTargetDollars == nil
-                             ? "Set your investment size"
-                             : "Update your investment size")
+                             ? "Adjust portfolio size"
+                             : "Update portfolio size")
                             .font(.title3.weight(.bold))
                             .foregroundColor(.textPrimary)
                         Text("All holdings on \(ownerName)'s portfolio will be scaled to match. The scale is frozen at the moment you set it.")
                             .font(.caption)
                             .foregroundColor(.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
+                        // Compliance disclaimer per LAUNCH_PLAYBOOK.md — must be
+                        // visible at the moment the user commits to a $ amount.
+                        Text("For educational purposes only. This is not investment advice.")
+                            .font(.caption2)
+                            .foregroundColor(.textMuted)
+                            .padding(.top, 2)
                     }
 
                     // Creator portfolio context
@@ -1527,7 +1533,7 @@ struct SetScaleSheet: View {
                 }
                 .padding(20)
             }
-            .navigationTitle("Investment Size")
+            .navigationTitle("Portfolio Size")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {

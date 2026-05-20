@@ -1487,7 +1487,7 @@ class PortfolioDetailViewModel @Inject constructor(
 
 /**
  * Card shown above the Holdings list for subscribers. Two states:
- *   • No scale set: "Set Investment Size" CTA
+ *   • No scale set: "Adjust Portfolio Size" CTA
  *   • Scale active: badge with target_dollars + Edit/Clear actions
  *
  * Mirrors the iOS [ScaleCard]. Hidden by the parent for the owner viewing
@@ -1570,7 +1570,7 @@ private fun ScaleCard(
             )
             Spacer(Modifier.width(10.dp))
             Text(
-                text = "Set Your Investment Size",
+                text = "Adjust Portfolio Size",
                 color = TextPrimary,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
@@ -1622,7 +1622,7 @@ private fun BelowOneShareFooter(count: Int, modifier: Modifier = Modifier) {
 }
 
 /**
- * Modal dialog presented when the subscriber taps "Set Investment Size"
+ * Modal dialog presented when the subscriber taps "Adjust Portfolio Size"
  * or "Edit". Lets them type a dollar amount (numeric keyboard) and
  * submits to /subscriptions/<id>/scale.
  */
@@ -1651,8 +1651,8 @@ private fun SetScaleDialog(
             // Headline + body
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    text = if (currentTargetDollars == null) "Set your investment size"
-                    else "Update your investment size",
+                    text = if (currentTargetDollars == null) "Adjust portfolio size"
+                    else "Update portfolio size",
                     color = TextPrimary,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
@@ -1661,6 +1661,13 @@ private fun SetScaleDialog(
                     text = "All holdings on $ownerName's portfolio will be scaled to match. The scale is frozen at the moment you set it.",
                     color = TextSecondary,
                     fontSize = 12.sp,
+                )
+                // Compliance disclaimer per LAUNCH_PLAYBOOK.md — must be
+                // visible at the moment the user commits to a $ amount.
+                Text(
+                    text = "For educational purposes only. This is not investment advice.",
+                    color = TextMuted,
+                    fontSize = 10.sp,
                 )
             }
 

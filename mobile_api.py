@@ -653,6 +653,10 @@ def get_portfolio(slug):
             },
             'is_owner': is_owner,
             'is_subscribed': is_subscribed,
+            # Phase D: expose subscription_id so mobile clients can call
+            # POST/DELETE /subscriptions/<id>/scale without first making
+            # a round-trip to /subscriptions to look it up.
+            'subscription_id': subscription.id if subscription else None,
             'subscription_price': 9.00
         }
         
