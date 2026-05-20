@@ -214,21 +214,49 @@ def apply_fomo_trades(bot_profile, market_hub, current_decisions):
 
 # ── Position Sizing ──────────────────────────────────────────────────────────
 
-def calculate_position_size(decision, bot_profile, portfolio_value=100000):
+def calculate_position_size(decision, bot_profile, portfolio_value=100000, held_qty=None):
     """
     Calculate the number of shares to buy/sell with human-like noise.
 
     Args:
         decision: trade decision dict
         bot_profile: bot's strategy profile
-        portfolio_value: estimated total portfolio value
+        portfolio_value: estimated total portfolio value (for BUY sizing)
+        held_qty: int or None — for SELLs, the bot's current holding of this
+            ticker. When provided (and > 0), the sell quantity is computed as
+            a sell-fraction of held_qty rather than a hypothetical allocation.
+            This is what callers should pass in production; the allocation-
+            based fallback exists only for unit tests / legacy callers.
 
     Returns:
-        int: number of shares
+        int: number of shares (always >= 1 unless held_qty == 0 for a sell,
+            in which case 0 is returned and the caller should skip the trade)
     """
     price = decision.get('price', 100)
     if price <= 0:
         return 1
+
+    action = decision.get('action')
+
+    # ── SELL path: clamp to actual holdings ──────────────────────────────────
+    # Sells were the swallow point in the wave-2 0-trades bug: the legacy
+    # allocation-based qty (35 shares of ZTS for a bot that only owned 5)
+    # always failed the /admin/bot/execute-trade insufficient_shares check.
+    # When held_qty is known, base the partial-sell fraction on the actual
+    # position, which guarantees the trade clears the API gate.
+    if action == 'sell' and held_qty is not None:
+        if held_qty <= 0:
+            return 0  # Caller should skip — nothing to sell
+        sell_fraction = random.uniform(0.30, 0.80)
+        if decision.get('urgency') == 'high':
+            sell_fraction = random.uniform(0.60, 1.00)  # Panic sells are larger
+        qty = max(1, int(held_qty * sell_fraction))
+        # Round to "human" numbers, but never exceed held_qty
+        if qty > 20:
+            qty = round(qty / 5) * 5
+        elif qty > 10:
+            qty = round(qty / 2) * 2
+        return max(1, min(qty, held_qty))
 
     risk_tolerance = bot_profile.get('risk_tolerance', 0.5)
     max_positions = bot_profile.get('max_positions', 8)
@@ -249,12 +277,13 @@ def calculate_position_size(decision, bot_profile, portfolio_value=100000):
     noise = random.uniform(0.85, 1.15)
     qty = max(1, int(ideal_qty * noise))
 
-    # For sells, don't sell everything (partial sells feel more human)
-    if decision.get('action') == 'sell':
-        # Sell 30-80% of position
+    # Legacy SELL path (no held_qty available) — kept for backward compat.
+    # This was the buggy code that caused the wave-2 0-trades issue when
+    # held_qty isn't supplied; modern callers MUST pass held_qty for sells.
+    if action == 'sell':
         sell_fraction = random.uniform(0.30, 0.80)
         if decision.get('urgency') == 'high':
-            sell_fraction = random.uniform(0.60, 1.00)  # Panic sells are larger
+            sell_fraction = random.uniform(0.60, 1.00)
         qty = max(1, int(qty * sell_fraction))
 
     # Round to "human" numbers: prefer multiples of 5 or 10

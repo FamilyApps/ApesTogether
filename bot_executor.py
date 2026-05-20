@@ -141,7 +141,19 @@ def execute_bot_decisions(user_id, username, decisions, bot_profile, market_hub)
     from bot_behaviors import calculate_position_size, add_trade_delay
 
     executed = []
-    portfolio_value = _estimate_portfolio_value(user_id)
+
+    # Fetch holdings ONCE per bot (one HTTP call). Used for two things:
+    #   1. Computing real portfolio_value for BUY position sizing.
+    #   2. Clamping SELL quantities to actual held shares so we don't
+    #      hit /admin/bot/execute-trade's insufficient_shares gate.
+    #
+    # Before this change, _estimate_portfolio_value() returned a hardcoded
+    # $100K and SELLs were sized off that allocation, producing qty=35 for
+    # a bot that only owned 5 shares — every SELL failed silently. See
+    # wave 2 on 2026-05-20 where 7+ valid sell decisions executed 0 trades.
+    holdings = get_bot_holdings(user_id)
+    held_by_ticker = {h['ticker']: h['quantity'] for h in holdings}
+    portfolio_value = _estimate_portfolio_value(user_id, holdings=holdings, market_hub=market_hub)
 
     # Shuffle decisions slightly (humans don't execute in perfect order)
     random.shuffle(decisions)
@@ -159,6 +171,15 @@ def execute_bot_decisions(user_id, username, decisions, bot_profile, market_hub)
         signal_tag = decision.get('signal_tag') or 'mixed'
         price_source = f"bot_{signal_tag}"
 
+        # SELL guard: if the bot doesn't hold this ticker, the trade
+        # cannot succeed — skip immediately with a clear info log
+        # (visible at default INFO level, unlike the old debug-only
+        # "Insufficient shares" line that hid the wave-2 bug).
+        held_qty = held_by_ticker.get(ticker, 0)
+        if action == 'sell' and held_qty <= 0:
+            logger.info(f"  Skipping SELL {ticker}: bot holds 0 shares")
+            continue
+
         # Get current price from market hub (most recent)
         stock_data = market_hub.get_stock_data(ticker)
         if stock_data:
@@ -174,8 +195,15 @@ def execute_bot_decisions(user_id, username, decisions, bot_profile, market_hub)
         spread_pct = random.uniform(-0.001, 0.001)
         price = round(price * (1 + spread_pct), 2)
 
-        # Calculate position size
-        quantity = calculate_position_size(decision, bot_profile, portfolio_value)
+        # Calculate position size. For sells, held_qty caps the result.
+        quantity = calculate_position_size(
+            decision, bot_profile, portfolio_value,
+            held_qty=held_qty if action == 'sell' else None,
+        )
+        if quantity <= 0:
+            # SELL path returned 0 — caller should skip (defensive; the
+            # held_qty <= 0 guard above should have caught this already).
+            continue
 
         # Execute
         success, result = execute_trade(user_id, ticker, quantity, price, action, reason, price_source=price_source)
@@ -191,11 +219,20 @@ def execute_bot_decisions(user_id, username, decisions, bot_profile, market_hub)
                 'is_fomo': decision.get('is_fomo', False),
                 'timestamp': datetime.utcnow().isoformat(),
             })
+            # Update local holdings tally so a same-wave second decision
+            # on the same ticker (rare, but possible) sees the new qty.
+            if action == 'sell':
+                held_by_ticker[ticker] = max(0, held_qty - quantity)
+            else:
+                held_by_ticker[ticker] = held_qty + quantity
         elif action == 'sell' and result.get('error') == 'insufficient_shares':
-            # Try selling fewer shares
-            reduced_qty = max(1, quantity // 2)
-            if reduced_qty != quantity:
-                success2, result2 = execute_trade(
+            # Belt-and-suspenders: clamp+retry once. This should be rare
+            # now that held_qty drives sizing, but races (e.g. a manual
+            # sell between get_bot_holdings and execute_trade) can still
+            # happen. Retry at half the held qty.
+            reduced_qty = max(1, min(quantity, held_qty) // 2)
+            if reduced_qty != quantity and reduced_qty > 0:
+                success2, _ = execute_trade(
                     user_id, ticker, reduced_qty, price, action,
                     reason + ' (reduced qty)', price_source=price_source)
                 if success2:
@@ -208,6 +245,7 @@ def execute_bot_decisions(user_id, username, decisions, bot_profile, market_hub)
                         'score': decision.get('score', 0),
                         'timestamp': datetime.utcnow().isoformat(),
                     })
+                    held_by_ticker[ticker] = max(0, held_qty - reduced_qty)
 
         # Human-like delay between trades
         delay = add_trade_delay()
@@ -223,15 +261,59 @@ def execute_bot_decisions(user_id, username, decisions, bot_profile, market_hub)
 
 # ── Portfolio Helpers ─────────────────────────────────────────────────────────
 
-def _estimate_portfolio_value(user_id):
+def _estimate_portfolio_value(user_id, holdings=None, market_hub=None):
     """
-    Rough estimate of a bot's portfolio value.
-    For position sizing — doesn't need to be exact.
-    Default to $100K simulated portfolio if we can't fetch.
+    Estimate a bot's portfolio value (used for BUY position sizing).
+
+    Args:
+        user_id: bot's user ID (kept for signature compat; not used when
+            holdings + market_hub are passed in)
+        holdings: optional list of {ticker, quantity, purchase_price} from
+            get_bot_holdings(). When provided alongside market_hub, returns
+            the real mark-to-market value.
+        market_hub: optional MarketDataHub used to look up current prices.
+
+    Returns:
+        float: portfolio value in dollars. Falls back to $100K only when
+            holdings or market_hub aren't supplied (e.g. legacy callers).
+
+    Notes:
+        - Cash is excluded — get_bot_holdings doesn't surface it and the
+          cash_tracking schema doesn't expose a simple "current cash"
+          number via the admin API. This slightly under-estimates
+          portfolio value for bots holding meaningful cash, which causes
+          BUY positions to be sized a touch smaller. That's acceptable —
+          the inverse error (oversizing) was the bug we're fixing.
+        - When market_hub has no price for a held ticker, purchase_price
+          is used as a fallback so the estimate stays reasonable.
     """
-    # In a real implementation, this would query the DB
-    # For now, use a reasonable default
-    return 100_000
+    if not holdings or market_hub is None:
+        # Legacy / fallback path — kept so older callers / unit tests
+        # don't break. Production callers in execute_bot_decisions now
+        # always supply both args.
+        return 100_000.0
+
+    total = 0.0
+    for h in holdings:
+        ticker = h.get('ticker')
+        qty = h.get('quantity', 0) or 0
+        if qty <= 0:
+            continue
+        price = 0.0
+        try:
+            stock_data = market_hub.get_stock_data(ticker)
+            if stock_data:
+                price = float(stock_data.get('price', 0) or 0)
+        except Exception:
+            price = 0.0
+        if price <= 0:
+            # Fallback to purchase_price — better than dropping the position
+            price = float(h.get('purchase_price', 0) or 0)
+        total += qty * price
+
+    # Floor at $1K so a bot with empty holdings still sizes new BUYs to
+    # something meaningful instead of qty=0 for everything.
+    return max(1_000.0, total)
 
 
 # ── Bot Account Management ───────────────────────────────────────────────────
