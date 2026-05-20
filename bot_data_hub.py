@@ -317,17 +317,128 @@ def fetch_av_daily_bars_concurrent(tickers, max_workers=4):
     return result
 
 
+def _load_cached_daily_bars_via_http(tickers, min_bars=20, max_bars=100):
+    """Fetch DailyPriceBar cache via HTTP from the Vercel-hosted app.
+
+    Used when running inside GitHub Actions (no DB credentials in CI). The
+    app server reads the cache out of Postgres and returns a JSON payload
+    we reconstruct into the same `{ticker: DataFrame}` shape the caller
+    expects from the direct-DB path.
+
+    Auth: requires CRON_SECRET in env (already set in the GH Actions
+    workflow `env:` block). Without it we silently fall through to the
+    live-AV path.
+
+    Failure modes (cache unreachable, HTTP timeout, JSON parse error,
+    empty response): all degrade gracefully \u2014 we return `{}` and the
+    caller's existing fallback to live AV fetch kicks in.
+    """
+    try:
+        import pandas as pd
+    except ImportError:
+        return {}
+
+    cron_secret = os.environ.get('CRON_SECRET', '')
+    if not cron_secret:
+        logger.info("No CRON_SECRET in env \u2014 skipping HTTP cache fetch")
+        return {}
+
+    base_url = os.environ.get('APP_BASE_URL', 'https://apestogether.ai').rstrip('/')
+    url = f"{base_url}/api/cron/get-cached-daily-bars"
+    params = {
+        'tickers': ','.join(tickers),
+        'min_bars': str(min_bars),
+        'max_bars': str(max_bars),
+    }
+    headers = {'X-Cron-Secret': cron_secret}
+
+    t0 = time.time()
+    try:
+        resp = requests.get(url, params=params, headers=headers, timeout=20)
+    except Exception as e:
+        logger.warning(f"DailyPriceBar HTTP fetch failed: {e}")
+        return {}
+
+    elapsed_ms = int((time.time() - t0) * 1000)
+
+    if resp.status_code != 200:
+        logger.warning(
+            f"DailyPriceBar HTTP fetch returned HTTP {resp.status_code} "
+            f"({elapsed_ms} ms) \u2014 falling back to live AV"
+        )
+        return {}
+
+    try:
+        data = resp.json()
+    except Exception as e:
+        logger.warning(f"DailyPriceBar HTTP response not JSON: {e}")
+        return {}
+
+    if not data.get('success'):
+        logger.warning(f"DailyPriceBar HTTP fetch reported failure: "
+                       f"{data.get('error') or data.get('message')}")
+        return {}
+
+    bars_by_ticker = data.get('bars') or {}
+    result = {}
+    for ticker, rows in bars_by_ticker.items():
+        if not rows or len(rows) < min_bars:
+            continue
+        recs = []
+        for row in rows:
+            # row = [date_iso, open, high, low, close, volume]
+            try:
+                recs.append({
+                    'Date': pd.Timestamp(row[0]),
+                    'Open': float(row[1]),
+                    'High': float(row[2]),
+                    'Low': float(row[3]),
+                    'Close': float(row[4]),
+                    'Volume': float(row[5]),
+                })
+            except (IndexError, ValueError, TypeError):
+                continue
+        if len(recs) < min_bars:
+            continue
+        result[ticker] = pd.DataFrame(recs).set_index('Date').sort_index()
+
+    logger.info(
+        f"DailyPriceBar cache hit (via HTTP): {len(result)}/{len(tickers)} tickers "
+        f"in {elapsed_ms} ms"
+    )
+    return result
+
+
 def _load_cached_daily_bars(tickers, min_bars=20):
     """Load OHLCV bars from the DailyPriceBar cache table.
 
     Returns {ticker: DataFrame} for tickers with at least `min_bars` rows.
     Tickers with no/insufficient cache rows are omitted.
+
+    Two access paths depending on execution context:
+      1. Direct DB query \u2014 used inside Flask app (Vercel serverless).
+      2. HTTP fetch from /api/cron/get-cached-daily-bars \u2014 used when
+         running inside GitHub Actions (no DB session available in CI).
+
+    The HTTP path is taken whenever we detect a CI environment OR the
+    direct-DB query raises (e.g. no Flask app context bound). Both paths
+    return identical shapes so the rest of the pipeline is agnostic.
     """
+    try:
+        import pandas as pd  # noqa: F401  (used downstream)
+    except ImportError:
+        return {}
+
+    # Detect GitHub Actions context — skip the direct-DB path entirely.
+    if os.environ.get('GITHUB_ACTIONS') == 'true':
+        return _load_cached_daily_bars_via_http(tickers, min_bars=min_bars)
+
     try:
         from models import db, DailyPriceBar
         import pandas as pd
     except ImportError:
-        return {}
+        # No models module reachable — try HTTP as a last resort.
+        return _load_cached_daily_bars_via_http(tickers, min_bars=min_bars)
 
     try:
         rows = (
@@ -337,8 +448,9 @@ def _load_cached_daily_bars(tickers, min_bars=20):
             .all()
         )
     except Exception as e:
-        logger.warning(f"DailyPriceBar query failed: {e}")
-        return {}
+        # No Flask app context, no DATABASE_URL, etc. Fall back to HTTP.
+        logger.info(f"DailyPriceBar direct-DB query unavailable ({e}); trying HTTP fallback")
+        return _load_cached_daily_bars_via_http(tickers, min_bars=min_bars)
 
     by_ticker = defaultdict(list)
     for r in rows:

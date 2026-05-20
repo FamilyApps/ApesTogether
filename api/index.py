@@ -8880,6 +8880,135 @@ def refresh_daily_bars_cron():
         }), 500
 
 
+@app.route('/api/cron/get-cached-daily-bars', methods=['GET'])
+def get_cached_daily_bars_cron():
+    """
+    Return cached OHLCV bars from the `daily_price_bar` table.
+
+    Used by `bot_agent.py` running on GitHub Actions, which has no DB access
+    (Option B from the May 2026 design discussion: keep DB credentials out
+    of CI). The bot wave fetches the cache via this HTTP endpoint instead
+    of going to AV directly, avoiding 138 redundant TIME_SERIES_DAILY calls
+    per wave.
+
+    Auth: same `verify_cron_request()` that all other crons use
+    (X-Cron-Secret header or Authorization: Bearer).
+
+    Query params:
+      - tickers (optional, comma-separated): default = full bot universe.
+      - max_bars (optional, int, default 100): cap rows per ticker for
+        response-size control. compute_indicators only needs ~26 bars min;
+        100 is comfortable headroom for SMA-200 etc.
+      - min_bars (optional, int, default 20): omit tickers with fewer rows
+        than this (matches `_load_cached_daily_bars`'s default).
+
+    Response shape:
+      {
+        "success": true,
+        "fetched_at": "2026-05-20T12:34:56Z",
+        "tickers_returned": 138,
+        "tickers_requested": 138,
+        "tickers_missing": [],
+        "bars": {
+          "AAPL": [
+            ["2026-01-15", 297.26, 300.51, 296.35, 298.97, 42243561.0],
+            ...
+          ],
+          ...
+        }
+      }
+    Each row is [date_iso, open, high, low, close, volume]. Sorted by date
+    ascending. Caller (bot_data_hub._load_cached_daily_bars) reconstructs a
+    pandas DataFrame matching the existing in-process format.
+    """
+    try:
+        auth_error = verify_cron_request()
+        if auth_error:
+            return auth_error
+
+        from bot_data_hub import get_all_tickers
+        from models import DailyPriceBar
+        from collections import defaultdict
+
+        # Parse params.
+        tickers_param = request.args.get('tickers', '').strip()
+        if tickers_param:
+            tickers = [t.strip().upper() for t in tickers_param.split(',') if t.strip()]
+        else:
+            tickers = get_all_tickers()
+
+        try:
+            max_bars = int(request.args.get('max_bars', '100'))
+        except ValueError:
+            max_bars = 100
+        try:
+            min_bars = int(request.args.get('min_bars', '20'))
+        except ValueError:
+            min_bars = 20
+
+        # Hard cap to keep response < ~5 MB even on a big query.
+        max_bars = max(1, min(max_bars, 250))
+
+        if not tickers:
+            return jsonify({
+                'success': False,
+                'error': 'no_tickers',
+                'message': 'No tickers requested and bot universe empty'
+            }), 400
+
+        # Pull all rows for requested tickers in one query, then group by ticker.
+        # ORDER BY (ticker, date DESC) so we naturally take the most-recent rows
+        # first; we'll reverse to date-ascending in the response so caller code
+        # matches the existing pandas DataFrame ordering.
+        rows = (
+            DailyPriceBar.query
+            .filter(DailyPriceBar.ticker.in_(tickers))
+            .order_by(DailyPriceBar.ticker.asc(), DailyPriceBar.date.desc())
+            .all()
+        )
+
+        by_ticker = defaultdict(list)
+        for r in rows:
+            recs = by_ticker[r.ticker]
+            if len(recs) >= max_bars:
+                continue  # already have enough most-recent bars for this ticker
+            recs.append([
+                r.date.isoformat(),
+                float(r.open) if r.open is not None else float(r.close),
+                float(r.high) if r.high is not None else float(r.close),
+                float(r.low) if r.low is not None else float(r.close),
+                float(r.close),
+                float(r.volume) if r.volume is not None else 0.0,
+            ])
+
+        # Reverse each ticker's list to date-ascending and drop sparse tickers.
+        bars = {}
+        for ticker, recs in by_ticker.items():
+            if len(recs) < min_bars:
+                continue
+            bars[ticker] = list(reversed(recs))
+
+        missing = [t for t in tickers if t not in bars]
+
+        return jsonify({
+            'success': True,
+            'fetched_at': datetime.utcnow().isoformat() + 'Z',
+            'tickers_requested': len(tickers),
+            'tickers_returned': len(bars),
+            'tickers_missing_count': len(missing),
+            'tickers_missing': missing[:25],
+            'bars': bars,
+        })
+    except Exception as e:
+        logger.error(f"get-cached-daily-bars error: {e}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc(),
+        }), 500
+
+
 @app.route('/api/cron/bot-trade-wave', methods=['GET', 'POST'])
 def bot_trade_wave_cron():
     """
