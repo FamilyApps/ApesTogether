@@ -11,6 +11,16 @@ struct PortfolioDetailView: View {
     @State private var tradeSheet: TradeSheetInfo?
     @State private var showBuySheet = false
     @State private var showAddStocks = false
+
+    // ── Phase D: portfolio resizer state ────────────────────────────────
+    // The scale sheet is presented when the subscriber taps "Set Investment
+    // Size" on a subscribed portfolio. `scaleAmountInput` is a dollar
+    // string (the TextField binds to it directly) — sanitized to Double
+    // only at submit time so the user can type freely.
+    @State private var showScaleSheet = false
+    @State private var scaleAmountInput: String = ""
+    @State private var scaleIsSaving = false
+    @State private var scaleError: String?
     
     struct TradeSheetInfo: Identifiable {
         let id = UUID()
@@ -175,6 +185,30 @@ struct PortfolioDetailView: View {
                             .padding(.horizontal, 16)
                         }
                         
+                        // ── Phase D: Portfolio Resizer Card (subscriber-only) ──
+                        // Renders one of two states:
+                        //   • No scale set yet → "Set Investment Size" CTA
+                        //   • Scale active     → badge with current $ + Edit/Clear
+                        // Hidden for the portfolio owner viewing their own page
+                        // and for non-subscribers (where the holdings are blurred
+                        // anyway).
+                        if portfolio.isSubscribed && !portfolio.isOwner,
+                           let subscriptionId = portfolio.subscriptionId {
+                            ScaleCard(
+                                scale: portfolio.scale,
+                                onTapEdit: {
+                                    scaleAmountInput = portfolio.scale
+                                        .map { String(format: "%.0f", $0.targetDollars) } ?? ""
+                                    scaleError = nil
+                                    showScaleSheet = true
+                                },
+                                onTapClear: {
+                                    Task { await viewModel.clearScale(slug: slug, subscriptionId: subscriptionId) }
+                                }
+                            )
+                            .padding(.horizontal, 16)
+                        }
+
                         // ── Holdings Section ──
                         if let holdings = portfolio.holdings, !holdings.isEmpty {
                             VStack(alignment: .leading, spacing: 10) {
@@ -235,6 +269,21 @@ struct PortfolioDetailView: View {
                                 }
                                 .cardStyle(padding: 0)
                                 .padding(.horizontal, 16)
+
+                                // ── Phase D: below-1-share footnote ──
+                                // Appears only in floor mode (prefer_fractional=false)
+                                // when scaling produces sub-1-share positions that
+                                // get dropped from the visible holdings list.
+                                if let count = portfolio.belowOneShareCount, count > 0 {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "info.circle")
+                                            .font(.system(size: 11))
+                                        Text("\(count) position\(count == 1 ? "" : "s") below 1 share at this scale — enable Show Fractional Shares in Settings to see them.")
+                                            .font(.system(size: 11))
+                                    }
+                                    .foregroundColor(.textMuted)
+                                    .padding(.horizontal, 16)
+                                }
                             }
                             
                             // ── Recent Trades ──
@@ -360,6 +409,38 @@ struct PortfolioDetailView: View {
                             type: .sell,
                             currentQuantity: holding.quantity
                         )
+                    }
+                }
+            )
+            .presentationDetents([.medium])
+        }
+        // ── Phase D: scale-setting sheet ────────────────────────────────────
+        .sheet(isPresented: $showScaleSheet) {
+            SetScaleSheet(
+                ownerName: viewModel.portfolio?.owner.publicName ?? "this portfolio",
+                creatorPortfolioValue: viewModel.portfolio?.scale?.unscaledPortfolioValue
+                    ?? viewModel.portfolio?.portfolioValue,
+                currentTargetDollars: viewModel.portfolio?.scale?.targetDollars,
+                amount: $scaleAmountInput,
+                isSaving: $scaleIsSaving,
+                errorText: $scaleError,
+                onCancel: { showScaleSheet = false },
+                onSubmit: { dollars in
+                    guard let subscriptionId = viewModel.portfolio?.subscriptionId else { return }
+                    Task {
+                        scaleIsSaving = true
+                        scaleError = nil
+                        let ok = await viewModel.setScale(
+                            slug: slug,
+                            subscriptionId: subscriptionId,
+                            targetDollars: dollars
+                        )
+                        scaleIsSaving = false
+                        if ok {
+                            showScaleSheet = false
+                        } else {
+                            scaleError = viewModel.error ?? "Failed to set scale"
+                        }
                     }
                 }
             )
@@ -814,6 +895,39 @@ class PortfolioDetailViewModel: ObservableObject {
         
         isLoadingChart = false
     }
+
+    // ── Phase D: portfolio resizer ──────────────────────────────────────
+    /// Set the subscriber's scale (target dollar amount) for this
+    /// portfolio. Reloads the portfolio on success so holdings + scale
+    /// banner reflect the new state. Returns true on success.
+    func setScale(slug: String, subscriptionId: Int, targetDollars: Double) async -> Bool {
+        do {
+            _ = try await APIService.shared.setSubscriptionScale(
+                subscriptionId: subscriptionId,
+                targetDollars: targetDollars
+            )
+            // Re-fetch the portfolio so scaled quantities/value populate.
+            await loadPortfolio(slug: slug)
+            return true
+        } catch let APIError.serverError(code) {
+            self.error = "Server error (\(code))"
+            return false
+        } catch {
+            self.error = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Clear the subscriber's scale (return to unscaled view). Reloads
+    /// the portfolio so the scale banner disappears immediately.
+    func clearScale(slug: String, subscriptionId: Int) async {
+        do {
+            try await APIService.shared.clearSubscriptionScale(subscriptionId: subscriptionId)
+            await loadPortfolio(slug: slug)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
 }
 
 // MARK: - Leaderboard Badge Pill
@@ -1212,6 +1326,215 @@ struct BlurredHoldingsTeaser: View {
                 RoundedRectangle(cornerRadius: 10)
                     .stroke(isSelected ? Color.primaryAccent : Color.clear, lineWidth: 1.5)
             )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// MARK: - Phase D: Portfolio Resizer Components
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Card shown above the Holdings list for subscribers. Two states:
+///   • No scale set: gradient "Set Investment Size" CTA
+///   • Scale active: badge with target_dollars + Edit/Clear actions
+struct ScaleCard: View {
+    let scale: PortfolioScale?
+    let onTapEdit: () -> Void
+    let onTapClear: () -> Void
+
+    var body: some View {
+        if let scale = scale {
+            // Active-scale state
+            HStack(spacing: 12) {
+                Image(systemName: "scale.3d")
+                    .font(.system(size: 18))
+                    .foregroundColor(.primaryAccent)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Scaled to \(formatDollars(scale.targetDollars))")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.textPrimary)
+                    Text("From " + formatDollars(scale.unscaledPortfolioValue) + " creator portfolio")
+                        .font(.system(size: 11))
+                        .foregroundColor(.textMuted)
+                }
+                Spacer()
+                Button(action: onTapEdit) {
+                    Text("Edit")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.primaryAccent)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.primaryAccent.opacity(0.5), lineWidth: 1)
+                        )
+                }
+                Button(action: onTapClear) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.textMuted)
+                        .padding(8)
+                        .background(
+                            Circle().fill(Color.white.opacity(0.05))
+                        )
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .cardStyle(padding: 0)
+        } else {
+            // No-scale CTA
+            Button(action: onTapEdit) {
+                HStack(spacing: 10) {
+                    Image(systemName: "scale.3d")
+                        .font(.system(size: 16))
+                    Text("Set Your Investment Size")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12))
+                        .foregroundColor(.textMuted)
+                }
+                .foregroundColor(.textPrimary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 14)
+            }
+            .cardStyle(padding: 0)
+        }
+    }
+
+    private func formatDollars(_ value: Double) -> String {
+        // Compact format: $10K, $1.2M, etc. Falls back to $X,XXX for
+        // small values so the card doesn't say "$0K" for a $500 scale.
+        if value >= 1_000_000 {
+            return String(format: "$%.1fM", value / 1_000_000)
+        }
+        if value >= 10_000 {
+            return String(format: "$%.0fK", value / 1_000)
+        }
+        if value >= 1_000 {
+            return String(format: "$%.1fK", value / 1_000)
+        }
+        return "$" + String(format: "%.0f", value)
+    }
+}
+
+/// Sheet presented when the subscriber taps "Set Investment Size" or
+/// "Edit" on the ScaleCard. Lets them type a dollar amount, submits to
+/// /subscriptions/<id>/scale, and dismisses on success.
+struct SetScaleSheet: View {
+    let ownerName: String
+    let creatorPortfolioValue: Double?
+    let currentTargetDollars: Double?
+    @Binding var amount: String
+    @Binding var isSaving: Bool
+    @Binding var errorText: String?
+    let onCancel: () -> Void
+    let onSubmit: (Double) -> Void
+
+    @FocusState private var inputFocused: Bool
+
+    var body: some View {
+        NavigationView {
+            ZStack {
+                Color.appBackground.ignoresSafeArea()
+
+                VStack(alignment: .leading, spacing: 20) {
+                    // Headline
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(currentTargetDollars == nil
+                             ? "Set your investment size"
+                             : "Update your investment size")
+                            .font(.title3.weight(.bold))
+                            .foregroundColor(.textPrimary)
+                        Text("All holdings on \(ownerName)'s portfolio will be scaled to match. The scale is frozen at the moment you set it.")
+                            .font(.caption)
+                            .foregroundColor(.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    // Creator portfolio context
+                    if let value = creatorPortfolioValue, value > 0 {
+                        HStack {
+                            Text("Creator portfolio")
+                                .font(.caption)
+                                .foregroundColor(.textMuted)
+                            Spacer()
+                            Text(String(format: "$%.0f", value))
+                                .font(.caption.monospacedDigit())
+                                .foregroundColor(.textSecondary)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .cardStyle(padding: 0)
+                    }
+
+                    // Dollar input
+                    HStack(spacing: 6) {
+                        Text("$")
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundColor(.textSecondary)
+                        TextField("0", text: $amount)
+                            .keyboardType(.numberPad)
+                            .font(.system(size: 32, weight: .bold))
+                            .foregroundColor(.textPrimary)
+                            .focused($inputFocused)
+                            .onAppear {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                    inputFocused = true
+                                }
+                            }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 14)
+                    .cardStyle(padding: 0)
+
+                    if let err = errorText {
+                        Text(err)
+                            .font(.caption)
+                            .foregroundColor(.losses)
+                    }
+
+                    Spacer()
+
+                    // Submit
+                    Button {
+                        let dollars = Double(amount.replacingOccurrences(of: ",", with: ""))
+                            ?? 0
+                        guard dollars > 0 else {
+                            errorText = "Enter a dollar amount greater than 0"
+                            return
+                        }
+                        onSubmit(dollars)
+                    } label: {
+                        HStack {
+                            if isSaving {
+                                ProgressView()
+                                    .tint(.white)
+                                    .padding(.trailing, 6)
+                            }
+                            Text(isSaving ? "Saving..." : "Apply Scale")
+                                .font(.system(size: 16, weight: .bold))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.primaryAccent)
+                        .foregroundColor(.white)
+                        .cornerRadius(12)
+                    }
+                    .disabled(isSaving)
+                }
+                .padding(20)
+            }
+            .navigationTitle("Investment Size")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel", action: onCancel)
+                        .foregroundColor(.textSecondary)
+                }
+            }
         }
     }
 }

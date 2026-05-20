@@ -11,6 +11,13 @@ struct SettingsView: View {
     @State private var showFAQ = false
     @State private var urlCopied = false
     @State private var showTaxInfo = false
+
+    // Phase D portfolio display preference. Default true so scaled
+    // subscriber views show up to 5-decimal fractional shares; flipping
+    // it off floors to whole shares and surfaces a "below 1 share"
+    // footnote. Loaded from /settings/portfolio-preferences on appear.
+    @State private var preferFractional = true
+    @State private var preferFractionalLoaded = false
     
     private var personalURL: String {
         if let slug = authManager.currentUser?.portfolioSlug {
@@ -90,6 +97,37 @@ struct SettingsView: View {
                                     Toggle("", isOn: $allowSubscribers)
                                         .toggleStyle(SwitchToggleStyle(tint: Color.primaryAccent))
                                         .labelsHidden()
+                                }
+                                .padding()
+
+                                AccentDivider()
+
+                                // Phase D: show fractional shares in scaled
+                                // subscribed-portfolio views. Persists to
+                                // User.extra_data via PUT /settings/portfolio-preferences.
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Image(systemName: "chart.pie.fill")
+                                            .foregroundColor(.primaryAccent)
+                                            .frame(width: 24)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("Show Fractional Shares")
+                                                .foregroundColor(.textPrimary)
+                                            Text("In scaled portfolio views")
+                                                .font(.caption2)
+                                                .foregroundColor(.textMuted)
+                                        }
+                                        Spacer()
+                                        Toggle("", isOn: $preferFractional)
+                                            .toggleStyle(SwitchToggleStyle(tint: Color.primaryAccent))
+                                            .labelsHidden()
+                                            .disabled(!preferFractionalLoaded)
+                                            .onChange(of: preferFractional) { newValue in
+                                                // Skip the initial set when loaded fires
+                                                guard preferFractionalLoaded else { return }
+                                                Task { await savePreferFractional(newValue) }
+                                            }
+                                    }
                                 }
                                 .padding()
                             }
@@ -236,6 +274,9 @@ struct SettingsView: View {
                 TaxInfoView()
                     .environmentObject(authManager)
             }
+            .task {
+                await loadPreferFractional()
+            }
         }
     }
     
@@ -245,6 +286,39 @@ struct SettingsView: View {
             authManager.signOut()
         } catch {
             print("Failed to delete account: \(error)")
+        }
+    }
+
+    // ── Phase D: portfolio display preferences ──────────────────────────
+    // Load on settings appear so the toggle reflects the server state.
+    // The `preferFractionalLoaded` flag gates the .onChange handler so
+    // SwiftUI's initial state set doesn't trigger an unnecessary PUT.
+    private func loadPreferFractional() async {
+        do {
+            let prefs = try await APIService.shared.getPortfolioPreferences()
+            await MainActor.run {
+                preferFractional = prefs.preferFractional
+                preferFractionalLoaded = true
+            }
+        } catch {
+            // Failure isn't critical — toggle stays at default (true) but
+            // disabled so the user knows it didn't load. Log for debug.
+            print("Failed to load portfolio preferences: \(error)")
+            await MainActor.run {
+                preferFractionalLoaded = true
+            }
+        }
+    }
+
+    private func savePreferFractional(_ newValue: Bool) async {
+        do {
+            _ = try await APIService.shared.updatePortfolioPreferences(preferFractional: newValue)
+        } catch {
+            // Roll back on failure so the toggle state matches the server.
+            print("Failed to update portfolio preferences: \(error)")
+            await MainActor.run {
+                preferFractional = !newValue
+            }
         }
     }
 }

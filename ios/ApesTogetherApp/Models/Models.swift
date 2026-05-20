@@ -79,6 +79,11 @@ struct PortfolioResponse: Codable {
     let owner: PortfolioOwner
     let isOwner: Bool
     let isSubscribed: Bool
+    // Phase D: subscription_id surfaced by GET /portfolio/<slug> when the
+    // viewer is the subscriber, so the scale modal can call
+    // POST/DELETE /subscriptions/<id>/scale directly. Nil for owner-view
+    // and not-subscribed-view.
+    let subscriptionId: Int?
     let subscriptionPrice: Double
     let subscriberCount: Int
     let holdings: [Holding]?
@@ -92,6 +97,35 @@ struct PortfolioResponse: Codable {
     let numStocks: Int?
     let portfolioValue: Double?
     let cashBalance: Double?
+
+    // ── Phase D: portfolio resizer ──────────────────────────────────────
+    // `scale` is populated only when the viewer is a subscriber whose
+    // subscription has a non-NULL scale_factor on the server. When
+    // present, `holdings.quantity`, `portfolioValue`, and `cashBalance`
+    // in this response are ALREADY SCALED. `scale.unscaledPortfolioValue`
+    // is the original creator portfolio total — render as "Scaled from $X"
+    // in the UI for context.
+    let scale: PortfolioScale?
+    // Count of positions that floor-rounded to 0 shares at the current
+    // scale (only populated when prefer_fractional is false). The UI
+    // surfaces this as "+N positions below 1 share at this scale".
+    let belowOneShareCount: Int?
+}
+
+/// Phase D scale metadata for a scaled subscriber view. Nil when the
+/// subscription has no scale set (= full unscaled portfolio).
+struct PortfolioScale: Codable {
+    /// The multiplier applied to all share quantities. e.g. 0.1234
+    /// means subscriber sees 12.34% of each creator position.
+    let scaleFactor: Double
+    /// Dollar amount the subscriber chose when configuring scale.
+    /// Frozen — does NOT track market drift on the creator portfolio.
+    let targetDollars: Double
+    /// ISO-8601 timestamp (UTC, with Z) of when scale was set.
+    let scaleSetAt: String?
+    /// Unscaled portfolio value (full creator total) at THIS moment.
+    /// Use this in the UI for "Scaled from $81,037" subtitle.
+    let unscaledPortfolioValue: Double
 }
 
 struct LeaderboardBadge: Codable, Identifiable {
@@ -146,15 +180,25 @@ struct Holding: Codable, Identifiable {
 
     /// Quantity formatted for display.
     /// - Whole-share positions (e.g. 10.0) show as "10"
-    /// - Fractional positions (e.g. 0.5, 1.2345) show with 4 decimals
-    /// This fixes the "fractional shares display as 0" bug — callers
-    /// were using `Int(quantity)` which truncated 0.5 to 0.
+    /// - Fractional positions show with up to 5 decimals, trailing zeros
+    ///   trimmed (e.g. 0.5 → "0.5", 1.23456 → "1.23456", 0.10000 → "0.1")
+    ///
+    /// 5 decimals is the precision used by Phase D scaled views — a
+    /// $100 scale on a 50-share position can yield qty like 0.06173.
+    /// Whole shares from non-scaled views still render cleanly as integers.
     var formattedQuantity: String {
         let rounded = quantity.rounded()
-        if abs(quantity - rounded) < 0.0001 {
+        if abs(quantity - rounded) < 0.000005 {
             return String(format: "%.0f", quantity)
         }
-        return String(format: "%.4f", quantity)
+        // Format to 5 decimals, then strip trailing zeros + dangling '.'
+        let raw = String(format: "%.5f", quantity)
+        var trimmed = raw
+        if trimmed.contains(".") {
+            while trimmed.hasSuffix("0") { trimmed.removeLast() }
+            if trimmed.hasSuffix(".") { trimmed.removeLast() }
+        }
+        return trimmed
     }
 
     /// Returns this position's share of the owner's portfolio as a percent
@@ -351,4 +395,25 @@ struct NotificationItem: Codable, Identifiable {
 struct UnsubscribeResponse: Codable {
     let success: Bool?
     let message: String?
+}
+
+// MARK: - Phase D: portfolio resizer
+
+/// Response from POST /subscriptions/<id>/scale. Mirrors the JSON
+/// returned by `mobile_api.set_subscription_scale`.
+struct SetScaleResponse: Codable {
+    let success: Bool
+    let scaleFactor: Double
+    let targetDollars: Double
+    let scaleSetAt: String?
+    let targetPortfolioValue: Double
+}
+
+/// Response from GET/PUT /settings/portfolio-preferences. Currently
+/// exposes only prefer_fractional but designed to grow.
+struct PortfolioPreferencesResponse: Codable {
+    let preferFractional: Bool
+    // success is only set on the PUT response; optional so the GET
+    // response decodes cleanly too.
+    let success: Bool?
 }

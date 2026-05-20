@@ -106,6 +106,33 @@ class APIService {
     func unsubscribe(subscriptionId: Int) async throws -> UnsubscribeResponse {
         return try await delete("/unsubscribe/\(subscriptionId)")
     }
+
+    // MARK: - Phase D: portfolio resizer
+
+    /// Set or update a subscription's scale (target dollar size).
+    /// Backend computes scale_factor from current creator portfolio value
+    /// at the moment of the call and freezes it.
+    func setSubscriptionScale(subscriptionId: Int, targetDollars: Double) async throws -> SetScaleResponse {
+        let body: [String: Any] = ["target_dollars": targetDollars]
+        return try await post("/subscriptions/\(subscriptionId)/scale", body: body, authenticated: true)
+    }
+
+    /// Clear a subscription's scale (return to full unscaled view).
+    func clearSubscriptionScale(subscriptionId: Int) async throws {
+        let _: EmptyResponse = try await delete("/subscriptions/\(subscriptionId)/scale")
+    }
+
+    /// Read the current user's portfolio display preferences.
+    func getPortfolioPreferences() async throws -> PortfolioPreferencesResponse {
+        return try await get("/settings/portfolio-preferences", authenticated: true)
+    }
+
+    /// Update the current user's portfolio display preferences (e.g.,
+    /// toggle prefer_fractional for the scaled view).
+    func updatePortfolioPreferences(preferFractional: Bool) async throws -> PortfolioPreferencesResponse {
+        let body: [String: Any] = ["prefer_fractional": preferFractional]
+        return try await put("/settings/portfolio-preferences", body: body)
+    }
     
     // MARK: - Notification History
     
