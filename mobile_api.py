@@ -4273,6 +4273,121 @@ def log_av_calls():
     return jsonify({'logged': logged, 'errors': errors, 'received': len(logs)})
 
 
+@mobile_api.route('/admin/bot/log-wave', methods=['POST'])
+@require_cron_secret
+@with_db_retry
+def log_bot_wave():
+    """Persist a BotWaveLog row from external workers (GitHub Actions).
+
+    Mirrors the in-process finally-block writes inside `_execute_bot_trade_wave()`.
+    Called by `bot_agent.py:cmd_trade()` at the end of each wave (success or
+    failure) so the admin panel's wave-status card and post-mortem queries
+    can see what actually happened — previously the GH Actions waves left
+    no trace in `bot_wave_log` because the runner has no DATABASE_URL.
+
+    Request body (JSON), shape mirrors `BotWaveLog` columns:
+        {
+          "wave": 1,                                # required, 1-4
+          "started_at": "2026-05-20T13:45:00Z",     # ISO 8601, defaults to now
+          "finished_at": "2026-05-20T13:46:23Z",    # optional
+          "duration_ms": 83000,                     # optional, auto-derived
+          "status": "success",                      # default 'success'
+          "bots_checked": 138,
+          "bots_traded": 12,
+          "trades_executed": 18,
+          "data_quality": { "prices": true, ... },
+          "data_summary": { "tickers_with_indicators": 138, ... },
+          "decisions": [ {bot_id, username, action, ticker, score,
+                          signal_tag, status}, ... ],
+          "errors": [ "Bot 42: ...", ... ],
+          "traceback_text": null
+        }
+
+    Auth: X-Cron-Secret header (or admin 2FA session via `require_cron_secret`).
+    Returns: { "success": true, "log_id": <int> }
+    """
+    from models import db, BotWaveLog
+    from datetime import datetime as _dt
+
+    payload = request.get_json(silent=True) or {}
+
+    # ── Validate wave number (must be 1-4) ──
+    try:
+        wave = int(payload.get('wave'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'wave must be an int 1-4'}), 400
+    if wave not in (1, 2, 3, 4):
+        return jsonify({'error': 'wave must be 1, 2, 3, or 4'}), 400
+
+    # ── Parse timestamps. ISO 8601 with optional trailing Z. ──
+    def _parse_ts(ts_str, fallback):
+        if not ts_str:
+            return fallback
+        try:
+            return _dt.fromisoformat(str(ts_str).rstrip('Z'))
+        except (ValueError, AttributeError):
+            return fallback
+
+    now = _dt.utcnow()
+    started_at = _parse_ts(payload.get('started_at'), now)
+    finished_at = _parse_ts(payload.get('finished_at'), now)
+
+    duration_ms = payload.get('duration_ms')
+    if duration_ms is None:
+        duration_ms = int((finished_at - started_at).total_seconds() * 1000)
+    else:
+        try:
+            duration_ms = int(duration_ms)
+        except (TypeError, ValueError):
+            duration_ms = None
+
+    # ── Cap large JSON fields to keep the row reasonable ──
+    decisions = payload.get('decisions') or []
+    if not isinstance(decisions, list):
+        decisions = []
+    if len(decisions) > 200:
+        decisions = decisions[:200]
+
+    errors = payload.get('errors') or []
+    if not isinstance(errors, list):
+        errors = []
+    if len(errors) > 100:
+        errors = errors[:100]
+
+    # ── Validated counts default to 0 on bad input rather than 500 ──
+    def _safe_int(v):
+        try:
+            return max(0, int(v))
+        except (TypeError, ValueError):
+            return 0
+
+    log = BotWaveLog(
+        wave=wave,
+        started_at=started_at,
+        finished_at=finished_at,
+        duration_ms=duration_ms,
+        status=(str(payload.get('status') or 'success'))[:30],
+        bots_checked=_safe_int(payload.get('bots_checked')),
+        bots_traded=_safe_int(payload.get('bots_traded')),
+        trades_executed=_safe_int(payload.get('trades_executed')),
+        data_quality=payload.get('data_quality') if isinstance(payload.get('data_quality'), dict) else None,
+        data_summary=payload.get('data_summary') if isinstance(payload.get('data_summary'), dict) else None,
+        decisions=decisions,
+        errors=errors,
+        traceback_text=payload.get('traceback_text') or None,
+    )
+
+    try:
+        db.session.add(log)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"log_bot_wave: commit failed: {e}")
+        return jsonify({'error': 'commit_failed', 'message': str(e)}), 500
+
+    return jsonify({'success': True, 'log_id': log.id})
+
+
 @mobile_api.route('/admin/bot/trade', methods=['POST'])
 @require_cron_secret
 @with_db_retry

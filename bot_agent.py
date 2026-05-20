@@ -186,8 +186,56 @@ def cmd_seed(args):
 
 # ── Trade Command ────────────────────────────────────────────────────────────
 
+def _post_wave_log(wave, started_at, finished_at, status, results):
+    """POST a BotWaveLog row to the backend. Best-effort, never raises.
+
+    Mirrors the columns of `BotWaveLog` and the shape that
+    `mobile_api.py:log_bot_wave()` expects. Any HTTP failure is caught
+    by the caller's try/except — this function only handles serialization
+    of the in-memory wave_results dict into a JSON-ready payload.
+    """
+    duration_ms = int((finished_at - started_at).total_seconds() * 1000)
+
+    # Cap large arrays defensively (endpoint also caps, but cheaper here).
+    decisions = results.get('decisions') or []
+    if len(decisions) > 200:
+        decisions = decisions[:200]
+    errors = results.get('errors') or []
+    if len(errors) > 100:
+        errors = errors[:100]
+
+    payload = {
+        'wave': int(wave),
+        'started_at': started_at.isoformat() + 'Z',
+        'finished_at': finished_at.isoformat() + 'Z',
+        'duration_ms': duration_ms,
+        'status': status,
+        'bots_checked': int(results.get('bots_checked') or 0),
+        'bots_traded': int(results.get('bots_traded') or 0),
+        'trades_executed': int(results.get('trades_executed') or 0),
+        'data_quality': results.get('data_quality'),
+        'data_summary': results.get('data_summary'),
+        'decisions': decisions,
+        'errors': errors,
+        'traceback_text': results.get('traceback_text'),
+    }
+
+    resp, code = api_call('/admin/bot/log-wave', method='POST', data=payload, timeout=10)
+    if code == 200 and resp.get('success'):
+        logger.info(f"BotWaveLog posted: wave={wave} status={status} log_id={resp.get('log_id')}")
+    else:
+        logger.warning(f"BotWaveLog POST returned {code}: {resp}")
+
+
 def cmd_trade(args):
-    """Run a trading session for all active bots."""
+    """Run a trading session for all active bots.
+
+    Instrumented to POST a BotWaveLog row to /api/mobile/admin/bot/log-wave
+    at the end of every wave (success or failure). Mirrors the in-process
+    `_execute_bot_trade_wave` logging path on Vercel — without this, GH
+    Actions waves left no trace in `bot_wave_log` because the runner has
+    no DATABASE_URL.
+    """
     dry_run = args.dry_run
     wave_filter = args.wave
     force = args.force
@@ -199,90 +247,190 @@ def cmd_trade(args):
         print("   ⚠️  Market is closed. Use --force to trade anyway.")
         return
 
-    # Step 1: Refresh market data
-    print(f"\n📊 Refreshing market data...")
-    hub = MarketDataHub()
-    hub.refresh(include_extras=True)
+    # ── Wave-level diagnostics: track everything _execute_bot_trade_wave
+    #    tracks so the BotWaveLog row produced from GH Actions matches the
+    #    shape the admin panel already understands. Cap decisions at 200
+    #    and errors at 100 before posting (endpoint also enforces this). ──
+    wave_started_at = datetime.utcnow()
+    wave_results = {
+        'bots_checked': 0,
+        'bots_traded': 0,
+        'trades_executed': 0,
+        'data_quality': None,
+        'data_summary': None,
+        'decisions': [],
+        'errors': [],
+        'traceback_text': None,
+    }
+    wave_status = 'success'
+    log_posted = False
 
-    if not hub.is_core_available():
-        print("❌ Cannot trade: no price/indicator data available")
-        return
+    try:
+        # Step 1: Refresh market data
+        print(f"\n📊 Refreshing market data...")
+        hub = MarketDataHub()
+        try:
+            hub.refresh(include_extras=True)
+        except Exception as refresh_err:
+            logger.error(f"MarketDataHub.refresh raised: {refresh_err}")
+            wave_results['errors'].append(f'refresh: {refresh_err}')
 
-    summary = hub.summary()
-    print(f"   Tickers with data: {summary['tickers_with_indicators']}")
-    print(f"   News sentiment: {summary['tickers_with_news']} tickers")
-    print(f"   Social sentiment: {summary['tickers_with_social']} tickers")
+        wave_results['data_quality'] = getattr(hub, 'data_quality', None)
+        try:
+            wave_results['data_summary'] = hub.summary()
+        except Exception:
+            wave_results['data_summary'] = None
 
-    # Step 2: Get active bots
-    bots = get_active_bots()
-    if not bots:
-        print("   No active bots found. Run 'seed' first.")
-        return
+        if not hub.is_core_available():
+            print("❌ Cannot trade: no price/indicator data available")
+            wave_results['errors'].insert(0, 'Market data unavailable')
+            wave_status = 'no_data'
+            return
 
-    print(f"\n🤖 Active bots: {len(bots)}")
+        summary = hub.summary()
+        print(f"   Tickers with data: {summary['tickers_with_indicators']}")
+        print(f"   News sentiment: {summary['tickers_with_news']} tickers")
+        print(f"   Social sentiment: {summary['tickers_with_social']} tickers")
 
-    # Step 3: Process each bot
-    total_trades = 0
-    for bot in bots:
-        user_id = bot['id']
-        username = bot['username']
-        industry = bot.get('industry', 'General')
+        # Step 2: Get active bots
+        bots = get_active_bots()
+        wave_results['bots_checked'] = len(bots)
+        if not bots:
+            print("   No active bots found. Run 'seed' first.")
+            return
 
-        # Load strategy profile
-        profile = _load_bot_profile(user_id)
-        if not profile:
-            # Generate a default profile if none saved
-            from bot_strategies import pick_random_strategy
-            strategy_name = bot.get('extra_data', {}).get('trading_style', pick_random_strategy())
-            profile = generate_strategy_profile(strategy_name, industry)
+        print(f"\n🤖 Active bots: {len(bots)}")
 
-        # Check if bot should trade today
-        if not force and not should_trade_today(profile):
-            logger.debug(f"  {username}: skipping today (frequency/patience)")
-            continue
+        # Step 3: Process each bot
+        total_trades = 0
+        for bot in bots:
+            user_id = bot['id']
+            username = bot['username']
+            industry = bot.get('industry', 'General')
 
-        # Check wave filter
-        bot_wave = get_trade_wave(profile)
-        if wave_filter and bot_wave != wave_filter:
-            logger.debug(f"  {username}: not in wave {wave_filter} (assigned wave {bot_wave})")
-            continue
+            try:
+                # Load strategy profile
+                profile = _load_bot_profile(user_id)
+                if not profile:
+                    # Generate a default profile if none saved
+                    from bot_strategies import pick_random_strategy
+                    strategy_name = bot.get('extra_data', {}).get('trading_style', pick_random_strategy())
+                    profile = generate_strategy_profile(strategy_name, industry)
 
-        print(f"\n  🧠 {username} (ID={user_id}, {profile.get('strategy', '?')}, wave {bot_wave})")
+                # Check if bot should trade today
+                if not force and not should_trade_today(profile):
+                    logger.debug(f"  {username}: skipping today (frequency/patience)")
+                    continue
 
-        # Get current holdings (from bot data)
-        holdings = _get_bot_holdings_from_api(user_id)
+                # Check wave filter
+                bot_wave = get_trade_wave(profile)
+                if wave_filter and bot_wave != wave_filter:
+                    logger.debug(f"  {username}: not in wave {wave_filter} (assigned wave {bot_wave})")
+                    continue
 
-        # Generate trade decisions
-        decisions = generate_trade_decisions(profile, hub, holdings)
+                print(f"\n  🧠 {username} (ID={user_id}, {profile.get('strategy', '?')}, wave {bot_wave})")
 
-        # Apply human biases
-        recent_trades = []  # TODO: fetch from trade history
-        decisions = apply_human_biases(decisions, profile, recent_trades)
+                # Get current holdings (from bot data)
+                holdings = _get_bot_holdings_from_api(user_id)
 
-        # Add FOMO trades
-        fomo = apply_fomo_trades(profile, hub, decisions)
-        if fomo:
-            decisions.extend(fomo)
+                # Generate trade decisions
+                decisions = generate_trade_decisions(profile, hub, holdings)
 
-        if not decisions:
-            print(f"    → No trades (signals below threshold)")
-            continue
+                # Apply human biases
+                recent_trades = []  # TODO: fetch from trade history
+                decisions = apply_human_biases(decisions, profile, recent_trades)
 
-        # Display decisions
-        for d in decisions:
-            fomo_tag = " 🔥FOMO" if d.get('is_fomo') else ""
-            print(f"    → {d['action'].upper()} {d['ticker']} "
-                  f"(score={d['score']:.3f}) — {d['reason']}{fomo_tag}")
+                # Add FOMO trades
+                fomo = apply_fomo_trades(profile, hub, decisions)
+                if fomo:
+                    decisions.extend(fomo)
 
-        if dry_run:
-            print(f"    [DRY RUN — not executed]")
-            continue
+                if not decisions:
+                    print(f"    → No trades (signals below threshold)")
+                    continue
 
-        # Execute trades
-        executed = execute_bot_decisions(user_id, username, decisions, profile, hub)
-        total_trades += len(executed)
+                # Display decisions
+                for d in decisions:
+                    fomo_tag = " 🔥FOMO" if d.get('is_fomo') else ""
+                    print(f"    → {d['action'].upper()} {d['ticker']} "
+                          f"(score={d['score']:.3f}) — {d['reason']}{fomo_tag}")
 
-    print(f"\n✅ Trading session complete: {total_trades} trades executed across {len(bots)} bots")
+                # Track per-decision diagnostics for the BotWaveLog row.
+                # `status` is updated to 'executed' below for the trades that
+                # actually went through; 'pending' here means generated but
+                # not yet executed (dry-run or executor failure).
+                wave_results['bots_traded'] += 1
+                bot_decision_records = []
+                for d in decisions:
+                    rec = {
+                        'bot_id': user_id,
+                        'username': username,
+                        'action': d.get('action'),
+                        'ticker': d.get('ticker'),
+                        'score': round(float(d.get('score', 0)), 3),
+                        'signal_tag': d.get('signal_tag'),
+                        'is_fomo': bool(d.get('is_fomo')),
+                        'status': 'dry_run' if dry_run else 'pending',
+                    }
+                    bot_decision_records.append(rec)
+                wave_results['decisions'].extend(bot_decision_records)
+
+                if dry_run:
+                    print(f"    [DRY RUN — not executed]")
+                    continue
+
+                # Execute trades
+                executed = execute_bot_decisions(user_id, username, decisions, profile, hub)
+                total_trades += len(executed)
+                wave_results['trades_executed'] += len(executed)
+
+                # Mark which decisions actually executed so the admin panel
+                # can distinguish "signal generated → trade placed" from
+                # "signal generated → executor rejected / insufficient shares".
+                executed_keys = {(e.get('action'), e.get('ticker')) for e in executed}
+                for rec in bot_decision_records:
+                    if (rec['action'], rec['ticker']) in executed_keys:
+                        rec['status'] = 'executed'
+                    else:
+                        rec['status'] = 'skipped'
+
+            except Exception as bot_err:
+                err_msg = f'Bot {user_id} ({username}): {bot_err}'
+                logger.error(err_msg)
+                wave_results['errors'].append(err_msg)
+
+        # Final wave-level status
+        if wave_results['errors']:
+            wave_status = 'partial'
+        else:
+            wave_status = 'success'
+
+        print(f"\n✅ Trading session complete: {total_trades} trades executed across {len(bots)} bots")
+
+    except Exception as fatal_err:
+        import traceback as _tb
+        wave_status = 'error'
+        wave_results['traceback_text'] = _tb.format_exc()
+        wave_results['errors'].append(f'cmd_trade fatal: {fatal_err}')
+        logger.error(f"cmd_trade fatal exception: {fatal_err}")
+        # Don't re-raise — finally block needs to fire and post the log.
+    finally:
+        # POST the wave log to the backend so the admin panel sees it.
+        # Skips when no wave_filter (dev-mode local runs) since the endpoint
+        # only accepts wave ∈ {1,2,3,4}. Failure here is non-fatal — the
+        # wave already ran, this is purely diagnostic plumbing.
+        if wave_filter in (1, 2, 3, 4) and not log_posted:
+            try:
+                _post_wave_log(
+                    wave=wave_filter,
+                    started_at=wave_started_at,
+                    finished_at=datetime.utcnow(),
+                    status=wave_status,
+                    results=wave_results,
+                )
+                log_posted = True
+            except Exception as post_err:
+                logger.warning(f"BotWaveLog HTTP post failed (non-fatal): {post_err}")
 
 
 # ── Remove Command ───────────────────────────────────────────────────────────
