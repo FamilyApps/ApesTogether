@@ -63,21 +63,20 @@ jobs:
             echo "wave=${{ github.event.inputs.wave }}" >> $GITHUB_OUTPUT
             echo "dry_run=${{ github.event.inputs.dry_run }}" >> $GITHUB_OUTPUT
           else
-            # Determine wave from cron schedule time (UTC hour)
-            HOUR=$(date -u +%H)
-            MINUTE=$(date -u +%M)
-            
-            if [ "$HOUR" = "13" ] || [ "$HOUR" = "14" -a "$MINUTE" -lt "30" ]; then
-              WAVE=1
-            elif [ "$HOUR" = "14" ] || [ "$HOUR" = "15" -a "$MINUTE" -lt "30" ]; then
-              WAVE=2
-            elif [ "$HOUR" = "17" ] || [ "$HOUR" = "18" -a "$MINUTE" -lt "30" ]; then
-              WAVE=3
-            elif [ "$HOUR" = "19" ] || [ "$HOUR" = "20" -a "$MINUTE" -lt "30" ]; then
-              WAVE=4
-            else
-              WAVE=0
-            fi
+            # Use github.event.schedule (the cron string that triggered this
+            # run) instead of comparing against $(date -u +%H:%M). GitHub
+            # Actions free-tier scheduled jobs routinely drift 30-60 minutes,
+            # which used to push the actual run time out of our 30-min
+            # detection windows and mis-classify waves (e.g. a delayed wave 1
+            # firing AS wave 2, or wave 2 falling into the else branch and
+            # running ALL waves). The cron string is the ground truth.
+            case "${{ github.event.schedule }}" in
+              "45 13 * * 1-5") WAVE=1 ;;
+              "45 14 * * 1-5") WAVE=2 ;;
+              "15 17 * * 1-5") WAVE=3 ;;
+              "30 19 * * 1-5") WAVE=4 ;;
+              *)               WAVE=0 ;;
+            esac
             
             echo "wave=$WAVE" >> $GITHUB_OUTPUT
             echo "dry_run=false" >> $GITHUB_OUTPUT

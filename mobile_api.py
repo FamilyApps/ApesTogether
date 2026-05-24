@@ -7347,7 +7347,13 @@ def bot_cron_health():
             bot_status = 'error' if is_weekday else 'unknown'
         jobs.append({
             'name': 'Bot Trading Waves',
-            'schedule': '9:45, 10:45, 1:15, 3:30 ET',
+            # Configured cron times in ET. GitHub Actions free-tier
+            # routinely drifts 30-60 min late on scheduled runs, so the
+            # actual trade timestamps in 'Bot Wave Diagnostics' below
+            # will not match these times exactly. This is a known GH
+            # platform limitation, not a bug in our code. (See
+            # bot-trading.yml for the full schedule.)
+            'schedule': 'Scheduled 9:45, 10:45, 1:15, 3:30 ET (GH cron drifts up to ~60min)',
             'last_run': bot_ts,
             'status': bot_status,
         })
