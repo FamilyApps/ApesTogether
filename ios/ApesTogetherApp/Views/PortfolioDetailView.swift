@@ -789,23 +789,31 @@ struct TradeRow: View {
         }
         
         // Fallback: manual format for Python's isoformat() output (no timezone)
+        // — assume UTC since the backend stores naive UTC datetimes.
         if date == nil {
             let manual = DateFormatter()
             manual.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
             manual.locale = Locale(identifier: "en_US_POSIX")
+            manual.timeZone = TimeZone(identifier: "UTC")
             date = manual.date(from: dateString)
         }
         if date == nil {
             let manual = DateFormatter()
             manual.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
             manual.locale = Locale(identifier: "en_US_POSIX")
+            manual.timeZone = TimeZone(identifier: "UTC")
             date = manual.date(from: dateString)
         }
         
         if let date = date {
+            // Always render in ET with explicit suffix so subscribers in
+            // other tz's see the same wall-clock time the trader saw.
+            // Format: "May 14, 1:43:27 PM ET"
             let displayFormatter = DateFormatter()
             displayFormatter.dateFormat = "MMM d, h:mm:ss a"
-            return displayFormatter.string(from: date)
+            displayFormatter.timeZone = TimeZone(identifier: "America/New_York")
+            displayFormatter.locale = Locale(identifier: "en_US_POSIX")
+            return displayFormatter.string(from: date) + " ET"
         }
         return dateString
     }

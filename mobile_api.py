@@ -884,7 +884,11 @@ def get_portfolio(slug):
                     'quantity': trade.quantity,
                     'price': trade.price,
                     'type': trade.transaction_type,
-                    'timestamp': trade.timestamp.isoformat()
+                    # Use _utc_iso (Z-suffixed, no microseconds) so iOS
+                    # ISO8601DateFormatter parses cleanly. Python's raw
+                    # isoformat() produces '2026-05-14T13:43:27.989841'
+                    # which both Swift and JS reject as a UTC datetime.
+                    'timestamp': _utc_iso(trade.timestamp)
                 }
                 for trade in recent_trades
             ]
@@ -1734,7 +1738,10 @@ def notification_history():
                 'type': 'email',
                 'trader_username': trader.public_name if trader else 'Unknown',
                 'status': log.status,
-                'created_at': log.created_at.isoformat() if log.created_at else None,
+                # _utc_iso so iOS / Android parse as UTC instantly and the
+                # 'Trade Alerts' list shows ET-formatted times instead of
+                # raw ISO strings.
+                'created_at': _utc_iso(log.created_at) if log.created_at else None,
             })
         for log in push_logs:
             trader = User.query.get(log.portfolio_owner_id)
@@ -1745,7 +1752,7 @@ def notification_history():
                 'body': log.body,
                 'trader_username': trader.public_name if trader else 'Unknown',
                 'status': log.status,
-                'created_at': log.created_at.isoformat() if log.created_at else None,
+                'created_at': _utc_iso(log.created_at) if log.created_at else None,
                 'data': log.data_payload,
             })
 
@@ -7281,7 +7288,11 @@ def bot_cron_health():
         # Return a full datetime (not just date) so JS doesn't misinterpret timezone.
         # The market-close cron runs at 20:05 UTC (4:05 PM ET).
         if last_snap:
-            snap_date = datetime.combine(last_snap.date, datetime.min.time().replace(hour=20, minute=5)).isoformat()
+            # Naive UTC → 'Z'-suffixed ISO so the admin panel JS
+            # (`new Date(...)`) parses it as UTC, not local. Without the Z
+            # the timestamp gets shifted by the viewer's tz offset (the
+            # '8 PM instead of 4 PM ET' bug).
+            snap_date = _utc_iso(datetime.combine(last_snap.date, datetime.min.time().replace(hour=20, minute=5)))
         else:
             snap_date = None
         if last_snap:
@@ -7302,7 +7313,7 @@ def bot_cron_health():
         })
         
         # Intraday Collection — should run every 15 min during market hours
-        intraday_ts = last_intraday.timestamp.isoformat() if last_intraday and hasattr(last_intraday, 'timestamp') and last_intraday.timestamp else None
+        intraday_ts = _utc_iso(last_intraday.timestamp) if last_intraday and hasattr(last_intraday, 'timestamp') and last_intraday.timestamp else None
         if last_intraday and last_intraday.timestamp:
             # During market hours (Mon-Fri 13:30-20:00 UTC), stale if >30 min old
             hours_since = (now - last_intraday.timestamp).total_seconds() / 3600
@@ -7322,7 +7333,7 @@ def bot_cron_health():
         })
         
         # Bot Trading Waves — should trade on market days
-        bot_ts = last_bot_trade.timestamp.isoformat() if last_bot_trade and last_bot_trade.timestamp else None
+        bot_ts = _utc_iso(last_bot_trade.timestamp) if last_bot_trade and last_bot_trade.timestamp else None
         if last_bot_trade and last_bot_trade.timestamp:
             days_since_trade = (today - last_bot_trade.timestamp.date()).days
             if days_since_trade <= 0:
@@ -7342,7 +7353,7 @@ def bot_cron_health():
         })
         
         # Pending Trade Retry
-        routed_ts = last_routed.routed_at.isoformat() if last_routed and last_routed.routed_at else None
+        routed_ts = _utc_iso(last_routed.routed_at) if last_routed and last_routed.routed_at else None
         if last_routed and last_routed.routed_at:
             days_since_route = (today - last_routed.routed_at.date()).days
             pending_status = 'ok' if days_since_route <= 3 else 'warning'
@@ -7473,7 +7484,7 @@ def bot_cron_health():
         except Exception as dq_err:
             logger.warning(f"Data quality check error: {dq_err}")
         
-        return jsonify({'jobs': jobs, 'data_sources': data_sources, 'server_time': now.isoformat()})
+        return jsonify({'jobs': jobs, 'data_sources': data_sources, 'server_time': _utc_iso(now)})
     except Exception as e:
         logger.error(f"Cron health error: {e}")
         return jsonify({'error': 'cron_health_failed'}), 500
@@ -7918,8 +7929,9 @@ def bot_auto_create_run():
     
     db.session.commit()
     
-    # Log the auto-creation event
-    _save_auto_create_settings({**settings, 'last_run': datetime.utcnow().isoformat(), 'last_created': len(created)})
+    # Log the auto-creation event — _utc_iso so admin panel renders ET
+    # correctly (see _utc_iso docstring for the non-Z parsing footgun).
+    _save_auto_create_settings({**settings, 'last_run': _utc_iso(datetime.utcnow()), 'last_created': len(created)})
     
     return jsonify({
         'success': True,

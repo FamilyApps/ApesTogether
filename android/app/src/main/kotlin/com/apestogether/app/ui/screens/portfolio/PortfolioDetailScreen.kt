@@ -104,6 +104,7 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import javax.inject.Inject
 import kotlin.math.absoluteValue
 
@@ -1246,20 +1247,33 @@ private fun formatQuantity(quantity: Double): String {
 }
 
 private fun formatTradeDate(iso: String): String {
-    // Backend sends Python isoformat() output, sometimes with microseconds and
-    // sometimes without; sometimes with timezone offset, often without. Try
-    // each known shape until one parses.
+    // Backend sends Python isoformat() output. After the _utc_iso migration
+    // it's always 'Z'-suffixed, but the patterns below stay as legacy
+    // fallbacks for any pre-migration cached timestamps still in flight.
+    //
+    // Naive (no-tz) shapes are parsed AS UTC, then rendered in ET so the
+    // subscriber sees the same wall-clock time the trader saw. Output:
+    //   "May 14, 1:43:27 PM ET"
+    val utc = TimeZone.getTimeZone("UTC")
     val patterns = listOf(
-        "yyyy-MM-dd'T'HH:mm:ss.SSSSSS",
-        "yyyy-MM-dd'T'HH:mm:ss.SSS",
-        "yyyy-MM-dd'T'HH:mm:ssXXX",
-        "yyyy-MM-dd'T'HH:mm:ss",
+        "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'" to utc,
+        "yyyy-MM-dd'T'HH:mm:ss'Z'"     to utc,
+        "yyyy-MM-dd'T'HH:mm:ssXXX"     to null,  // explicit offset -> use it
+        "yyyy-MM-dd'T'HH:mm:ss.SSSSSS" to utc,
+        "yyyy-MM-dd'T'HH:mm:ss.SSS"    to utc,
+        "yyyy-MM-dd'T'HH:mm:ss"        to utc,
     )
-    val parsed: Date? = patterns.firstNotNullOfOrNull { p ->
-        runCatching { SimpleDateFormat(p, Locale.US).parse(iso) }.getOrNull()
+    val parsed: Date? = patterns.firstNotNullOfOrNull { (p, tz) ->
+        runCatching {
+            val f = SimpleDateFormat(p, Locale.US)
+            if (tz != null) f.timeZone = tz
+            f.parse(iso)
+        }.getOrNull()
     }
-    val out = SimpleDateFormat("MMM d, h:mm:ss a", Locale.US)
-    return parsed?.let { out.format(it) } ?: iso
+    val out = SimpleDateFormat("MMM d, h:mm:ss a", Locale.US).apply {
+        timeZone = TimeZone.getTimeZone("America/New_York")
+    }
+    return parsed?.let { out.format(it) + " ET" } ?: iso
 }
 
 // ─────────────────────────────────────────────────────────────────────────
