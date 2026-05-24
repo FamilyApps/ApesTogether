@@ -1360,9 +1360,24 @@ def get_leaderboard():
                     continue
             
             # ── Sector filter (supports comma-separated multi-select) ──
+            # Per user requirement (May 2026): only show portfolios ENTIRELY
+            # composed of the selected sectors. The previous semantics was
+            # "any portfolio that contains at least one position in any of
+            # the selected sectors" \u2014 which is way too loose (e.g. picking
+            # 'Energy' showed every diversified portfolio that happens to
+            # own one oil stock).
+            #
+            # New semantics: the share of the portfolio invested across the
+            # selected sectors must be \u2265 99% (1% slack for floating-point
+            # rounding + unclassified tickers). Anything meaningfully
+            # diversified outside the selection is excluded.
             if industry_filter and industry_filter != 'all':
-                requested_sectors = [s.strip() for s in industry_filter.split(',')]
-                if not any(sector in industry_mix for sector in requested_sectors):
+                requested_sectors = {s.strip() for s in industry_filter.split(',')}
+                in_selection_pct = sum(
+                    pct for sector, pct in industry_mix.items()
+                    if sector in requested_sectors
+                )
+                if in_selection_pct < 99.0:
                     continue
             
             # ── Frequency filter ──

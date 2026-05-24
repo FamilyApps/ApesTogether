@@ -108,9 +108,11 @@ import kotlin.math.absoluteValue
  * any divergence is a bug.
  *
  * Layout (top → bottom):
- *  1. Period pills (1D / 1W / 1M / 3M / YTD / 1Y) + Filter button (with badge
- *     showing the count of non-default filters).
- *  2. S&P 500 benchmark banner ("S&P 500 +x.yz%   1W").
+ *  1. Period pills (1D / 1W / 1M / 3M / YTD / 1Y) — full-width, no filter icon.
+ *  2. S&P 500 benchmark banner ("S&P 500 +x.yz%   [Filters]"). The "Filters"
+ *     button lives on the right of this row and replaces what used to be a
+ *     duplicative period capsule (the period was already highlighted in the
+ *     row above). Shows a numeric badge when any non-default filter is set.
  *  3. Scrollable list of [LeaderboardCard]s — tap a card to expand it
  *     in-place, revealing stats, sector mix, View Portfolio + Subscribe CTAs.
  *  4. Filter modal bottom sheet on tap of the filter icon.
@@ -139,22 +141,21 @@ fun LeaderboardScreen(
             .fillMaxSize()
             .background(AppBackground),
     ) {
-        // ── Period pills + Filter button ──
+        // ── Period pills (full-width, no filter icon) ──
         PeriodPillRow(
             selected = period,
-            filterBadgeCount = filters.activeCount,
             onPeriodSelected = {
                 expandedEntryId = null
                 autoExpandedTop = true
                 viewModel.setPeriod(it)
             },
-            onFilterTap = { showFilters = true },
         )
 
-        // ── S&P 500 banner ──
+        // ── S&P 500 banner + Filters button ──
         Sp500Banner(
             sp500Return = (state as? LeaderboardState.Loaded)?.sp500Return ?: 0.0,
-            period = period,
+            filterBadgeCount = filters.activeCount,
+            onFilterTap = { showFilters = true },
         )
 
         // ── List / states ──
@@ -233,9 +234,7 @@ fun LeaderboardScreen(
 @Composable
 private fun PeriodPillRow(
     selected: String,
-    filterBadgeCount: Int,
     onPeriodSelected: (String) -> Unit,
-    onFilterTap: () -> Unit,
 ) {
     val periods = remember { listOf("1D", "1W", "1M", "3M", "YTD", "1Y") }
 
@@ -243,75 +242,25 @@ private fun PeriodPillRow(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            modifier = Modifier.weight(1f),
-        ) {
-            periods.forEach { p ->
-                val isActive = p == selected
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (isActive) PrimaryAccent else Color.Transparent)
-                        .clickable { onPeriodSelected(p) }
-                        .padding(vertical = 8.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = p,
-                        color = if (isActive) AppBackground else TextMuted,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-            }
-        }
-
-        // Filter button (with badge if any active filters)
-        Box {
+        periods.forEach { p ->
+            val isActive = p == selected
             Box(
                 modifier = Modifier
-                    .size(36.dp)
+                    .weight(1f)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(
-                        if (filterBadgeCount > 0) PrimaryAccent.copy(alpha = 0.15f)
-                        else CardBackground
-                    )
-                    .border(
-                        width = 0.5.dp,
-                        color = if (filterBadgeCount > 0) PrimaryAccent.copy(alpha = 0.4f)
-                        else CardBorder,
-                        shape = RoundedCornerShape(8.dp),
-                    )
-                    .clickable(onClick = onFilterTap),
+                    .background(if (isActive) PrimaryAccent else Color.Transparent)
+                    .clickable { onPeriodSelected(p) }
+                    .padding(vertical = 8.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(
-                    imageVector = Icons.Default.FilterList,
-                    contentDescription = "Filters",
-                    tint = if (filterBadgeCount > 0) PrimaryAccent else TextMuted,
-                    modifier = Modifier.size(16.dp),
+                Text(
+                    text = p,
+                    color = if (isActive) AppBackground else TextMuted,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
                 )
-            }
-            if (filterBadgeCount > 0) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .size(16.dp)
-                        .clip(CircleShape)
-                        .background(PrimaryAccent),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = "$filterBadgeCount",
-                        color = AppBackground,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
             }
         }
     }
@@ -322,7 +271,11 @@ private fun PeriodPillRow(
 // ─────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun Sp500Banner(sp500Return: Double, period: String) {
+private fun Sp500Banner(
+    sp500Return: Double,
+    filterBadgeCount: Int,
+    onFilterTap: () -> Unit,
+) {
     Column {
         Row(
             modifier = Modifier
@@ -351,18 +304,51 @@ private fun Sp500Banner(sp500Return: Double, period: String) {
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.weight(1f))
-            Box(
+
+            // Filters button — text label (industry standard) with numeric
+            // badge. Replaces the previous duplicative period capsule.
+            val active = filterBadgeCount > 0
+            Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(50))
-                    .background(CardBorder.copy(alpha = 0.3f))
-                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                    .background(
+                        if (active) PrimaryAccent.copy(alpha = 0.12f)
+                        else CardBorder.copy(alpha = 0.3f)
+                    )
+                    .border(
+                        width = 0.5.dp,
+                        color = if (active) PrimaryAccent.copy(alpha = 0.4f) else Color.Transparent,
+                        shape = RoundedCornerShape(50),
+                    )
+                    .clickable(onClick = onFilterTap)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    text = period,
-                    color = TextMuted,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
+                    text = "Filters",
+                    color = if (active) PrimaryAccent else TextSecondary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
                 )
+                if (active) {
+                    Box(
+                        modifier = Modifier
+                            .heightIn(min = 18.dp)
+                            .widthIn(min = 18.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(PrimaryAccent)
+                            .padding(horizontal = 4.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = "$filterBadgeCount",
+                            color = AppBackground,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
             }
         }
         Divider(color = CardBorder.copy(alpha = 0.3f), thickness = 0.5.dp)

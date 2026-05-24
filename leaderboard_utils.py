@@ -690,11 +690,19 @@ def _filter_and_sort(all_metrics, category='all', limit=20):
     """
     Filter precomputed user metrics by category and return top N sorted by performance.
     O(n) filter + O(n log n) sort — no DB queries.
+    
+    Category semantics (per user requirement, May 2026):
+        The Small Cap / Large Cap filters show ONLY portfolios entirely
+        composed of that cap type. Uses a 99% threshold to allow ~1% slack
+        for rounding + the occasional unclassified ticker, while still
+        excluding any portfolio meaningfully diversified across caps. A
+        truly diversified portfolio (60% small / 40% large) will NOT show
+        under either cap filter.
     """
     if category == 'small_cap':
-        filtered = [m for m in all_metrics if m['small_cap_percent'] >= 60]
+        filtered = [m for m in all_metrics if m['small_cap_percent'] >= 99]
     elif category == 'large_cap':
-        filtered = [m for m in all_metrics if m['large_cap_percent'] >= 60]
+        filtered = [m for m in all_metrics if m['large_cap_percent'] >= 99]
     else:
         filtered = list(all_metrics)
     

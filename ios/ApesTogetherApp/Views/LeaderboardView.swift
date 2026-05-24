@@ -106,58 +106,36 @@ struct LeaderboardView: View {
                     // ── Custom header (no nav bar pill) ──
                     AppHeaderRow(showSettings: $showSettings)
                     
-                    // ── Period pills + Filter button row ──
-                    HStack(spacing: 8) {
-                        HStack(spacing: 0) {
-                            ForEach(periods, id: \.self) { period in
-                                Button {
-                                    selectedPeriod = period
-                                    expandedEntryId = nil
-                                    autoExpandedTop = true
-                                    reloadLeaderboard()
-                                } label: {
-                                    Text(period)
-                                        .font(.system(size: 13, weight: .bold))
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 8)
-                                        .background(selectedPeriod == period ? Color.primaryAccent : Color.clear)
-                                        .foregroundColor(selectedPeriod == period ? .appBackground : .textMuted)
-                                        .cornerRadius(8)
-                                }
-                            }
-                        }
-                        
-                        // Filter button
-                        Button(action: openFilters) {
-                            ZStack(alignment: .topTrailing) {
-                                Image(systemName: "line.3.horizontal.decrease")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundColor(activeFilterCount > 0 ? .primaryAccent : .textMuted)
-                                    .frame(width: 36, height: 36)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(activeFilterCount > 0 ? Color.primaryAccent.opacity(0.15) : Color.cardBackground)
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(activeFilterCount > 0 ? Color.primaryAccent.opacity(0.4) : Color.cardBorder, lineWidth: 0.5)
-                                    )
-                                
-                                if activeFilterCount > 0 {
-                                    Text("\(activeFilterCount)")
-                                        .font(.system(size: 9, weight: .bold))
-                                        .foregroundColor(.appBackground)
-                                        .frame(width: 16, height: 16)
-                                        .background(Circle().fill(Color.primaryAccent))
-                                        .offset(x: 4, y: -4)
-                                }
+                    // ── Period pills (full-width, no filter icon) ──
+                    // The filter button moved down to the S&P banner row so
+                    // the period selector reads more clearly and replaces
+                    // the duplicative selected-period capsule next to S&P.
+                    HStack(spacing: 0) {
+                        ForEach(periods, id: \.self) { period in
+                            Button {
+                                selectedPeriod = period
+                                expandedEntryId = nil
+                                autoExpandedTop = true
+                                reloadLeaderboard()
+                            } label: {
+                                Text(period)
+                                    .font(.system(size: 13, weight: .bold))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                                    .background(selectedPeriod == period ? Color.primaryAccent : Color.clear)
+                                    .foregroundColor(selectedPeriod == period ? .appBackground : .textMuted)
+                                    .cornerRadius(8)
                             }
                         }
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     
-                    // ── S&P 500 benchmark banner ──
+                    // ── S&P 500 benchmark banner + Filters button ──
+                    // The Filters button replaces the previous selected-period
+                    // capsule on the right (which duplicated the highlighted
+                    // pill above). Industry-standard text label "Filters" with
+                    // a numeric badge when any non-default filter is active.
                     HStack(spacing: 10) {
                         Image(systemName: "chart.line.uptrend.xyaxis")
                             .font(.system(size: 14, weight: .semibold))
@@ -173,12 +151,31 @@ struct LeaderboardView: View {
                         
                         Spacer()
                         
-                        Text(selectedPeriod)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.textMuted)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(Capsule().fill(Color.cardBorder.opacity(0.3)))
+                        Button(action: openFilters) {
+                            HStack(spacing: 6) {
+                                Text("Filters")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundColor(activeFilterCount > 0 ? .primaryAccent : .textSecondary)
+                                if activeFilterCount > 0 {
+                                    Text("\(activeFilterCount)")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundColor(.appBackground)
+                                        .frame(minWidth: 18, minHeight: 18)
+                                        .padding(.horizontal, 4)
+                                        .background(Capsule().fill(Color.primaryAccent))
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule()
+                                    .fill(activeFilterCount > 0 ? Color.primaryAccent.opacity(0.12) : Color.cardBorder.opacity(0.3))
+                            )
+                            .overlay(
+                                Capsule()
+                                    .stroke(activeFilterCount > 0 ? Color.primaryAccent.opacity(0.4) : Color.clear, lineWidth: 0.5)
+                            )
+                        }
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
