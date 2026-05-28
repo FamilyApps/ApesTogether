@@ -278,7 +278,7 @@ def notify_subscribers_via_email(db, trader_user_id, action, ticker, quantity, p
             continue
 
         # Check user-level email preference
-        if hasattr(subscriber, 'email_notifications_enabled') and not subscriber.email_notifications_enabled:
+        if getattr(subscriber, 'email_notifications_enabled', True) is False:
             continue
 
         result = send_trade_notification_to_subscriber(
