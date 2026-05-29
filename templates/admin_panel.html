@@ -502,8 +502,10 @@ const BotManagement = ({ api }) => {
 
   const botData = bots.map(b => ({
     ...b,
-    industry: b.extra_data?.industry || b.industry || 'General',
-    strategy: b.extra_data?.trading_style || '—',
+    // Prefer the backend's profile-backed fields (list-users now reads the
+    // committed .bot_profiles/<id>.json); extra_data is usually empty for bots.
+    industry: b.industry || b.extra_data?.industry || 'General',
+    strategy: b.strategy || b.extra_data?.trading_style || '—',
     stock_count: b.stock_count || 0,
     subscriber_count: b.subscriber_count || 0,
     real_subscribers: b.real_subscribers || 0,
@@ -602,6 +604,7 @@ const BotManagement = ({ api }) => {
                   <div style={{ textAlign: 'right' }}>
                     <Badge text={src.status} color={statusColor} />
                     {src.calls_24h != null && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{src.successes}/{src.calls_24h} calls OK (24h){src.avg_latency_ms ? ` \u00b7 ${src.avg_latency_ms}ms avg` : ''}</div>}
+                    {src.trades_7d != null && <div style={{ fontSize: 11, fontWeight: 600, color: src.trades_7d > 0 ? 'var(--green)' : 'var(--text-muted)', marginTop: 2 }}>informed {src.trades_7d} trade{src.trades_7d === 1 ? '' : 's'} (7d){src.trades_today ? ` \u00b7 ${src.trades_today} today` : ''}</div>}
                   </div>
                 </div>
               );
@@ -2083,8 +2086,8 @@ const SystemHealth = ({ api }) => {
               const labelMap = {
                 bot_rsi: 'RSI', bot_macd: 'MACD', bot_trend: 'Trend', bot_volume: 'Volume',
                 bot_news: 'News', bot_social: 'Social', bot_mover: 'Top Mover',
-                bot_insider: 'Insider', bot_stoploss: 'Stop Loss', bot_takeprofit: 'Take Profit',
-                bot_fomo: 'FOMO', bot_mixed: 'Mixed', bot_research: 'Bot',
+                bot_insider: 'Insider', bot_analyst: 'Analyst', bot_stoploss: 'Stop Loss', bot_takeprofit: 'Take Profit',
+                bot_fomo: 'FOMO', bot_mixed: 'Mixed', bot_research: 'Bot', bot_redeploy: 'Redeploy',
                 bulk_api: 'Bulk API', cached: 'Cached', single_api: 'API', manual: 'Manual',
                 email: 'Email', queued_email: 'Queued Email',
               };
@@ -2094,11 +2097,13 @@ const SystemHealth = ({ api }) => {
                 // Sentiment / external — purple
                 bot_news: 'var(--purple, #a855f7)', bot_social: 'var(--purple, #a855f7)', bot_mover: 'var(--purple, #a855f7)',
                 // Smart money — green
-                bot_insider: 'var(--green)',
+                bot_insider: 'var(--green)', bot_analyst: 'var(--green)',
                 // Risk events
                 bot_stoploss: 'var(--red)', bot_takeprofit: 'var(--green)',
                 // Impulse — yellow
                 bot_fomo: 'var(--yellow)',
+                // Cash redeployment — accent
+                bot_redeploy: 'var(--accent)',
                 // Generic bot fallbacks
                 bot_mixed: 'var(--text-muted)', bot_research: 'var(--blue)',
                 // Non-bot sources

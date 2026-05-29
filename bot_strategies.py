@@ -326,23 +326,53 @@ def compute_signal_components(stock_data, profile):
     admin Recent Trades 'Source' column.
 
     Component names: 'rsi', 'macd', 'news', 'social', 'volume', 'insider',
-    'trend', 'mover'. Missing/unavailable signals contribute 0.
+    'analyst', 'trend', 'mover'. Missing/unavailable signals contribute 0.
     """
     weights = dict(profile['indicator_weights'])  # copy so we can adjust
     strategy = profile['strategy']
     components = {
         'rsi': 0.0, 'macd': 0.0, 'news': 0.0, 'social': 0.0,
-        'volume': 0.0, 'insider': 0.0, 'trend': 0.0, 'mover': 0.0,
+        'volume': 0.0, 'insider': 0.0, 'analyst': 0.0, 'trend': 0.0, 'mover': 0.0,
     }
 
-    # Redistribute social_buzz weight if social data is missing (Finnhub premium)
-    if stock_data.get('social_mentions', 0) == 0 and weights.get('social_buzz', 0) > 0:
-        orphan = weights.pop('social_buzz')
-        other_total = sum(weights.values())
-        if other_total > 0:
-            for k in weights:
-                weights[k] += orphan * (weights[k] / other_total)
-        weights['social_buzz'] = 0.0  # keep key but zeroed
+    # ── Redistribute weight from data legs that have NO data for this ticker ──
+    # On the free Finnhub tier the social / analyst / insider endpoints return
+    # nothing (premium-gated or HTTP 403), and any given ticker may simply have
+    # no AlphaVantage news coverage. Leaving that weight in place permanently
+    # caps the composite score below the bot's buy_threshold — e.g. bot 11
+    # carries 57% of its weight on social_buzz, so with social dead it could
+    # never clear a 0.52 buy threshold. That starves BUY decisions while
+    # price-based SELLs (stop-loss / take-profit) keep firing, which is the
+    # cash-accumulation bug. Reallocating each dead leg's weight to the live
+    # signals restores a meaningful [-1, 1] score range so thresholds stay
+    # reachable, and keeps source attribution honest (a leg with no data can't
+    # be flagged as the 'dominant' driver).
+    #
+    # Per-ticker detection (more accurate than a global data_quality flag):
+    #   - social_buzz   dead when social_mentions == 0
+    #   - news_sentiment dead when article_count == 0 (distinct from neutral news)
+    #   - insider       dead when neither insider nor analyst data is present
+    #                   (get_stock_data omits insider_buys / sets analyst_action
+    #                    = 'none' when Finnhub returned nothing). This single
+    #                    'insider' weight backs BOTH the insider and analyst
+    #                    components below, so zeroing it kills both correctly.
+    dead_keys = []
+    if stock_data.get('social_mentions', 0) == 0:
+        dead_keys.append('social_buzz')
+    if stock_data.get('article_count', 0) == 0:
+        dead_keys.append('news_sentiment')
+    if 'insider_buys' not in stock_data and stock_data.get('analyst_action', 'none') == 'none':
+        dead_keys.append('insider')
+
+    orphan = sum(weights.get(k, 0.0) for k in dead_keys)
+    if orphan > 0:
+        live = {k: w for k, w in weights.items() if k not in dead_keys and w > 0}
+        live_total = sum(live.values())
+        if live_total > 0:
+            for k in live:
+                weights[k] += orphan * (weights[k] / live_total)
+        for k in dead_keys:
+            weights[k] = 0.0  # keep key but zeroed so attribution skips it
 
     # ── RSI Signal ──
     rsi = stock_data.get('rsi_14')
@@ -433,7 +463,14 @@ def compute_signal_components(stock_data, profile):
         volume_signal = 0.0
     components['volume'] = weights.get('volume', 0) * volume_signal
 
-    # ── Insider Signal (includes analyst-action bonus) ──
+    # ── Insider Signal ──
+    # Insider transactions (Finnhub) and analyst recommendations (Finnhub) are
+    # reported as SEPARATE components so source attribution is honest — the
+    # admin panel shows "Finnhub Insider informed N trades" vs "Finnhub Analyst
+    # informed M trades" independently. They share the single 'insider'
+    # indicator weight, and because the old combined signal's clamp never bound
+    # (max 0.7+0.3=1.0, min -0.5-0.3=-0.8), splitting the sum into two weighted
+    # terms leaves the composite score identical — this is attribution-only.
     insider_net = stock_data.get('insider_net', 'neutral')
     if insider_net == 'buying':
         insider_signal = 0.7
@@ -441,13 +478,17 @@ def compute_signal_components(stock_data, profile):
         insider_signal = -0.5
     else:
         insider_signal = 0.0
-    # Analyst action bonus (folded into insider component since it shares weight)
+    components['insider'] = weights.get('insider', 0) * insider_signal
+
+    # ── Analyst Recommendation Signal (shares the insider weight) ──
     analyst_action = stock_data.get('analyst_action', 'none')
     if analyst_action in ('up', 'upgrade'):
-        insider_signal += 0.3
+        analyst_signal = 0.3
     elif analyst_action in ('down', 'downgrade'):
-        insider_signal -= 0.3
-    components['insider'] = weights.get('insider', 0) * min(1.0, max(-1.0, insider_signal))
+        analyst_signal = -0.3
+    else:
+        analyst_signal = 0.0
+    components['analyst'] = weights.get('insider', 0) * analyst_signal
 
     # ── Price Trend Signal ──
     price_vs_sma20 = stock_data.get('price_vs_sma20', 'unknown')
@@ -521,7 +562,7 @@ def dominant_signal(stock_data, profile):
     return name
 
 
-def generate_trade_decisions(bot_profile, market_hub, current_holdings=None):
+def generate_trade_decisions(bot_profile, market_hub, current_holdings=None, cash_available=0.0):
     """
     Generate buy/sell decisions for a bot given its profile and market data.
 
@@ -529,6 +570,9 @@ def generate_trade_decisions(bot_profile, market_hub, current_holdings=None):
         bot_profile: dict with strategy, indicator_weights, thresholds, etc.
         market_hub: MarketDataHub instance with current data
         current_holdings: list of dicts [{ticker, quantity, purchase_price}, ...]
+        cash_available: bot's uninvested cash_proceeds. When a bot has drifted
+            to a high cash fraction, an idle-cash redeployment rule deploys the
+            excess into its best current ideas (see below) so it stays invested.
 
     Returns:
         list of {action: 'buy'|'sell', ticker, score, reason}
@@ -637,6 +681,77 @@ def generate_trade_decisions(bot_profile, market_hub, current_holdings=None):
             'price': candidate['price'],
             'signal_tag': candidate.get('dominant', 'mixed'),
         })
+
+    # ── Idle-cash redeployment ────────────────────────────────────────────────
+    # The cash-accumulation bug: price-based exits (stop-loss / take-profit)
+    # kept selling, but signal-driven BUYs were starved (high thresholds + dead
+    # premium data legs), so sale proceeds piled up as cash indefinitely — some
+    # bots drifted to 80-95% cash and their charts went flat. This rule is the
+    # safety net: when a bot's cash exceeds a ceiling, deploy the excess into its
+    # best current ideas (relaxing buy_threshold — "put my idle cash to work")
+    # so it stays invested even on waves where nothing clears the threshold.
+    #
+    # To stay human-like and avoid one giant all-in wave, we deploy at most a
+    # few equal-weight positions per wave; the bot converges toward the target
+    # cash level over a handful of waves.
+    REDEPLOY_TRIGGER_FRAC = 0.15   # begin redeploying once cash exceeds 15% of NAV
+    REDEPLOY_TARGET_FRAC = 0.08    # ... deploying down toward ~8% cash
+    MAX_REDEPLOY_PER_WAVE = 3
+
+    if cash_available and cash_available > 0:
+        # Mark-to-market the held stock from the hub (purchase_price fallback).
+        stock_value = 0.0
+        for h in current_holdings:
+            sd = market_hub.get_stock_data(h['ticker'])
+            px = (sd.get('price') if sd else 0) or h.get('purchase_price', 0) or 0
+            stock_value += (h.get('quantity', 0) or 0) * px
+        nav = stock_value + cash_available
+        per_name = nav / max(1, max_positions)  # equal-weight target size
+
+        already_buying = {d['ticker'] for d in decisions if d['action'] == 'buy'}
+        remaining_slots = max(0, open_slots - len(already_buying))
+
+        # Deploy the cash above target, but reserve ~per_name for each
+        # signal-driven buy already queued this wave (the executor sizes those
+        # off allocation) so the two paths together don't over-deploy into new
+        # capital and inflate max_cash_deployed.
+        deployable = (cash_available - REDEPLOY_TARGET_FRAC * nav
+                      - per_name * len(already_buying))
+
+        if (nav > 0 and remaining_slots > 0
+                and cash_available > REDEPLOY_TRIGGER_FRAC * nav
+                and deployable > 0):
+            # Best-scored names we don't already hold or plan to buy, with a
+            # valid price and a non-negative score (never redeploy into an
+            # outright sell signal).
+            redeploy_candidates = [
+                s for s in scored_stocks
+                if s['ticker'] not in held_tickers
+                and s['ticker'] not in already_buying
+                and s['price'] > 0
+                and s['score'] >= 0
+            ]
+            redeploy_candidates.sort(key=lambda x: x['score'], reverse=True)
+
+            n_slots = min(len(redeploy_candidates), remaining_slots, MAX_REDEPLOY_PER_WAVE)
+            remaining_cash = deployable
+            for c in redeploy_candidates[:n_slots]:
+                if remaining_cash < 1:
+                    break
+                notional = min(per_name, remaining_cash)
+                if notional < 1:
+                    break
+                decisions.append({
+                    'action': 'buy',
+                    'ticker': c['ticker'],
+                    'score': c['score'],
+                    'reason': (f"Idle-cash redeploy: cash {cash_available / nav:.0%} of NAV "
+                               f"> {REDEPLOY_TRIGGER_FRAC:.0%} ceiling; deploying ${notional:,.0f}"),
+                    'price': c['price'],
+                    'signal_tag': 'redeploy',
+                    'target_notional': round(notional, 2),
+                })
+                remaining_cash -= notional
 
     return decisions
 

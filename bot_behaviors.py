@@ -258,6 +258,17 @@ def calculate_position_size(decision, bot_profile, portfolio_value=100000, held_
             qty = round(qty / 2) * 2
         return max(1, min(qty, held_qty))
 
+    # ── Explicit-notional BUY path (idle-cash redeployment / admin rebalance) ──
+    # When a decision carries a `target_notional` dollar amount, size directly
+    # off it instead of the per-position allocation. This is what actually lets
+    # a cash-heavy bot deploy its idle cash: the allocation path below sizes off
+    # portfolio_value, which historically excluded cash, so a 90%-cash bot would
+    # only ever place tiny buys. Fractional shares are fine — process_transaction
+    # already supports them and they make the deployment exact.
+    target_notional = decision.get('target_notional')
+    if action != 'sell' and target_notional and target_notional > 0:
+        return round(target_notional / price, 4)
+
     risk_tolerance = bot_profile.get('risk_tolerance', 0.5)
     max_positions = bot_profile.get('max_positions', 8)
 

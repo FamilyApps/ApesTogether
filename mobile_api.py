@@ -3651,6 +3651,28 @@ def bot_execute_trade():
         return jsonify({'error': 'trade_failed'}), 500
 
 
+def _bot_profile_meta(user_id):
+    """Read (strategy, industry) from the committed .bot_profiles/<id>.json.
+
+    That file is the source of truth for the live trade runner (GitHub Actions
+    loads it each wave); the DB's User.extra_data is frequently empty for bots,
+    which is why the admin Bot Management 'Strategy' column was showing '—' for
+    every bot. Resolves the path the same way bot_agent.PROFILE_DIR does so it
+    works both locally and on Vercel (the dir is committed, not gitignored).
+    """
+    try:
+        import os as _os, json as _json
+        path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                             '.bot_profiles', f'{user_id}.json')
+        if _os.path.exists(path):
+            with open(path) as f:
+                p = _json.load(f)
+            return p.get('strategy'), p.get('industry')
+    except Exception:
+        pass
+    return None, None
+
+
 @mobile_api.route('/admin/bot/list-users', methods=['GET'])
 @require_admin_or_cron
 @with_db_retry
@@ -3709,6 +3731,15 @@ def bot_list_users():
             industry = extra.get('industry', 'General')
             bot_active = extra.get('bot_active', True) if u.role == 'agent' else None
             strategy = extra.get('trading_style', extra.get('strategy_name', None))
+            # Bots store their real strategy/industry in the committed profile
+            # file, not the DB extra_data (usually empty) — fall back to it so
+            # the admin 'Strategy' column stops showing '—' for every bot.
+            if u.role == 'agent' and (not strategy or industry == 'General'):
+                p_strat, p_ind = _bot_profile_meta(u.id)
+                if not strategy and p_strat:
+                    strategy = p_strat
+                if industry == 'General' and p_ind:
+                    industry = p_ind
             
             # Surface copytrade_bot flag so callers (bot_executor's
             # get_active_bots → cmd_trade wave) can exclude bots that
@@ -4315,8 +4346,19 @@ def _execute_bot_trade_wave(wave, dry_run=False):
                             'purchase_price': float(s.purchase_price) if s.purchase_price else 0
                         })
                 
+                # Uninvested cash + mark-to-market portfolio value so BUY sizing
+                # reflects total buying power and idle-cash redeployment can run
+                # (mirrors the GitHub Actions runner path).
+                bot_cash = float(bot.cash_proceeds or 0)
+                portfolio_value = bot_cash
+                for h in holdings:
+                    sd = hub.get_stock_data(h['ticker'])
+                    px = (sd.get('price') if sd else 0) or h.get('purchase_price', 0) or 0
+                    portfolio_value += (h.get('quantity', 0) or 0) * px
+                portfolio_value = max(1000.0, portfolio_value)
+
                 # Generate decisions
-                decisions = generate_trade_decisions(profile, hub, holdings)
+                decisions = generate_trade_decisions(profile, hub, holdings, cash_available=bot_cash)
                 decisions = apply_human_biases(decisions, profile)
                 fomo = apply_fomo_trades(profile, hub, decisions)
                 if fomo:
@@ -4344,10 +4386,26 @@ def _execute_bot_trade_wave(wave, dry_run=False):
                     # Execute trade via process_transaction (cash tracking + transaction record)
                     try:
                         from cash_tracking import process_transaction as pt_func
+                        from bot_behaviors import calculate_position_size
                         action = d['action']
                         ticker = d['ticker']
-                        quantity = d.get('quantity', 1)
                         price = d.get('price', 0)
+                        if price <= 0:
+                            decision_info['status'] = 'skipped_no_price'
+                            results['decisions'].append(decision_info)
+                            continue
+                        # Size properly (matches the GH Actions executor): SELLs
+                        # clamp to held qty, BUYs size off portfolio_value, and
+                        # idle-cash-redeploy / rebalance buys honor target_notional.
+                        _held = None
+                        if action == 'sell':
+                            _hs = Stock.query.filter_by(user_id=bot.id, ticker=ticker).first()
+                            _held = _hs.quantity if _hs else 0
+                        quantity = calculate_position_size(d, profile, portfolio_value, held_qty=_held)
+                        if quantity <= 0:
+                            decision_info['status'] = 'skipped_no_qty'
+                            results['decisions'].append(decision_info)
+                            continue
                         # Map the strategy's signal_tag onto Transaction.price_source
                         # so the admin Recent Trades 'Trigger' column can attribute
                         # the trade to its actual driver instead of always saying
@@ -5963,24 +6021,39 @@ def bot_sp500_check():
 @with_db_retry
 def bot_holdings():
     """
-    Get a user's current stock holdings.
+    Get a user's current stock holdings + cash.
     Query param: user_id
-    Returns list of {ticker, quantity, purchase_price}
+    Returns {holdings: [{ticker, quantity, purchase_price}], count,
+             cash, cash_proceeds, max_cash_deployed}
     """
-    from models import Stock
+    from models import Stock, User
     
     user_id = request.args.get('user_id')
     if not user_id:
         return jsonify({'error': 'user_id_required'}), 400
     
     try:
-        stocks = Stock.query.filter_by(user_id=int(user_id)).all()
+        uid = int(user_id)
+        stocks = Stock.query.filter_by(user_id=uid).all()
         holdings = [{
             'ticker': s.ticker,
             'quantity': s.quantity,
             'purchase_price': round(float(s.purchase_price), 2) if s.purchase_price else 0,
         } for s in stocks if s.quantity > 0]
-        return jsonify({'holdings': holdings, 'count': len(holdings)})
+        # Surface cash so the bot trade runner can size BUYs off total buying
+        # power (stock + cash) and run idle-cash redeployment. Without this the
+        # runner sized buys off stock value alone, so a bot that had liquidated
+        # to mostly cash could never redeploy — the cash-accumulation bug.
+        u = User.query.get(uid)
+        cash = round(float(u.cash_proceeds or 0), 2) if u else 0.0
+        max_cash = round(float(u.max_cash_deployed or 0), 2) if u else 0.0
+        return jsonify({
+            'holdings': holdings,
+            'count': len(holdings),
+            'cash': cash,
+            'cash_proceeds': cash,
+            'max_cash_deployed': max_cash,
+        })
     except Exception as e:
         logger.error(f"Bot holdings error: {e}")
         return jsonify({'error': 'holdings_failed'}), 500
@@ -7504,6 +7577,55 @@ def bot_cron_health():
                 })
         except Exception as dq_err:
             logger.warning(f"Data quality check error: {dq_err}")
+        
+        # ── Data-source → trade attribution ──────────────────────────────────
+        # Connects the green-light sources above to reality: how many recent bot
+        # trades did each source actually inform? Bot trades carry
+        # price_source='bot_<signal_tag>' (bot_news, bot_rsi, bot_insider, ...),
+        # set from the dominant signal component at decision time. A source
+        # that's "active" but informed 0 trades is effectively a dead leg (e.g.
+        # Finnhub social on the free tier) — exactly the gap we need to see.
+        try:
+            from datetime import timedelta
+            cutoff_7d = now - timedelta(days=7)
+            cutoff_1d = now - timedelta(days=1)
+            bot_ids = [bid for (bid,) in db.session.query(User.id).filter(User.role == 'agent').all()]
+            by_tag_7d, by_tag_1d = {}, {}
+            if bot_ids:
+                rows = db.session.query(
+                    Transaction.price_source, Transaction.timestamp
+                ).filter(
+                    Transaction.user_id.in_(bot_ids),
+                    Transaction.timestamp >= cutoff_7d,
+                ).all()
+                for ps, ts in rows:
+                    if not ps or not ps.startswith('bot_'):
+                        continue
+                    tag = ps[4:]
+                    by_tag_7d[tag] = by_tag_7d.get(tag, 0) + 1
+                    if ts and ts >= cutoff_1d:
+                        by_tag_1d[tag] = by_tag_1d.get(tag, 0) + 1
+
+            # Map each data-source 'type' to the signal_tag(s) it feeds. Note:
+            # the AV 'price_fallback' row is intentionally unmapped to avoid
+            # double-counting indicator trades already attributed to yfinance.
+            source_tags = {
+                'news_sentiment': ('news',),
+                'top_movers': ('mover',),
+                'yfinance': ('rsi', 'macd', 'volume', 'trend'),
+                'insider': ('insider',),
+                'analyst': ('analyst',),
+                'social': ('social',),
+                'finnhub': ('insider', 'analyst', 'social'),  # combined fallback row
+            }
+            for src in data_sources:
+                tags = source_tags.get(src.get('type'))
+                if not tags:
+                    continue
+                src['trades_7d'] = sum(by_tag_7d.get(t, 0) for t in tags)
+                src['trades_today'] = sum(by_tag_1d.get(t, 0) for t in tags)
+        except Exception as attr_err:
+            logger.warning(f"Trade attribution failed: {attr_err}")
         
         return jsonify({'jobs': jobs, 'data_sources': data_sources, 'server_time': _utc_iso(now)})
     except Exception as e:

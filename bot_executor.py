@@ -88,6 +88,22 @@ def get_bot_holdings(user_id):
     return []
 
 
+def get_bot_account(user_id):
+    """
+    Get a bot's holdings AND uninvested cash in a single admin API call.
+    Returns (holdings: list, cash: float). Used by the trade runner so BUY
+    sizing reflects total buying power (stock + cash) and idle-cash
+    redeployment can run — see _estimate_portfolio_value / generate_trade_decisions.
+    Falls back to ([], 0.0) on error.
+    """
+    result, status = api_call(f'/admin/bot/holdings?user_id={user_id}')
+    if status == 200:
+        holdings = result.get('holdings', [])
+        cash = float(result.get('cash', result.get('cash_proceeds', 0)) or 0)
+        return holdings, cash
+    return [], 0.0
+
+
 # ── Trade Execution ──────────────────────────────────────────────────────────
 
 def execute_trade(user_id, ticker, quantity, price, trade_type, reason='', price_source=None):
@@ -165,9 +181,13 @@ def execute_bot_decisions(user_id, username, decisions, bot_profile, market_hub)
     # $100K and SELLs were sized off that allocation, producing qty=35 for
     # a bot that only owned 5 shares — every SELL failed silently. See
     # wave 2 on 2026-05-20 where 7+ valid sell decisions executed 0 trades.
-    holdings = get_bot_holdings(user_id)
+    holdings, cash = get_bot_account(user_id)
     held_by_ticker = {h['ticker']: h['quantity'] for h in holdings}
-    portfolio_value = _estimate_portfolio_value(user_id, holdings=holdings, market_hub=market_hub)
+    # Include cash so BUY sizing reflects total buying power. This is what lets
+    # a cash-heavy bot actually deploy its idle cash instead of sizing new buys
+    # off a tiny remaining stock value (the cash-accumulation bug).
+    portfolio_value = _estimate_portfolio_value(
+        user_id, holdings=holdings, market_hub=market_hub, cash=cash)
 
     # Shuffle decisions slightly (humans don't execute in perfect order)
     random.shuffle(decisions)
@@ -275,7 +295,7 @@ def execute_bot_decisions(user_id, username, decisions, bot_profile, market_hub)
 
 # ── Portfolio Helpers ─────────────────────────────────────────────────────────
 
-def _estimate_portfolio_value(user_id, holdings=None, market_hub=None):
+def _estimate_portfolio_value(user_id, holdings=None, market_hub=None, cash=0.0):
     """
     Estimate a bot's portfolio value (used for BUY position sizing).
 
@@ -287,28 +307,28 @@ def _estimate_portfolio_value(user_id, holdings=None, market_hub=None):
             the real mark-to-market value.
         market_hub: optional MarketDataHub used to look up current prices.
 
+        cash: the bot's uninvested cash_proceeds. INCLUDED in the returned
+            value so BUY position sizing reflects total buying power. This is
+            the fix for the cash-accumulation bug: previously cash was excluded,
+            so a bot that had liquidated to 90% cash sized new buys off its tiny
+            remaining stock value and could never redeploy.
+
     Returns:
-        float: portfolio value in dollars. Falls back to $100K only when
-            holdings or market_hub aren't supplied (e.g. legacy callers).
+        float: portfolio value (stock mark-to-market + cash) in dollars.
+            Falls back to $100K only when market_hub isn't supplied.
 
     Notes:
-        - Cash is excluded — get_bot_holdings doesn't surface it and the
-          cash_tracking schema doesn't expose a simple "current cash"
-          number via the admin API. This slightly under-estimates
-          portfolio value for bots holding meaningful cash, which causes
-          BUY positions to be sized a touch smaller. That's acceptable —
-          the inverse error (oversizing) was the bug we're fixing.
         - When market_hub has no price for a held ticker, purchase_price
           is used as a fallback so the estimate stays reasonable.
     """
-    if not holdings or market_hub is None:
-        # Legacy / fallback path — kept so older callers / unit tests
-        # don't break. Production callers in execute_bot_decisions now
-        # always supply both args.
-        return 100_000.0
+    if market_hub is None:
+        # Legacy / fallback path — kept so older callers / unit tests don't
+        # break (without a market_hub we can't mark-to-market). Production
+        # callers in execute_bot_decisions always supply it.
+        return 100_000.0 + (cash or 0.0)
 
     total = 0.0
-    for h in holdings:
+    for h in (holdings or []):
         ticker = h.get('ticker')
         qty = h.get('quantity', 0) or 0
         if qty <= 0:
@@ -326,8 +346,9 @@ def _estimate_portfolio_value(user_id, holdings=None, market_hub=None):
         total += qty * price
 
     # Floor at $1K so a bot with empty holdings still sizes new BUYs to
-    # something meaningful instead of qty=0 for everything.
-    return max(1_000.0, total)
+    # something meaningful instead of qty=0 for everything. Cash is added so
+    # a cash-heavy bot's buying power is fully reflected in position sizing.
+    return max(1_000.0, total + (cash or 0.0))
 
 
 # ── Bot Account Management ───────────────────────────────────────────────────

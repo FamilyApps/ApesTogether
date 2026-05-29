@@ -330,11 +330,15 @@ def cmd_trade(args):
 
                 print(f"\n  🧠 {username} (ID={user_id}, {profile.get('strategy', '?')}, wave {bot_wave})")
 
-                # Get current holdings (from bot data)
-                holdings = _get_bot_holdings_from_api(user_id)
+                # Get current holdings + uninvested cash (one API call). Cash
+                # enables idle-cash redeployment in generate_trade_decisions so
+                # a bot that has drifted to mostly cash deploys it back into the
+                # market instead of sitting flat.
+                from bot_executor import get_bot_account
+                holdings, cash = get_bot_account(user_id)
 
                 # Generate trade decisions
-                decisions = generate_trade_decisions(profile, hub, holdings)
+                decisions = generate_trade_decisions(profile, hub, holdings, cash_available=cash)
 
                 # Apply human biases
                 recent_trades = []  # TODO: fetch from trade history
