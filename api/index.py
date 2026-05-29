@@ -9673,6 +9673,19 @@ def collect_intraday_data():
                     'weekend': True
                 })
             
+            # Don't collect data on market holidays (NYSE/NASDAQ closed).
+            # Mirrors the guard in market_close_cron so intraday charts don't
+            # accrue flat phantom rows on holidays (e.g. Memorial Day).
+            if is_market_holiday(today_et):
+                logger.info(f"Market holiday {today_et} - skipping intraday data collection")
+                return jsonify({
+                    'success': True,
+                    'message': f'Skipped collection - market holiday on {today_et}',
+                    'timestamp': current_time.isoformat(),
+                    'timezone': 'America/New_York',
+                    'holiday': True
+                })
+            
             # DST-aware check: Only collect at valid 15-minute intervals during market hours (9:30 AM - 4:00 PM ET)
             hour = current_time.hour
             minute = current_time.minute
