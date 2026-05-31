@@ -642,6 +642,20 @@ private fun SectorAllocationCard(
     industryMix: Map<String, Double>,
     modifier: Modifier = Modifier,
 ) {
+    // Index-based palette mirrors iOS SectorAllocationCard.barColors: sectors are
+    // colored by their sorted position (largest first), NOT by sector name, so
+    // the #1 sector is always green, #2 blue, etc. Also matches the iOS layout —
+    // per-sector rows (name | bar | %), not a single stacked bar + chip legend.
+    val barColors = listOf(
+        Color(0xFF10B981), Color(0xFF3B82F6), Color(0xFFF59E0B),
+        Color(0xFFEF4444), Color(0xFF8B5CF6), Color(0xFFEC4899),
+        Color(0xFF06B6D4), Color(0xFFF97316), Color(0xFF14B8A6),
+        Color(0xFFA855F7), Color(0xFF6366F1),
+    )
+    val sectors = industryMix.entries
+        .sortedByDescending { it.value }
+        .filter { it.value >= 1.0 }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -649,78 +663,49 @@ private fun SectorAllocationCard(
             .background(CardBackground)
             .border(0.5.dp, CardBorder, RoundedCornerShape(16.dp))
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
-            text = "SECTOR ALLOCATION",
-            color = TextMuted,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.8.sp,
+            text = "Sector Allocation",
+            color = TextPrimary,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
         )
 
-        // Stacked bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(8.dp)
-                .clip(RoundedCornerShape(4.dp)),
-        ) {
-            val total = industryMix.values.sum().takeIf { it > 0 } ?: 1.0
-            industryMix.entries.sortedByDescending { it.value }.forEach { (name, pct) ->
-                Box(
-                    modifier = Modifier
-                        .weight((pct / total).toFloat().coerceAtLeast(0.005f))
-                        .fillMaxSize()
-                        .background(sectorColor(name))
+        sectors.forEachIndexed { index, entry ->
+            val pct = entry.value
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = entry.key,
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.width(90.dp),
                 )
-            }
-        }
-
-        // Legend
-        Row(
-            modifier = Modifier
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            industryMix.entries.sortedByDescending { it.value }.forEach { (name, pct) ->
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(CardBorder.copy(alpha = 0.3f))
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
+                Box(modifier = Modifier.weight(1f)) {
                     Box(
                         modifier = Modifier
-                            .size(6.dp)
-                            .clip(CircleShape)
-                            .background(sectorColor(name))
+                            .fillMaxWidth((pct / 100.0).toFloat().coerceIn(0.01f, 1f))
+                            .height(8.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(barColors[index % barColors.size])
                     )
-                    Text(name, color = TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Medium)
-                    Text("%.0f%%".format(pct), color = TextPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+                Box(modifier = Modifier.width(42.dp), contentAlignment = Alignment.CenterEnd) {
+                    Text(
+                        text = "%.1f%%".format(pct),
+                        color = TextPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
                 }
             }
         }
-    }
-}
-
-private fun sectorColor(sector: String): Color {
-    val s = sector.lowercase()
-    return when {
-        "tech" in s -> Color(0xFF3B82F6)
-        "health" in s -> Color(0xFF22C55E)
-        "financ" in s -> Color(0xFFF59E0B)
-        "consumer d" in s -> Color(0xFFEC4899)
-        "communicat" in s -> Color(0xFF8B5CF6)
-        "industrial" in s -> Color(0xFF6366F1)
-        "consumer s" in s -> Color(0xFF14B8A6)
-        "energy" in s -> Color(0xFFEF4444)
-        "utilit" in s -> Color(0xFF64748B)
-        "real" in s -> Color(0xFFD97706)
-        "material" in s -> Color(0xFF78716C)
-        else -> Color(0xFF9CA3AF)
     }
 }
 
