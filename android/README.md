@@ -167,7 +167,7 @@ Once verified, in https://play.google.com/console:
    - App access (no login required for reviewers — provide test creds anyway)
    - Ads, Content rating, Target audience, News app
    - Data safety (mirror what iOS submitted)
-   - Privacy policy URL: `https://apestogether.ai/privacy`
+   - Privacy policy URL: `https://apestogether.ai/privacy-policy`
    - Store listing (icon, screenshots, short / full description — reuse iOS App Store copy)
 5. Set **package name** to `com.apestogether.app` (must match `applicationId` in `app/build.gradle.kts`).
 

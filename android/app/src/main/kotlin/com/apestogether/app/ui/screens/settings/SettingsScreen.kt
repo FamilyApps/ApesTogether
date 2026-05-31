@@ -240,19 +240,19 @@ fun SettingsScreen(
                 NavRow(
                     icon = Icons.AutoMirrored.Filled.Help,
                     label = "FAQ",
-                    onClick = { openUrl(context, "https://apestogether.ai/faq") },
+                    onClick = { openUrl(context, "https://apestogether.ai/#faq") },
                 )
                 Divider()
                 NavRow(
                     icon = Icons.Default.Description,
                     label = "Terms of Service",
-                    onClick = { openUrl(context, "https://apestogether.ai/terms") },
+                    onClick = { openUrl(context, "https://apestogether.ai/terms-of-service") },
                 )
                 Divider()
                 NavRow(
                     icon = Icons.Default.Shield,
                     label = "Privacy Policy",
-                    onClick = { openUrl(context, "https://apestogether.ai/privacy") },
+                    onClick = { openUrl(context, "https://apestogether.ai/privacy-policy") },
                 )
                 Divider()
                 NavRow(
