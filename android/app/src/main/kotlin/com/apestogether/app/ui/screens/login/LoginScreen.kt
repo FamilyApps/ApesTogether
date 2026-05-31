@@ -1,8 +1,26 @@
 ﻿package com.apestogether.app.ui.screens.login
 
 import com.apestogether.app.data.auth.AuthRepository
+import com.apestogether.app.ui.theme.AppBackground
+import com.apestogether.app.ui.theme.HeroBackgroundEnd
 import com.apestogether.app.ui.theme.PrimaryAccent
+import com.apestogether.app.ui.theme.TextMuted
+import com.apestogether.app.ui.theme.TextPrimary
+import com.apestogether.app.ui.theme.TextSecondary
 import android.content.Context
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.sp
+import com.apestogether.app.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -54,28 +72,58 @@ fun LoginScreen(onSignedIn: () -> Unit) {
         if (signedIn) onSignedIn()
     }
 
+    // Hero gradient — same as iOS LinearGradient.heroGradient.
+    val heroGradient = Brush.verticalGradient(
+        colors = listOf(AppBackground, HeroBackgroundEnd),
+    )
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 32.dp, vertical = 48.dp),
+            .background(heroGradient)
+            .padding(horizontal = 40.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
     ) {
-        Text(
-            text = "Apes Together",
-            style = MaterialTheme.typography.displayMedium,
-            color = PrimaryAccent,
-            textAlign = TextAlign.Center,
+        Spacer(Modifier.weight(1f))
+
+        // App logo — matches iOS Image("AppLogo"): 100dp, rounded, accent glow.
+        Image(
+            painter = painterResource(R.drawable.app_logo),
+            contentDescription = null,
+            modifier = Modifier
+                .size(100.dp)
+                .shadow(
+                    elevation = 20.dp,
+                    shape = RoundedCornerShape(22.dp),
+                    spotColor = PrimaryAccent,
+                    ambientColor = PrimaryAccent,
+                )
+                .clip(RoundedCornerShape(22.dp)),
         )
-        Spacer(Modifier.height(8.dp))
+
+        Spacer(Modifier.height(20.dp))
+
+        // Two-tone wordmark: "Apes" (white) + " Together" (accent).
         Text(
-            text = "Verified trading strategies. Zero hype.",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            text = buildAnnotatedString {
+                withStyle(SpanStyle(color = TextPrimary)) { append("Apes") }
+                withStyle(SpanStyle(color = PrimaryAccent)) { append(" Together") }
+            },
+            fontSize = 36.sp,
+            fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
         )
 
-        Spacer(Modifier.height(64.dp))
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            text = "Follow top traders.\nGet real-time alerts.",
+            color = TextSecondary,
+            fontSize = 20.sp,
+            textAlign = TextAlign.Center,
+        )
+
+        Spacer(Modifier.weight(1f))
 
         if (isLoading) {
             CircularProgressIndicator(color = PrimaryAccent)
@@ -84,12 +132,13 @@ fun LoginScreen(onSignedIn: () -> Unit) {
                 onClick = { viewModel.signInWithGoogle(context) },
                 colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
                 shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth().height(56.dp),
+                modifier = Modifier.fillMaxWidth().height(54.dp),
             ) {
                 Text(
                     "Continue with Google",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onPrimary,
+                    color = AppBackground,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
                 )
             }
         }
@@ -99,10 +148,21 @@ fun LoginScreen(onSignedIn: () -> Unit) {
             Text(
                 text = error.orEmpty(),
                 color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodyMedium,
+                fontSize = 13.sp,
                 textAlign = TextAlign.Center,
             )
         }
+
+        Spacer(Modifier.height(60.dp))
+
+        // Terms — mirrors iOS bottom disclaimer.
+        Text(
+            text = "By signing in, you agree to our Terms of Service and Privacy Policy",
+            color = TextMuted,
+            fontSize = 12.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(bottom = 20.dp),
+        )
     }
 }
 

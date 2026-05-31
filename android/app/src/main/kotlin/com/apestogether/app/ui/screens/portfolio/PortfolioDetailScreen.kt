@@ -1728,8 +1728,8 @@ private fun SetScaleDialog(
                     focusedTextColor = TextPrimary,
                     unfocusedTextColor = TextPrimary,
                     cursorColor = PrimaryAccent,
-                    focusedBorderColor = PrimaryAccent,
-                    unfocusedBorderColor = CardBorder,
+                    focusedIndicatorColor = PrimaryAccent,
+                    unfocusedIndicatorColor = CardBorder,
                 ),
                 modifier = Modifier.fillMaxWidth(),
             )

@@ -1,5 +1,6 @@
 package com.apestogether.app.ui.screens.onboarding
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,6 +39,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.apestogether.app.R
 import com.apestogether.app.ui.theme.AppBackground
 import com.apestogether.app.ui.theme.HeroBackgroundEnd
 import com.apestogether.app.ui.theme.PrimaryAccent
@@ -106,12 +110,14 @@ fun WelcomeCarouselScreen(onComplete: () -> Unit) {
                         headline = "Know when the best\ntraders buy and sell",
                         accentWord = "buy and sell",
                         subtext = "Get real-time alerts the moment\ntop investors make a move",
+                        imageRes = R.drawable.carousel1,
                     )
                     1 -> CarouselPage(
                         icon = Icons.Default.AttachMoney,
                         headline = "Get paid to share\nyour trades",
                         accentWord = "your trades",
                         subtext = "Build a following and earn\nfrom every subscriber",
+                        imageRes = R.drawable.carousel2,
                     )
                 }
             }
@@ -171,6 +177,7 @@ private fun CarouselPage(
     headline: String,
     accentWord: String,
     subtext: String,
+    imageRes: Int? = null,
 ) {
     Column(
         modifier = Modifier
@@ -179,20 +186,32 @@ private fun CarouselPage(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        // Icon in a soft circle
-        Box(
-            modifier = Modifier
-                .size(120.dp)
-                .clip(CircleShape)
-                .background(PrimaryAccent.copy(alpha = 0.12f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = icon,
+        // Illustration (matches iOS Carousel1/Carousel2 assets); falls back
+        // to an icon-in-a-circle when no image is supplied.
+        if (imageRes != null) {
+            Image(
+                painter = painterResource(imageRes),
                 contentDescription = null,
-                tint = PrimaryAccent,
-                modifier = Modifier.size(50.dp),
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .height(200.dp)
+                    .clip(RoundedCornerShape(16.dp)),
             )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(120.dp)
+                    .clip(CircleShape)
+                    .background(PrimaryAccent.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = PrimaryAccent,
+                    modifier = Modifier.size(50.dp),
+                )
+            }
         }
 
         Spacer(Modifier.height(32.dp))

@@ -248,8 +248,7 @@ struct SubscriptionsView: View {
     // MARK: - Helpers
     
     private func formatShortDate(_ dateString: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        if let date = formatter.date(from: dateString) {
+        if let date = parseBackendDate(dateString) {
             let displayFormatter = DateFormatter()
             displayFormatter.dateFormat = "MMM d"
             return displayFormatter.string(from: date)
@@ -258,8 +257,7 @@ struct SubscriptionsView: View {
     }
     
     private func formatRelativeDate(_ dateString: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        guard let date = formatter.date(from: dateString) else { return dateString }
+        guard let date = parseBackendDate(dateString) else { return dateString }
         let interval = Date().timeIntervalSince(date)
         if interval < 60 { return "just now" }
         if interval < 3600 { return "\(Int(interval / 60))m ago" }
@@ -269,6 +267,31 @@ struct SubscriptionsView: View {
         displayFormatter.dateFormat = "MMM d"
         return displayFormatter.string(from: date)
     }
+}
+
+// MARK: - Date parsing
+
+/// Robustly parses backend ISO-8601 timestamps. The backend emits 6-digit
+/// microsecond precision (e.g. "2026-05-28T17:33:38.761915Z"), which a bare
+/// `ISO8601DateFormatter` rejects outright — and even `.withFractionalSeconds`
+/// only accepts 3 digits. Without this, every caller fell back to printing the
+/// raw ISO string in the Trade Alerts list.
+fileprivate func parseBackendDate(_ s: String) -> Date? {
+    let withFrac = ISO8601DateFormatter()
+    withFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let d = withFrac.date(from: s) { return d }
+
+    let plain = ISO8601DateFormatter()
+    plain.formatOptions = [.withInternetDateTime]
+    if let d = plain.date(from: s) { return d }
+
+    // Strip the fractional component (any number of digits) and retry, since
+    // the formatters above can't handle microsecond precision.
+    if let dot = s.range(of: #"\.\d+"#, options: .regularExpression) {
+        let stripped = s.replacingCharacters(in: dot, with: "")
+        if let d = plain.date(from: stripped) { return d }
+    }
+    return nil
 }
 
 // MARK: - Subscription Card
@@ -370,8 +393,7 @@ struct SubscriptionCard: View {
     }
     
     private func formatDate(_ dateString: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        if let date = formatter.date(from: dateString) {
+        if let date = parseBackendDate(dateString) {
             let displayFormatter = DateFormatter()
             displayFormatter.dateStyle = .short
             return displayFormatter.string(from: date)
