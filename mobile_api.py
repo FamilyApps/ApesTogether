@@ -7586,7 +7586,12 @@ def bot_cron_health():
         # that's "active" but informed 0 trades is effectively a dead leg (e.g.
         # Finnhub social on the free tier) — exactly the gap we need to see.
         try:
-            from datetime import timedelta
+            # NOTE: do NOT `from datetime import timedelta` here — `timedelta`
+            # is already module-level imported and used earlier in this
+            # function (get_last_market_day, the 24h data-quality cutoff). A
+            # local import would make `timedelta` a function-local for the
+            # WHOLE scope, raising UnboundLocalError at those earlier uses and
+            # 500-ing the endpoint (which blanks the entire System Health tab).
             cutoff_7d = now - timedelta(days=7)
             cutoff_1d = now - timedelta(days=1)
             bot_ids = [bid for (bid,) in db.session.query(User.id).filter(User.role == 'agent').all()]

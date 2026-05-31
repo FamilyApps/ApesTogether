@@ -1663,9 +1663,13 @@ const SystemHealth = ({ api }) => {
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      // Each call has its own .catch so one failing endpoint degrades that
+      // section only — it must NOT reject Promise.all and blank the entire
+      // System Health tab (the 'cron-health 500 → everything shows No data'
+      // regression). Components already handle null (cron?.jobs, trades?.trades).
       const [c, t, d, sa, w] = await Promise.all([
-        api('/admin/bot/cron-health'),
-        api('/admin/bot/trade-history?per_page=20'),
+        api('/admin/bot/cron-health').catch(() => null),
+        api('/admin/bot/trade-history?per_page=20').catch(() => null),
         fetchDrift(),
         fetchSnapAudit(),
         api('/admin/bot/last-wave-status?limit=10').catch(() => ({ waves: [], count: 0 })),
