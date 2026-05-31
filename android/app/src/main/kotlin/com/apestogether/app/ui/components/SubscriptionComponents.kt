@@ -48,9 +48,15 @@ sealed interface SubscribeUiState {
  * default — same pricing as iOS (`$69/yr`, ~36% savings vs `$9/mo`).
  *
  * Used both above the Subscribe CTA on `PortfolioDetailScreen` and inside
- * the expanded leaderboard card. Direct port of iOS [CompactPlanToggle];
- * keep dimensions/colors/typography in lockstep with that file when
- * tweaking either platform.
+ * the expanded leaderboard card. Visual port of iOS [CompactPlanToggle].
+ *
+ * NOTE: the type sizes and padding here are intentionally ~1-2 units larger
+ * than the iOS source-of-truth values (iOS uses 10/13/9 pt + 3/8/10 pt
+ * padding). Roboto renders noticeably smaller and lighter than SF Pro at
+ * these sizes, so a literal 1:1 port looked undersized and cramped on
+ * Android. These bumps restore visual parity with the iOS pill; keep the
+ * COLORS and overall structure in lockstep, but do not blindly copy the iOS
+ * numeric sizes back over these.
  */
 @Composable
 fun CompactPlanToggle(
@@ -61,10 +67,10 @@ fun CompactPlanToggle(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(12.dp))
             .background(Color.White.copy(alpha = 0.06f))
-            .border(1.dp, Color.White.copy(alpha = 0.04f), RoundedCornerShape(10.dp))
-            .padding(3.dp),
+            .border(1.dp, Color.White.copy(alpha = 0.04f), RoundedCornerShape(12.dp))
+            .padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         PlanChip(
@@ -98,17 +104,17 @@ private fun PlanChip(
     // iOS draws a 1px stroke at 55% PrimaryAccent alpha around the selected
     // chip; unselected chips have no stroke at all (clear color in SwiftUI).
     val borderModifier = if (isSelected) {
-        Modifier.border(1.dp, PrimaryAccent.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+        Modifier.border(1.dp, PrimaryAccent.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
     } else {
         Modifier
     }
     Row(
         modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(10.dp))
             .background(if (isSelected) PrimaryAccent.copy(alpha = 0.12f) else Color.Transparent)
             .then(borderModifier)
             .clickable(onClick = onClick)
-            .padding(vertical = 8.dp, horizontal = 10.dp),
+            .padding(vertical = 10.dp, horizontal = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -118,14 +124,14 @@ private fun PlanChip(
             Text(
                 text = title,
                 color = if (isSelected) TextSecondary else TextMuted,
-                fontSize = 10.sp,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Medium,
             )
             // Price row ("$69/yr" / "$9/mo") — the prominent label.
             Text(
                 text = price,
                 color = if (isSelected) TextPrimary else TextSecondary,
-                fontSize = 13.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
             )
         }
@@ -141,12 +147,12 @@ private fun PlanChip(
                         if (isSelected) PrimaryAccent
                         else PrimaryAccent.copy(alpha = 0.18f)
                     )
-                    .padding(horizontal = 5.dp, vertical = 2.dp),
+                    .padding(horizontal = 6.dp, vertical = 3.dp),
             ) {
                 Text(
                     text = badge,
                     color = if (isSelected) AppBackground else PrimaryAccent,
-                    fontSize = 9.sp,
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                 )
             }

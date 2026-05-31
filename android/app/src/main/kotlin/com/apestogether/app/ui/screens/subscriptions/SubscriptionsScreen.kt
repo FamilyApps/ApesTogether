@@ -75,6 +75,7 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import javax.inject.Inject
 
 /**
@@ -482,7 +483,7 @@ private fun NotificationRow(n: NotificationItem) {
                 )
                 n.createdAt?.let { date ->
                     Text(
-                        text = formatRelativeDate(date),
+                        text = formatAlertTimestamp(date),
                         color = TextMuted,
                         fontSize = 10.sp,
                     )
@@ -578,17 +579,59 @@ private fun formatRelativeDate(iso: String): String {
     return SimpleDateFormat("MMM d", Locale.US).format(parsed)
 }
 
+/**
+ * Trade Alerts timestamp: a friendly relative prefix (for items < 1 week old)
+ * followed by the exact calendar date and time down to the minute, e.g.
+ * "3d ago · May 28, 5:33 PM". Older items drop the redundant relative prefix
+ * and show the absolute date/time only. The year is appended when the alert is
+ * not from the current year. Mirrors iOS `formatAlertTimestamp`.
+ */
+private fun formatAlertTimestamp(iso: String): String {
+    val parsed = parseIso(iso) ?: return iso
+    val yearFmt = SimpleDateFormat("yyyy", Locale.US)
+    val sameYear = yearFmt.format(parsed) == yearFmt.format(Date())
+    val pattern = if (sameYear) "MMM d, h:mm a" else "MMM d, yyyy, h:mm a"
+    val absolute = SimpleDateFormat(pattern, Locale.US).format(parsed)
+
+    val ms = System.currentTimeMillis() - parsed.time
+    val relative = when {
+        ms < 60_000 -> "just now"
+        ms < 3_600_000 -> "${ms / 60_000}m ago"
+        ms < 86_400_000 -> "${ms / 3_600_000}h ago"
+        ms < 604_800_000 -> "${ms / 86_400_000}d ago"
+        else -> null
+    }
+    return if (relative != null) "$relative · $absolute" else absolute
+}
+
 private fun parseIso(iso: String): Date? {
-    val patterns = listOf(
-        "yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXX",
+    // The backend emits 6-digit microseconds (e.g. ".761915"). SimpleDateFormat's
+    // millisecond field ('S') would read that whole number as milliseconds —
+    // adding ~12 minutes — so truncate any fractional component to 3 digits.
+    val normalized = Regex("\\.(\\d{3})\\d+").replace(iso) { "." + it.groupValues[1] }
+
+    // Patterns carrying an explicit offset/"Z" — the timezone comes from the
+    // string itself, so parse as-is.
+    val tzPatterns = listOf(
         "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
         "yyyy-MM-dd'T'HH:mm:ssXXX",
-        "yyyy-MM-dd'T'HH:mm:ss.SSSSSS",
+    )
+    for (p in tzPatterns) {
+        val r = runCatching { SimpleDateFormat(p, Locale.US).parse(normalized) }.getOrNull()
+        if (r != null) return r
+    }
+
+    // Naive (no-offset) timestamps: backend times are UTC, so force UTC instead
+    // of the device's local zone (which would shift the displayed time).
+    val utcPatterns = listOf(
+        "yyyy-MM-dd'T'HH:mm:ss.SSS",
         "yyyy-MM-dd'T'HH:mm:ss",
         "yyyy-MM-dd",
     )
-    for (p in patterns) {
-        val r = runCatching { SimpleDateFormat(p, Locale.US).parse(iso) }.getOrNull()
+    for (p in utcPatterns) {
+        val r = runCatching {
+            SimpleDateFormat(p, Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.parse(normalized)
+        }.getOrNull()
         if (r != null) return r
     }
     return null

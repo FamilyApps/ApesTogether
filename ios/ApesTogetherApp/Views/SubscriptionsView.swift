@@ -223,7 +223,7 @@ struct SubscriptionsView: View {
                                         .font(.system(size: 11, weight: .semibold))
                                         .foregroundColor(.primaryAccent)
                                     if let date = notif.createdAt {
-                                        Text(formatRelativeDate(date))
+                                        Text(formatAlertTimestamp(date))
                                             .font(.system(size: 10))
                                             .foregroundColor(.textMuted)
                                     }
@@ -266,6 +266,31 @@ struct SubscriptionsView: View {
         let displayFormatter = DateFormatter()
         displayFormatter.dateFormat = "MMM d"
         return displayFormatter.string(from: date)
+    }
+
+    /// Trade Alerts timestamp: a friendly relative prefix (for items < 1 week
+    /// old) followed by the exact calendar date and time down to the minute,
+    /// e.g. "3d ago · May 28, 5:33 PM". Older items drop the redundant relative
+    /// prefix and show the absolute date/time only. The year is appended when
+    /// the alert is not from the current year.
+    private func formatAlertTimestamp(_ dateString: String) -> String {
+        guard let date = parseBackendDate(dateString) else { return dateString }
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US")
+        let sameYear = Calendar.current.isDate(date, equalTo: Date(), toGranularity: .year)
+        df.dateFormat = sameYear ? "MMM d, h:mm a" : "MMM d, yyyy, h:mm a"
+        let absolute = df.string(from: date)
+
+        let interval = Date().timeIntervalSince(date)
+        let relative: String?
+        if interval < 60 { relative = "just now" }
+        else if interval < 3600 { relative = "\(Int(interval / 60))m ago" }
+        else if interval < 86400 { relative = "\(Int(interval / 3600))h ago" }
+        else if interval < 604800 { relative = "\(Int(interval / 86400))d ago" }
+        else { relative = nil }
+
+        if let relative = relative { return "\(relative) · \(absolute)" }
+        return absolute
     }
 }
 
