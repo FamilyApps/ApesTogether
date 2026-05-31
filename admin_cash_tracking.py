@@ -1618,8 +1618,22 @@ def register_cash_tracking_routes(app, db):
 
             drift_users = []
             scanned = 0
+            skipped_copytrade = 0
+
+            try:
+                from mobile_api import _is_copytrade_bot
+            except Exception:
+                def _is_copytrade_bot(_u):
+                    return False
 
             for user in users:
+                # Copytrade bots (CoastHillBear, marblethehill72) derive cash/holdings
+                # from brokerage-screenshot migrations (price_source='phase_c_migration')
+                # that a transaction replay cannot reproduce, so they always show
+                # false-positive drift. Skip them so alerts stay trustworthy.
+                if _is_copytrade_bot(user):
+                    skipped_copytrade += 1
+                    continue
                 txns = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.timestamp).all()
                 if not txns:
                     continue  # users with no transactions can't drift
@@ -1727,6 +1741,7 @@ def register_cash_tracking_routes(app, db):
                 'success': True,
                 'timestamp': timestamp_str,
                 'users_scanned': scanned,
+                'copytrade_bots_skipped': skipped_copytrade,
                 'drift_count': len(drift_users),
                 'threshold': threshold,
                 'drift_users': drift_users,

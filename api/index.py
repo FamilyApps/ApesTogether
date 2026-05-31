@@ -2183,27 +2183,27 @@ def admin_audit_snapshot_cash_drift():
     limit_users_param = request.args.get('limit_users')
     apply_fix = request.args.get('fix', 'false').lower() == 'true'
 
-    # EOD cron fires at 20:05 UTC (`5 20 * * 1-5` in vercel.json). Trades < 20:05 UTC
-    # apply to that day's snapshot; trades >= 20:05 UTC roll to next day. This matches
-    # what the EOD cron actually saw at write time.
+    try:
+        from mobile_api import _is_copytrade_bot
+    except Exception:
+        def _is_copytrade_bot(_u):
+            return False
+
+    # Bucket each trade by its UTC calendar date to MATCH the snapshot writer
+    # (calculate_cash_proceeds_as_of_date + historical stock-value replay both use
+    # `func.date(Transaction.timestamp) <= target_date`). The old 20:05-UTC cutoff
+    # rolled late-wave trades to the next day and falsely flagged snapshots that had
+    # correctly captured them same-day. See cron_snapshot_audit for the full write-up.
     def _eff_date(ts):
         if ts is None:
             return None
-        ts_naive = ts.replace(tzinfo=None) if ts.tzinfo else ts
-        cron_firing = datetime.combine(ts_naive.date(), _dt_time(20, 5))
-        if ts_naive < cron_firing:
-            return ts_naive.date()
-        return ts_naive.date() + _td(days=1)
+        return (ts.replace(tzinfo=None) if ts.tzinfo else ts).date()
 
-    # Tolerance buffer: trades in [20:04:00, 20:06:00) UTC (±60s of cron firing)
-    # are inherently ambiguous — Vercel cron jitter means the trade may or may
-    # not have been captured by the EOD cron. For snapshot D, sum up |trade_value|
-    # of ambiguous trades whose timestamp falls on date D, and add that to the
-    # drift threshold before flagging. This eliminates timing-edge false positives
-    # like marblethehill72 4/28 PLTR (16:05 ET = 20:05 UTC) and apex1575 5/7 ZTS
-    # (20:04:27 UTC).
-    _amb_start = _dt_time(20, 4)
-    _amb_end = _dt_time(20, 6)
+    # Ambiguous-trade tolerance: post-market-close trades (>= 20:00 UTC) on date D
+    # may or may not be in that day's EOD snapshot; tolerate their summed |value| so
+    # boundary-wave trades never falsely flag. Intraday trades still surface genuine drift.
+    _amb_start = _dt_time(20, 0)
+    _amb_end = _dt_time(23, 59, 59)
 
     q = User.query.order_by(User.id.asc())
     if role_filter:
@@ -2219,8 +2219,16 @@ def admin_audit_snapshot_cash_drift():
     total_snapshots_checked = 0
     total_bad_snapshots = 0
     fix_count = 0
+    skipped_copytrade = 0
 
     for user in users:
+        # Copytrade bots derive cash/holdings from brokerage-screenshot migrations
+        # (price_source='phase_c_migration') that a transaction replay cannot
+        # reproduce — they always show false-positive drift. Skip them so a blanket
+        # ?fix=true can never overwrite their brokerage-matched cash.
+        if _is_copytrade_bot(user):
+            skipped_copytrade += 1
+            continue
         txns = Transaction.query.filter_by(user_id=user.id).order_by(
             Transaction.timestamp.asc()
         ).all()
@@ -2241,9 +2249,9 @@ def admin_audit_snapshot_cash_drift():
                 d = ts_n.date()
                 amb_tol_by_date[d] = amb_tol_by_date.get(d, 0.0) + v
 
-        # Replay transactions chronologically using the 20:05 UTC effective-date
-        # cutoff so the audit's "expected" matches what the EOD cron actually wrote
-        # at that moment. This eliminates after-close-buy false positives.
+        # Replay transactions chronologically bucketed by UTC calendar date (matching
+        # the snapshot writer's func.date(timestamp) filter). Post-close boundary-wave
+        # trades are absorbed by the ambiguous-trade tolerance computed above.
         replay_cash = 0.0
         replay_max = 0.0
         txn_idx = 0
@@ -2334,6 +2342,7 @@ def admin_audit_snapshot_cash_drift():
         'fix_applied': apply_fix,
         'fix_count': fix_count if apply_fix else 0,
         'users_scanned': len(users),
+        'copytrade_bots_skipped': skipped_copytrade,
         'users_with_issues': len(issues),
         'total_snapshots_checked': total_snapshots_checked,
         'total_bad_snapshots': total_bad_snapshots,
@@ -2360,19 +2369,24 @@ def admin_audit_snapshot_max_cash_drift():
     from models import db, User, Transaction, PortfolioSnapshot, Stock
     from sqlalchemy import text as _sql_text
     from datetime import time as _dt_time, timedelta as _td
+    try:
+        from mobile_api import _is_copytrade_bot
+    except Exception:
+        def _is_copytrade_bot(_u):
+            return False
 
+    # Bucket trades by UTC calendar date to match the snapshot writer
+    # (func.date(Transaction.timestamp) <= target_date). See cron_snapshot_audit
+    # for why the old 20:05-UTC cutoff produced late-wave false positives.
     def _eff_date(ts):
         if ts is None:
             return None
-        ts_naive = ts.replace(tzinfo=None) if ts.tzinfo else ts
-        cron_firing = datetime.combine(ts_naive.date(), _dt_time(20, 5))
-        if ts_naive < cron_firing:
-            return ts_naive.date()
-        return ts_naive.date() + _td(days=1)
+        return (ts.replace(tzinfo=None) if ts.tzinfo else ts).date()
 
-    # Tolerance buffer for ambiguous trades within ±60s of cron firing
-    _amb_start = _dt_time(20, 4)
-    _amb_end = _dt_time(20, 6)
+    # Ambiguous-trade tolerance: post-market-close trades (>= 20:00 UTC) on date D
+    # may or may not be in that day's EOD snapshot; tolerate their summed |value|.
+    _amb_start = _dt_time(20, 0)
+    _amb_end = _dt_time(23, 59, 59)
 
     try:
         threshold = float(request.args.get('threshold', '1.00'))
@@ -2396,8 +2410,16 @@ def admin_audit_snapshot_max_cash_drift():
     total_snapshots_checked = 0
     total_bad_snapshots = 0
     fix_count = 0
+    skipped_copytrade = 0
 
     for user in users:
+        # Copytrade bots derive cash/holdings from brokerage-screenshot migrations
+        # (price_source='phase_c_migration') that a transaction replay cannot
+        # reproduce — they always show false-positive drift. Skip them so a blanket
+        # ?fix=true can never overwrite their brokerage-matched cash.
+        if _is_copytrade_bot(user):
+            skipped_copytrade += 1
+            continue
         txns = Transaction.query.filter_by(user_id=user.id).order_by(
             Transaction.timestamp.asc()
         ).all()
@@ -2419,9 +2441,8 @@ def admin_audit_snapshot_max_cash_drift():
                 amb_tol_by_date[d] = amb_tol_by_date.get(d, 0.0) + v
 
         # Determine seeded_baseline: gap between first snapshot max_cash and
-        # what txns through first_snap.date can explain (using 20:05 UTC cutoff
-        # so an after-close trade on first_snap.date is NOT counted — it would
-        # have rolled to first_snap.date+1).
+        # what txns through first_snap.date can explain (bucketed by UTC calendar
+        # date, matching the snapshot writer's func.date(timestamp) filter).
         first_snap = snaps[0]
         rmf = 0.0
         rcf = 0.0
@@ -2523,6 +2544,7 @@ def admin_audit_snapshot_max_cash_drift():
         'fix_applied': apply_fix,
         'fix_count': fix_count if apply_fix else 0,
         'users_scanned': len(users),
+        'copytrade_bots_skipped': skipped_copytrade,
         'users_with_issues': len(issues),
         'total_snapshots_checked': total_snapshots_checked,
         'total_bad_snapshots': total_bad_snapshots,
@@ -2543,9 +2565,10 @@ def cron_snapshot_audit():
       - /api/cron/snapshot-audit       → CRON_SECRET bearer token (Vercel cron)
       - /admin/cash-tracking/snapshot-audit → admin session (Run-now button)
 
-    Uses the same 20:05 UTC effective-date cutoff as the EOD cron itself, so
-    after-close trades that the cron physically didn't see don't get flagged
-    as false positives.
+    Buckets trades by UTC calendar date (matching the snapshot writer's
+    func.date(timestamp) filter) and tolerates post-market-close (>= 20:00 UTC)
+    boundary-wave trades, so EOD-wave timing differences are not flagged as
+    false positives.
 
     Schedule: daily at 21:00 UTC (17:00 EDT / 16:00 EST), well after the
     market-close cron at 20:05 UTC has finished writing snapshots.
@@ -2579,22 +2602,33 @@ def cron_snapshot_audit():
 
     from models import db, User, Transaction, PortfolioSnapshot
     from datetime import time as _dt_time, timedelta as _td
+    try:
+        from mobile_api import _is_copytrade_bot
+    except Exception:
+        def _is_copytrade_bot(_u):
+            return False
 
     def _eff_date(ts):
+        # Bucket each trade by its UTC calendar date — IDENTICAL to how the EOD
+        # snapshot writer assigns trades. calculate_cash_proceeds_as_of_date()
+        # (cash_tracking.py) and the historical stock-value replay both filter with
+        # `func.date(Transaction.timestamp) <= target_date`, i.e. Postgres DATE() on
+        # the raw naive-UTC timestamp. The previous 20:05-UTC cutoff rolled late-wave
+        # trades (e.g. a 20:09 UTC bot buy) to the NEXT day, but the snapshot captured
+        # them SAME day (cash AND stock both moved -> total smooth), producing false-
+        # positive 'drift'. Matching the writer's UTC-date bucketing kills that whole
+        # false-positive class while still catching genuine stale-cash snapshots.
         if ts is None:
             return None
-        ts_naive = ts.replace(tzinfo=None) if ts.tzinfo else ts
-        cron_firing = datetime.combine(ts_naive.date(), _dt_time(20, 5))
-        if ts_naive < cron_firing:
-            return ts_naive.date()
-        return ts_naive.date() + _td(days=1)
+        return (ts.replace(tzinfo=None) if ts.tzinfo else ts).date()
 
-    # Tolerance buffer for ambiguous trades within ±60s of cron firing.
-    # Eliminates false positives like marblethehill72 4/28 PLTR (16:05 ET = 20:05 UTC)
-    # and apex1575 5/7 ZTS (20:04:27 UTC) where Vercel cron jitter determined
-    # whether the trade was captured by the EOD cron.
-    _amb_start = _dt_time(20, 4)
-    _amb_end = _dt_time(20, 6)
+    # Ambiguous-trade tolerance: trades AFTER market close (>= 20:00 UTC) on date D
+    # may or may not be in that day's EOD snapshot (cron ~20:05, bot wave ~20:05-20:20,
+    # snapshot may be (re)written before or after). Add their summed |value| on date D
+    # to the threshold so neither case is falsely flagged. Intraday trades (< 20:00 UTC)
+    # are NOT tolerated, so genuine stale-cash snapshots still surface.
+    _amb_start = _dt_time(20, 0)
+    _amb_end = _dt_time(23, 59, 59)
 
     cash_threshold = 1.00  # $1.00 — coarser than admin endpoint to avoid noise
     max_cash_threshold = 1.00
@@ -2605,7 +2639,15 @@ def cron_snapshot_audit():
 
     users = User.query.order_by(User.id.asc()).all()
 
+    skipped_copytrade = 0
     for user in users:
+        # Copytrade bots (CoastHillBear, marblethehill72) derive cash/holdings from
+        # brokerage-screenshot migrations (price_source='phase_c_migration') that a
+        # transaction replay cannot reproduce, so they always show false-positive
+        # drift. Skip them so alerts stay trustworthy and a blanket fix can't corrupt them.
+        if _is_copytrade_bot(user):
+            skipped_copytrade += 1
+            continue
         txns = Transaction.query.filter_by(user_id=user.id).order_by(
             Transaction.timestamp.asc()
         ).all()
@@ -2714,7 +2756,7 @@ def cron_snapshot_audit():
         prompt_lines = [
             f"# Snapshot drift detected ({timestamp_str})",
             f"# {total_bad_snapshots} bad snapshots across {len(issues)} users (of {len(users)} scanned).",
-            f"# 20:05 UTC effective-date cutoff in use, so these are NOT after-close-buy false positives.",
+            f"# Trades bucketed by UTC date with post-close (>=20:00 UTC) tolerance; these are NOT EOD-wave timing false positives.",
             "",
             "Investigate via:",
             "  /admin/audit-snapshot-cash-drift  (full per-snapshot detail)",
@@ -2729,6 +2771,7 @@ def cron_snapshot_audit():
         'success': True,
         'timestamp': timestamp_str,
         'users_scanned': len(users),
+        'copytrade_bots_skipped': skipped_copytrade,
         'total_snapshots_checked': total_snapshots_checked,
         'total_bad_snapshots': total_bad_snapshots,
         'users_with_issues': len(issues),
