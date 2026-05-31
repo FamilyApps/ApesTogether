@@ -699,16 +699,20 @@ def generate_trade_decisions(bot_profile, market_hub, current_holdings=None, cas
     MAX_REDEPLOY_PER_WAVE = 3
 
     if cash_available and cash_available > 0:
-        # Mark-to-market the held stock from the hub (purchase_price fallback).
-        stock_value = 0.0
+        # Mark-to-market each held position (hub price, purchase_price fallback)
+        # so we know both total stock value (for NAV) and each position's
+        # CURRENT size (needed for top-up sizing below).
+        held_mv = {}
         for h in current_holdings:
             sd = market_hub.get_stock_data(h['ticker'])
             px = (sd.get('price') if sd else 0) or h.get('purchase_price', 0) or 0
-            stock_value += (h.get('quantity', 0) or 0) * px
+            held_mv[h['ticker']] = held_mv.get(h['ticker'], 0.0) + (h.get('quantity', 0) or 0) * px
+        stock_value = sum(held_mv.values())
         nav = stock_value + cash_available
         per_name = nav / max(1, max_positions)  # equal-weight target size
 
         already_buying = {d['ticker'] for d in decisions if d['action'] == 'buy'}
+        selling_now = {d['ticker'] for d in decisions if d['action'] == 'sell'}
         remaining_slots = max(0, open_slots - len(already_buying))
 
         # Deploy the cash above target, but reserve ~per_name for each
@@ -718,40 +722,62 @@ def generate_trade_decisions(bot_profile, market_hub, current_holdings=None, cas
         deployable = (cash_available - REDEPLOY_TARGET_FRAC * nav
                       - per_name * len(already_buying))
 
-        if (nav > 0 and remaining_slots > 0
+        # NOTE: no `remaining_slots > 0` gate here. The original rule only
+        # opened NEW positions, so a bot sitting AT max_positions with tiny,
+        # under-weight holdings (the 'stranded cash' bots — full slot count but
+        # only ~40-50% invested, stuck at 50-70% cash) could never redeploy:
+        # every slot was taken. Top-ups (below) need no slot, so they keep the
+        # bot deploying toward equal-weight even when its book is 'full'.
+        if (nav > 0
                 and cash_available > REDEPLOY_TRIGGER_FRAC * nav
                 and deployable > 0):
-            # Best-scored names we don't already hold or plan to buy, with a
-            # valid price and a non-negative score (never redeploy into an
-            # outright sell signal).
-            redeploy_candidates = [
-                s for s in scored_stocks
-                if s['ticker'] not in held_tickers
-                and s['ticker'] not in already_buying
-                and s['price'] > 0
-                and s['score'] >= 0
-            ]
-            redeploy_candidates.sort(key=lambda x: x['score'], reverse=True)
+            # Two ways to put idle cash to work, both requiring a valid price
+            # and a non-negative score (never redeploy into a sell signal):
+            #   • OPEN a new position    — consumes a free slot (respects max_positions)
+            #   • TOP UP an under-weight existing holding toward per_name — no slot needed
+            # The executor's BUY path (/admin/bot/execute-trade) already does a
+            # weighted-average cost-basis update when the position exists.
+            redeploy_targets = []  # list of (scored_stock, kind, gap_dollars)
+            for s in scored_stocks:
+                if s['price'] <= 0 or s['score'] < 0 or s['ticker'] in already_buying:
+                    continue
+                tk = s['ticker']
+                if tk in held_tickers:
+                    if tk in selling_now:
+                        continue  # don't top up a position we're trimming this wave
+                    gap = per_name - held_mv.get(tk, 0.0)
+                    if gap > 1:  # only top up genuinely under-weight positions
+                        redeploy_targets.append((s, 'topup', gap))
+                else:
+                    redeploy_targets.append((s, 'new', per_name))
+            redeploy_targets.sort(key=lambda x: x[0]['score'], reverse=True)
 
-            n_slots = min(len(redeploy_candidates), remaining_slots, MAX_REDEPLOY_PER_WAVE)
             remaining_cash = deployable
-            for c in redeploy_candidates[:n_slots]:
-                if remaining_cash < 1:
+            slots_left = remaining_slots
+            buys_made = 0
+            for s, kind, gap in redeploy_targets:
+                if buys_made >= MAX_REDEPLOY_PER_WAVE or remaining_cash < 1:
                     break
-                notional = min(per_name, remaining_cash)
+                if kind == 'new':
+                    if slots_left <= 0:
+                        continue  # out of slots — skip new opens, keep scanning for top-ups
+                    slots_left -= 1
+                notional = min(per_name, gap, remaining_cash)
                 if notional < 1:
-                    break
+                    continue
+                verb = 'open' if kind == 'new' else 'add to'
                 decisions.append({
                     'action': 'buy',
-                    'ticker': c['ticker'],
-                    'score': c['score'],
-                    'reason': (f"Idle-cash redeploy: cash {cash_available / nav:.0%} of NAV "
+                    'ticker': s['ticker'],
+                    'score': s['score'],
+                    'reason': (f"Idle-cash redeploy ({verb}): cash {cash_available / nav:.0%} of NAV "
                                f"> {REDEPLOY_TRIGGER_FRAC:.0%} ceiling; deploying ${notional:,.0f}"),
-                    'price': c['price'],
+                    'price': s['price'],
                     'signal_tag': 'redeploy',
                     'target_notional': round(notional, 2),
                 })
                 remaining_cash -= notional
+                buys_made += 1
 
     return decisions
 
