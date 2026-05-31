@@ -3517,7 +3517,7 @@ def bot_subscribe():
         "subscribed_to_id": 456
     }
     """
-    from models import db, MobileSubscription
+    from models import db, MobileSubscription, InAppPurchase
     
     data = request.get_json()
     if not data:
@@ -3541,18 +3541,41 @@ def bot_subscribe():
             return jsonify({'error': 'already_subscribed', 'subscription_id': existing.id}), 409
         
         from datetime import timedelta
+        now = datetime.utcnow()
+        # MobileSubscription.in_app_purchase_id is NOT NULL and there is no
+        # `platform` column on MobileSubscription (that lives on InAppPurchase).
+        # Admin/bot-created subscriptions have no real store purchase, so create a
+        # $0 placeholder IAP flagged platform='admin' (price/payout/fees all 0 so it
+        # stays out of revenue/Xero) and link the subscription to it.
+        iap = InAppPurchase(
+            subscriber_id=subscriber_id,
+            subscribed_to_id=subscribed_to_id,
+            platform='admin',
+            product_id='admin.bot.subscription',
+            transaction_id=f'admin-bot-{subscriber_id}-{subscribed_to_id}-{int(now.timestamp())}',
+            status='active',
+            purchase_date=now,
+            expires_date=now + timedelta(days=365),
+            price=0.0,
+            influencer_payout=0.0,
+            platform_revenue=0.0,
+            store_fee=0.0,
+        )
+        db.session.add(iap)
+        db.session.flush()  # assigns iap.id
+
         sub = MobileSubscription(
             subscriber_id=subscriber_id,
             subscribed_to_id=subscribed_to_id,
-            platform='admin_bot',
+            in_app_purchase_id=iap.id,
             status='active',
-            expires_at=datetime.utcnow() + timedelta(days=365),
+            expires_at=now + timedelta(days=365),
             push_notifications_enabled=False
         )
         db.session.add(sub)
         db.session.commit()
         
-        return jsonify({'success': True, 'subscription_id': sub.id})
+        return jsonify({'success': True, 'subscription_id': sub.id, 'in_app_purchase_id': iap.id})
         
     except Exception as e:
         db.session.rollback()

@@ -67,7 +67,14 @@ def process_transaction(db, user_id, ticker, quantity, price, transaction_type, 
         raise ValueError(f"User {user_id} not found")
     
     transaction_value = quantity * price
-    
+
+    # Normalize transaction_type to canonical lowercase. The cash-tracking replay
+    # and drift audits match lowercase only ('buy'/'initial'/'sell'/'dividend'), so
+    # a stray uppercase record (e.g. 'SELL' from a legacy/admin path) would be
+    # silently ignored by the replay and diverge from holdings. Normalizing every
+    # write here keeps the ledger canonical and prevents that landmine.
+    transaction_type = (transaction_type or '').strip().lower()
+
     if transaction_type in ('buy', 'initial'):
         # BUYING STOCK
         logger.info(f"Processing {transaction_type}: {quantity} {ticker} @ ${price} = ${transaction_value}")

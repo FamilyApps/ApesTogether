@@ -297,7 +297,12 @@ def notify_subscribers_via_email(db, trader_user_id, action, ticker, quantity, p
             log = NotificationLog(
                 user_id=subscriber.id,
                 portfolio_owner_id=trader_user_id,
-                subscription_id=sub.id if hasattr(sub, 'id') else None,
+                # NotificationLog.subscription_id FKs to the legacy `subscription`
+                # (Stripe) table. `sub` here is a MobileSubscription, whose id does
+                # NOT map to that table — passing it caused an FK violation that made
+                # the batch commit() below fail under `except: pass`, silently dropping
+                # ALL notification logs for the fan-out. Leave NULL (column is nullable).
+                subscription_id=None,
                 notification_type='email',
                 status=result['status'],
                 sendgrid_message_id=result.get('message_id'),
@@ -309,7 +314,13 @@ def notify_subscribers_via_email(db, trader_user_id, action, ticker, quantity, p
 
     try:
         db.session.commit()
-    except Exception:
-        pass
+    except Exception as commit_err:
+        # Don't let a logging-table failure mask the fact that emails were already
+        # sent. Roll back and log loudly rather than swallowing silently.
+        logger.error(f"NotificationLog commit failed (emails already sent): {commit_err}")
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
 
     return {'sent': sent, 'failed': failed, 'rate_limited': rate_limited}
