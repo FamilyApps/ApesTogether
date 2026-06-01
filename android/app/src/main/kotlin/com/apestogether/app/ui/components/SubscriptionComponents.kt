@@ -19,6 +19,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,6 +44,16 @@ sealed interface SubscribeUiState {
     data class Error(val message: String) : SubscribeUiState
     data object Success : SubscribeUiState
 }
+
+/**
+ * Android adds extra vertical "font padding" above/below text by default,
+ * which makes labels and the capsule badge render noticeably chunkier than
+ * iOS (SF Pro has no such padding). Disabling it on the toggle brings the
+ * pill height + badge sizing in line with the iOS CompactPlanToggle.
+ */
+private val ToggleTextStyle = TextStyle(
+    platformStyle = PlatformTextStyle(includeFontPadding = false),
+)
 
 /**
  * Two-pill plan toggle (Annual / Monthly). Annual is the recommended
@@ -124,6 +136,7 @@ private fun PlanChip(
                 color = if (isSelected) TextSecondary else TextMuted,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Medium,
+                style = ToggleTextStyle,
             )
             // Price row ("$69/yr" / "$9/mo") — the prominent label.
             Text(
@@ -131,6 +144,7 @@ private fun PlanChip(
                 color = if (isSelected) TextPrimary else TextSecondary,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
+                style = ToggleTextStyle,
             )
         }
         // Optional capsule badge (only Annual carries "Save 36%").
@@ -154,6 +168,7 @@ private fun PlanChip(
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     softWrap = false,
+                    style = ToggleTextStyle,
                 )
             }
         }
