@@ -23,11 +23,14 @@ import androidx.compose.ui.unit.sp
 import com.apestogether.app.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -128,18 +131,32 @@ fun LoginScreen(onSignedIn: () -> Unit) {
         if (isLoading) {
             CircularProgressIndicator(color = PrimaryAccent)
         } else {
+            // Mirrors iOS SignInWithAppleButton(.white): a white pill, height 54,
+            // corner 12 — but with the Google "G" mark + "Sign in with Google"
+            // since Android uses Google auth instead of Apple.
             Button(
                 onClick = { viewModel.signInWithGoogle(context) },
-                colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth().height(54.dp),
             ) {
-                Text(
-                    "Continue with Google",
-                    color = AppBackground,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    Image(
+                        painter = painterResource(R.drawable.ic_google_g),
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        "Sign in with Google",
+                        color = Color(0xFF1F1F1F),
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
         }
 
