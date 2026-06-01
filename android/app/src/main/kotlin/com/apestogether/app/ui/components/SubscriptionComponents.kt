@@ -152,6 +152,8 @@ private fun PlanChip(
                     color = if (isSelected) AppBackground else PrimaryAccent,
                     fontSize = 9.sp,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
                 )
             }
         }

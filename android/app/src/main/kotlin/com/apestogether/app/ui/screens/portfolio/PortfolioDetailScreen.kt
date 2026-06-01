@@ -947,7 +947,7 @@ private fun HoldingRow(holding: Holding, portfolioValue: Double? = null) {
             Text(
                 text = holding.formattedQuantity + " " + sharesLabel + avgPart,
                 color = TextSecondary,
-                fontSize = 13.sp,
+                fontSize = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
