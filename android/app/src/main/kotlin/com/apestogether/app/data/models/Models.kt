@@ -185,6 +185,17 @@ data class Holding(
     }
 
     /**
+     * Absolute $ gain on the position. Null when purchasePrice is missing/0
+     * (same guard as [gainPercent]), so the UI stays consistent. Mirrors the
+     * iOS Holding.gainDollars computed property.
+     */
+    val gainDollars: Double? get() {
+        val cur = currentPrice ?: return null
+        if (purchasePrice <= 0.0 || cur <= 0.0) return null
+        return (cur - purchasePrice) * quantity
+    }
+
+    /**
      * Quantity formatted for display.
      *  - Whole shares (e.g. 10.0) → "10"
      *  - Fractional → up to 5 decimals, trailing zeros trimmed

@@ -931,24 +931,33 @@ private fun HoldingRow(holding: Holding, portfolioValue: Double? = null) {
 
         Spacer(Modifier.width(12.dp))
 
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(holding.ticker, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            // Phase B fractional-share fix: was `quantity.toInt()` which
-            // truncated 0.5 to 0 (showed "0 shares"). `formatQuantity`
-            // matches iOS `formattedQuantity`: integers for whole positions,
-            // 4-decimal-trimmed for fractional.
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Text(holding.ticker, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            // Mirrors iOS `quantityAndAvgLine`: "{qty} shares · $X.XX avg".
+            // Uses the model's `formattedQuantity` (up to 5 decimals, trimmed)
+            // — NOT the 2-decimal `formatQuantity()` — and appends the average
+            // cost per share whenever purchasePrice is known.
+            val sharesLabel = if (holding.quantity == 1.0) "share" else "shares"
+            val avgPart = if (holding.purchasePrice > 0) {
+                " · $" + "%.2f".format(holding.purchasePrice) + " avg"
+            } else ""
             Text(
-                text = "${formatQuantity(holding.quantity)} shares",
+                text = holding.formattedQuantity + " " + sharesLabel + avgPart,
                 color = TextSecondary,
-                fontSize = 11.sp,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
 
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.width(8.dp))
 
         Column(
             horizontalAlignment = Alignment.End,
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
         ) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -957,7 +966,7 @@ private fun HoldingRow(holding: Holding, portfolioValue: Double? = null) {
                 Text(
                     text = "$" + "%.2f".format(holding.totalValue),
                     color = TextPrimary,
-                    fontSize = 14.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
                 )
                 if (portfolioValue != null && portfolioValue > 0.0) {
@@ -965,23 +974,25 @@ private fun HoldingRow(holding: Holding, portfolioValue: Double? = null) {
                     Text(
                         text = if (pct < 1.0) "<1% port" else "%.0f%% port".format(pct),
                         color = TextMuted,
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
                     )
                 }
             }
-            holding.gainPercent?.let { gain ->
+            // Bottom-right line mirrors iOS: "+$X.XX (+X.X%)" color-coded, or
+            // an em-dash when cost basis is unknown.
+            val gainPct = holding.gainPercent
+            val gainDol = holding.gainDollars
+            if (gainPct != null && gainDol != null) {
                 Text(
-                    text = formatPercent(gain, decimals = 1),
-                    color = if (gain >= 0) Gains else Losses,
-                    fontSize = 11.sp,
+                    text = formatSignedDollars(gainDol) + " (" + formatPercent(gainPct, decimals = 1) + ")",
+                    color = if (gainPct >= 0) Gains else Losses,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
-            } ?: Text(
-                text = "$" + "%.2f".format(holding.displayPrice) + " avg",
-                color = TextMuted,
-                fontSize = 11.sp,
-            )
+            } else {
+                Text(text = "—", color = TextMuted, fontSize = 13.sp)
+            }
         }
     }
 }
@@ -1219,6 +1230,13 @@ private fun formatPercent(value: Double, decimals: Int): String {
     val sign = if (value >= 0) "+" else "−"
     val abs = value.absoluteValue
     return "$sign${"%.${decimals}f".format(abs)}%"
+}
+
+/** Signed dollar amount, e.g. "+$5971.70" / "-$42.10". Mirrors iOS
+ *  HoldingRow.formattedSignedDollars. */
+private fun formatSignedDollars(value: Double): String {
+    val sign = if (value >= 0) "+" else "-"
+    return sign + "$" + "%.2f".format(value.absoluteValue)
 }
 
 private fun formatQuantity(quantity: Double): String {
