@@ -3143,6 +3143,185 @@ def admin_audit_bot_portfolio_integrity():
     })
 
 
+@app.route('/admin/backfill-bot-untracked-holdings')
+@admin_required
+def admin_backfill_bot_untracked_holdings():
+    """
+    Remediate the `untracked_holdings` found by /admin/audit-bot-portfolio-integrity:
+    bots seeded via the legacy /admin/bot/add-stocks path got Stock rows but NO
+    Transaction, so transaction replay can't reconstruct them and their
+    max_cash_deployed is understated (which can overstate their leaderboard %).
+
+    For every (bot, ticker) where current Stock qty exceeds replayed qty, this
+    records the missing seed lot:
+      missing_qty = current_qty - replay_qty
+      seed_value  = missing_qty * Stock.purchase_price   (seeded cost basis)
+
+    IMPORTANT - we DON'T route through process_transaction(). That path offsets
+    a buy against current cash_proceeds, but the seed happened at t0 when
+    cash_proceeds was 0; replaying it now (after later sells built up
+    cash_proceeds) would wrongly consume that cash. Instead we:
+      1. INSERT a Transaction(type='initial', backdated to the bot's first
+         snapshot date, price_source='backfill_seed').
+      2. user.max_cash_deployed += seed_value, leaving cash_proceeds untouched.
+    This is provably correct: every later trade's effect on max_cash_deployed
+    depends only on the cash_proceeds series (unchanged by the seed), so
+    current_max + seed_value == the max we'd have if the seed had been recorded.
+
+    READ-ONLY DRY-RUN by default. Params:
+      ?commit=true              actually write (otherwise preview only)
+      ?user_id=N                scope to a single bot (recommended first pass)
+      ?include_copytrade=true   include copytrade bots (default: skipped)
+    On commit, affected users are purged from user_portfolio_chart_cache so any
+    max_cash_deployed-derived returns regenerate.
+    """
+    from models import db, User, Stock, Transaction, PortfolioSnapshot
+    from sqlalchemy import text as _sql_text
+
+    try:
+        from mobile_api import _is_copytrade_bot
+    except Exception:
+        def _is_copytrade_bot(_u):
+            return False
+
+    commit = request.args.get('commit', 'false').lower() == 'true'
+    include_copytrade = request.args.get('include_copytrade', 'false').lower() == 'true'
+    user_id_param = request.args.get('user_id')
+
+    q = User.query.filter(User.role == 'agent')
+    if user_id_param:
+        try:
+            q = q.filter(User.id == int(user_id_param))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'invalid user_id'}), 400
+    bots = q.order_by(User.id.asc()).all()
+
+    results = []
+    bots_processed = 0
+    bots_skipped_copytrade = 0
+    bots_with_backfill = 0
+    total_txns = 0
+    total_capital_recovered = 0.0
+    affected_user_ids = []
+
+    for bot in bots:
+        if _is_copytrade_bot(bot) and not include_copytrade:
+            bots_skipped_copytrade += 1
+            continue
+        bots_processed += 1
+
+        stocks = {}
+        prices = {}
+        for s in Stock.query.filter_by(user_id=bot.id).all():
+            if s.quantity and s.quantity > 1e-9:
+                tk = (s.ticker or '').upper()
+                stocks[tk] = stocks.get(tk, 0.0) + s.quantity
+                if s.purchase_price and s.purchase_price > 0:
+                    prices[tk] = float(s.purchase_price)
+
+        replay = {}
+        for t in Transaction.query.filter_by(user_id=bot.id).all():
+            tk = (t.ticker or '').upper()
+            qty = t.quantity or 0
+            if t.transaction_type in ('buy', 'initial'):
+                replay[tk] = replay.get(tk, 0.0) + qty
+            elif t.transaction_type == 'sell':
+                replay[tk] = replay.get(tk, 0.0) - qty
+
+        first_snap = PortfolioSnapshot.query.filter_by(user_id=bot.id).order_by(
+            PortfolioSnapshot.date.asc()
+        ).first()
+        backfill_dt = (
+            datetime.combine(first_snap.date, datetime.min.time())
+            if first_snap else datetime.utcnow()
+        )
+
+        txns = []
+        skipped = []
+        capital_recovered = 0.0
+        for tk, cur_qty in stocks.items():
+            missing = cur_qty - replay.get(tk, 0.0)
+            if missing <= 1e-6:
+                continue
+            price = prices.get(tk)
+            if not price or price <= 0:
+                skipped.append({'ticker': tk, 'missing_qty': round(missing, 6),
+                                'reason': 'no_purchase_price'})
+                continue
+            missing = round(missing, 6)
+            value = missing * price
+            capital_recovered += value
+            txns.append({'ticker': tk, 'quantity': missing, 'price': round(price, 4),
+                         'value': round(value, 2), 'transaction_type': 'initial'})
+
+        if not txns:
+            continue
+
+        bots_with_backfill += 1
+        total_txns += len(txns)
+        total_capital_recovered += capital_recovered
+        affected_user_ids.append(bot.id)
+
+        cur_max = float(bot.max_cash_deployed or 0.0)
+        projected_max = cur_max + capital_recovered
+
+        if commit:
+            for tr in txns:
+                db.session.add(Transaction(
+                    user_id=bot.id,
+                    ticker=tr['ticker'],
+                    quantity=tr['quantity'],
+                    price=tr['price'],
+                    transaction_type='initial',
+                    timestamp=backfill_dt,
+                    price_source='backfill_seed',
+                ))
+            bot.max_cash_deployed = projected_max
+            db.session.add(bot)
+
+        results.append({
+            'user_id': bot.id,
+            'username': bot.username,
+            'backfill_timestamp': backfill_dt.isoformat(),
+            'current_max_cash_deployed': round(cur_max, 2),
+            'projected_max_cash_deployed': round(projected_max, 2),
+            'capital_recovered': round(capital_recovered, 2),
+            'transactions': txns,
+            'transaction_count': len(txns),
+            'skipped': skipped or None,
+        })
+
+    if commit and affected_user_ids:
+        try:
+            db.session.execute(
+                _sql_text("DELETE FROM user_portfolio_chart_cache WHERE user_id = ANY(:ids)"),
+                {'ids': affected_user_ids},
+            )
+        except Exception as _e:
+            logger.warning(f"backfill: chart-cache purge failed: {_e}")
+        db.session.commit()
+
+    return jsonify({
+        'mode': 'commit' if commit else 'dry_run',
+        'include_copytrade': include_copytrade,
+        'bots_processed': bots_processed,
+        'bots_skipped_copytrade': bots_skipped_copytrade,
+        'bots_with_backfill': bots_with_backfill,
+        'total_transactions': total_txns,
+        'total_capital_recovered': round(total_capital_recovered, 2),
+        'chart_cache_purged': bool(commit and affected_user_ids),
+        'results': results,
+        'next_steps': (
+            'DRY-RUN: review transactions[] + projected_max_cash_deployed per bot, '
+            'then re-run with ?commit=true (optionally ?user_id=N to do one bot first). '
+            'After commit, re-run /admin/audit-bot-portfolio-integrity -> untracked_count '
+            'should be 0 and bots become transaction-replay-validatable. Note: '
+            'max_cash_deployed increases, which may LOWER the displayed return % '
+            'for some bots.'
+        ),
+    })
+
+
 @app.route('/admin/audit-snapshot-max-cash-drift')
 @admin_required
 def admin_audit_snapshot_max_cash_drift():
