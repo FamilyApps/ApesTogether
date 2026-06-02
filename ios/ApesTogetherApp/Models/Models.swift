@@ -28,6 +28,10 @@ struct AddStocksResponse: Codable {
     let success: Bool
     let addedCount: Int
     let errors: [String]?
+    // When the market is closed, an intent='buy' request is queued instead of
+    // executed. `pending` is true and `queuedCount` holds how many were queued.
+    let pending: Bool?
+    let queuedCount: Int?
 }
 
 // MARK: - Leaderboard
@@ -212,11 +216,19 @@ struct Holding: Codable, Identifiable {
 struct Trade: Codable, Identifiable {
     let ticker: String
     let quantity: Double
-    let price: Double
+    // null for PENDING (after-hours) trades whose price isn't set until
+    // the market-open settlement establishes it.
+    let price: Double?
     let type: String
     let timestamp: String
+    // 'executed' or 'pending'. Optional for backwards compatibility.
+    let status: String?
+    // Present on pending trades so the app can offer a cancel action.
+    let pendingId: Int?
     
-    var id: String { "\(ticker)-\(timestamp)" }
+    var isPending: Bool { (status?.lowercased() == "pending") || price == nil }
+    
+    var id: String { "\(status ?? "x")-\(ticker)-\(timestamp)" }
 }
 
 // MARK: - Subscriptions
@@ -308,13 +320,17 @@ struct TradeResponse: Codable {
     let success: Bool
     let trade: TradeDetail?
     let error: String?
+    // True when an after-hours trade was queued rather than executed.
+    let pending: Bool?
+    let message: String?
 }
 
 struct TradeDetail: Codable {
     let ticker: String
     let quantity: Double
-    let price: Double
+    let price: Double?
     let type: String
+    let status: String?
 }
 
 // MARK: - Top Influencers

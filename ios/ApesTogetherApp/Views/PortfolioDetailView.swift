@@ -392,6 +392,7 @@ struct PortfolioDetailView: View {
                 showSkip: false,
                 submitLabel: "Buy",
                 submitTint: .gains,
+                intent: "buy",
                 onComplete: {
                     showAddStocks = false
                     Task {
@@ -744,16 +745,17 @@ struct TradeRow: View {
     private var isBuy: Bool {
         trade.type.lowercased() == "buy"
     }
+    private var isPending: Bool { trade.isPending }
     
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
                 Circle()
-                    .fill((isBuy ? Color.gains : Color.losses).opacity(0.15))
+                    .fill((isPending ? Color.textMuted : (isBuy ? Color.gains : Color.losses)).opacity(0.15))
                     .frame(width: 32, height: 32)
-                Image(systemName: isBuy ? "arrow.down.left" : "arrow.up.right")
+                Image(systemName: isPending ? "clock.fill" : (isBuy ? "arrow.down.left" : "arrow.up.right"))
                     .font(.caption.weight(.bold))
-                    .foregroundColor(isBuy ? .gains : .losses)
+                    .foregroundColor(isPending ? .textMuted : (isBuy ? .gains : .losses))
             }
             
             VStack(alignment: .leading, spacing: 4) {
@@ -764,17 +766,31 @@ struct TradeRow: View {
                     Text(trade.ticker)
                         .font(.subheadline.bold())
                         .foregroundColor(.textPrimary)
+                    if isPending {
+                        Text("PENDING")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.textMuted)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.textMuted.opacity(0.15)))
+                    }
                 }
-                Text(formatDate(trade.timestamp))
+                Text(isPending ? "Executes at market open" : formatDate(trade.timestamp))
                     .font(.caption)
                     .foregroundColor(.textMuted)
             }
             
             Spacer()
             
-            Text("\(formatQuantity(trade.quantity)) @ $\(String(format: "%.2f", trade.price))")
-                .font(.subheadline)
-                .foregroundColor(.textSecondary)
+            if isPending {
+                Text("\(formatQuantity(trade.quantity)) shares")
+                    .font(.subheadline)
+                    .foregroundColor(.textSecondary)
+            } else {
+                Text("\(formatQuantity(trade.quantity)) @ $\(String(format: "%.2f", trade.price ?? 0))")
+                    .font(.subheadline)
+                    .foregroundColor(.textSecondary)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)

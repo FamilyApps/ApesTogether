@@ -14,6 +14,7 @@ struct TradeSheetView: View {
     @State private var isSubmitting = false
     @State private var errorMessage: String?
     @State private var showSuccess = false
+    @State private var isPending = false
     
     enum TradeType: String {
         case buy = "buy"
@@ -194,7 +195,7 @@ struct TradeSheetView: View {
                                     .tint(.white)
                                     .scaleEffect(0.8)
                             }
-                            Text(showSuccess ? "Done!" : "\(tradeType.title) \(ticker)")
+                            Text(showSuccess ? (isPending ? "Queued for open" : "Done!") : "\(tradeType.title) \(ticker)")
                                 .fontWeight(.bold)
                         }
                         .frame(maxWidth: .infinity)
@@ -310,9 +311,12 @@ struct TradeSheetView: View {
                 )
                 
                 if response.success {
+                    isPending = (response.pending == true)
                     showSuccess = true
-                    Self.promptReviewIfEligible()
-                    try? await Task.sleep(nanoseconds: 800_000_000)
+                    if !isPending {
+                        Self.promptReviewIfEligible()
+                    }
+                    try? await Task.sleep(nanoseconds: isPending ? 1_200_000_000 : 800_000_000)
                     dismiss()
                     onComplete()
                 } else {

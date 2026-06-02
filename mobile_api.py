@@ -878,12 +878,13 @@ def get_portfolio(slug):
                 user_id=owner.id
             ).order_by(Transaction.timestamp.desc()).limit(20).all()
             
-            response['recent_trades'] = [
+            executed_entries = [
                 {
                     'ticker': trade.ticker,
                     'quantity': trade.quantity,
                     'price': trade.price,
                     'type': trade.transaction_type,
+                    'status': 'executed',
                     # Use _utc_iso (Z-suffixed, no microseconds) so iOS
                     # ISO8601DateFormatter parses cleanly. Python's raw
                     # isoformat() produces '2026-05-14T13:43:27.989841'
@@ -892,6 +893,32 @@ def get_portfolio(slug):
                 }
                 for trade in recent_trades
             ]
+            
+            # Pending (after-hours) trades the OWNER has queued for the next
+            # market open. Shown only to the owner — we don't broadcast a
+            # creator's unsettled intentions to subscribers (they get notified
+            # when the trade actually executes at open). `price` is null until
+            # the open price is established by the market-open cron.
+            pending_entries = []
+            if is_owner:
+                from models import QueuedEmailTrade
+                pending = QueuedEmailTrade.query.filter_by(
+                    user_id=owner.id, status='queued'
+                ).order_by(QueuedEmailTrade.queued_at.desc()).all()
+                pending_entries = [
+                    {
+                        'pending_id': p.id,
+                        'ticker': p.ticker,
+                        'quantity': p.quantity,
+                        'price': None,
+                        'type': p.action,
+                        'status': 'pending',
+                        'timestamp': _utc_iso(p.queued_at)
+                    }
+                    for p in pending
+                ]
+            
+            response['recent_trades'] = pending_entries + executed_entries
         else:
             # Limited preview for non-subscribers
             response['holdings'] = None  # Blurred in app
@@ -902,6 +929,111 @@ def get_portfolio(slug):
     except Exception as e:
         logger.error(f"Get portfolio error: {e}")
         return jsonify({'error': 'failed_to_get_portfolio'}), 500
+
+
+def _add_stocks_as_buys(stocks_list):
+    """Handle `POST /portfolio/stocks` with intent='buy' — i.e. the in-app
+    "Buy" sheet, as opposed to onboarding's "declare existing holdings".
+
+    - Market OPEN:  fetch live prices, execute real buys (Stock + Transaction +
+                    cash tracking via process_transaction).
+    - Market CLOSED: queue each row as a PENDING QueuedEmailTrade('buy'); the
+                     market-open cron settles them at the open price.
+    """
+    from models import db, Stock, QueuedEmailTrade, User
+    from cash_tracking import process_transaction
+    from timezone_utils import is_market_hours
+
+    # Normalize + validate
+    items = []
+    errors = []
+    for item in stocks_list:
+        ticker = (item.get('ticker') or '').strip().upper()
+        try:
+            quantity = float(item.get('quantity'))
+        except (ValueError, TypeError):
+            quantity = 0
+        if not ticker or len(ticker) > 10 or quantity <= 0:
+            errors.append("Missing or invalid ticker/quantity")
+            continue
+        items.append((ticker, quantity))
+
+    if not items:
+        return jsonify({'error': 'no_valid_stocks', 'errors': errors or None}), 400
+
+    trader = User.query.get(g.user_id)
+
+    # ── Market closed → queue all as PENDING buys ───────────────────────────
+    if not is_market_hours():
+        for ticker, quantity in items:
+            db.session.add(QueuedEmailTrade(
+                user_id=g.user_id,
+                user_email=(getattr(trader, 'email', None) or ''),
+                ticker=ticker,
+                action='buy',
+                quantity=quantity,
+                status='queued',
+            ))
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error queuing after-hours buys: {e}")
+            return jsonify({'error': 'failed_to_queue'}), 500
+        logger.info(f"Queued {len(items)} after-hours app buys for user={g.user_id}")
+        return jsonify({
+            'success': True,
+            'pending': True,
+            'queued_count': len(items),
+            'added_count': 0,
+            'message': 'Market closed — your purchase is queued and will execute at the next market open.',
+            'errors': errors or None,
+        })
+
+    # ── Market open → fetch live prices and execute real buys ───────────────
+    tickers = list({t for t, _ in items})
+    try:
+        from portfolio_performance import PortfolioPerformanceCalculator
+        prices = PortfolioPerformanceCalculator().get_batch_stock_data(tickers)
+    except Exception as e:
+        logger.error(f"Live price fetch failed for buy: {e}")
+        prices = {}
+
+    added_count = 0
+    for ticker, quantity in items:
+        price = prices.get(ticker) or prices.get(ticker.upper()) or 0
+        if not price or price <= 0:
+            errors.append(f"Price unavailable for {ticker}")
+            continue
+        try:
+            existing = Stock.query.filter_by(user_id=g.user_id, ticker=ticker).first()
+            if existing:
+                total_cost = (existing.purchase_price * existing.quantity) + (price * quantity)
+                existing.quantity += quantity
+                existing.purchase_price = total_cost / existing.quantity if existing.quantity > 0 else price
+            else:
+                db.session.add(Stock(ticker=ticker, quantity=quantity, purchase_price=price, user_id=g.user_id))
+            process_transaction(
+                db, g.user_id, ticker, quantity, price, 'buy',
+                timestamp=datetime.utcnow()
+            )
+            added_count += 1
+        except Exception as e:
+            logger.error(f"Error buying stock {ticker}: {e}")
+            errors.append(f"Failed to buy {ticker}")
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error committing buys: {e}")
+        return jsonify({'error': 'failed_to_save_stocks'}), 500
+
+    return jsonify({
+        'success': True,
+        'added_count': added_count,
+        'errors': errors or None,
+    })
 
 
 @mobile_api.route('/portfolio/stocks', methods=['POST'])
@@ -930,6 +1062,14 @@ def add_stocks():
         return jsonify({'error': 'stocks_must_be_non_empty_list'}), 400
     if len(stocks_list) > 50:
         return jsonify({'error': 'batch_too_large', 'max_stocks_per_request': 50}), 400
+    
+    # 'buy'  → a real market purchase: fetch a live price, create a Transaction,
+    #          and (after hours) queue as a PENDING trade that settles at open.
+    # 'seed' → declare already-owned holdings (onboarding / "Add Your Stocks").
+    #          Recorded immediately at the cost basis provided (legacy behavior).
+    intent = (data.get('intent') or 'seed').strip().lower()
+    if intent == 'buy':
+        return _add_stocks_as_buys(stocks_list)
     
     from cash_tracking import process_transaction
     
@@ -2863,9 +3003,64 @@ def execute_trade():
     
     try:
         from cash_tracking import process_transaction
+        from timezone_utils import is_market_hours
         
         existing = Stock.query.filter_by(user_id=g.user_id, ticker=ticker).first()
         position_before_qty = existing.quantity if existing and trade_type == 'sell' else None
+        
+        # ── Market closed → queue as a PENDING trade ────────────────────────
+        # A trade submitted outside regular hours must NOT land in Holdings at
+        # a stale closing price (and must not be immediately re-sellable).
+        # Instead we queue it; the existing /api/cron/market-open job settles
+        # it at the next open price via process_queued_trades(). Cash-on-hand
+        # ordering (cash_proceeds before new capital) is handled there too.
+        if not is_market_hours():
+            from models import QueuedEmailTrade, User
+            from sqlalchemy import func as _func
+            
+            # Validate sells against shares actually held minus shares already
+            # spoken for by other queued sells. A pending BUY never creates a
+            # Stock row, so its shares are correctly NOT sellable until it
+            # settles at open.
+            if trade_type == 'sell':
+                held = existing.quantity if existing else 0
+                queued_sells = db.session.query(
+                    _func.coalesce(_func.sum(QueuedEmailTrade.quantity), 0)
+                ).filter(
+                    QueuedEmailTrade.user_id == g.user_id,
+                    QueuedEmailTrade.ticker == ticker,
+                    QueuedEmailTrade.action == 'sell',
+                    QueuedEmailTrade.status == 'queued',
+                ).scalar() or 0
+                available = held - queued_sells
+                if available < quantity:
+                    return jsonify({'error': 'insufficient_shares', 'available': available}), 400
+            
+            trader = User.query.get(g.user_id)
+            queued = QueuedEmailTrade(
+                user_id=g.user_id,
+                user_email=(getattr(trader, 'email', None) or ''),
+                ticker=ticker,
+                action=trade_type,
+                quantity=quantity,
+                status='queued',
+            )
+            db.session.add(queued)
+            db.session.commit()
+            logger.info(f"Queued after-hours app trade: user={g.user_id} {trade_type} {quantity} {ticker}")
+            return jsonify({
+                'success': True,
+                'pending': True,
+                'message': 'Market closed — your trade is queued and will execute at the next market open.',
+                'trade': {
+                    'pending_id': queued.id,
+                    'ticker': ticker,
+                    'quantity': quantity,
+                    'price': None,
+                    'type': trade_type,
+                    'status': 'pending',
+                }
+            })
         
         if trade_type == 'sell':
             if not existing or existing.quantity < quantity:
@@ -2932,6 +3127,34 @@ def execute_trade():
         db.session.rollback()
         logger.error(f"Trade execution error: {e}")
         return jsonify({'error': 'trade_failed'}), 500
+
+
+@mobile_api.route('/portfolio/pending-trades/<int:pending_id>', methods=['DELETE'])
+@require_auth
+@rate_limit(20)
+def cancel_pending_trade(pending_id):
+    """Cancel a queued (pending, not-yet-executed) after-hours trade.
+
+    Only the owner of the queued trade may cancel it, and only while it is
+    still 'queued' (before the market-open cron settles it).
+    """
+    from models import db, QueuedEmailTrade
+    
+    qt = QueuedEmailTrade.query.get(pending_id)
+    if not qt or qt.user_id != g.user_id:
+        return jsonify({'error': 'not_found'}), 404
+    if qt.status != 'queued':
+        return jsonify({'error': 'not_cancellable', 'status': qt.status}), 400
+    
+    qt.status = 'cancelled'
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Cancel pending trade failed: {e}")
+        return jsonify({'error': 'cancel_failed'}), 500
+    
+    return jsonify({'success': True, 'cancelled_id': pending_id})
 
 
 # =============================================================================

@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.RemoveCircle
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.WorkspacePremium
@@ -1105,7 +1106,9 @@ private fun RecentTradesSection(
 @Composable
 private fun TradeRow(trade: Trade) {
     val isBuy = trade.type.equals("buy", ignoreCase = true)
+    val isPending = trade.isPending
     val accent = if (isBuy) Gains else Losses
+    val iconTint = if (isPending) TextMuted else accent
 
     Row(
         modifier = Modifier
@@ -1118,13 +1121,17 @@ private fun TradeRow(trade: Trade) {
             modifier = Modifier
                 .size(32.dp)
                 .clip(CircleShape)
-                .background(accent.copy(alpha = 0.15f)),
+                .background(iconTint.copy(alpha = 0.15f)),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                imageVector = if (isBuy) Icons.AutoMirrored.Filled.CallReceived else Icons.AutoMirrored.Filled.CallMade,
+                imageVector = when {
+                    isPending -> Icons.Filled.Schedule
+                    isBuy -> Icons.AutoMirrored.Filled.CallReceived
+                    else -> Icons.AutoMirrored.Filled.CallMade
+                },
                 contentDescription = null,
-                tint = accent,
+                tint = iconTint,
                 modifier = Modifier.size(14.dp),
             )
         }
@@ -1146,16 +1153,29 @@ private fun TradeRow(trade: Trade) {
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
                 )
+                if (isPending) {
+                    Text(
+                        text = "PENDING",
+                        color = TextMuted,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(TextMuted.copy(alpha = 0.15f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
             }
             Text(
-                text = formatTradeDate(trade.timestamp),
+                text = if (isPending) "Executes at market open" else formatTradeDate(trade.timestamp),
                 color = TextMuted,
                 fontSize = 11.sp,
             )
         }
 
         Text(
-            text = "${formatQuantity(trade.quantity)} @ $" + "%.2f".format(trade.price),
+            text = if (isPending) "${formatQuantity(trade.quantity)} shares"
+                   else "${formatQuantity(trade.quantity)} @ $" + "%.2f".format(trade.price ?: 0.0),
             color = TextSecondary,
             fontSize = 13.sp,
         )

@@ -16,12 +16,17 @@ struct AddStocksView: View {
     let subheadline: String
     let submitLabel: String
     let submitTint: Color
+    // "buy" = real market purchase (live price / queued after-hours);
+    // "seed" = declare already-owned holdings (onboarding / Add Your Stocks).
+    let intent: String
     
     @State private var entries: [StockEntry] = [StockEntry()]
     @State private var isSubmitting = false
     @State private var errorMessage: String?
     @State private var successCount = 0
     @State private var showSuccess = false
+    @State private var isPending = false
+    @State private var queuedCount = 0
     @FocusState private var focusedEntryID: UUID?
     
     init(
@@ -30,6 +35,7 @@ struct AddStocksView: View {
         showSkip: Bool = true,
         submitLabel: String = "Save Stocks",
         submitTint: Color = .primaryAccent,
+        intent: String = "seed",
         onComplete: @escaping () -> Void
     ) {
         self.headline = headline
@@ -37,6 +43,7 @@ struct AddStocksView: View {
         self.showSkip = showSkip
         self.submitLabel = submitLabel
         self.submitTint = submitTint
+        self.intent = intent
         self.onComplete = onComplete
     }
     
@@ -153,12 +160,16 @@ struct AddStocksView: View {
                 .padding(.bottom, 40)
             }
         }
-        .alert("Stocks Added!", isPresented: $showSuccess) {
+        .alert(isPending ? "Trade Queued" : "Stocks Added!", isPresented: $showSuccess) {
             Button("Continue") {
                 onComplete()
             }
         } message: {
-            Text("\(successCount) stock\(successCount == 1 ? "" : "s") added to your portfolio.")
+            if isPending {
+                Text("The market is closed. \(queuedCount) \(queuedCount == 1 ? "trade" : "trades") queued and will execute at the next market open.")
+            } else {
+                Text("\(successCount) stock\(successCount == 1 ? "" : "s") added to your portfolio.")
+            }
         }
     }
     
@@ -198,8 +209,14 @@ struct AddStocksView: View {
         }
         
         do {
-            let response = try await APIService.shared.addStocks(stocks: stocks)
-            successCount = response.addedCount
+            let response = try await APIService.shared.addStocks(stocks: stocks, intent: intent)
+            if response.pending == true {
+                isPending = true
+                queuedCount = response.queuedCount ?? stocks.count
+            } else {
+                isPending = false
+                successCount = response.addedCount
+            }
             showSuccess = true
         } catch {
             errorMessage = error.localizedDescription

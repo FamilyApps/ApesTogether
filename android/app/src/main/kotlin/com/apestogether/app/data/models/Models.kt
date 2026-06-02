@@ -224,10 +224,18 @@ data class Holding(
 data class Trade(
     val ticker: String,
     val quantity: Double,
-    val price: Double,
+    // null for PENDING (after-hours) trades — price isn't set until the
+    // market-open settlement establishes it.
+    val price: Double? = null,
     val type: String,
     val timestamp: String,
-)
+    // 'executed' or 'pending'.
+    val status: String? = null,
+    @SerialName("pending_id") val pendingId: Int? = null,
+) {
+    val isPending: Boolean
+        get() = (status?.lowercase() == "pending") || price == null
+}
 
 // ── Subscriptions ─────────────────────────────────────────────────────────
 

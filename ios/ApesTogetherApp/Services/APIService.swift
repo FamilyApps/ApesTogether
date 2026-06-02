@@ -192,9 +192,12 @@ class APIService {
     
     // MARK: - Portfolio Management
     
-    func addStocks(stocks: [[String: Any]]) async throws -> AddStocksResponse {
+    /// `intent` = "buy" for a real market purchase (live price, queued after
+    /// hours) or "seed" (default) to declare already-owned holdings.
+    func addStocks(stocks: [[String: Any]], intent: String = "seed") async throws -> AddStocksResponse {
         let body: [String: Any] = [
-            "stocks": stocks
+            "stocks": stocks,
+            "intent": intent
         ]
         return try await post("/portfolio/stocks", body: body, authenticated: true)
     }
