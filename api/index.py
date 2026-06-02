@@ -3557,6 +3557,164 @@ def admin_backfill_marketdata_from_dailybars():
     })
 
 
+@app.route('/admin/backfill-marketdata-av-fetch')
+@admin_required
+def admin_backfill_marketdata_av_fetch():
+    """
+    Fill the daily-close gaps that DailyPriceBar CAN'T cover -- held/transacted
+    tickers outside the ~145-name bot universe (DailyPriceBar has zero rows for
+    them) plus the odd not-yet-fetched recent day. For each such ticker we call
+    PortfolioPerformanceCalculator.get_historical_price(force_fetch=True) ONCE:
+    AlphaVantage TIME_SERIES_DAILY returns ~100 days and the method caches every
+    new day into market_data (self-commits per ticker), so one call closes the
+    whole recent gap for that ticker.
+
+    READ-ONLY DRY-RUN by default (lists targets, makes NO API calls). Params:
+      ?commit=true     actually fetch (rate-limited AlphaVantage calls)
+      ?days=N          window back from today (default 120)
+      ?ticker=XXX      scope to a single ticker
+      ?limit=N         max tickers to fetch this run (default 50)
+      ?max_seconds=S   wall-clock budget before stopping early (default 45,
+                       under the 60s function limit)
+
+    Idempotent + resumable: each ticker's missing set is recomputed live, so a
+    fetched ticker drops out next run. If remaining_tickers_this_run is non-empty
+    (budget/limit hit), just re-run with ?commit=true to continue.
+    """
+    import time as _time
+    from collections import defaultdict
+    from models import MarketData
+    from portfolio_performance import PortfolioPerformanceCalculator
+
+    commit = request.args.get('commit', 'false').lower() == 'true'
+    days = request.args.get('days', '120')
+    try:
+        days = max(1, min(int(days), 400))
+    except (TypeError, ValueError):
+        days = 120
+    ticker_filter = (request.args.get('ticker') or '').upper() or None
+    try:
+        limit = max(1, min(int(request.args.get('limit', '50')), 145))
+    except (TypeError, ValueError):
+        limit = 50
+    try:
+        max_seconds = max(5.0, min(float(request.args.get('max_seconds', '45')), 55.0))
+    except (TypeError, ValueError):
+        max_seconds = 45.0
+
+    (window_start, tickers, md_dates_by_ticker,
+     dpb_dates_by_ticker, _dpb_close, calendar) = _marketdata_coverage_universe(days)
+
+    if ticker_filter:
+        tickers = {t for t in tickers if t == ticker_filter}
+
+    targets = []
+    for tk in sorted(tickers):
+        md = md_dates_by_ticker.get(tk, set())
+        dpb = dpb_dates_by_ticker.get(tk, set())
+        missing = sorted(calendar - md - dpb)
+        if missing:
+            targets.append({
+                'ticker': tk,
+                'missing_before': len(missing),
+                'missing_dates': missing,
+                'in_dpb_universe': len(dpb) > 0,
+            })
+    targets.sort(key=lambda r: -r['missing_before'])
+
+    if not commit:
+        return jsonify({
+            'mode': 'dry_run',
+            'window_start': window_start.isoformat(),
+            'window_days': days,
+            'target_ticker_count': len(targets),
+            'total_missing_rows': sum(t['missing_before'] for t in targets),
+            'estimated_av_calls_this_run': min(len(targets), limit),
+            'limit': limit,
+            'targets': [{
+                'ticker': t['ticker'],
+                'missing_rows': t['missing_before'],
+                'in_dpb_universe': t['in_dpb_universe'],
+                'latest_missing': t['missing_dates'][-1].isoformat(),
+            } for t in targets],
+            'next_steps': (
+                'DRY-RUN: no API calls made. Re-run with ?commit=true to fetch '
+                '(force_fetch caches ~100 days/ticker into market_data). limit + '
+                'max_seconds cap each run under the 60s function budget; re-run to '
+                'continue (idempotent). Then re-run /admin/audit-marketdata-coverage.'
+            ),
+        })
+
+    calculator = PortfolioPerformanceCalculator()
+    if not getattr(calculator, 'alpha_vantage_api_key', None):
+        return jsonify({'error': 'ALPHA_VANTAGE_API_KEY not set -- cannot fetch'}), 400
+
+    missing_by_ticker = {t['ticker']: set(t['missing_dates']) for t in targets}
+    start_ts = _time.time()
+    succeeded = []
+    failed = []
+    skipped = []
+    n_done = 0
+
+    for t in targets:
+        tk = t['ticker']
+        if n_done >= limit or (_time.time() - start_ts) > max_seconds:
+            skipped.append(tk)
+            continue
+        try:
+            target_date = max(missing_by_ticker[tk])
+            price = calculator.get_historical_price(tk, target_date, force_fetch=True)
+            if price and price > 0:
+                succeeded.append(tk)
+            else:
+                failed.append({'ticker': tk, 'reason': 'no_data_returned'})
+        except Exception as e:
+            failed.append({'ticker': tk, 'reason': str(e)[:200]})
+        n_done += 1
+        _time.sleep(0.1)
+
+    # Measure how many of the originally-missing dates are now present.
+    fetched = succeeded + [f['ticker'] for f in failed]
+    rows_filled = 0
+    rows_still_missing = 0
+    if fetched:
+        md_now = defaultdict(set)
+        for tk2, d in (
+            db.session.query(MarketData.ticker, MarketData.date)
+            .filter(MarketData.ticker.in_(fetched),
+                    MarketData.date >= window_start,
+                    MarketData.timestamp.is_(None))
+            .all()
+        ):
+            if tk2:
+                md_now[tk2.upper()].add(d)
+        for tk2 in fetched:
+            before = missing_by_ticker.get(tk2, set())
+            now_have = md_now.get(tk2, set())
+            rows_filled += len(before & now_have)
+            rows_still_missing += len(before - now_have)
+
+    return jsonify({
+        'mode': 'commit',
+        'window_start': window_start.isoformat(),
+        'tickers_fetched': n_done,
+        'tickers_succeeded': len(succeeded),
+        'rows_filled': rows_filled,
+        'rows_still_missing': rows_still_missing,
+        'failed': failed,
+        'remaining_tickers_this_run': skipped,
+        'elapsed_seconds': round(_time.time() - start_ts, 1),
+        'next_steps': (
+            'Fetched {n} tickers ({s} ok). '.format(n=n_done, s=len(succeeded))
+            + ('{r} tickers hit the limit/time budget -- re-run with ?commit=true to '
+               'continue. '.format(r=len(skipped)) if skipped else '')
+            + 'rows_still_missing are dates AlphaVantage itself lacks (e.g. delisted '
+            'tickers or symbol-format mismatches like BRK.B). Then re-run '
+            '/admin/audit-marketdata-coverage to confirm.'
+        ),
+    })
+
+
 @app.route('/admin/audit-snapshot-max-cash-drift')
 @admin_required
 def admin_audit_snapshot_max_cash_drift():
