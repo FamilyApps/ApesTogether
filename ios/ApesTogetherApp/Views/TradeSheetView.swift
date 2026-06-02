@@ -109,7 +109,7 @@ struct TradeSheetView: View {
                         
                         // Quantity
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("# of Shares")
+                            Text("Quantity")
                                 .font(.caption.weight(.semibold))
                                 .foregroundColor(.textMuted)
                             

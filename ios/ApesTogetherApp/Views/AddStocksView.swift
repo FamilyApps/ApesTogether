@@ -233,7 +233,7 @@ struct StockEntryRow: View {
                 .focused(focusedID, equals: entry.id)
             
             // Quantity field
-            TextField("", text: $entry.quantity, prompt: Text("# of Shares").foregroundColor(.textSecondary))
+            TextField("", text: $entry.quantity, prompt: Text("Quantity").foregroundColor(.textSecondary))
                 .keyboardType(.decimalPad)
                 .font(.headline)
                 .foregroundColor(.textPrimary)
