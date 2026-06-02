@@ -3322,6 +3322,241 @@ def admin_backfill_bot_untracked_holdings():
     })
 
 
+def _marketdata_coverage_universe(days):
+    """Shared helper for the MarketData coverage audit + backfill.
+
+    Returns (window_start, tickers, md_dates_by_ticker, dpb_dates_by_ticker,
+    dpb_close_by_ticker, calendar) where:
+      - tickers           = every ticker ever held or transacted (uppercased)
+      - md_dates_by_ticker= {ticker: set(date)} of existing DAILY MarketData rows
+                            (timestamp IS NULL) in the window
+      - dpb_dates_by_ticker, dpb_close_by_ticker = DailyPriceBar coverage / closes
+      - calendar          = canonical trading-day set (SPY's DailyPriceBar dates,
+                            falling back to the union of all dpb dates)
+    MarketData (the table get_historical_price reads to value snapshots) is only
+    populated on-demand, so it's sparse; DailyPriceBar is refreshed daily for the
+    whole bot universe, so it's the natural source to fill MarketData gaps.
+    """
+    from models import MarketData, DailyPriceBar, Stock, Transaction
+    from collections import defaultdict
+
+    window_start = date.today() - timedelta(days=days)
+
+    tickers = set()
+    for (tk,) in db.session.query(Stock.ticker).distinct().all():
+        if tk:
+            tickers.add(tk.upper())
+    for (tk,) in db.session.query(Transaction.ticker).distinct().all():
+        if tk:
+            tickers.add(tk.upper())
+    # Benchmark tickers are valued elsewhere and aren't user holdings.
+    tickers -= {'SPY_SP500', 'SPY_INTRADAY', 'SPY_SP500_INTRADAY'}
+
+    md_dates_by_ticker = defaultdict(set)
+    for tk, d in (
+        db.session.query(MarketData.ticker, MarketData.date)
+        .filter(MarketData.date >= window_start, MarketData.timestamp.is_(None))
+        .all()
+    ):
+        if tk:
+            md_dates_by_ticker[tk.upper()].add(d)
+
+    dpb_dates_by_ticker = defaultdict(set)
+    dpb_close_by_ticker = defaultdict(dict)
+    for tk, d, close in (
+        db.session.query(DailyPriceBar.ticker, DailyPriceBar.date, DailyPriceBar.close)
+        .filter(DailyPriceBar.date >= window_start)
+        .all()
+    ):
+        if tk and close is not None and close > 0:
+            u = tk.upper()
+            dpb_dates_by_ticker[u].add(d)
+            dpb_close_by_ticker[u][d] = float(close)
+
+    calendar = set(dpb_dates_by_ticker.get('SPY', set()))
+    if not calendar:
+        for ds in dpb_dates_by_ticker.values():
+            calendar |= ds
+
+    return (window_start, tickers, md_dates_by_ticker,
+            dpb_dates_by_ticker, dpb_close_by_ticker, calendar)
+
+
+@app.route('/admin/audit-marketdata-coverage')
+@admin_required
+def admin_audit_marketdata_coverage():
+    """
+    READ-ONLY. Map the daily-close coverage gap in the `market_data` table
+    (the source get_historical_price uses to value/validate snapshots).
+
+    For every ticker ever held or transacted, compare existing daily MarketData
+    rows against the DailyPriceBar OHLCV cache (refreshed daily for the bot
+    universe) and the canonical trading calendar (SPY's DailyPriceBar dates):
+      - fillable_from_dpb : dates DailyPriceBar has but MarketData lacks
+                            (CHEAPLY backfillable -- same AlphaVantage source).
+      - missing_everywhere: trading days neither table has (would need a fresh
+                            AlphaVantage fetch; usually tickers outside the
+                            ~145-name bot universe).
+      - not_in_dpb        : held ticker with ZERO DailyPriceBar rows (outside the
+                            universe -> the daily-bars cron never fetches it).
+
+    Params: ?days=N (window back from today, default 120) ?ticker=XXX (scope one).
+    """
+    days = request.args.get('days', '120')
+    try:
+        days = max(1, min(int(days), 400))
+    except (TypeError, ValueError):
+        days = 120
+    ticker_filter = (request.args.get('ticker') or '').upper() or None
+
+    (window_start, tickers, md_dates_by_ticker,
+     dpb_dates_by_ticker, dpb_close_by_ticker, calendar) = _marketdata_coverage_universe(days)
+
+    if ticker_filter:
+        tickers = {t for t in tickers if t == ticker_filter}
+
+    results = []
+    total_fillable = 0
+    total_missing_everywhere = 0
+    tickers_needing_av = []
+
+    for tk in sorted(tickers):
+        md = md_dates_by_ticker.get(tk, set())
+        dpb = dpb_dates_by_ticker.get(tk, set())
+        fillable = sorted(dpb - md)
+        missing_everywhere = sorted(calendar - md - dpb) if calendar else []
+        in_dpb = len(dpb) > 0
+
+        if not in_dpb:
+            tickers_needing_av.append(tk)
+        total_fillable += len(fillable)
+        total_missing_everywhere += len(missing_everywhere)
+
+        if not fillable and not missing_everywhere and in_dpb:
+            continue  # fully covered -- skip from the detail list
+
+        results.append({
+            'ticker': tk,
+            'md_days': len(md),
+            'dpb_days': len(dpb),
+            'in_dpb_universe': in_dpb,
+            'fillable_from_dpb': len(fillable),
+            'fillable_sample': [d.isoformat() for d in fillable[:5]],
+            'missing_everywhere': len(missing_everywhere),
+            'missing_sample': [d.isoformat() for d in missing_everywhere[:5]],
+        })
+
+    results.sort(key=lambda r: (-r['fillable_from_dpb'], -r['missing_everywhere']))
+
+    return jsonify({
+        'window_start': window_start.isoformat(),
+        'window_days': days,
+        'calendar_trading_days': len(calendar),
+        'tickers_examined': len(tickers),
+        'tickers_with_gaps': len(results),
+        'total_fillable_from_dpb_rows': total_fillable,
+        'total_missing_everywhere_rows': total_missing_everywhere,
+        'tickers_needing_av_fetch': sorted(tickers_needing_av),
+        'results': results,
+        'next_steps': (
+            'total_fillable_from_dpb_rows are CHEAPLY backfillable (no API calls) '
+            'via /admin/backfill-marketdata-from-dailybars (dry-run, then ?commit=true). '
+            'tickers_needing_av_fetch are held names outside the bot universe -- they '
+            'need a fresh AlphaVantage TIME_SERIES_DAILY pull (get_historical_price '
+            'force_fetch). NOTE: filling market_data improves AUDIT fidelity and any '
+            'FUTURE snapshot recompute -- it does NOT retroactively change already-'
+            'stored PortfolioSnapshot rows.'
+        ),
+    })
+
+
+@app.route('/admin/backfill-marketdata-from-dailybars')
+@admin_required
+def admin_backfill_marketdata_from_dailybars():
+    """
+    Fill daily-close gaps in `market_data` by copying DailyPriceBar.close into
+    MarketData(ticker, date, close_price, timestamp=None) for every (ticker,date)
+    DailyPriceBar has but MarketData lacks. Same upstream source (AlphaVantage),
+    so values are consistent; no external API calls; idempotent (a second run
+    sees the now-present dates and inserts nothing).
+
+    READ-ONLY DRY-RUN by default. Params:
+      ?commit=true    actually insert the rows
+      ?days=N         window back from today (default 120; DailyPriceBar only
+                      holds ~100 trading days, so older gaps aren't fillable here)
+      ?ticker=XXX     scope to a single ticker
+
+    Does NOT change existing PortfolioSnapshot values (those are recomputed
+    separately); it makes the snapshot stock-value audit authoritative and
+    improves any future recompute.
+    """
+    from models import MarketData
+
+    commit = request.args.get('commit', 'false').lower() == 'true'
+    days = request.args.get('days', '120')
+    try:
+        days = max(1, min(int(days), 400))
+    except (TypeError, ValueError):
+        days = 120
+    ticker_filter = (request.args.get('ticker') or '').upper() or None
+
+    (window_start, tickers, md_dates_by_ticker,
+     dpb_dates_by_ticker, dpb_close_by_ticker, _calendar) = _marketdata_coverage_universe(days)
+
+    if ticker_filter:
+        tickers = {t for t in tickers if t == ticker_filter}
+
+    per_ticker = []
+    total_inserted = 0
+    now = datetime.utcnow()
+
+    for tk in sorted(tickers):
+        md = md_dates_by_ticker.get(tk, set())
+        dpb = dpb_dates_by_ticker.get(tk, set())
+        fillable = sorted(dpb - md)
+        if not fillable:
+            continue
+
+        if commit:
+            for d in fillable:
+                db.session.add(MarketData(
+                    ticker=tk,
+                    date=d,
+                    timestamp=None,
+                    close_price=dpb_close_by_ticker[tk][d],
+                    created_at=now,
+                ))
+
+        total_inserted += len(fillable)
+        per_ticker.append({
+            'ticker': tk,
+            'rows': len(fillable),
+            'date_range': [fillable[0].isoformat(), fillable[-1].isoformat()],
+        })
+
+    if commit and total_inserted:
+        db.session.commit()
+
+    per_ticker.sort(key=lambda r: -r['rows'])
+
+    return jsonify({
+        'mode': 'commit' if commit else 'dry_run',
+        'window_start': window_start.isoformat(),
+        'window_days': days,
+        'tickers_filled': len(per_ticker),
+        'total_rows': total_inserted,
+        'per_ticker': per_ticker,
+        'next_steps': (
+            ('Inserted {n} daily-close rows into market_data. '.format(n=total_inserted)
+             if commit else
+             'DRY-RUN: {n} rows would be inserted. Re-run with ?commit=true to apply. '.format(n=total_inserted))
+            + 'Then re-run /admin/audit-marketdata-coverage (fillable should drop to 0) '
+            'and /admin/audit-snapshot-stock-value (stale_weekday_price flags should '
+            'clear). Held tickers still outside DailyPriceBar need an AlphaVantage fetch.'
+        ),
+    })
+
+
 @app.route('/admin/audit-snapshot-max-cash-drift')
 @admin_required
 def admin_audit_snapshot_max_cash_drift():
