@@ -246,20 +246,39 @@ def calculate_portfolio_value_with_cash(user_id, target_date=None):
     user = User.query.get(user_id)
     if not user:
         return {'stock_value': 0, 'cash_proceeds': 0, 'total_value': 0}
-    
-    # Calculate stock value (using existing logic)
+
     from portfolio_performance import PortfolioPerformanceCalculator
     calculator = PortfolioPerformanceCalculator()
-    stock_value = calculator.calculate_portfolio_value(user_id, target_date)
-    
-    # Get cash proceeds (if target_date specified, need to recalculate from transactions)
+
     if target_date:
+        # Historical path: holdings AND cash are both reconstructed from the
+        # transaction history as of target_date, so they are internally consistent.
+        stock_value = calculator.calculate_portfolio_value(user_id, target_date)
         cash_proceeds = calculate_cash_proceeds_as_of_date(user_id, target_date)
     else:
+        # LIVE path read-skew guard. stock_value comes from the Stock holdings table
+        # while cash_proceeds comes from the denormalized User.cash_proceeds field —
+        # TWO separate reads. A bot trade updates both atomically, but if it commits
+        # BETWEEN these reads the intraday snapshot stores post-trade holdings with
+        # pre-trade cash (phantom spike on a buy) or pre-trade holdings with post-trade
+        # cash (phantom dip on a sell) — a one-tick artifact that snaps back on the next
+        # collection. Eliminate it: read cash, compute stock_value, then re-read cash;
+        # if cash moved, a trade landed mid-read, so recompute holdings so BOTH sides
+        # reflect the same committed state. Converges on the first iteration whenever no
+        # trade is concurrently committing (one extra lightweight SELECT, no recompute).
+        from models import db
+        db.session.refresh(user)
         cash_proceeds = user.cash_proceeds
-    
+        stock_value = calculator.calculate_portfolio_value(user_id, None)
+        for _attempt in range(3):
+            db.session.refresh(user)
+            if user.cash_proceeds == cash_proceeds:
+                break
+            cash_proceeds = user.cash_proceeds
+            stock_value = calculator.calculate_portfolio_value(user_id, None)
+
     total_value = stock_value + cash_proceeds
-    
+
     return {
         'stock_value': stock_value,
         'cash_proceeds': cash_proceeds,

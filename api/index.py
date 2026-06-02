@@ -2354,6 +2354,205 @@ def admin_audit_snapshot_cash_drift():
     })
 
 
+@app.route('/admin/audit-intraday-anomalies')
+@admin_required
+def admin_audit_intraday_anomalies():
+    """
+    Fleet-wide scan of PortfolioSnapshotIntraday for one-tick spike/dip-and-revert
+    rows: a snapshot whose total_value deviates from BOTH its same-day neighbors in
+    the SAME direction by >= threshold, i.e. an isolated outlier that snaps back.
+
+    ROOT CAUSE (see cash_tracking.calculate_portfolio_value_with_cash): the intraday
+    writer reads user.cash_proceeds and the Stock holdings in TWO separate queries.
+    A bot trade commits both atomically, but if it lands between those reads the row
+    stores post-trade stock_value with pre-trade cash (spike on a buy) or pre-trade
+    stock_value with post-trade cash (dip on a sell). The next tick reads cleanly, so
+    the artifact is a single isolated outlier. The daily-snapshot twin of this race is
+    handled by /admin/audit-snapshot-cash-drift; this covers the intraday table, which
+    no existing audit touched. The source race is now fixed, so this should mainly
+    surface PRE-FIX historical rows.
+
+    Query params:
+      ?threshold=0.025        Min |deviation| vs EACH neighbor to flag (fraction; default 0.025 = 2.5%)
+      ?days=N                 Only scan intraday snapshots from the last N days (default: all)
+      ?role=agent             Restrict to a single role
+      ?limit_users=N          Audit only the first N users
+      ?fingerprint_only=true  Only report rows matching the cash-lag race signature
+      ?fix=true               DELETE the flagged rows (chart then interpolates across
+                              the gap). Read-only unless this is set.
+
+    Response: per-user flagged rows with prev/outlier/next decomposition + aggregates.
+    """
+    from models import db, User, PortfolioSnapshotIntraday
+    from datetime import datetime as _dt, timedelta as _td
+
+    try:
+        threshold = float(request.args.get('threshold', '0.025'))
+    except (TypeError, ValueError):
+        threshold = 0.025
+    role_filter = request.args.get('role')
+    limit_users_param = request.args.get('limit_users')
+    fingerprint_only = request.args.get('fingerprint_only', 'false').lower() == 'true'
+    apply_fix = request.args.get('fix', 'false').lower() == 'true'
+    days_param = request.args.get('days')
+    since = None
+    if days_param:
+        try:
+            since = _dt.utcnow() - _td(days=int(days_param))
+        except (TypeError, ValueError):
+            since = None
+
+    q = User.query.order_by(User.id.asc())
+    if role_filter:
+        q = q.filter(User.role == role_filter)
+    users = q.all()
+    if limit_users_param:
+        try:
+            users = users[: int(limit_users_param)]
+        except (TypeError, ValueError):
+            pass
+
+    def _f(v):
+        return float(v) if v is not None else None
+
+    def _r(v):
+        return round(float(v), 2) if v is not None else None
+
+    issues = []
+    total_points_checked = 0
+    total_flagged = 0
+    total_fingerprint = 0
+    fix_ids = []
+
+    for user in users:
+        sq = PortfolioSnapshotIntraday.query.filter_by(user_id=user.id)
+        if since is not None:
+            sq = sq.filter(PortfolioSnapshotIntraday.timestamp >= since)
+        snaps = sq.order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
+        if len(snaps) < 3:
+            continue
+
+        # Group by UTC calendar date so we never compare across the overnight gap
+        # (open-vs-prior-close jumps are legitimate price moves, not phantoms).
+        by_day = {}
+        for s in snaps:
+            ts = s.timestamp
+            if ts is None or s.total_value is None:
+                continue
+            d = (ts.replace(tzinfo=None) if ts.tzinfo else ts).date()
+            by_day.setdefault(d, []).append(s)
+
+        user_flagged = []
+        for d, day_snaps in by_day.items():
+            n = len(day_snaps)
+            if n < 3:
+                continue
+            for i in range(1, n - 1):
+                prev_s, cur_s, next_s = day_snaps[i - 1], day_snaps[i], day_snaps[i + 1]
+                prev_t = _f(prev_s.total_value)
+                cur_t = _f(cur_s.total_value)
+                next_t = _f(next_s.total_value)
+                total_points_checked += 1
+                if not prev_t or not next_t or cur_t is None:
+                    continue
+                dev_prev = (cur_t - prev_t) / prev_t
+                dev_next = (cur_t - next_t) / next_t
+                # Isolated outlier: deviates from BOTH neighbors in the SAME direction.
+                is_spike = dev_prev >= threshold and dev_next >= threshold
+                is_dip = dev_prev <= -threshold and dev_next <= -threshold
+                if not (is_spike or is_dip):
+                    continue
+
+                # Cash-lag fingerprint: at the outlier the cash side did NOT move from
+                # the previous tick, then the next tick corrects cash. This is the exact
+                # race signature (requires the cash columns to be populated).
+                cur_cash = _f(cur_s.cash_proceeds)
+                prev_cash = _f(prev_s.cash_proceeds)
+                next_cash = _f(next_s.cash_proceeds)
+                fingerprint = None
+                if None not in (cur_cash, prev_cash, next_cash):
+                    cash_static = abs(cur_cash - prev_cash) < 0.005
+                    cash_moves_next = abs(next_cash - cur_cash) >= 0.01
+                    fingerprint = bool(cash_static and cash_moves_next)
+
+                if fingerprint_only and not fingerprint:
+                    continue
+
+                total_flagged += 1
+                if fingerprint:
+                    total_fingerprint += 1
+                if apply_fix:
+                    fix_ids.append(cur_s.id)
+
+                user_flagged.append({
+                    'snapshot_id': cur_s.id,
+                    'timestamp': cur_s.timestamp.isoformat(),
+                    'direction': 'spike' if is_spike else 'dip',
+                    'dev_vs_prev_pct': round(dev_prev * 100, 3),
+                    'dev_vs_next_pct': round(dev_next * 100, 3),
+                    'cash_lag_fingerprint': fingerprint,
+                    'prev': {'total': _r(prev_t), 'stock': _r(prev_s.stock_value), 'cash': _r(prev_cash)},
+                    'outlier': {'total': _r(cur_t), 'stock': _r(cur_s.stock_value), 'cash': _r(cur_cash)},
+                    'next': {'total': _r(next_t), 'stock': _r(next_s.stock_value), 'cash': _r(next_cash)},
+                })
+
+        if user_flagged:
+            user_flagged.sort(
+                key=lambda x: max(abs(x['dev_vs_prev_pct']), abs(x['dev_vs_next_pct'])),
+                reverse=True,
+            )
+            issues.append({
+                'user_id': user.id,
+                'username': user.username,
+                'role': user.role,
+                'flagged_count': len(user_flagged),
+                'fingerprint_count': sum(1 for f in user_flagged if f['cash_lag_fingerprint']),
+                'max_dev_pct': round(
+                    max(max(abs(f['dev_vs_prev_pct']), abs(f['dev_vs_next_pct'])) for f in user_flagged), 3
+                ),
+                'sample': user_flagged[:5],
+                'all_flagged': user_flagged if len(user_flagged) <= 50 else None,
+            })
+
+    rows_deleted = 0
+    if apply_fix and fix_ids:
+        try:
+            for chunk_start in range(0, len(fix_ids), 500):
+                chunk = fix_ids[chunk_start:chunk_start + 500]
+                rows_deleted += PortfolioSnapshotIntraday.query.filter(
+                    PortfolioSnapshotIntraday.id.in_(chunk)
+                ).delete(synchronize_session=False)
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({
+                'error': 'delete_failed',
+                'message': str(e),
+                'fix_count_attempted': len(fix_ids),
+            }), 500
+
+    issues.sort(key=lambda x: -x['max_dev_pct'])
+    return jsonify({
+        'threshold_pct': round(threshold * 100, 3),
+        'fingerprint_only': fingerprint_only,
+        'fix_applied': apply_fix,
+        'rows_deleted': rows_deleted,
+        'days_scanned': days_param or 'all',
+        'users_scanned': len(users),
+        'users_with_issues': len(issues),
+        'total_points_checked': total_points_checked,
+        'total_flagged_rows': total_flagged,
+        'total_fingerprint_rows': total_fingerprint,
+        'issues': issues,
+        'next_steps': (
+            'Add ?fingerprint_only=true to isolate the exact cash-lag race signature. '
+            'Re-run with ?fix=true to DELETE flagged rows (the 1D chart interpolates across '
+            'the gap). The source race is fixed in calculate_portfolio_value_with_cash, so '
+            'only PRE-FIX historical rows should appear going forward.'
+        ),
+    })
+
+
 @app.route('/admin/audit-snapshot-max-cash-drift')
 @admin_required
 def admin_audit_snapshot_max_cash_drift():
