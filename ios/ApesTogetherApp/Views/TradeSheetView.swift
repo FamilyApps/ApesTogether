@@ -35,8 +35,8 @@ struct TradeSheetView: View {
         
         var icon: String {
             switch self {
-            case .buy: return "arrow.down.left"
-            case .sell: return "arrow.up.right"
+            case .buy: return "cart.fill"
+            case .sell: return "banknote.fill"
             }
         }
     }
@@ -68,7 +68,7 @@ struct TradeSheetView: View {
                                 .foregroundColor(.textMuted)
                         }
                     }
-                    .padding(.top, 8)
+                    .padding(.top, 24)
                     
                     // Input fields
                     VStack(spacing: 16) {
@@ -109,7 +109,7 @@ struct TradeSheetView: View {
                         
                         // Quantity
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Shares")
+                            Text("# of Shares")
                                 .font(.caption.weight(.semibold))
                                 .foregroundColor(.textMuted)
                             
@@ -119,11 +119,11 @@ struct TradeSheetView: View {
                                 .foregroundColor(.textPrimary)
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 14)
-                                .background(Color.cardBackground)
+                                .background(Color.inputBackground)
                                 .cornerRadius(12)
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 12)
-                                        .stroke(Color.cardBorder, lineWidth: 1)
+                                        .stroke(Color.inputBorder, lineWidth: 1)
                                 )
                         }
                         

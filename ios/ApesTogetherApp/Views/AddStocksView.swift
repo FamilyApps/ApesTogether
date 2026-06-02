@@ -14,6 +14,8 @@ struct AddStocksView: View {
     let showSkip: Bool
     let headline: String
     let subheadline: String
+    let submitLabel: String
+    let submitTint: Color
     
     @State private var entries: [StockEntry] = [StockEntry()]
     @State private var isSubmitting = false
@@ -26,11 +28,15 @@ struct AddStocksView: View {
         headline: String = "Add Your Stocks",
         subheadline: String = "Share your trades and earn from every subscriber",
         showSkip: Bool = true,
+        submitLabel: String = "Save Stocks",
+        submitTint: Color = .primaryAccent,
         onComplete: @escaping () -> Void
     ) {
         self.headline = headline
         self.subheadline = subheadline
         self.showSkip = showSkip
+        self.submitLabel = submitLabel
+        self.submitTint = submitTint
         self.onComplete = onComplete
     }
     
@@ -39,6 +45,22 @@ struct AddStocksView: View {
             Color.appBackground.ignoresSafeArea()
             
             VStack(spacing: 0) {
+                // Close button (sheet contexts only — onboarding uses Skip instead)
+                if !showSkip {
+                    HStack {
+                        Spacer()
+                        Button {
+                            dismiss()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title3)
+                                .foregroundColor(.textMuted)
+                        }
+                    }
+                    .padding(.top, 12)
+                    .padding(.horizontal, 20)
+                }
+
                 // Header
                 VStack(spacing: 8) {
                     Text(headline)
@@ -50,7 +72,7 @@ struct AddStocksView: View {
                         .foregroundColor(.textSecondary)
                         .multilineTextAlignment(.center)
                 }
-                .padding(.top, 24)
+                .padding(.top, showSkip ? 24 : 8)
                 .padding(.horizontal, 24)
                 
                 // Stock entries
@@ -111,10 +133,10 @@ struct AddStocksView: View {
                             ProgressView()
                                 .tint(.appBackground)
                         } else {
-                            Text("Save Stocks")
+                            Text(submitLabel)
                         }
                     }
-                    .buttonStyle(PrimaryButtonStyle(isDisabled: !hasValidEntries || isSubmitting))
+                    .buttonStyle(PrimaryButtonStyle(isDisabled: !hasValidEntries || isSubmitting, tint: submitTint))
                     .disabled(!hasValidEntries || isSubmitting)
                     
                     if showSkip {
@@ -195,35 +217,35 @@ struct StockEntryRow: View {
     var body: some View {
         HStack(spacing: 10) {
             // Ticker field
-            TextField("AAPL", text: $entry.ticker)
+            TextField("", text: $entry.ticker, prompt: Text("AAPL").foregroundColor(.textSecondary))
                 .textCase(.uppercase)
                 .font(.headline)
                 .foregroundColor(.textPrimary)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 14)
-                .background(Color.cardBackground)
+                .background(Color.inputBackground)
                 .cornerRadius(10)
                 .overlay(
                     RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color.cardBorder, lineWidth: 1)
+                        .stroke(Color.inputBorder, lineWidth: 1)
                 )
                 .frame(maxWidth: .infinity)
                 .focused(focusedID, equals: entry.id)
             
             // Quantity field
-            TextField("Shares", text: $entry.quantity)
+            TextField("", text: $entry.quantity, prompt: Text("# of Shares").foregroundColor(.textSecondary))
                 .keyboardType(.decimalPad)
                 .font(.headline)
                 .foregroundColor(.textPrimary)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 14)
-                .background(Color.cardBackground)
+                .background(Color.inputBackground)
                 .cornerRadius(10)
                 .overlay(
                     RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color.cardBorder, lineWidth: 1)
+                        .stroke(Color.inputBorder, lineWidth: 1)
                 )
-                .frame(width: 100)
+                .frame(width: 140)
             
             // Delete button
             if let onDelete = onDelete {

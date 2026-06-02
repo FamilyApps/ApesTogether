@@ -94,6 +94,7 @@ struct MyPortfolioView: View {
                     }
                 )
                 .environmentObject(authManager)
+                .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showShareSheet) {
                 if let image = shareImage {

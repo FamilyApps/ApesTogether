@@ -383,12 +383,15 @@ struct PortfolioDetailView: View {
                 }
             )
             .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showAddStocks) {
             AddStocksView(
                 headline: "Buy Stocks",
                 subheadline: "Add new positions to your portfolio",
                 showSkip: false,
+                submitLabel: "Buy",
+                submitTint: .gains,
                 onComplete: {
                     showAddStocks = false
                     Task {
@@ -397,6 +400,7 @@ struct PortfolioDetailView: View {
                     }
                 }
             )
+            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showBuySheet) {
             SellPickerSheet(

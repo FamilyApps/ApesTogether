@@ -6,6 +6,10 @@ extension Color {
     static let appBackground = Color(hex: "0A0F0D")
     static let cardBackground = Color(hex: "141A17")
     static let cardBorder = Color(hex: "1F2A24")
+
+    // Form inputs (lighter than cards for better legibility)
+    static let inputBackground = Color(hex: "1E2A24")
+    static let inputBorder = Color(hex: "33453B")
     
     // Accent colors
     static let primaryAccent = Color(hex: "00D9A5")
@@ -70,6 +74,7 @@ extension LinearGradient {
 // MARK: - Button Styles
 struct PrimaryButtonStyle: ButtonStyle {
     var isDisabled: Bool = false
+    var tint: Color = .primaryAccent
     
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -79,9 +84,9 @@ struct PrimaryButtonStyle: ButtonStyle {
             .padding(.vertical, 16)
             .background(
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(isDisabled ? Color.textMuted : Color.primaryAccent)
+                    .fill(isDisabled ? Color.textMuted : tint)
             )
-            .shadow(color: isDisabled ? .clear : Color.primaryAccent.opacity(0.3), radius: 12, y: 4)
+            .shadow(color: isDisabled ? .clear : tint.opacity(0.3), radius: 12, y: 4)
             .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
             .opacity(configuration.isPressed ? 0.9 : 1.0)
     }
