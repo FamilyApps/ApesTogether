@@ -2553,6 +2553,303 @@ def admin_audit_intraday_anomalies():
     })
 
 
+@app.route('/admin/audit-snapshot-stock-value')
+@admin_required
+def admin_audit_snapshot_stock_value():
+    """
+    Fleet-wide validation of PortfolioSnapshot.stock_value — the one snapshot field no
+    existing audit checks (cash-drift + max-cash-drift cover cash / max_cash_deployed only).
+
+    For each daily snapshot we reconstruct holdings as-of that date by replaying the user's
+    transactions (buy/initial +qty, sell -qty; dividends don't change share count) — exactly
+    mirroring PortfolioPerformanceCalculator.calculate_portfolio_value's HISTORICAL branch
+    (same `func.date(timestamp) <= target_date` bucketing) — and price each holding from the
+    MarketData daily close (timestamp IS NULL). We use the EXACT-date close when present
+    (matching get_historical_price); if absent we carry forward the most recent earlier close,
+    which is correct on weekends/holidays but on a *weekday* signals a MarketData gap we can't
+    trust, so such rows are reported as unvalidatable rather than flagged for drift.
+
+    Issue buckets:
+      - DRIFT: snapshot fully priced (every holding has an exact/weekend close) yet
+        |expected - stored stock_value| exceeds the threshold. Historical closes are
+        deterministic, so real drift means the stored value used a bad price (the live-day
+        path can fall back to an expired cache price or, worst case, purchase_price) or a
+        wrong quantity. These are the only rows ?fix=true will repair.
+      - MISSING_PRICE: a held ticker has NO MarketData close on-or-before the date.
+        calculate_portfolio_value SILENTLY SKIPS unpriced holdings (price=None -> continue),
+        undervaluing the snapshot. Needs a MarketData backfill, NOT an in-place recompute,
+        so these are never auto-fixed.
+      - STALE_WEEKDAY: a weekday snapshot whose ticker lacks an exact-date close (only an
+        older one exists) — a MarketData coverage gap; reported, not drift-flagged.
+      - ABSURD_PRICE: a MarketData close <= 0.
+
+    Copytrade bots are skipped (their brokerage-migration holdings can't be rebuilt from a
+    transaction replay — same rationale as the cash-drift audit).
+
+    Query params:
+      ?threshold=0.01    Relative drift to flag (fraction of expected; default 1%)
+      ?abs_floor=1.00    Absolute $ floor so penny rounding never flags (default 1.00)
+      ?days=N            Only audit snapshots from the last N days
+      ?role=agent        Restrict to a single role
+      ?limit_users=N     Audit only the first N users
+      ?fix=true          Repair ONLY clean drift rows (fully priced, no missing/absurd):
+                         stock_value=expected, total_value=expected+cash_proceeds.
+
+    Response: per-user flagged snapshots + aggregate counts by issue type.
+    """
+    from models import db, User, Transaction, PortfolioSnapshot, MarketData
+    from sqlalchemy import text as _sql_text
+    from datetime import date as _date, timedelta as _td
+    import bisect
+
+    try:
+        from mobile_api import _is_copytrade_bot
+    except Exception:
+        def _is_copytrade_bot(_u):
+            return False
+
+    try:
+        rel_threshold = float(request.args.get('threshold', '0.01'))
+    except (TypeError, ValueError):
+        rel_threshold = 0.01
+    try:
+        abs_floor = float(request.args.get('abs_floor', '1.00'))
+    except (TypeError, ValueError):
+        abs_floor = 1.00
+    role_filter = request.args.get('role')
+    limit_users_param = request.args.get('limit_users')
+    apply_fix = request.args.get('fix', 'false').lower() == 'true'
+    days_param = request.args.get('days')
+    since_date = None
+    if days_param:
+        try:
+            since_date = _date.today() - _td(days=int(days_param))
+        except (TypeError, ValueError):
+            since_date = None
+
+    def _lookup(price_index, ticker, d):
+        """Return (price, kind) where kind is 'exact' | 'stale' | 'none'."""
+        entry = price_index.get(ticker)
+        if not entry:
+            return (None, 'none')
+        dates, closes = entry
+        i = bisect.bisect_right(dates, d) - 1
+        if i < 0:
+            return (None, 'none')
+        return (closes[i], 'exact' if dates[i] == d else 'stale')
+
+    q = User.query.order_by(User.id.asc())
+    if role_filter:
+        q = q.filter(User.role == role_filter)
+    users = q.all()
+    if limit_users_param:
+        try:
+            users = users[: int(limit_users_param)]
+        except (TypeError, ValueError):
+            pass
+
+    issues = []
+    total_snapshots_checked = 0
+    snapshots_with_drift = 0
+    snapshots_with_missing = 0
+    snapshots_with_stale_weekday = 0
+    snapshots_with_absurd = 0
+    skipped_null_stock_value = 0
+    skipped_copytrade = 0
+    fix_count = 0
+
+    for user in users:
+        if _is_copytrade_bot(user):
+            skipped_copytrade += 1
+            continue
+
+        txns = Transaction.query.filter_by(user_id=user.id).order_by(
+            Transaction.timestamp.asc()
+        ).all()
+        snap_q = PortfolioSnapshot.query.filter_by(user_id=user.id)
+        if since_date is not None:
+            snap_q = snap_q.filter(PortfolioSnapshot.date >= since_date)
+        snaps = snap_q.order_by(PortfolioSnapshot.date.asc()).all()
+        if not txns or not snaps:
+            continue
+
+        # Pre-load daily MarketData closes for every ticker this user ever held.
+        tickers = sorted({(t.ticker or '').upper() for t in txns if t.ticker})
+        price_index = {}
+        if tickers:
+            md_rows = MarketData.query.filter(
+                MarketData.ticker.in_(tickers),
+                MarketData.timestamp.is_(None),
+            ).order_by(MarketData.ticker.asc(), MarketData.date.asc()).all()
+            for md in md_rows:
+                tk = md.ticker.upper()
+                if tk not in price_index:
+                    price_index[tk] = ([], [])
+                price_index[tk][0].append(md.date)
+                price_index[tk][1].append(float(md.close_price))
+
+        # Walk snapshots ascending, advancing a transaction pointer to maintain
+        # holdings as-of each snapshot date (same incremental technique as cash-drift).
+        holdings = {}
+        txn_idx = 0
+        user_bad = []
+        for snap in snaps:
+            while txn_idx < len(txns):
+                t = txns[txn_idx]
+                t_ts = t.timestamp
+                if t_ts is not None and t_ts.tzinfo:
+                    t_ts = t_ts.replace(tzinfo=None)
+                t_date = t_ts.date() if t_ts else None
+                if t_date is None or t_date > snap.date:
+                    break
+                tk = (t.ticker or '').upper()
+                qty = t.quantity or 0
+                if t.transaction_type in ('buy', 'initial'):
+                    holdings[tk] = holdings.get(tk, 0.0) + qty
+                elif t.transaction_type == 'sell':
+                    holdings[tk] = holdings.get(tk, 0.0) - qty
+                txn_idx += 1
+
+            total_snapshots_checked += 1
+            if snap.stock_value is None:
+                skipped_null_stock_value += 1
+                continue
+
+            is_weekend = snap.date.weekday() >= 5
+            expected = 0.0
+            missing = []
+            stale_weekday = []
+            absurd = []
+            for tk, qty in holdings.items():
+                if not qty or qty <= 1e-9:
+                    continue
+                price, kind = _lookup(price_index, tk, snap.date)
+                if kind == 'none':
+                    missing.append(tk)
+                    continue
+                if price is not None and price <= 0:
+                    absurd.append({'ticker': tk, 'price': round(price, 4)})
+                    continue
+                if kind == 'stale' and not is_weekend:
+                    stale_weekday.append(tk)
+                    expected += qty * price  # included for context; row marked unvalidatable
+                    continue
+                expected += qty * price  # 'exact', or 'stale' on a weekend (carry-forward)
+
+            actual = float(snap.stock_value)
+            has_missing = len(missing) > 0
+            has_stale = len(stale_weekday) > 0
+            has_absurd = len(absurd) > 0
+            validatable = not (has_missing or has_stale or has_absurd)
+
+            drift = expected - actual
+            denom = expected if expected > 0 else (actual if actual > 0 else 1.0)
+            drift_pct = (drift / denom) * 100.0
+            effective_abs = max(abs_floor, rel_threshold * expected)
+            is_drift = validatable and abs(drift) >= effective_abs
+
+            if not (is_drift or has_missing or has_stale or has_absurd):
+                continue
+
+            if is_drift:
+                snapshots_with_drift += 1
+            if has_missing:
+                snapshots_with_missing += 1
+            if has_stale:
+                snapshots_with_stale_weekday += 1
+            if has_absurd:
+                snapshots_with_absurd += 1
+
+            issue_tags = []
+            if is_drift:
+                issue_tags.append('drift')
+            if has_missing:
+                issue_tags.append('missing_price')
+            if has_stale:
+                issue_tags.append('stale_weekday_price')
+            if has_absurd:
+                issue_tags.append('absurd_price')
+
+            clean_fixable = is_drift and validatable
+            if apply_fix and clean_fixable:
+                new_stock = round(expected, 2)
+                db.session.execute(_sql_text("""
+                    UPDATE portfolio_snapshot
+                    SET stock_value = :sv,
+                        total_value = :sv + COALESCE(cash_proceeds, 0)
+                    WHERE id = :sid
+                """), {'sv': new_stock, 'sid': snap.id})
+                fix_count += 1
+
+            user_bad.append({
+                'date': snap.date.isoformat(),
+                'snapshot_id': snap.id,
+                'issues': issue_tags,
+                'expected_stock_value': round(expected, 2),
+                'actual_stock_value': round(actual, 2),
+                'drift': round(drift, 2) if validatable else None,
+                'drift_pct': round(drift_pct, 3) if validatable else None,
+                'missing_price_tickers': missing or None,
+                'stale_weekday_tickers': stale_weekday or None,
+                'absurd_prices': absurd or None,
+                'holdings_count': sum(1 for v in holdings.values() if v and v > 1e-9),
+                'fixed': bool(apply_fix and clean_fixable),
+            })
+
+        if user_bad:
+            user_bad.sort(key=lambda x: -(abs(x['drift']) if x['drift'] is not None else 0.0))
+            drift_rows = [b for b in user_bad if b['drift'] is not None]
+            issues.append({
+                'user_id': user.id,
+                'username': user.username,
+                'role': user.role,
+                'bad_snapshot_count': len(user_bad),
+                'max_abs_drift': round(max((abs(b['drift']) for b in drift_rows), default=0.0), 2),
+                'first_bad_date': min(b['date'] for b in user_bad),
+                'last_bad_date': max(b['date'] for b in user_bad),
+                'sample_bad_snapshots': user_bad[:5],
+                'all_bad_snapshots': user_bad if len(user_bad) <= 30 else None,
+            })
+
+    if apply_fix and fix_count:
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({
+                'error': 'commit_failed',
+                'message': str(e),
+                'fix_count_attempted': fix_count,
+            }), 500
+
+    issues.sort(key=lambda x: -x['max_abs_drift'])
+    return jsonify({
+        'relative_threshold_pct': round(rel_threshold * 100, 3),
+        'abs_floor': abs_floor,
+        'days_scanned': days_param or 'all',
+        'fix_applied': apply_fix,
+        'fix_count': fix_count if apply_fix else 0,
+        'users_scanned': len(users),
+        'copytrade_bots_skipped': skipped_copytrade,
+        'users_with_issues': len(issues),
+        'total_snapshots_checked': total_snapshots_checked,
+        'snapshots_with_drift': snapshots_with_drift,
+        'snapshots_with_missing_prices': snapshots_with_missing,
+        'snapshots_with_stale_weekday_prices': snapshots_with_stale_weekday,
+        'snapshots_with_absurd_prices': snapshots_with_absurd,
+        'snapshots_skipped_null_stock_value': skipped_null_stock_value,
+        'issues': issues,
+        'next_steps': (
+            'DRIFT-only rows (no missing/stale/absurd) are safe to repair in place with '
+            '?fix=true (stock_value=expected, total_value=expected+cash_proceeds). '
+            'MISSING_PRICE / STALE_WEEKDAY rows need a MarketData daily-close backfill for the '
+            'listed ticker/date pairs FIRST (calculate_portfolio_value silently skips unpriced '
+            'holdings), then re-run ?fix=true. After any fix, DELETE the affected users from '
+            'user_portfolio_chart_cache so charts regenerate from corrected snapshots.'
+        ),
+    })
+
+
 @app.route('/admin/audit-snapshot-max-cash-drift')
 @admin_required
 def admin_audit_snapshot_max_cash_drift():
