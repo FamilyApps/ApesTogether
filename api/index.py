@@ -2770,7 +2770,12 @@ def admin_audit_snapshot_stock_value():
             if has_absurd:
                 issue_tags.append('absurd_price')
 
-            clean_fixable = is_drift and validatable
+            holdings_count = sum(1 for v in holdings.values() if v and v > 1e-9)
+            # SAFETY: never let ?fix zero out or overwrite a row we cannot positively
+            # value. expected must be a real, fully-priced, NON-ZERO sum and the row must
+            # actually hold something. This blocks the bot false-positive case where the
+            # transaction replay yields 0 holdings -> expected 0 -> fix would erase value.
+            clean_fixable = is_drift and validatable and expected > 0 and holdings_count > 0
             if apply_fix and clean_fixable:
                 new_stock = round(expected, 2)
                 db.session.execute(_sql_text("""
@@ -2792,7 +2797,7 @@ def admin_audit_snapshot_stock_value():
                 'missing_price_tickers': missing or None,
                 'stale_weekday_tickers': stale_weekday or None,
                 'absurd_prices': absurd or None,
-                'holdings_count': sum(1 for v in holdings.values() if v and v > 1e-9),
+                'holdings_count': holdings_count,
                 'fixed': bool(apply_fix and clean_fixable),
             })
 
@@ -2846,6 +2851,294 @@ def admin_audit_snapshot_stock_value():
             'listed ticker/date pairs FIRST (calculate_portfolio_value silently skips unpriced '
             'holdings), then re-run ?fix=true. After any fix, DELETE the affected users from '
             'user_portfolio_chart_cache so charts regenerate from corrected snapshots.'
+        ),
+    })
+
+
+@app.route('/admin/audit-bot-portfolio-integrity')
+@admin_required
+def admin_audit_bot_portfolio_integrity():
+    """
+    Bot (role='agent') portfolio integrity audit.
+
+    Bots CANNOT be validated by the transaction-replay oracle used in
+    /admin/audit-snapshot-stock-value: many were seeded via the legacy
+    /admin/bot/add-stocks path which created Stock holdings WITHOUT Transaction
+    rows (the add_stocks cost-basis bug), and their pre-creation PortfolioSnapshot
+    history was synthetically backfilled. Replaying transactions therefore yields
+    0 (or partial) holdings and produces meaningless '-100% drift'. This endpoint
+    validates bots against the only ground truth they actually have -- the live
+    Stock table -- plus internal snapshot consistency and time-series plausibility.
+
+    Per bot, four INDEPENDENT, READ-ONLY checks:
+      1. LEDGER COVERAGE: current Stock holdings vs transaction replay. Tickers held
+         with zero replayed quantity (held but never transacted) are the add_stocks
+         signature -> 'untracked_holdings'. Also reports per-ticker qty mismatches.
+      2. LATEST SNAPSHOT vs LIVE HOLDINGS: price current Stock holdings at each
+         ticker's most-recent MarketData close and compare to the newest snapshot's
+         stock_value. Catches a corrupted value on the row users see on the
+         leaderboard TODAY (the only date where Stock = ground truth).
+      3. SNAPSHOT SERIES PLAUSIBILITY: flag (a) total_value != stock_value +
+         cash_proceeds and (b) spike/dip-and-revert -- a day whose stock_value
+         deviates > spike_pct from BOTH neighbours while the neighbours agree
+         (chart-corruption signature, the daily analog of the intraday read-skew).
+      4. SYNTHETIC HISTORY: count snapshots dated before the bot's first
+         transaction (informational; explains the replay audit's -100% rows).
+
+    No ?fix -- remediation (backdating an 'initial' ledger entry per untracked
+    holding, or regenerating synthetic history) is a deliberate, separate operation.
+
+    Params:
+      ?holdings_threshold=0.10   rel tolerance for check #2 (default 10%; live prices
+                                 may be a few days fresher than the snapshot)
+      ?spike_pct=0.25            day-over-day deviation for check #3 (default 25%)
+      ?limit_users=N
+      ?include_copytrade=true    include copytrade bots (default: skipped)
+    """
+    from models import User, Stock, Transaction, PortfolioSnapshot, MarketData
+
+    try:
+        from mobile_api import _is_copytrade_bot
+    except Exception:
+        def _is_copytrade_bot(_u):
+            return False
+
+    try:
+        holdings_threshold = float(request.args.get('holdings_threshold', '0.10'))
+    except (TypeError, ValueError):
+        holdings_threshold = 0.10
+    try:
+        spike_pct = float(request.args.get('spike_pct', '0.25'))
+    except (TypeError, ValueError):
+        spike_pct = 0.25
+    include_copytrade = request.args.get('include_copytrade', 'false').lower() == 'true'
+    limit_users_param = request.args.get('limit_users')
+
+    bots = User.query.filter(User.role == 'agent').order_by(User.id.asc()).all()
+    if limit_users_param:
+        try:
+            bots = bots[: int(limit_users_param)]
+        except (TypeError, ValueError):
+            pass
+
+    results = []
+    bots_scanned = 0
+    bots_skipped_copytrade = 0
+    bots_with_untracked = 0
+    bots_with_latest_drift = 0
+    bots_with_series_anomalies = 0
+    total_untracked_holdings = 0
+    total_spike_days = 0
+
+    for bot in bots:
+        is_copy = _is_copytrade_bot(bot)
+        if is_copy and not include_copytrade:
+            bots_skipped_copytrade += 1
+            continue
+        bots_scanned += 1
+
+        # Current holdings (ground truth) from the Stock table.
+        current = {}
+        for s in Stock.query.filter_by(user_id=bot.id).all():
+            if s.quantity and s.quantity > 1e-9:
+                tk = (s.ticker or '').upper()
+                current[tk] = current.get(tk, 0.0) + s.quantity
+
+        # Replayed holdings from the transaction ledger.
+        txns = Transaction.query.filter_by(user_id=bot.id).order_by(
+            Transaction.timestamp.asc()
+        ).all()
+        replay = {}
+        for t in txns:
+            tk = (t.ticker or '').upper()
+            qty = t.quantity or 0
+            if t.transaction_type in ('buy', 'initial'):
+                replay[tk] = replay.get(tk, 0.0) + qty
+            elif t.transaction_type == 'sell':
+                replay[tk] = replay.get(tk, 0.0) - qty
+
+        # --- Check 1: ledger coverage ---
+        untracked = sorted([
+            tk for tk, q in current.items()
+            if q > 1e-9 and replay.get(tk, 0.0) <= 1e-9
+        ])
+        qty_mismatches = []
+        for tk, q in current.items():
+            rq = replay.get(tk, 0.0)
+            if rq > 1e-9 and abs(q - rq) > max(1.0, 0.01 * q):
+                qty_mismatches.append({
+                    'ticker': tk,
+                    'current_qty': round(q, 4),
+                    'replay_qty': round(rq, 4),
+                })
+        ledger_explains_pct = (
+            round(100.0 * (1 - len(untracked) / len(current)), 1) if current else None
+        )
+
+        # Most-recent daily close per held ticker (for check 2).
+        latest_close = {}
+        held_tickers = sorted(current.keys())
+        if held_tickers:
+            md_rows = MarketData.query.filter(
+                MarketData.ticker.in_(held_tickers),
+                MarketData.timestamp.is_(None),
+            ).order_by(MarketData.ticker.asc(), MarketData.date.asc()).all()
+            for md in md_rows:
+                latest_close[md.ticker.upper()] = float(md.close_price)
+
+        snaps = PortfolioSnapshot.query.filter_by(user_id=bot.id).order_by(
+            PortfolioSnapshot.date.asc()
+        ).all()
+        latest_snap = snaps[-1] if snaps else None
+
+        # --- Check 2: latest snapshot vs live holdings ---
+        latest_info = None
+        if latest_snap is not None and current:
+            live_val = 0.0
+            unpriced = []
+            for tk, q in current.items():
+                price = latest_close.get(tk)
+                if price is None or price <= 0:
+                    unpriced.append(tk)
+                    continue
+                live_val += q * price
+            stored = float(latest_snap.stock_value or 0.0)
+            drift = stored - live_val
+            denom = live_val if live_val > 0 else (stored if stored > 0 else 1.0)
+            flagged = (not unpriced) and live_val > 0 and abs(drift) > max(
+                1.0, holdings_threshold * live_val
+            )
+            latest_info = {
+                'date': latest_snap.date.isoformat(),
+                'stored_stock_value': round(stored, 2),
+                'live_holdings_value': round(live_val, 2),
+                'drift': round(drift, 2),
+                'drift_pct': round(drift / denom * 100.0, 2),
+                'unpriced_tickers': unpriced or None,
+                'flagged': bool(flagged),
+            }
+            if flagged:
+                bots_with_latest_drift += 1
+
+        # --- Check 3: snapshot series plausibility ---
+        value_mismatch_count = 0
+        for s in snaps:
+            tv = float(s.total_value or 0.0)
+            stv = float(s.stock_value or 0.0)
+            cp = float(s.cash_proceeds or 0.0)
+            if abs(tv - (stv + cp)) > max(1.0, 0.005 * max(abs(tv), 1.0)):
+                value_mismatch_count += 1
+        sv = [(s.date, float(s.stock_value)) for s in snaps if s.stock_value is not None]
+        spike_days = []
+        for i in range(1, len(sv) - 1):
+            _, v_prev = sv[i - 1]
+            d_cur, v_cur = sv[i]
+            _, v_next = sv[i + 1]
+            if v_prev <= 0 or v_next <= 0:
+                continue
+            neighbours_agree = abs(v_prev - v_next) / max(v_prev, v_next) <= spike_pct
+            dev_prev = abs(v_cur - v_prev) / v_prev
+            dev_next = abs(v_cur - v_next) / v_next
+            if neighbours_agree and dev_prev > spike_pct and dev_next > spike_pct:
+                spike_days.append({
+                    'date': d_cur.isoformat(),
+                    'stock_value': round(v_cur, 2),
+                    'prev': round(v_prev, 2),
+                    'next': round(v_next, 2),
+                    'direction': 'spike' if v_cur > v_prev else 'dip',
+                })
+        total_spike_days += len(spike_days)
+        if value_mismatch_count or spike_days:
+            bots_with_series_anomalies += 1
+
+        # --- Check 4: synthetic history ---
+        first_txn_date = None
+        if txns:
+            t0 = txns[0].timestamp
+            if t0 is not None and t0.tzinfo:
+                t0 = t0.replace(tzinfo=None)
+            first_txn_date = t0.date() if t0 else None
+        first_snap_date = snaps[0].date if snaps else None
+        if first_txn_date is not None:
+            synthetic_count = sum(1 for s in snaps if s.date < first_txn_date)
+        else:
+            synthetic_count = len(snaps)
+
+        if untracked:
+            bots_with_untracked += 1
+            total_untracked_holdings += len(untracked)
+
+        flags = []
+        if untracked:
+            flags.append('untracked_holdings')
+        if qty_mismatches:
+            flags.append('qty_mismatch')
+        if latest_info and latest_info['flagged']:
+            flags.append('latest_snapshot_drift')
+        if value_mismatch_count:
+            flags.append('total_value_mismatch')
+        if spike_days:
+            flags.append('stock_value_spike_revert')
+        if synthetic_count:
+            flags.append('synthetic_history')
+
+        if not flags:
+            continue
+
+        results.append({
+            'user_id': bot.id,
+            'username': bot.username,
+            'is_copytrade': is_copy,
+            'flags': flags,
+            'ledger': {
+                'current_ticker_count': len(current),
+                'untracked_holdings': untracked or None,
+                'untracked_count': len(untracked),
+                'qty_mismatches': qty_mismatches or None,
+                'ledger_explains_pct': ledger_explains_pct,
+            },
+            'latest_snapshot': latest_info,
+            'series': {
+                'snapshot_count': len(snaps),
+                'total_value_mismatch_count': value_mismatch_count,
+                'spike_revert_days': spike_days[:10],
+                'spike_revert_count': len(spike_days),
+            },
+            'synthetic_history': {
+                'first_snapshot_date': first_snap_date.isoformat() if first_snap_date else None,
+                'first_transaction_date': first_txn_date.isoformat() if first_txn_date else None,
+                'pre_ledger_snapshot_count': synthetic_count,
+            },
+        })
+
+    results.sort(
+        key=lambda r: (r['ledger']['untracked_count'], r['series']['spike_revert_count']),
+        reverse=True,
+    )
+    return jsonify({
+        'holdings_threshold_pct': round(holdings_threshold * 100, 2),
+        'spike_pct': round(spike_pct * 100, 2),
+        'include_copytrade': include_copytrade,
+        'bots_scanned': bots_scanned,
+        'bots_skipped_copytrade': bots_skipped_copytrade,
+        'bots_with_issues': len(results),
+        'bots_with_untracked_holdings': bots_with_untracked,
+        'bots_with_latest_snapshot_drift': bots_with_latest_drift,
+        'bots_with_series_anomalies': bots_with_series_anomalies,
+        'total_untracked_holdings': total_untracked_holdings,
+        'total_spike_revert_days': total_spike_days,
+        'issues': results,
+        'interpretation': (
+            'untracked_holdings = Stock rows with no Transaction history (legacy '
+            '/admin/bot/add-stocks seeding bug) -> these bots cannot be validated by '
+            'transaction replay and their cost basis / max_cash_deployed may be wrong. '
+            'latest_snapshot_drift = the value users see TODAY disagrees with live Stock '
+            'holdings priced at the latest close (real live-writer error -- investigate). '
+            'stock_value_spike_revert = a daily snapshot deviates sharply from BOTH '
+            'neighbours which agree (chart-corruption signature, same family as the '
+            'intraday read-skew). synthetic_history = snapshots predating the first '
+            'transaction were backfilled (expected for bots; explains the replay audit '
+            '-100% rows). READ-ONLY: remediation is a separate, deliberate step.'
         ),
     })
 
