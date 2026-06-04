@@ -3526,6 +3526,17 @@ def admin_revert_bot_untracked_backfill():
     commit = request.args.get('commit', 'false').lower() == 'true'
     delete_seed = request.args.get('delete_seed_txns', 'false').lower() == 'true'
     user_id_param = request.args.get('user_id')
+    force_max_param = request.args.get('force_max')
+
+    if force_max_param is not None:
+        if not user_id_param:
+            return jsonify({'error': 'force_max requires user_id'}), 400
+        try:
+            force_max_val = round(float(force_max_param), 2)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'invalid force_max'}), 400
+    else:
+        force_max_val = None
 
     if user_id_param:
         try:
@@ -3554,13 +3565,41 @@ def admin_revert_bot_untracked_backfill():
         seed_value = round(sum((t.quantity or 0) * (t.price or 0)
                                for t in seed_txns), 2)
         cur_max = round(float(user.max_cash_deployed or 0), 2)
-        target_max = round(cur_max - seed_value, 2)
 
-        def _fix(stored):
-            stored = round(float(stored or 0), 2)
-            if abs(stored - seed_value) < 0.01 and stored < target_max - 0.01:
+        if force_max_val is not None:
+            # Explicit recovery: set user.max AND every snapshot flat to this
+            # value. Used to repair a bot whose snapshot history was lost/
+            # over-written (e.g. divi51, which had the non-idempotent revert
+            # applied twice and is now flat at the wrong level).
+            target_max = force_max_val
+            def _fix(stored):
                 return target_max
-            return min(stored, target_max)
+        else:
+            target_max = round(cur_max - seed_value, 2)
+            # IDEMPOTENCY GUARD: target_max = cur_max - seed_value only holds the
+            # FIRST time (when cur_max is the inflated post-backfill value). After
+            # a successful revert cur_max == target, so re-running would subtract
+            # the seed AGAIN. Detect a genuine, un-reverted double-count by
+            # checking that (inflated cur_max - genuine historical peak) == seed.
+            daily_maxes = [round(float(s.max_cash_deployed or 0), 2)
+                           for s in PortfolioSnapshot.query.filter_by(user_id=uid).all()]
+            genuine = [m for m in daily_maxes if m < cur_max - 0.01]
+            genuine_peak = max(genuine) if genuine else None
+            if genuine_peak is None or abs((cur_max - genuine_peak) - seed_value) > 1.0:
+                results.append({
+                    'user_id': uid, 'username': user.username,
+                    'seed_value': seed_value, 'current_user_max': cur_max,
+                    'target_max': cur_max, 'seed_txns': len(seed_txns),
+                    'seed_txns_deleted': 0, 'daily_changed': 0,
+                    'intraday_changed': 0,
+                    'skipped': 'already_reverted_or_no_double_count',
+                })
+                continue
+            def _fix(stored):
+                stored = round(float(stored or 0), 2)
+                if abs(stored - seed_value) < 0.01 and stored < target_max - 0.01:
+                    return target_max
+                return min(stored, target_max)
 
         daily = PortfolioSnapshot.query.filter_by(user_id=uid).all()
         d_changed = 0
