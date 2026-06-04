@@ -3322,6 +3322,175 @@ def admin_backfill_bot_untracked_holdings():
     })
 
 
+@app.route('/admin/fix-bot-snapshot-maxcash')
+@admin_required
+def admin_fix_bot_snapshot_maxcash():
+    """
+    Repair the max_cash_deployed DISCONTINUITY introduced by
+    /admin/backfill-bot-untracked-holdings.
+
+    The backfill bumped user.max_cash_deployed and inserted backdated 'initial'
+    seed transactions, but DID NOT update the historical PortfolioSnapshot rows.
+    create_daily_snapshot() writes user.max_cash_deployed into each NEW snapshot,
+    so the post-backfill snapshots (EOD yesterday / market-open today) got the
+    high (correct) value while every historical snapshot kept the old (low) one.
+    performance_calculator computes CF_net = last.max_cash_deployed -
+    first.max_cash_deployed, so that step looks like a huge mid-period capital
+    inflow that earned nothing -> Modified Dietz return collapses (the observed
+    ~-60% cliff on these 6 bots).
+
+    FIX: recompute each snapshot's max_cash_deployed by replaying the (now
+    seed-inclusive) Transaction ledger up to that snapshot's date and SETTING
+    max_cash_deployed to the running max as of that date. Uses the canonical
+    cash_tracking replay (buy/initial deploy after consuming cash_proceeds; sell/
+    dividend add to cash_proceeds). Idempotent + self-consistent: post-backfill
+    snapshots are unchanged, historical ones get +seed, the discontinuity
+    disappears, and returns revert to their correct pre-backfill values.
+
+    Scope: bots (role='agent') that have backfill_seed transactions, OR a single
+    ?user_id=N. READ-ONLY DRY-RUN by default; ?commit=true to write. Fixes BOTH
+    daily and intraday snapshots. Purges chart cache on commit (re-run the
+    market-close cron / leaderboard rebuild afterwards to regenerate caches).
+    """
+    from models import (db, User, Transaction, PortfolioSnapshot,
+                        PortfolioSnapshotIntraday)
+    from sqlalchemy import text as _sql_text
+
+    commit = request.args.get('commit', 'false').lower() == 'true'
+    user_id_param = request.args.get('user_id')
+
+    if user_id_param:
+        try:
+            affected_ids = {int(user_id_param)}
+        except (TypeError, ValueError):
+            return jsonify({'error': 'invalid user_id'}), 400
+    else:
+        rows = (db.session.query(Transaction.user_id)
+                .filter(Transaction.price_source == 'backfill_seed')
+                .distinct().all())
+        affected_ids = {r[0] for r in rows}
+
+    if not affected_ids:
+        return jsonify({
+            'mode': 'commit' if commit else 'dry_run',
+            'message': 'No bots with backfill_seed transactions found',
+            'results': [],
+        })
+
+    results = []
+    affected_for_cache = []
+
+    for uid in sorted(affected_ids):
+        user = User.query.get(uid)
+        if not user:
+            continue
+        txns = (Transaction.query.filter_by(user_id=uid)
+                .order_by(Transaction.timestamp.asc()).all())
+        if not txns:
+            continue
+
+        # Replay the ledger once, recording (date, running_max) after each txn.
+        # running_max is monotonic non-decreasing, so the value after the last
+        # txn with date <= D is exactly the max_cash_deployed as of date D.
+        cash = 0.0
+        mcd = 0.0
+        timeline = []  # list of (date, mcd_after_txn), chronological
+        seed_value = 0.0
+        for t in txns:
+            v = (t.quantity or 0) * (t.price or 0)
+            tt = t.transaction_type
+            if tt in ('buy', 'initial'):
+                if cash >= v:
+                    cash -= v
+                else:
+                    mcd += (v - cash)
+                    cash = 0.0
+            elif tt == 'sell':
+                cash += v
+            elif tt == 'dividend':
+                cash += v
+            d = t.timestamp.date() if t.timestamp else None
+            timeline.append((d, mcd))
+            if t.price_source == 'backfill_seed':
+                seed_value += v
+
+        def _mcd_as_of(target_date):
+            best = 0.0
+            for d, m in timeline:
+                if d is not None and d <= target_date:
+                    best = m
+                else:
+                    break
+            return best
+
+        # Daily snapshots
+        daily = (PortfolioSnapshot.query.filter_by(user_id=uid)
+                 .order_by(PortfolioSnapshot.date.asc()).all())
+        changes = []
+        for s in daily:
+            correct = round(_mcd_as_of(s.date), 2)
+            old = round(float(s.max_cash_deployed or 0.0), 2)
+            if abs(correct - old) > 0.01:
+                changes.append({'date': s.date.isoformat(),
+                                'old_max': old, 'new_max': correct})
+                if commit:
+                    s.max_cash_deployed = correct
+
+        # Intraday snapshots (1D/5D charts)
+        intraday = PortfolioSnapshotIntraday.query.filter_by(user_id=uid).all()
+        intraday_changed = 0
+        for s in intraday:
+            sd = s.timestamp.date() if s.timestamp else None
+            if sd is None:
+                continue
+            correct = round(_mcd_as_of(sd), 2)
+            old = round(float(s.max_cash_deployed or 0.0), 2)
+            if abs(correct - old) > 0.01:
+                intraday_changed += 1
+                if commit:
+                    s.max_cash_deployed = correct
+
+        if changes or intraday_changed:
+            affected_for_cache.append(uid)
+
+        results.append({
+            'user_id': uid,
+            'username': user.username,
+            'seed_value': round(seed_value, 2),
+            'user_max_cash_deployed': round(float(user.max_cash_deployed or 0), 2),
+            'daily_snapshots': len(daily),
+            'daily_changed': len(changes),
+            'intraday_changed': intraday_changed,
+            'first_change': changes[0] if changes else None,
+            'last_change': changes[-1] if changes else None,
+        })
+
+    if commit and affected_for_cache:
+        try:
+            db.session.execute(
+                _sql_text("DELETE FROM user_portfolio_chart_cache WHERE user_id = ANY(:ids)"),
+                {'ids': affected_for_cache},
+            )
+        except Exception as _e:
+            logger.warning(f"maxcash-fix: chart-cache purge failed: {_e}")
+        db.session.commit()
+
+    return jsonify({
+        'mode': 'commit' if commit else 'dry_run',
+        'affected_bots': len(results),
+        'chart_cache_purged': bool(commit and affected_for_cache),
+        'results': results,
+        'next_steps': (
+            'DRY-RUN: per bot, daily_changed should equal (daily_snapshots minus '
+            'the 1-2 post-backfill snapshots already at the correct value), and '
+            'first_change.old_max + seed_value == first_change.new_max. Then re-run '
+            'with ?commit=true (optionally ?user_id=N first). After commit, trigger '
+            '/api/cron/market-close (or the leaderboard rebuild) so LeaderboardCache '
+            'regenerates, and verify the 1M/YTD charts no longer show the ~60% cliff.'
+        ),
+    })
+
+
 def _marketdata_coverage_universe(days):
     """Shared helper for the MarketData coverage audit + backfill.
 
