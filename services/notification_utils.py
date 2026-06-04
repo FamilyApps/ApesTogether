@@ -199,7 +199,7 @@ def send_trade_confirmation_email(user, action, ticker, quantity, price, positio
 
     html_body = (
         f"<div style='font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px'>"
-        f"<h2 style='margin:0 0 16px'>{emoji} Trade Confirmed</h2>"
+        f"<h2 style='margin:0 0 16px'>Trade Confirmed</h2>"
         f"<table style='width:100%;border-collapse:collapse;font-size:15px'>"
         f"<tr><td style='padding:6px 0;color:#888'>Action</td><td style='padding:6px 0;font-weight:600'>{action_upper}</td></tr>"
         f"<tr><td style='padding:6px 0;color:#888'>Ticker</td><td style='padding:6px 0;font-weight:600'>{ticker}</td></tr>"
@@ -236,7 +236,7 @@ def send_trade_notification_to_subscriber(subscriber_email, trader_username, act
 
     html_body = (
         f"<div style='font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px'>"
-        f"<h2 style='margin:0 0 12px'>{emoji} Trade Alert</h2>"
+        f"<h2 style='margin:0 0 12px'>Trade Alert</h2>"
         f"<p style='font-size:16px;line-height:1.5'>{msg}</p>"
         f"<p style='color:#888;font-size:12px;margin-top:20px'>— Apes Together</p>"
         f"</div>"
