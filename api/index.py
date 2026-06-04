@@ -3508,7 +3508,14 @@ def admin_revert_bot_untracked_backfill():
       - if stored == seed_value (the divi51 corruption signature) and < target:
             set = target_max          # un-flatten the snapshots I overwrote
       - else: set = min(stored, target_max)   # clamp inflated, keep genuine history
-    Then reset user.max_cash_deployed = target_max and delete backfill_seed txns.
+    Then reset user.max_cash_deployed = target_max.
+
+    The 'initial' backfill_seed transactions are KEPT by default -- they are
+    legitimate entry-buys (a seed IS a buy: the bot purchasing its starting
+    position), so they belong in the ledger. Only their DOUBLE-COUNT in
+    max_cash_deployed is undone (set-cash already counted the seed once).
+    Pass ?delete_seed_txns=true to remove them instead.
+
     DRY-RUN by default; ?commit=true to write; ?user_id=N to scope. Purges chart
     cache on commit (re-run market-close cron after to rebuild leaderboard).
     """
@@ -3517,6 +3524,7 @@ def admin_revert_bot_untracked_backfill():
     from sqlalchemy import text as _sql_text
 
     commit = request.args.get('commit', 'false').lower() == 'true'
+    delete_seed = request.args.get('delete_seed_txns', 'false').lower() == 'true'
     user_id_param = request.args.get('user_id')
 
     if user_id_param:
@@ -3573,14 +3581,17 @@ def admin_revert_bot_untracked_backfill():
 
         if commit:
             user.max_cash_deployed = target_max
-            for t in seed_txns:
-                db.session.delete(t)
+            if delete_seed:
+                for t in seed_txns:
+                    db.session.delete(t)
             cache_ids.append(uid)
 
         results.append({
             'user_id': uid, 'username': user.username,
             'seed_value': seed_value, 'current_user_max': cur_max,
-            'target_max': target_max, 'seed_txns_deleted': len(seed_txns) if commit else 0,
+            'target_max': target_max,
+            'seed_txns': len(seed_txns),
+            'seed_txns_deleted': (len(seed_txns) if (commit and delete_seed) else 0),
             'daily_changed': d_changed, 'intraday_changed': i_changed,
         })
 
@@ -3597,10 +3608,12 @@ def admin_revert_bot_untracked_backfill():
         'mode': 'commit' if commit else 'dry_run',
         'affected_bots': len(results), 'results': results,
         'next_steps': ('DRY-RUN: target_max = current_user_max - seed_value is the '
-                       'correct pre-backfill peak. Re-run ?commit=true (optionally '
-                       '?user_id=9 first to undo the divi51 corruption). After commit, '
-                       'trigger /api/cron/market-close to rebuild leaderboard caches, '
-                       'then confirm the ~60% cliff is gone.'),
+                       'correct pre-backfill peak (seed counted once as deployed '
+                       'capital). The initial seed transactions are KEPT (they are '
+                       'entry-buys); pass ?delete_seed_txns=true to remove them. Re-run '
+                       '?commit=true (optionally ?user_id=9 first to undo the divi51 '
+                       'corruption). After commit, trigger /api/cron/market-close to '
+                       'rebuild leaderboard caches, then confirm the ~60% cliff is gone.'),
     })
 
 

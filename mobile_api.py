@@ -765,11 +765,14 @@ def get_portfolio(slug):
             account_age_days = (datetime.utcnow() - owner.created_at).days
         response['account_age_days'] = account_age_days
         
-        # Trades per week (last 30 days)
+        # Trades per week (last 30 days). Exclude dividends — they are income
+        # events, not trades. Seeds ('initial') ARE counted: a seed is the bot
+        # buying its entry position.
         thirty_days_ago = datetime.utcnow() - timedelta(days=30)
         recent_trade_count = Transaction.query.filter(
             Transaction.user_id == owner.id,
-            Transaction.timestamp >= thirty_days_ago
+            Transaction.timestamp >= thirty_days_ago,
+            Transaction.transaction_type != 'dividend',
         ).count()
         response['avg_trades_per_week'] = round(recent_trade_count / 4.3, 1)
         

@@ -557,10 +557,15 @@ def _compute_all_user_metrics(period='YTD'):
     # 5) Recent trade counts (last 30 days) — single aggregation query
     _trade_count_map = {}
     try:
+        # Exclude dividends — they are income events, not trades. Seeds
+        # ('initial') ARE counted: a seed is the bot buying its entry position.
         trade_counts = db.session.query(
             Transaction.user_id,
             sqla_func.count(Transaction.id).label('cnt')
-        ).filter(Transaction.timestamp >= thirty_days_ago).group_by(Transaction.user_id).all()
+        ).filter(
+            Transaction.timestamp >= thirty_days_ago,
+            Transaction.transaction_type != 'dividend',
+        ).group_by(Transaction.user_id).all()
         _trade_count_map = {uid: cnt for uid, cnt in trade_counts}
     except Exception as e:
         logger.warning(f"Batch trade count failed: {e}")
