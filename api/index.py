@@ -3491,6 +3491,119 @@ def admin_fix_bot_snapshot_maxcash():
     })
 
 
+@app.route('/admin/revert-bot-untracked-backfill')
+@admin_required
+def admin_revert_bot_untracked_backfill():
+    """
+    REVERT the untracked-holdings backfill. Premise was wrong: these bots were
+    seeded via set-cash + add-stocks, so max_cash_deployed was set directly and
+    was ALREADY correct -- the missing transactions were expected, not an
+    understatement. The backfill inflated user.max_cash_deployed by seed_value
+    and the post-backfill snapshots (+ EOD cron) picked up the inflated value,
+    creating the discontinuity. (My replay fix made it worse on divi51 by
+    flattening every snapshot to seed_value.)
+
+    target_max = current user.max_cash_deployed - seed_value (the pre-backfill,
+    correct peak). Per snapshot (daily + intraday):
+      - if stored == seed_value (the divi51 corruption signature) and < target:
+            set = target_max          # un-flatten the snapshots I overwrote
+      - else: set = min(stored, target_max)   # clamp inflated, keep genuine history
+    Then reset user.max_cash_deployed = target_max and delete backfill_seed txns.
+    DRY-RUN by default; ?commit=true to write; ?user_id=N to scope. Purges chart
+    cache on commit (re-run market-close cron after to rebuild leaderboard).
+    """
+    from models import (db, User, Transaction, PortfolioSnapshot,
+                        PortfolioSnapshotIntraday)
+    from sqlalchemy import text as _sql_text
+
+    commit = request.args.get('commit', 'false').lower() == 'true'
+    user_id_param = request.args.get('user_id')
+
+    if user_id_param:
+        try:
+            ids = {int(user_id_param)}
+        except (TypeError, ValueError):
+            return jsonify({'error': 'invalid user_id'}), 400
+    else:
+        rows = (db.session.query(Transaction.user_id)
+                .filter(Transaction.price_source == 'backfill_seed')
+                .distinct().all())
+        ids = {r[0] for r in rows}
+
+    if not ids:
+        return jsonify({'mode': 'commit' if commit else 'dry_run',
+                        'message': 'No bots with backfill_seed transactions',
+                        'results': []})
+
+    results = []
+    cache_ids = []
+    for uid in sorted(ids):
+        user = User.query.get(uid)
+        if not user:
+            continue
+        seed_txns = (Transaction.query.filter_by(
+            user_id=uid, price_source='backfill_seed').all())
+        seed_value = round(sum((t.quantity or 0) * (t.price or 0)
+                               for t in seed_txns), 2)
+        cur_max = round(float(user.max_cash_deployed or 0), 2)
+        target_max = round(cur_max - seed_value, 2)
+
+        def _fix(stored):
+            stored = round(float(stored or 0), 2)
+            if abs(stored - seed_value) < 0.01 and stored < target_max - 0.01:
+                return target_max
+            return min(stored, target_max)
+
+        daily = PortfolioSnapshot.query.filter_by(user_id=uid).all()
+        d_changed = 0
+        for s in daily:
+            nv = _fix(s.max_cash_deployed)
+            if abs(nv - round(float(s.max_cash_deployed or 0), 2)) > 0.01:
+                d_changed += 1
+                if commit:
+                    s.max_cash_deployed = nv
+        intraday = PortfolioSnapshotIntraday.query.filter_by(user_id=uid).all()
+        i_changed = 0
+        for s in intraday:
+            nv = _fix(s.max_cash_deployed)
+            if abs(nv - round(float(s.max_cash_deployed or 0), 2)) > 0.01:
+                i_changed += 1
+                if commit:
+                    s.max_cash_deployed = nv
+
+        if commit:
+            user.max_cash_deployed = target_max
+            for t in seed_txns:
+                db.session.delete(t)
+            cache_ids.append(uid)
+
+        results.append({
+            'user_id': uid, 'username': user.username,
+            'seed_value': seed_value, 'current_user_max': cur_max,
+            'target_max': target_max, 'seed_txns_deleted': len(seed_txns) if commit else 0,
+            'daily_changed': d_changed, 'intraday_changed': i_changed,
+        })
+
+    if commit and cache_ids:
+        try:
+            db.session.execute(_sql_text(
+                "DELETE FROM user_portfolio_chart_cache WHERE user_id = ANY(:ids)"),
+                {'ids': cache_ids})
+        except Exception as _e:
+            logger.warning(f"revert: chart-cache purge failed: {_e}")
+        db.session.commit()
+
+    return jsonify({
+        'mode': 'commit' if commit else 'dry_run',
+        'affected_bots': len(results), 'results': results,
+        'next_steps': ('DRY-RUN: target_max = current_user_max - seed_value is the '
+                       'correct pre-backfill peak. Re-run ?commit=true (optionally '
+                       '?user_id=9 first to undo the divi51 corruption). After commit, '
+                       'trigger /api/cron/market-close to rebuild leaderboard caches, '
+                       'then confirm the ~60% cliff is gone.'),
+    })
+
+
 def _marketdata_coverage_universe(days):
     """Shared helper for the MarketData coverage audit + backfill.
 
