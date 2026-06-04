@@ -3149,8 +3149,9 @@ def admin_backfill_bot_untracked_holdings():
     """
     Remediate the `untracked_holdings` found by /admin/audit-bot-portfolio-integrity:
     bots seeded via the legacy /admin/bot/add-stocks path got Stock rows but NO
-    Transaction, so transaction replay can't reconstruct them and their
-    max_cash_deployed is understated (which can overstate their leaderboard %).
+    Transaction, so transaction replay can't reconstruct them. This ONLY restores
+    the missing ledger rows so the audit can replay-validate holdings; it does NOT
+    change max_cash_deployed (see the big note below -- doing so double-counts).
 
     For every (bot, ticker) where current Stock qty exceeds replayed qty, this
     records the missing seed lot:
@@ -3160,13 +3161,18 @@ def admin_backfill_bot_untracked_holdings():
     IMPORTANT - we DON'T route through process_transaction(). That path offsets
     a buy against current cash_proceeds, but the seed happened at t0 when
     cash_proceeds was 0; replaying it now (after later sells built up
-    cash_proceeds) would wrongly consume that cash. Instead we:
-      1. INSERT a Transaction(type='initial', backdated to the bot's first
-         snapshot date, price_source='backfill_seed').
-      2. user.max_cash_deployed += seed_value, leaving cash_proceeds untouched.
-    This is provably correct: every later trade's effect on max_cash_deployed
-    depends only on the cash_proceeds series (unchanged by the seed), so
-    current_max + seed_value == the max we'd have if the seed had been recorded.
+    cash_proceeds) would wrongly consume that cash. Instead we just INSERT a
+    Transaction(type='initial', backdated to the bot's first snapshot date,
+    price_source='backfill_seed') so transaction-replay reproduces the holdings.
+
+    *** THIS ENDPOINT DOES NOT TOUCH max_cash_deployed. ***
+    (Session-10 incident: the original version did `max_cash_deployed += seed_value`,
+    which DOUBLE-COUNTED the seed. These bots were seeded via set-cash + add-stocks,
+    so max_cash_deployed was ALREADY set to the full seed value at creation -- it is
+    NOT understated. Adding the seed again inflated the latest snapshot and produced
+    a ~60% cliff on 1M/YTD; undone by /admin/revert-bot-untracked-backfill.) This
+    endpoint now ONLY completes the ledger so the audit can replay-validate holdings;
+    max_cash_deployed is left exactly as-is.
 
     READ-ONLY DRY-RUN by default. Params:
       ?commit=true              actually write (otherwise preview only)
@@ -3263,7 +3269,9 @@ def admin_backfill_bot_untracked_holdings():
         affected_user_ids.append(bot.id)
 
         cur_max = float(bot.max_cash_deployed or 0.0)
-        projected_max = cur_max + capital_recovered
+        # max_cash_deployed is intentionally NOT changed (see docstring): set-cash
+        # already counts the seed; adding it again double-counts. Reported unchanged.
+        projected_max = cur_max
 
         if commit:
             for tr in txns:
@@ -3276,8 +3284,9 @@ def admin_backfill_bot_untracked_holdings():
                     timestamp=backfill_dt,
                     price_source='backfill_seed',
                 ))
-            bot.max_cash_deployed = projected_max
-            db.session.add(bot)
+            # NOTE: deliberately DO NOT modify bot.max_cash_deployed here -- set-cash
+            # already counted the full seed at creation; mutating it double-counts
+            # (session-10 ~60% cliff). This endpoint only completes the ledger.
 
         results.append({
             'user_id': bot.id,
@@ -3312,12 +3321,12 @@ def admin_backfill_bot_untracked_holdings():
         'chart_cache_purged': bool(commit and affected_user_ids),
         'results': results,
         'next_steps': (
-            'DRY-RUN: review transactions[] + projected_max_cash_deployed per bot, '
-            'then re-run with ?commit=true (optionally ?user_id=N to do one bot first). '
-            'After commit, re-run /admin/audit-bot-portfolio-integrity -> untracked_count '
-            'should be 0 and bots become transaction-replay-validatable. Note: '
-            'max_cash_deployed increases, which may LOWER the displayed return % '
-            'for some bots.'
+            'DRY-RUN: review transactions[] per bot, then re-run with ?commit=true '
+            '(optionally ?user_id=N to do one bot first). This ONLY inserts the missing '
+            'initial seed txns so transaction-replay reproduces holdings; it does NOT '
+            'modify max_cash_deployed (set-cash already counts the seed -- changing it '
+            'here double-counts, the session-10 ~60% cliff). After commit, re-run '
+            '/admin/audit-bot-portfolio-integrity -> untracked_count should be 0.'
         ),
     })
 
@@ -3355,6 +3364,22 @@ def admin_fix_bot_snapshot_maxcash():
     from models import (db, User, Transaction, PortfolioSnapshot,
                         PortfolioSnapshotIntraday)
     from sqlalchemy import text as _sql_text
+
+    # DEPRECATED (session 10): this replay-based fixer SETS each snapshot's
+    # max_cash_deployed to the transaction-replay value, which is WRONG for
+    # set-cash-seeded bots -- their true max is the set-cash value, NOT the ledger
+    # replay (the ledger is intentionally incomplete). It flattened divi51 to its
+    # seed value. Superseded by /admin/revert-bot-untracked-backfill (clamp + restore,
+    # idempotent, with force_max recovery). Refuses to run unless explicitly forced.
+    if request.args.get('allow_deprecated_replay_fix', 'false').lower() != 'true':
+        return jsonify({
+            'error': 'deprecated',
+            'message': ('This endpoint is deprecated and unsafe for set-cash-seeded '
+                        'bots: it sets max_cash_deployed to the transaction-replay '
+                        'value, which is too low (it flattened divi51 to its seed). '
+                        'Use /admin/revert-bot-untracked-backfill instead. To override '
+                        'anyway, pass ?allow_deprecated_replay_fix=true.'),
+        }), 410
 
     commit = request.args.get('commit', 'false').lower() == 'true'
     user_id_param = request.args.get('user_id')
