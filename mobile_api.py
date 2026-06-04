@@ -788,12 +788,48 @@ def get_portfolio(slug):
         except Exception as e:
             logger.warning(f"Bulk price fetch failed: {e}")
         
-        # Portfolio value from batch prices (no additional API calls)
+        # Display-layer price fallback: when the live bulk quote
+        # (REALTIME_BULK_QUOTES) doesn't return a ticker, fall back to the most
+        # recent real daily close from market_data instead of purchase_price --
+        # otherwise current_price == purchase_price and Holdings render ~+0%
+        # gains (the bug). get_batch_stock_data itself is intentionally left
+        # unchanged so trade-execution paths never transact on a stale close.
+        latest_close = {}
+        try:
+            from models import MarketData
+            held_upper = [s.ticker.upper() for s in all_stocks
+                          if s.ticker and s.quantity and s.quantity > 0]
+            if held_upper:
+                for tk, close in (
+                    MarketData.query
+                    .with_entities(MarketData.ticker, MarketData.close_price)
+                    .filter(MarketData.ticker.in_(held_upper),
+                            MarketData.timestamp.is_(None))
+                    .order_by(MarketData.ticker, MarketData.date.desc())
+                    .all()
+                ):
+                    if tk and close and close > 0:
+                        u = tk.upper()
+                        if u not in latest_close:
+                            latest_close[u] = float(close)
+        except Exception as e:
+            logger.warning(f"Holdings latest-close fallback lookup failed: {e}")
+
+        def _resolve_current_price(stock):
+            u = stock.ticker.upper()
+            live = batch_prices.get(u)
+            if live and live > 0:
+                return float(live)
+            close = latest_close.get(u)
+            if close and close > 0:
+                return float(close)
+            return float(stock.purchase_price or 0)
+
+        # Portfolio value (live bulk quote -> latest close -> purchase price)
         portfolio_value = 0.0
         for stock in all_stocks:
             if stock.quantity > 0:
-                price = batch_prices.get(stock.ticker.upper(), stock.purchase_price or 0)
-                portfolio_value += price * stock.quantity
+                portfolio_value += _resolve_current_price(stock) * stock.quantity
         cash_balance = float(getattr(owner, 'cash_proceeds', 0.0) or 0.0)
         portfolio_value += cash_balance
         response['portfolio_value'] = round(portfolio_value, 2)
@@ -860,7 +896,7 @@ def get_portfolio(slug):
                     'ticker': stock.ticker,
                     'quantity': qty,
                     'purchase_price': stock.purchase_price or 0,
-                    'current_price': round(batch_prices.get(stock.ticker.upper(), stock.purchase_price or 0), 2),
+                    'current_price': round(_resolve_current_price(stock), 2),
                     'purchase_date': stock.purchase_date.isoformat() if stock.purchase_date else None
                 })
             response['holdings'] = holdings_list
