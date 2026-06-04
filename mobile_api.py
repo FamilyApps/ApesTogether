@@ -1899,65 +1899,95 @@ def update_notification_settings():
 @require_auth
 def notification_history():
     """
-    Get notification history for the authenticated user.
-    Combines email (NotificationLog) and push (PushNotificationLog) records.
-    Query params: ?limit=50&offset=0
+    Trade Alerts feed for the Subscriptions tab.
+
+    Sourced from the TRANSACTIONS of every portfolio the user actively
+    subscribes to — NOT from delivery logs. This guarantees exactly ONE alert
+    per trade regardless of whether the subscriber has push on, email on, both,
+    or NEITHER.
+
+    The previous implementation merged NotificationLog (email) +
+    PushNotificationLog (push), which (a) double-counted every trade when both
+    channels were enabled, and (b) showed nothing when neither was. Delivery
+    logs are the wrong source of truth for "what trades happened" — the
+    subscribed trader's Transaction ledger is.
+
+    Only trades AT/AFTER each subscription's start (MobileSubscription.created_at)
+    are shown, and 'initial'/seed rows are excluded — alerts are real buy/sell
+    trades. Query params: ?limit=50&offset=0
     """
-    from models import NotificationLog, PushNotificationLog, User
-    from sqlalchemy import desc
+    from models import MobileSubscription, Transaction, User
+    from sqlalchemy import and_, or_, desc
 
     limit = min(int(request.args.get('limit', 50)), 100)
     offset = int(request.args.get('offset', 0))
 
     try:
-        # Email notifications received
-        email_logs = NotificationLog.query.filter_by(
-            user_id=g.user_id
-        ).order_by(desc(NotificationLog.created_at)).limit(limit + offset).all()
+        subs = MobileSubscription.query.filter_by(
+            subscriber_id=g.user_id, status='active'
+        ).all()
+        if not subs:
+            return jsonify({'notifications': [], 'total': 0,
+                            'limit': limit, 'offset': offset})
 
-        # Push notifications received
-        push_logs = PushNotificationLog.query.filter_by(
-            user_id=g.user_id
-        ).order_by(desc(PushNotificationLog.created_at)).limit(limit + offset).all()
+        # trader_id -> earliest active subscription start. Alerts only surface
+        # trades made on/after the user subscribed to that portfolio.
+        sub_start = {}
+        for s in subs:
+            tid = s.subscribed_to_id
+            start = s.created_at or datetime(1970, 1, 1)
+            if tid not in sub_start or start < sub_start[tid]:
+                sub_start[tid] = start
+        trader_ids = list(sub_start.keys())
 
-        # Merge and sort by created_at descending
-        combined = []
-        for log in email_logs:
-            trader = User.query.get(log.portfolio_owner_id)
-            combined.append({
-                'id': f'email-{log.id}',
-                'type': 'email',
-                'trader_username': trader.public_name if trader else 'Unknown',
-                'status': log.status,
-                # _utc_iso so iOS / Android parse as UTC instantly and the
-                # 'Trade Alerts' list shows ET-formatted times instead of
-                # raw ISO strings.
-                'created_at': _utc_iso(log.created_at) if log.created_at else None,
+        # Per-trader "trades since I subscribed" predicate, OR'd together so a
+        # single query covers all of the user's subscriptions.
+        per_trader = [
+            and_(Transaction.user_id == tid, Transaction.timestamp >= start)
+            for tid, start in sub_start.items()
+        ]
+        base_q = Transaction.query.filter(
+            Transaction.user_id.in_(trader_ids),
+            Transaction.transaction_type.in_(('buy', 'sell')),
+            or_(*per_trader),
+        )
+
+        total = base_q.count()
+        txns = (base_q.order_by(desc(Transaction.timestamp))
+                .limit(limit).offset(offset).all())
+
+        traders = {u.id: u for u in
+                   User.query.filter(User.id.in_(trader_ids)).all()}
+
+        items = []
+        for t in txns:
+            trader = traders.get(t.user_id)
+            trader_name = (getattr(trader, 'public_name', None)
+                           or (trader.username if trader else 'A portfolio'))
+            action = (t.transaction_type or '').upper()
+            emoji = '🟢' if action == 'BUY' else '🔴'
+            verb = 'bought' if action == 'BUY' else 'sold'
+            qty = t.quantity or 0
+            qty_str = f"{int(qty)}" if qty == int(qty) else f"{qty:g}"
+            price = t.price or 0
+            items.append({
+                'id': f'trade-{t.id}',
+                'type': 'trade',
+                'trader_username': trader_name,
+                'status': 'executed',
+                'created_at': _utc_iso(t.timestamp) if t.timestamp else None,
+                'title': f"{emoji} {trader_name} {action}",
+                'body': f"{trader_name} {verb} {qty_str} {t.ticker} @ ${price:,.2f}",
             })
-        for log in push_logs:
-            trader = User.query.get(log.portfolio_owner_id)
-            combined.append({
-                'id': f'push-{log.id}',
-                'type': 'push',
-                'title': log.title,
-                'body': log.body,
-                'trader_username': trader.public_name if trader else 'Unknown',
-                'status': log.status,
-                'created_at': _utc_iso(log.created_at) if log.created_at else None,
-                'data': log.data_payload,
-            })
-
-        combined.sort(key=lambda x: x.get('created_at') or '', reverse=True)
-        page = combined[offset:offset + limit]
 
         return jsonify({
-            'notifications': page,
-            'total': len(combined),
+            'notifications': items,
+            'total': total,
             'limit': limit,
             'offset': offset,
         })
     except Exception as e:
-        logger.error(f"Notification history error: {e}")
+        logger.error(f"Trade alerts feed error: {e}")
         return jsonify({'error': 'fetch_failed'}), 500
 
 
