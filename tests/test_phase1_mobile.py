@@ -234,30 +234,76 @@ class TestIAPValidationService:
         assert 'authenticated' in result['error'].lower()
     
     def test_google_response_parsing(self):
-        """Test Google Play response parsing"""
+        """Test Google Play Subscriptions v2 response parsing"""
         from iap_validation_service import IAPValidationService, SubscriptionStatus
         
         service = IAPValidationService()
         
-        # Mock Google response for active subscription
-        now_ms = int(datetime.utcnow().timestamp() * 1000)
-        future_ms = int((datetime.utcnow() + timedelta(days=30)).timestamp() * 1000)
+        now = datetime.utcnow()
+        def iso(dt):
+            return dt.strftime('%Y-%m-%dT%H:%M:%S.000Z')
         
-        response = {
-            'orderId': 'GPA.1234-5678-9012',
-            'startTimeMillis': str(now_ms),
-            'expiryTimeMillis': str(future_ms),
-            'autoRenewing': True,
-            'acknowledgementState': 1
+        # Active MONTHLY subscription (SubscriptionPurchaseV2 shape)
+        monthly_response = {
+            'subscriptionState': 'SUBSCRIPTION_STATE_ACTIVE',
+            'startTime': iso(now),
+            'latestOrderId': 'GPA.1234-5678-9012',
+            'acknowledgementState': 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
+            'lineItems': [
+                {
+                    'productId': IAPValidationService.PRODUCT_ID,
+                    'expiryTime': iso(now + timedelta(days=30)),
+                    'autoRenewingPlan': {'autoRenewEnabled': True},
+                }
+            ],
         }
         
-        result = service._parse_google_response(response, 'test_token', 'test_product')
+        result = service._parse_google_subscription_v2(monthly_response, 'test_token')
         
         assert result['valid'] == True
         assert result['platform'] == 'google'
         assert result['status'] == SubscriptionStatus.ACTIVE.value
         assert result['auto_renew_status'] == True
+        assert result['acknowledged'] == True
+        assert result['product_id'] == IAPValidationService.PRODUCT_ID
+        assert result['transaction_id'] == 'GPA.1234-5678-9012'
         assert result['price'] == 9.00
+        
+        # ANNUAL token must resolve annual pricing from the line item's product
+        # (this is the bug the v2 migration fixes: v1 hardcoded monthly $9).
+        annual_response = {
+            'subscriptionState': 'SUBSCRIPTION_STATE_ACTIVE',
+            'startTime': iso(now),
+            'latestOrderId': 'GPA.9999-0000-1111',
+            'acknowledgementState': 'ACKNOWLEDGEMENT_STATE_PENDING',
+            'lineItems': [
+                {
+                    'productId': IAPValidationService.ANNUAL_PRODUCT_ID,
+                    'expiryTime': iso(now + timedelta(days=365)),
+                    'autoRenewingPlan': {'autoRenewEnabled': True},
+                }
+            ],
+        }
+        
+        annual = service._parse_google_subscription_v2(annual_response, 'annual_token')
+        assert annual['product_id'] == IAPValidationService.ANNUAL_PRODUCT_ID
+        assert annual['price'] == 69.00
+        assert annual['acknowledged'] == False
+        
+        # Expired subscription → no entitlement
+        expired_response = {
+            'subscriptionState': 'SUBSCRIPTION_STATE_EXPIRED',
+            'startTime': iso(now - timedelta(days=60)),
+            'latestOrderId': 'GPA.2222-3333',
+            'lineItems': [
+                {
+                    'productId': IAPValidationService.PRODUCT_ID,
+                    'expiryTime': iso(now - timedelta(days=1)),
+                }
+            ],
+        }
+        expired = service._parse_google_subscription_v2(expired_response, 'expired_token')
+        assert expired['status'] == SubscriptionStatus.EXPIRED.value
 
 
 # =============================================================================

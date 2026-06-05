@@ -1454,6 +1454,11 @@ class PortfolioDetailViewModel @Inject constructor(
                                 platform = "google",
                                 subscribedToId = subscribedToId,
                                 purchaseToken = purchase.purchaseToken,
+                                // The real purchased SKU; falls back to the
+                                // launched plan if Play omits it. Drives
+                                // correct monthly/annual pricing server-side.
+                                productId = purchase.products.firstOrNull()
+                                    ?: _selectedPlan.value.productId,
                             )
                         )
                     }

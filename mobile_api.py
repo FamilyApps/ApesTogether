@@ -469,6 +469,7 @@ def validate_purchase():
     
     receipt_data = data.get('receipt_data')
     purchase_token = data.get('purchase_token')
+    product_id = data.get('product_id')  # client hint; used for pricing/accounting
     
     if platform == 'apple' and not receipt_data:
         return jsonify({'error': 'receipt_data_required_for_apple'}), 400
@@ -486,7 +487,8 @@ def validate_purchase():
                 subscribed_to_id=subscribed_to_id,
                 platform=platform,
                 receipt_data=receipt_data,
-                purchase_token=purchase_token
+                purchase_token=purchase_token,
+                product_id=product_id
             )
         )
         loop.close()

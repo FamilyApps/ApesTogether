@@ -1,6 +1,5 @@
 ﻿package com.apestogether.app.ui
 
-import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,7 +21,6 @@ import com.apestogether.app.data.onboarding.OnboardingManager
 import com.apestogether.app.data.onboarding.OnboardingPreferences
 import com.apestogether.app.ui.navigation.RootNavGraph
 import com.apestogether.app.ui.navigation.Screen
-import com.apestogether.app.ui.navigation.extractSlugFromDeepLink
 import com.apestogether.app.ui.screens.onboarding.AddStocksScreen
 import com.apestogether.app.ui.screens.onboarding.EarnNudgeScreen
 import com.apestogether.app.ui.screens.onboarding.ReferralPreviewScreen
@@ -57,7 +55,7 @@ import javax.inject.Inject
  * Mirrors iOS [ContentView]'s state-machine layout.
  */
 @Composable
-fun RootApp(initialDeepLinkUri: Uri? = null) {
+fun RootApp() {
     val rootViewModel: RootViewModel = hiltViewModel()
     // Tri-state — null until the underlying DataStore Flow emits its first
     // value. We render a splash while these are null instead of guessing,
@@ -83,37 +81,33 @@ fun RootApp(initialDeepLinkUri: Uri? = null) {
     var carouselDismissed by remember { mutableStateOf(false) }
     var showAddStocksOverlay by remember { mutableStateOf(false) }
 
-    // ── Cold-start deep-link ingestion ──────────────────────────────────
-    // Drop the slug into the OnboardingManager exactly once on first
-    // composition. The post-auth LaunchedEffect below drains it and
-    // navigates after auth resolves, regardless of whether the user is
-    // already signed in or signs in via the Referral landing. Going
-    // through the manager (instead of calling navController directly here)
-    // avoids a double-navigation race when the auth flow flips while a
-    // slug is still pending.
-    LaunchedEffect(Unit) {
-        val slug = initialDeepLinkUri?.let { extractSlugFromDeepLink(it) }
-        if (!slug.isNullOrBlank()) {
-            rootViewModel.setPendingSlug(slug)
-        }
-    }
-
     // ── Post-auth bookkeeping ───────────────────────────────────────────
     // On every flip from unauthed → authed:
     //   1. Re-hydrate the cached User object so MyPortfolio renders with
     //      the user's portfolio_slug instead of the empty state.
     //   2. Mark onboarding completed (covers users who jumped straight to
     //      Login from a fresh install without seeing the carousel).
-    //   3. If a referral slug is still pending, drain it after a short
-    //      delay (so the NavHost has time to recompose with start = "main")
-    //      and route the user to that portfolio's detail page.
     LaunchedEffect(isAuthed) {
         if (isAuthed == true) {
             rootViewModel.hydrateUser()
             rootViewModel.markOnboardingCompleted()
+        }
+    }
+
+    // ── Deep-link navigation ────────────────────────────────────────────
+    // The pending slug is published by MainActivity (cold start via the App
+    // Link Uri or a tapped FCM notification's extras, and warm start via
+    // onNewIntent). Keyed on BOTH auth state and the slug so it fires when:
+    //   - the user signs in from the ReferralPreview (isAuthed flips), and
+    //   - a deep link arrives while the user is already signed in (slug flips).
+    // Unauthed + slug is intentionally left to ReferralPreviewScreen below;
+    // we only auto-navigate once authenticated. consumePendingSlug() clears the
+    // slug so re-running with a null value is a no-op (no double navigation).
+    LaunchedEffect(isAuthed, pendingSlug) {
+        if (isAuthed == true && !pendingSlug.isNullOrBlank()) {
+            delay(300)  // let the NavHost recompose with start = "main"
             val drained = rootViewModel.consumePendingSlug()
             if (!drained.isNullOrBlank()) {
-                delay(300)
                 navController.navigate(Screen.PortfolioDetail.route(drained))
             }
         }

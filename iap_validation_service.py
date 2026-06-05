@@ -16,7 +16,7 @@ import os
 import json
 import logging
 import httpx
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, Tuple
 from enum import Enum
 
@@ -336,50 +336,59 @@ class IAPValidationService:
         product_id: str = None
     ) -> Dict[str, Any]:
         """
-        Validate Google Play purchase
-        
+        Validate a Google Play subscription using the Subscriptions v2 API
+        (purchases.subscriptionsv2.get).
+
+        Unlike the deprecated v1 purchases.subscriptions.get, the v2 endpoint
+        is keyed ONLY by the purchase token — there is no product_id in the
+        URL — so it validates correctly regardless of which SKU (monthly /
+        annual) the token belongs to. The real product is read back from the
+        response's `lineItems`.
+
         Args:
             purchase_token: Token from Google Play Billing
-            product_id: Product ID (defaults to our subscription)
-            
+            product_id: Optional client hint, used only as a pricing fallback
+                if the v2 response omits a line item.
+
         Returns:
             Dict with validation result and subscription info
         """
         if not self.google_credentials:
             logger.error("GOOGLE_PLAY_CREDENTIALS_JSON not configured")
             return {'valid': False, 'error': 'server_config_error'}
-        
-        product_id = product_id or self.PRODUCT_ID
-        
+
         try:
             # Get access token
             access_token = await self._get_google_access_token()
             if not access_token:
                 return {'valid': False, 'error': 'failed_to_get_access_token'}
-            
-            # Verify subscription
+
+            # Verify subscription (token-only v2 endpoint)
             url = (
                 f"https://androidpublisher.googleapis.com/androidpublisher/v3/"
-                f"applications/{self.google_package_name}/purchases/subscriptions/"
-                f"{product_id}/tokens/{purchase_token}"
+                f"applications/{self.google_package_name}/purchases/subscriptionsv2/"
+                f"tokens/{purchase_token}"
             )
-            
+
             async with httpx.AsyncClient() as client:
                 response = await client.get(
                     url,
                     headers={'Authorization': f'Bearer {access_token}'},
                     timeout=30.0
                 )
-                
+
                 if response.status_code == 404:
                     return {'valid': False, 'error': 'purchase_not_found'}
                 elif response.status_code != 200:
+                    logger.error(
+                        f"Google subscriptionsv2 API error {response.status_code}: {response.text}"
+                    )
                     return {'valid': False, 'error': f'api_error_{response.status_code}'}
-                
+
                 result = response.json()
-            
-            return self._parse_google_response(result, purchase_token, product_id)
-            
+
+            return self._parse_google_subscription_v2(result, purchase_token, product_id)
+
         except Exception as e:
             logger.error(f"Google validation error: {e}")
             return {'valid': False, 'error': str(e)}
@@ -430,54 +439,102 @@ class IAPValidationService:
             logger.error(f"Error getting Google access token: {e}")
             return None
     
-    def _parse_google_response(
+    @staticmethod
+    def _parse_rfc3339(value: Optional[str]) -> Optional[datetime]:
+        """Parse a Google RFC3339 timestamp (e.g. '2026-01-01T00:00:00.000Z')
+        into a NAIVE UTC datetime, matching the rest of this module's use of
+        `datetime.utcnow()` for comparisons. Returns None on any failure."""
+        if not value:
+            return None
+        s = value.strip()
+        try:
+            dt = datetime.fromisoformat(s.replace('Z', '+00:00'))
+        except Exception:
+            # Fallback for runtimes whose fromisoformat rejects fractional
+            # seconds: drop the fraction + zone and parse as UTC.
+            try:
+                core = s.replace('Z', '')
+                if '.' in core:
+                    core = core.split('.', 1)[0]
+                return datetime.strptime(core, '%Y-%m-%dT%H:%M:%S')
+            except Exception:
+                return None
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+
+    def _parse_google_subscription_v2(
         self,
         response: Dict[str, Any],
         purchase_token: str,
-        product_id: str
+        product_id_hint: str = None,
     ) -> Dict[str, Any]:
-        """Parse Google Play subscription response"""
-        
-        # Parse timestamps (Google uses milliseconds)
-        start_time_ms = int(response.get('startTimeMillis', 0))
-        expiry_time_ms = int(response.get('expiryTimeMillis', 0))
-        
-        purchase_date = datetime.fromtimestamp(start_time_ms / 1000) if start_time_ms else None
-        expires_date = datetime.fromtimestamp(expiry_time_ms / 1000) if expiry_time_ms else None
-        
-        # Determine status
+        """Parse a SubscriptionPurchaseV2 resource into our canonical result.
+
+        Schema: https://developers.google.com/android-publisher/api-ref/rest/v3/purchases.subscriptionsv2
+        """
+        # We only ever sell a single subscription per purchase. Pick the line
+        # item with the latest expiry as the source of truth for product +
+        # expiration (covers upgrade/downgrade carry-over edge cases).
+        line_items = response.get('lineItems') or []
+        primary = None
+        if line_items:
+            primary = max(
+                line_items,
+                key=lambda li: self._parse_rfc3339(li.get('expiryTime')) or datetime.min,
+            )
+        primary = primary or {}
+
+        product_id = primary.get('productId') or product_id_hint or self.PRODUCT_ID
+        expires_date = self._parse_rfc3339(primary.get('expiryTime'))
+        purchase_date = self._parse_rfc3339(response.get('startTime'))
+
+        # Entitlement-first status mapping. In v2, CANCELED means auto-renew
+        # is off but access continues until expiry, so for the "middle" states
+        # we key access off the expiry time rather than the raw state.
+        state = response.get('subscriptionState')
         now = datetime.utcnow()
-        cancel_reason = response.get('cancelReason')
-        
-        if cancel_reason == 1:
-            status = SubscriptionStatus.CANCELED
-        elif cancel_reason == 2:
-            status = SubscriptionStatus.REFUNDED
+        if state == 'SUBSCRIPTION_STATE_EXPIRED':
+            status = SubscriptionStatus.EXPIRED
+        elif state in (
+            'SUBSCRIPTION_STATE_ON_HOLD',
+            'SUBSCRIPTION_STATE_PAUSED',
+            'SUBSCRIPTION_STATE_PENDING',
+        ):
+            status = SubscriptionStatus.EXPIRED  # no current entitlement
         elif expires_date and expires_date > now:
+            # ACTIVE, IN_GRACE_PERIOD, or CANCELED-but-not-yet-expired.
             status = SubscriptionStatus.ACTIVE
         else:
             status = SubscriptionStatus.EXPIRED
-        
-        # Check acknowledgement
-        acknowledged = response.get('acknowledgementState') == 1
-        
+
+        auto_renew = bool((primary.get('autoRenewingPlan') or {}).get('autoRenewEnabled', False))
+        acknowledged = response.get('acknowledgementState') == 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED'
+        is_trial = bool((primary.get('offerDetails') or {}).get('offerId'))
+
+        # Pricing/payout splits come from OUR product table (Google does not
+        # return our negotiated economics), keyed by the REAL product_id.
+        pricing = self._get_pricing(product_id)
+
         return {
             'valid': True,
             'platform': Platform.GOOGLE.value,
             'product_id': product_id,
-            'transaction_id': response.get('orderId'),
+            # latestOrderId is short + unique; fall back to a truncated token
+            # so we never overflow InAppPurchase.transaction_id (String(200)).
+            'transaction_id': response.get('latestOrderId') or purchase_token[:200],
             'original_transaction_id': response.get('linkedPurchaseToken', purchase_token),
             'purchase_token': purchase_token,
             'purchase_date': purchase_date,
             'expires_date': expires_date,
             'status': status.value,
-            'is_trial': response.get('paymentState') == 2,  # Free trial
-            'auto_renew_status': response.get('autoRenewing', False),
+            'is_trial': is_trial,
+            'auto_renew_status': auto_renew,
             'acknowledged': acknowledged,
-            'price': self.SUBSCRIPTION_PRICE,
-            'influencer_payout': self.INFLUENCER_PAYOUT,
-            'platform_revenue': self.PLATFORM_REVENUE,
-            'store_fee': self.STORE_FEE,
+            'price': pricing['price'],
+            'influencer_payout': pricing['influencer_payout'],
+            'platform_revenue': pricing['platform_revenue'],
+            'store_fee': pricing['store_fee'],
         }
     
     async def acknowledge_google_purchase(self, purchase_token: str, product_id: str = None) -> bool:
@@ -530,7 +587,8 @@ async def validate_and_save_purchase(
     subscribed_to_id: int,
     platform: str,
     receipt_data: str = None,
-    purchase_token: str = None
+    purchase_token: str = None,
+    product_id: str = None
 ) -> Tuple[bool, Dict[str, Any]]:
     """
     Validate a purchase and save it to the database
@@ -542,6 +600,8 @@ async def validate_and_save_purchase(
         platform: 'apple' or 'google'
         receipt_data: Apple receipt (base64)
         purchase_token: Google purchase token
+        product_id: Google product/SKU the client purchased. Used as a pricing
+            fallback only; the v2 API resolves the real product from the token.
         
     Returns:
         Tuple of (success, result_dict)
@@ -558,7 +618,7 @@ async def validate_and_save_purchase(
     elif platform == 'google':
         if not purchase_token:
             return False, {'error': 'purchase_token_required'}
-        result = await service.validate_google_purchase(purchase_token)
+        result = await service.validate_google_purchase(purchase_token, product_id)
     else:
         return False, {'error': 'invalid_platform'}
     
@@ -638,8 +698,10 @@ async def validate_and_save_purchase(
         import logging
         logging.getLogger(__name__).warning(f"Milestone check failed (non-fatal): {e}")
     
-    # Acknowledge Google purchase if needed
+    # Acknowledge Google purchase if needed (idempotent; the client also
+    # acknowledges). Pass the REAL product_id so the v1 acknowledge endpoint
+    # (which still requires a subscriptionId) targets the correct SKU.
     if platform == 'google' and not result.get('acknowledged'):
-        await service.acknowledge_google_purchase(purchase_token)
+        await service.acknowledge_google_purchase(purchase_token, result.get('product_id'))
     
     return True, {'purchase_id': purchase.id, 'subscription_created': True, **result}

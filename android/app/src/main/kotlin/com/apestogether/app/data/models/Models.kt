@@ -280,6 +280,7 @@ data class PurchaseValidationRequest(
     @SerialName("subscribed_to_id") val subscribedToId: Int,
     @SerialName("receipt_data") val receiptData: String? = null,    // Apple: StoreKit 2 JWS or legacy base64 receipt
     @SerialName("purchase_token") val purchaseToken: String? = null, // Google: Play Billing purchase token
+    @SerialName("product_id") val productId: String? = null,        // Google: purchased SKU (pricing/accounting hint)
 )
 
 @Serializable
