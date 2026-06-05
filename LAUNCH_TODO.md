@@ -9,6 +9,24 @@ This document is the single source of truth for what's still open before launch.
 
 ---
 
+## ▶ RESUME HERE — Sunday (AI tokens reset)
+
+**Last worked: Session 11, 2026-06-04. Committed `7a21b67` (8 files, +254/−95).** Stopped because AI tokens ran low.
+
+**Done this session (all committed):**
+- **Android deep-link navigation bug — FIXED + VERIFIED on the physical Pixel 8a.** `MainActivity` now handles `onNewIntent` (warm start) and reads the slug from both the data Uri (App Links) and the `portfolio_slug` intent extra (FCM system-tray tap). All 4 cases (cold/warm × Uri/extra) passed on-device via adb; admin Test Push also delivered + displayed while backgrounded. → Pre-launch tests **#2 (FCM) and #3 (App Link handling) are confirmed on-device.** Details in **Section C**.
+- **Google IAP backend — FIXED.** Migrated to `purchases.subscriptionsv2.get` (token-only), forwarded `product_id` end-to-end, per-product pricing (fixes annual subs 404'ing / being priced as monthly). Unit test updated, logic verified locally. **Not yet runnable on-device** (see #4 gates below). Details in **Section C**.
+
+**Next steps, in priority order:**
+1. **Play Billing (test #4) setup** — the only remaining on-device test, and it can't run over USB. Need: (a) set Vercel **`GOOGLE_PLAY_CREDENTIALS_JSON`** + **redeploy backend** (Section H); (b) publish both subscription products + base plans + the 7-day trial in Play Console; (c) add `bobford00` as a License Tester; (d) upload to an **internal-testing track** and install via that opt-in link. Then subscribe (monthly + annual) on the Pixel and confirm a `MobileSubscription` row + 200 from `/purchase/validate`. *(Ask Cascade to walk through this step by step.)*
+2. **App Link `autoVerify`** — swap the placeholder SHA-256s in `public/.well-known/assetlinks.json` for the real debug + Play App Signing certs (see "USER ACTIONS" / Section C). Handling already works; only OS verification is pending.
+3. **`/admin-panel` → API Usage tab shows all zeroes** (reported this session) — investigate. Logged in **Section H**.
+4. *(Optional/low-risk)* real-device Google Sign-In (#1) and a real trade-alert FCM tap (rides along with #4 once a live subscription exists).
+
+**Re-test the deep-link fix anytime (Pixel plugged in, logged in as bobford00):** clear logcat, launch the app plain to the feed first (clean baseline), then `adb shell am start -W -a android.intent.action.VIEW -d "https://apestogether.ai/p/<slug>" com.apestogether.app` — success = a `GET /api/mobile/portfolio/<slug>` appears in `adb logcat` (proves navigation). adb lives at `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe` (not on PATH).
+
+---
+
 ## ⏰ Monday market-open checklist (next trading day)
 
 Things to verify when the market is open and the bot pipeline is running. Hit each URL and report back.
