@@ -4347,7 +4347,7 @@ def alphavantage_usage():
     """Get AlphaVantage API usage stats for the admin dashboard.
     Premium tier ($99.99/mo): 150 req/min, no daily limit."""
     from models import db, AlphaVantageAPILog
-    from sqlalchemy import func
+    from sqlalchemy import func, case
 
     try:
         now = datetime.utcnow()
@@ -4379,11 +4379,16 @@ def alphavantage_usage():
             AlphaVantageAPILog.timestamp >= one_hour_ago
         ).count()
 
-        # Peak requests per minute over last 7 days
-        # Group by truncated-to-minute timestamp, find the max count
-        from sqlalchemy import cast, Date, text as sa_text
+        # Peak requests per minute over last 7 days.
+        # Group by truncated-to-minute timestamp, find the max count.
+        # IMPORTANT: under Postgres the SELECT must match the GROUP BY exactly.
+        # Selecting CAST(timestamp AS DATE) while grouping by
+        # date_trunc('minute', timestamp) raises "column must appear in the
+        # GROUP BY clause", which 500s this entire endpoint — and the admin UI
+        # silently renders that failure as all-zeroes / "No data yet". So we
+        # select the same minute bucket we group by and derive the day in Python.
         peak_rows = db.session.query(
-            cast(AlphaVantageAPILog.timestamp, Date).label('day'),
+            func.date_trunc('minute', AlphaVantageAPILog.timestamp).label('minute'),
             func.count().label('calls_in_min'),
         ).filter(
             AlphaVantageAPILog.timestamp >= seven_days_ago
@@ -4391,10 +4396,10 @@ def alphavantage_usage():
             func.date_trunc('minute', AlphaVantageAPILog.timestamp)
         ).order_by(func.count().desc()).limit(20).all()
 
-        # Build peak-per-day from the grouped results
+        # Build peak-per-day from the grouped results (derive the day in Python).
         peak_by_day = {}
         for r in peak_rows:
-            day_str = str(r.day)
+            day_str = r.minute.date().isoformat() if hasattr(r.minute, 'date') else str(r.minute)[:10]
             if day_str not in peak_by_day or r.calls_in_min > peak_by_day[day_str]:
                 peak_by_day[day_str] = r.calls_in_min
         overall_peak = max((r.calls_in_min for r in peak_rows), default=0)
@@ -4403,7 +4408,7 @@ def alphavantage_usage():
         daily_rows = db.session.query(
             func.date(AlphaVantageAPILog.timestamp).label('day'),
             func.count().label('total'),
-            func.sum(db.case(
+            func.sum(case(
                 (AlphaVantageAPILog.response_status == 'success', 1),
                 else_=0
             )).label('success'),
@@ -4466,7 +4471,7 @@ def alphavantage_usage():
             AlphaVantageAPILog.endpoint,
             func.avg(AlphaVantageAPILog.response_time_ms).label('avg_ms'),
             func.count().label('total'),
-            func.sum(db.case(
+            func.sum(case(
                 (AlphaVantageAPILog.response_status != 'success', 1),
                 else_=0
             )).label('errors'),
