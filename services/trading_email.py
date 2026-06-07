@@ -443,7 +443,11 @@ def process_queued_trades():
                 db, qt.user_id, qt.ticker, qt.quantity, price, qt.action,
                 timestamp=datetime.utcnow(),
                 price_source='queued_email',
-                position_before_qty=position_before_qty
+                position_before_qty=position_before_qty,
+                # We send our own "Queued Trade Executed" email below; suppress
+                # process_transaction's generic trader confirmation so the user
+                # gets a single email per fill (subscriber fan-out still fires).
+                suppress_trader_email=True
             )
 
             qt.status = 'executed'

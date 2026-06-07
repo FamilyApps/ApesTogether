@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # Push notification integration flag - set to True when Firebase is configured
 PUSH_NOTIFICATIONS_ENABLED = True
 
-def process_transaction(db, user_id, ticker, quantity, price, transaction_type, timestamp=None, position_before_qty=None, price_source=None, suppress_notifications=False):
+def process_transaction(db, user_id, ticker, quantity, price, transaction_type, timestamp=None, position_before_qty=None, price_source=None, suppress_notifications=False, suppress_trader_email=False):
     """
     Process a transaction and update user's cash tracking fields.
     
@@ -53,6 +53,10 @@ def process_transaction(db, user_id, ticker, quantity, price, transaction_type, 
             the daily-trade-cap check. Used by admin bulk migrations
             (e.g. /admin/migrate-bot-holdings) so we don't spam every
             subscriber when the migration emits 20+ trades back-to-back.
+        suppress_trader_email: If True, skip ONLY the trader's own confirmation
+            email (subscriber push + subscriber emails still fire). Used by the
+            queued-trade path, which sends its own richer "Queued Trade Executed"
+            email — without this the trader would receive two emails per fill.
     
     Returns:
         dict with updated max_cash_deployed and cash_proceeds
@@ -166,8 +170,10 @@ def process_transaction(db, user_id, ticker, quantity, price, transaction_type, 
     if not suppress_notifications and transaction_type in ('buy', 'sell'):
         try:
             from services.notification_utils import send_trade_confirmation_email, notify_subscribers_via_email
-            # Email confirmation to the trader (if they have email notifications on)
-            if getattr(user, 'email_notifications_enabled', True):
+            # Email confirmation to the trader (if they have email notifications on).
+            # Skipped when the caller sends its own trader email (queued-trade path)
+            # so the trader doesn't get two emails for a single execution.
+            if not suppress_trader_email and getattr(user, 'email_notifications_enabled', True):
                 conf_result = send_trade_confirmation_email(user, transaction_type, ticker, quantity, price, position_pct)
                 logger.info(f"Trade confirmation email: {conf_result.get('status')}")
             # Email notifications to subscribers
