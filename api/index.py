@@ -10564,8 +10564,26 @@ def refresh_daily_bars_cron():
                 'message': 'ALPHA_VANTAGE_API_KEY env var is not set'
             }), 200  # 200 with diagnostics, NOT 500 — config issue surfaced cleanly
 
-        tickers = get_all_tickers()
-        logger.info(f"refresh-daily-bars: fetching {len(tickers)} tickers from AlphaVantage")
+        # Two-minute split: each cron invocation handles 1/`of` of the universe
+        # so the per-minute AV call burst stays well under the 150/min cap (138
+        # calls in one minute was ~92% of the limit). The crons fire two minutes
+        # apart (see vercel.json), each taking ~30s for ~69 tickers. `part`/`of`
+        # default to 1/1 (whole universe) for manual / single-shot invocations.
+        try:
+            part = int(request.args.get('part', 1))
+            of = int(request.args.get('of', 1))
+        except (TypeError, ValueError):
+            part, of = 1, 1
+        of = max(of, 1)
+        part = min(max(part, 1), of)
+
+        all_tickers = sorted(get_all_tickers())
+        # Strided slice keeps the parts balanced even when the count is odd.
+        tickers = all_tickers[part - 1::of]
+        logger.info(
+            f"refresh-daily-bars: part {part}/{of} — fetching {len(tickers)} "
+            f"of {len(all_tickers)} tickers from AlphaVantage"
+        )
         started = datetime.utcnow()
 
         # Concurrent fetch from AV (respects 140 req/min effective rate).
@@ -10624,6 +10642,9 @@ def refresh_daily_bars_cron():
 
         return jsonify({
             'success': True,
+            'part': part,
+            'of': of,
+            'tickers_in_universe': len(all_tickers),
             'tickers_total': len(tickers),
             'tickers_fetched': len(bars_by_ticker),
             'tickers_missing_from_av': not_returned[:25],

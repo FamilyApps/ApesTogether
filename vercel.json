@@ -69,8 +69,12 @@
       "schedule": "0 21 * * 1-5"
     },
     {
-      "path": "/api/cron/refresh-daily-bars",
+      "path": "/api/cron/refresh-daily-bars?part=1&of=2",
       "schedule": "30 22 * * 1-5"
+    },
+    {
+      "path": "/api/cron/refresh-daily-bars?part=2&of=2",
+      "schedule": "32 22 * * 1-5"
     }
   ]
 }
