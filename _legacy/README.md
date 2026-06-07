@@ -21,7 +21,7 @@ Documentation from web app development phases (Sept 2025 - Jan 2026)
 - Week-by-week development logs
 - Feature specifications that no longer apply
 
-**June 2026 cleanup added:** superseded planning/status docs replaced by `LAUNCH_TODO.md` + `CURRENT_ARCHITECTURE.md` — `DEPLOYMENT_CHECKLIST.md` (FTP/SSH, pre-Vercel), `MASTER_REFERENCE.md` (nav hub to deleted files), `IMPLEMENTATION_CHECKLIST.md` (SMS/Twilio-era), `IMPLEMENTATION_SUMMARY.md`, `IMPLEMENTATION_PHASES.md` (aspirational tiering, now in `SCALING_TRIGGERS.md`).
+**June 2026 cleanup added:** superseded planning/status docs replaced by `LAUNCH_TODO.md` + `CURRENT_ARCHITECTURE.md` — `DEPLOYMENT_CHECKLIST.md` (FTP/SSH, pre-Vercel), `MASTER_REFERENCE.md` (nav hub to deleted files), `IMPLEMENTATION_CHECKLIST.md` (SMS/Twilio-era), `IMPLEMENTATION_SUMMARY.md`, `IMPLEMENTATION_PHASES.md` (aspirational tiering, now in `SCALING_TRIGGERS.md`), `TOMORROW_GAMEPLAN.md` (a May 20 day-plan — Steps 1/2/3/5/6 all shipped; only its Phase F security hardening was carried into `LAUNCH_TODO.md` Section A).
 
 ### `docs_debug_history/`
 Historical debugging sessions and Grok consultation records
