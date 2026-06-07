@@ -9,6 +9,20 @@ This document is the single source of truth for what's still open before launch.
 
 ---
 
+## 🗺 Doc Map — where everything lives
+
+This file is the **only** task tracker. Everything else is reference (no tasks tracked there):
+
+- **Tasks / launch status:** this file (`LAUNCH_TODO.md`).
+- **Scaling thresholds + AlphaVantage plan upgrades (150→300/min):** `SCALING_TRIGGERS.md`.
+- **Current system design:** `CURRENT_ARCHITECTURE.md` (+ `ARCHITECTURE_CHANGELOG.md`).
+- **Feature specs:** `PENDING_TRADES_DESIGN.md`, `GHOST_SUBSCRIBER_VISIBILITY.md`, `XERO_PAYOUT_INTEGRATION.md`, `MOBILE_ARCHITECTURE_PLAN.md`.
+- **Env / setup:** `ENV_VARIABLES.md`.
+- **Launch calendar template + store copy:** `docs/` (`LAUNCH_PLAYBOOK.md`, `ASO_STRATEGY.md`, `PLAY_STORE_LISTING_GUIDE.md`).
+- **Superseded planning/implementation docs:** archived under `_legacy/docs_web_era/` + `_legacy/docs_debug_history/` (2026-06 cleanup — `DEPLOYMENT_CHECKLIST`, `MASTER_REFERENCE`, `IMPLEMENTATION_CHECKLIST/PHASES/RECOMMENDATION/STATUS/SUMMARY`).
+
+---
+
 ## ▶ RESUME HERE — Sunday (AI tokens reset)
 
 **Last worked: Session 11, 2026-06-04. Committed `7a21b67` (8 files, +254/−95).** Stopped because AI tokens ran low.
@@ -116,6 +130,7 @@ Things to verify when the market is open and the bot pipeline is running. Hit ea
 - [x] **Buy/Sell sheet polish (#5 + #6, commits `9d5463c` / `038f37a`).** Lighter input fields (`inputBackground` / `inputBorder`), "Quantity" labels, swipe-down indicator + close X on the Buy sheet, green "Buy" button (param'd `PrimaryButtonStyle.tint`), `banknote.fill` / `cart.fill` trade icons, fixed Sell-sheet top cut-off.
 - [x] **Trade Alerts timestamp (#7)** was already on `origin/master` (`bacce6f`) — a Mac-side `git pull` gap, not a code bug.
 - [ ] **Verify pending render on device:** an after-hours buy/sell should show under Recent Trades as PENDING (clock + badge, no price), NOT in Holdings, and NOT be sellable; it should settle at the next open.
+- [ ] **Trade buy/sell icons — carried over from conversation (CONFIRM SCOPE).** The Buy/Sell *sheet* icons (`banknote.fill` / `cart.fill`) are done (#5/#6 above). This tracks the separately-discussed "trade icons" item: ensure buy vs. sell trade icons render correctly + consistently in the **trade-alerts feed + push notifications** across iOS (`SubscriptionsView`) and Android. Confirm exact intent before working — may already be covered by the sheet polish.
 
 ## C. Android App — large unfinished workstream
 
@@ -224,6 +239,7 @@ This section only tracks **deferred / dropped items**:
 
 - [ ] **#1 Verify bot creation + `/admin-panel` batch creation** follows the new rules: trades within the assigned industry/sector, the research method, and `max_cash_deployed` all wired correctly (`bot_executor.py` / `bot_strategies.py` / `bot_data_hub.py` + admin batch routes).
 - [ ] **#2 Per-sector data adequacy.** Assess whether AlphaVantage News/Movers + Finnhub Insider/Analyst give bots enough signal in thinner sectors (healthcare, real estate). Recommend additional data services if there are gaps.
+- [ ] **#3 AI stock-picking model API research.** Evaluate feeding bots an external AI model / signal API for stock selection vs. the current AlphaVantage + Finnhub rules-based research. Scope candidate providers, cost, latency, and how it would slot into `bot_data_hub.py` / `bot_strategies.py`. Discussed in prior sessions; never written down until now.
 
 ## I. Local Dev Hygiene (Mac)
 

@@ -21,12 +21,16 @@ Documentation from web app development phases (Sept 2025 - Jan 2026)
 - Week-by-week development logs
 - Feature specifications that no longer apply
 
+**June 2026 cleanup added:** superseded planning/status docs replaced by `LAUNCH_TODO.md` + `CURRENT_ARCHITECTURE.md` — `DEPLOYMENT_CHECKLIST.md` (FTP/SSH, pre-Vercel), `MASTER_REFERENCE.md` (nav hub to deleted files), `IMPLEMENTATION_CHECKLIST.md` (SMS/Twilio-era), `IMPLEMENTATION_SUMMARY.md`, `IMPLEMENTATION_PHASES.md` (aspirational tiering, now in `SCALING_TRIGGERS.md`).
+
 ### `docs_debug_history/`
 Historical debugging sessions and Grok consultation records
 - Chart issue investigations
 - Performance debugging
 - Timezone fixes
 - One-time analysis documents
+
+**June 2026 cleanup added:** `IMPLEMENTATION_STATUS.md` + `IMPLEMENTATION_RECOMMENDATION.md` — the performance-calculator fix that shipped as `performance_calculator.py`.
 
 ### `scripts_one_time/`
 One-time migration and debugging scripts
@@ -59,4 +63,4 @@ The SMS/Twilio infrastructure is no longer needed because:
 
 ## Current Architecture
 
-See `/MOBILE_ARCHITECTURE_PLAN.md` and `/IMPLEMENTATION_PHASES.md` for the current mobile-first architecture.
+See `/CURRENT_ARCHITECTURE.md` and `/MOBILE_ARCHITECTURE_PLAN.md` for the current mobile-first architecture, `/SCALING_TRIGGERS.md` for scaling thresholds, and `/LAUNCH_TODO.md` for the single open-task tracker. (`/IMPLEMENTATION_PHASES.md` moved into `docs_web_era/` in the June 2026 cleanup.)

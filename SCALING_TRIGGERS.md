@@ -14,7 +14,7 @@
 | **Database Connections** | 20 | 15 | 18 | Upgrade Postgres plan |
 | **API Latency (P95)** | 500ms | 750ms | 1,000ms | Add caching/CDN |
 | **Push Notifs/min** | 500 | 400 | 475 | Batch notifications |
-| **AlphaVantage calls/min** | 150 | 120 | 140 | Add secondary key |
+| **AlphaVantage calls/min** | 150 | 120 | 140 | Split daily-bars cron, then +key or upgrade to 300/min plan |
 | **Monthly Cost** | Budget | 80% | 90% | Review architecture |
 
 ---
@@ -447,6 +447,59 @@ def get_shard_for_user(user_id: int) -> str:
 | 10-25K | ~1,000 | 80-120 | 2 | $200 |
 | 25-50K | ~2,000 | 120-200 | 3 | $300 |
 | 50-100K | ~3,000 | 200-400 | 5 | $500 |
+
+### ⚠️ Per-Minute Peak Driver: Daily-Bars Refresh (`TIME_SERIES_DAILY`)
+
+The largest **per-minute** burst is NOT the trade waves (they use the batched
+`REALTIME_BULK_QUOTES` — ~2 calls for the whole universe). It's the nightly
+**`/api/cron/refresh-daily-bars`** job, which calls `TIME_SERIES_DAILY` **once
+per ticker** — there is no bulk endpoint for daily history, so the per-minute
+call count equals the bot-universe size.
+
+**History / current state (June 2026):**
+- At ~138 universe tickers, the refresh fired all 138 calls in one ~59s window
+  → a peak of **138/150 per minute (92% of the cap)**.
+- Mitigation (no plan change, no data-quality loss): the cron was **split into
+  two invocations** two minutes apart — `?part=1&of=2` at 22:30 UTC and
+  `?part=2&of=2` at 22:32 UTC. Each does ~69 tickers in ~30s → peak **~70/min**.
+- The endpoint accepts arbitrary `part`/`of`, so adding more splits is a
+  `vercel.json`-only change (no code).
+
+**Why this can't just move to bulk quotes:** daily bars feed the bot indicators
+(MACD/RSI/ATR/ADX — needs OHLC, not just close), the `MarketData`
+performance-chart backfill, and the SPY-based trading calendar.
+`TIME_SERIES_DAILY` (compact = last 100 days, re-fetched every run) self-heals
+missed runs + end-of-day corrections; an incremental snapshot from bulk quotes
+would lose that and contaminate OHLC with extended-hours prints.
+
+**Scaling triggers for the daily-bars refresh:**
+
+| Universe size | Action |
+|---------------|--------|
+| ≤ ~145 | None — current 2-way split (`of=2`, ~70/min) is fine |
+| ~145–250 | Bump to `of=3` (three cron minutes, ~22:30/22:32/22:34) |
+| ~250–360 | Bump to `of=4`, OR upgrade the AV plan (below) |
+| > ~360, or too many cron minutes | **Upgrade AlphaVantage plan** (below) |
+
+**Rule of thumb:** keep `universe ÷ of` under ~110–120 calls/minute. Revisit when
+the universe crosses ~250 tickers.
+
+### AlphaVantage Plan-Upgrade Path (single account — no key-rotation code)
+
+Splitting the cron buys runway, but every split adds a cron minute and the whole
+nightly refresh must still finish in its window. Once you're consistently near
+the cap across many splits, the simpler lever is to **raise the rate limit on the
+one account** rather than juggle multiple keys:
+
+| Plan | Rate limit | Cost | When |
+|------|-----------|------|------|
+| Premium 150 | 150 req/min | **$99.99/mo** | Current |
+| Premium 300 | 300 req/min | **$149.99/mo** | When `universe ÷ of` can't stay < ~120 without an unreasonable number of cron splits, or trade-wave + refresh contention appears |
+| Premium 600+ | 600+/min | $249.99+/mo | Multi-thousand-ticker universe / many concurrent consumers |
+
+Upgrading the single account is operationally simpler than the multi-key rotation
+below (no `key_cycle` code, no per-key quota tracking). Prefer the plan upgrade
+unless you specifically want redundancy across distinct keys.
 
 ### Multi-Key Implementation
 
@@ -893,4 +946,4 @@ ONGOING: Optimization
 ---
 
 *Document maintained by: Development Team*
-*Last updated: January 21, 2026*
+*Last updated: June 7, 2026 (added daily-bars `TIME_SERIES_DAILY` per-minute peak driver + AV plan-upgrade path)*
