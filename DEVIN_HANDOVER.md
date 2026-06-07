@@ -97,17 +97,65 @@ git push origin master
   that still need the real debug + Play App Signing certs).
 - `tests/test_phase1_mobile.py` — mobile unit tests (incl. `test_google_response_parsing`, rewritten to v2).
 
+**iOS client** (`ios/ApesTogetherApp/`, SwiftUI — parity reference / the other app on the shared backend)
+- Built on a Mac, not this PC (see §4C). `ApesTogetherApp.swift` (Firebase + deep-link `onOpenURL`),
+  `Services/SubscriptionManager.swift` (StoreKit 2 IAP), `Services/AuthenticationManager.swift` (Sign in
+  with Apple), `Services/APIService.swift` (same `/api/mobile` backend). `ios/README.md` = setup/build steps.
+- Note: the iOS deep-link/notification-tap path (`AppDelegate.handleNotification` → `portfolio_slug`) was
+  the reference when fixing the Android equivalent — leave iOS untouched unless a change is iOS-specific.
+
 ---
 
-## 4. Deployment
+## 4. Deployment — THREE separate targets (do not conflate them)
 
-- **Backend + web deploy from GitHub:** pushing to `origin/master` triggers a **Vercel production deploy**
-  (Python serverless under `api/`, config in `vercel.json`). So "deploy the backend fix" = push master.
-  Confirm this assumption against `vercel.json` / the Vercel dashboard before relying on it.
-- **Env vars** are configured in the **Vercel dashboard** (not in the repo). The one outstanding for our
-  work: **`GOOGLE_PLAY_CREDENTIALS_JSON`** (service-account key JSON; see LAUNCH_TODO Section H).
-- **Android app** is built locally / via Play Console — Vercel does not build it.
-- `.env` at repo root is local-only (it's the file currently open in the user's IDE).
+There is **one shared backend** but **two completely independent mobile-app release pipelines**. Pushing
+git does NOT deploy either app; it only deploys the backend/web. The two apps ship through different
+build machines and different stores.
+
+### 4A. Shared backend + web API (Vercel, git-driven)
+- Both the iOS and Android apps talk to the **same** production backend at
+  `https://apestogether.ai/api/mobile/` (Python/Flask serverless under `api/`, config in `vercel.json`).
+- **Deploy = `git push origin master`** → triggers a **Vercel production deploy**. This is the only thing
+  "deploying the backend" means. (Confirm against the Vercel dashboard if in doubt.)
+- **Env vars live in the Vercel dashboard**, NOT in the repo. Outstanding for our work:
+  **`GOOGLE_PLAY_CREDENTIALS_JSON`** (Android IAP validation; see LAUNCH_TODO Section H). Apple IAP
+  validation uses StoreKit 2 JWS and needs no server key.
+- `.env` at repo root is local-only.
+- This backend is shared, so a server change affects **both** apps at once — test both sides when touching
+  shared endpoints (e.g. `/purchase/validate`, `/device/register`, `/auth/token`).
+
+### 4B. Android app (built on THIS Windows machine → Google Play)
+- **Source:** `android/` (Kotlin/Compose). Built with Gradle / Android Studio locally on this PC.
+- **Local install for testing:** `.\gradlew.bat :app:installDebug` (USB to the Pixel 8a) — see §5.
+- **Release:** build a signed **AAB** → upload to **Google Play Console** → promote through tracks
+  (internal-testing → closed → production). Play Console handles signing (Play App Signing).
+- **IAP:** Play Billing; products/base-plans/trial configured in **Play Console**; backend validates the
+  purchase token via `purchases.subscriptionsv2.get` (`iap_validation_service.py`).
+- **Push:** Firebase Cloud Messaging directly.
+- **App Links verification:** `public/.well-known/assetlinks.json` (served by the backend) must contain the
+  real signing-cert SHA-256s.
+- Vercel does **not** build or host the Android app.
+
+### 4C. iOS app (requires a Mac + Xcode → App Store Connect)
+- **Source:** `ios/ApesTogetherApp/` (SwiftUI). Bundle ID `com.apestogether.app`. Setup steps in
+  `ios/README.md`.
+- **CANNOT be built on this Windows machine.** Per `ios/README.md`, the `ios/` folder must be moved to a
+  **Mac**, opened in **Xcode 15+**, and built there. No CI/fastlane is configured — it's a manual Xcode flow.
+- **Release:** Xcode → **Product → Archive** → **Distribute App → TestFlight & App Store** → upload to
+  **App Store Connect** → TestFlight for testers, then submit for App Store review.
+- **IAP:** StoreKit 2 (`SubscriptionManager.swift`); products `com.apestogether.subscription.monthly` /
+  `.annual` configured in **App Store Connect**; backend validates the **JWS** via `/purchase/validate`
+  with `platform="apple"` (no server-side key needed).
+- **Push:** APNs via Firebase; capabilities (Push, Sign in with Apple, In-App Purchase, Background Modes)
+  enabled in Xcode; `GoogleService-Info.plist` added in Xcode.
+- Vercel does **not** build or host the iOS app; `git push` has no effect on iOS distribution.
+
+### 4D. Quick reference
+| Target | Source | Build machine | Ships via | "Deploy" trigger |
+|--------|--------|---------------|-----------|------------------|
+| Backend + web API | `api/`, root `*.py` | Vercel (cloud) | Vercel | `git push origin master` |
+| Android app | `android/` | This Windows PC (Gradle/Android Studio) | Google Play Console | manual AAB upload + track promotion |
+| iOS app | `ios/` | A **Mac** w/ Xcode (not this PC) | App Store Connect | manual Xcode Archive → upload |
 
 ---
 
