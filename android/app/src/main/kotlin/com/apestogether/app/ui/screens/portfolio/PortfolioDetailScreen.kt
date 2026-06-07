@@ -25,12 +25,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.CallMade
-import androidx.compose.material.icons.automirrored.filled.CallReceived
 import androidx.compose.material.icons.automirrored.filled.ShowChart
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.RemoveCircle
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Share
@@ -1127,8 +1128,8 @@ private fun TradeRow(trade: Trade) {
             Icon(
                 imageVector = when {
                     isPending -> Icons.Filled.Schedule
-                    isBuy -> Icons.AutoMirrored.Filled.CallReceived
-                    else -> Icons.AutoMirrored.Filled.CallMade
+                    isBuy -> Icons.Filled.Add
+                    else -> Icons.Filled.Remove
                 },
                 contentDescription = null,
                 tint = iconTint,

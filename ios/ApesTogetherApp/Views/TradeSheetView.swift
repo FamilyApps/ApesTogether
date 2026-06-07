@@ -36,8 +36,8 @@ struct TradeSheetView: View {
         
         var icon: String {
             switch self {
-            case .buy: return "cart.fill"
-            case .sell: return "banknote.fill"
+            case .buy: return "plus"
+            case .sell: return "minus"
             }
         }
     }

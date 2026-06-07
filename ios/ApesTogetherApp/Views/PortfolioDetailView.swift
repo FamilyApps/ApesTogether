@@ -755,7 +755,7 @@ struct TradeRow: View {
                 Circle()
                     .fill((isPending ? Color.textMuted : (isBuy ? Color.gains : Color.losses)).opacity(0.15))
                     .frame(width: 32, height: 32)
-                Image(systemName: isPending ? "clock.fill" : (isBuy ? "arrow.down.left" : "arrow.up.right"))
+                Image(systemName: isPending ? "clock.fill" : (isBuy ? "plus" : "minus"))
                     .font(.caption.weight(.bold))
                     .foregroundColor(isPending ? .textMuted : (isBuy ? .gains : .losses))
             }

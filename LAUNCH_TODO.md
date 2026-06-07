@@ -130,7 +130,7 @@ Things to verify when the market is open and the bot pipeline is running. Hit ea
 - [x] **Buy/Sell sheet polish (#5 + #6, commits `9d5463c` / `038f37a`).** Lighter input fields (`inputBackground` / `inputBorder`), "Quantity" labels, swipe-down indicator + close X on the Buy sheet, green "Buy" button (param'd `PrimaryButtonStyle.tint`), `banknote.fill` / `cart.fill` trade icons, fixed Sell-sheet top cut-off.
 - [x] **Trade Alerts timestamp (#7)** was already on `origin/master` (`bacce6f`) — a Mac-side `git pull` gap, not a code bug.
 - [ ] **Verify pending render on device:** an after-hours buy/sell should show under Recent Trades as PENDING (clock + badge, no price), NOT in Holdings, and NOT be sellable; it should settle at the next open.
-- [ ] **Trade buy/sell icons — carried over from conversation (CONFIRM SCOPE).** The Buy/Sell *sheet* icons (`banknote.fill` / `cart.fill`) are done (#5/#6 above). This tracks the separately-discussed "trade icons" item: ensure buy vs. sell trade icons render correctly + consistently in the **trade-alerts feed + push notifications** across iOS (`SubscriptionsView`) and Android. Confirm exact intent before working — may already be covered by the sheet polish.
+- [x] **Trade buy/sell icons — DONE (Jun 7).** The old red/green directional arrows in **Recent Trades** (and the Sell sheet's `banknote.fill` / `cart.fill`) are replaced by `plus` (buy) / `minus` (sell). Applied on iOS (`PortfolioDetailView.TradeRow:758`, `TradeSheetView` `TradeType.icon`) and Android (`PortfolioDetailScreen.TradeRow`). Green-buy / red-sell color coding + PENDING clock preserved. Requires a Mac `git pull` + iOS rebuild and an Android rebuild to see.
 
 ## C. Android App — large unfinished workstream
 
