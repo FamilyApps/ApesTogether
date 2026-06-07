@@ -4496,9 +4496,19 @@ def alphavantage_usage():
 
         daily_latency = [{'date': str(r.day), 'avg_ms': round(float(r.avg_ms), 1)} for r in daily_latency_rows]
 
+        # Window-independent diagnostics so an empty dashboard can self-explain:
+        # distinguishes "table genuinely empty / writes failing" from "today
+        # window is empty but historical rows exist (timezone/window issue)".
+        all_time_total = AlphaVantageAPILog.query.count()
+        most_recent = db.session.query(func.max(AlphaVantageAPILog.timestamp)).scalar()
+
         return jsonify({
             'plan': 'Premium ($99.99/mo)',
             'rate_limit': {'per_minute': 150, 'daily': 'unlimited'},
+            'diagnostics': {
+                'all_time_total': all_time_total,
+                'most_recent_call': most_recent.isoformat() + 'Z' if most_recent else None,
+            },
             'current_minute': {'calls': last_min, 'limit': 150, 'pct': round(last_min / 150 * 100, 1)},
             'peak_per_minute': {'value': overall_peak, 'limit': 150, 'pct': round(overall_peak / 150 * 100, 1)},
             'last_hour': last_hour,

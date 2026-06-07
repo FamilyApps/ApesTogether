@@ -1210,6 +1210,10 @@ const AlphaVantageUsage = ({ api }) => {
         <div>
           <h2 style={{ fontSize: 20, fontWeight: 700 }}>AlphaVantage API Usage</h2>
           <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{d.plan || 'Premium'} — {LIMIT} req/min, {d.rate_limit?.daily || 'unlimited'} daily</p>
+          <p style={{ fontSize: 12, color: (d.diagnostics?.all_time_total || 0) === 0 ? 'var(--red)' : 'var(--text-muted)', marginTop: 2 }}>
+            All-time logged calls: <strong>{(d.diagnostics?.all_time_total ?? 0).toLocaleString()}</strong>
+            {d.diagnostics?.most_recent_call ? ` · most recent ${new Date(d.diagnostics.most_recent_call).toLocaleString()}` : ' · no calls ever recorded (logging pipeline likely broken)'}
+          </p>
         </div>
         <Btn small variant="secondary" onClick={load}>{Icons.refresh} Refresh</Btn>
       </div>
