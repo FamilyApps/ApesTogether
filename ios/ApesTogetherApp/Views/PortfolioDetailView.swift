@@ -393,6 +393,7 @@ struct PortfolioDetailView: View {
                 submitLabel: "Buy",
                 submitTint: .gains,
                 intent: "buy",
+                autofocusTicker: true,
                 onComplete: {
                     showAddStocks = false
                     Task {
@@ -401,6 +402,7 @@ struct PortfolioDetailView: View {
                     }
                 }
             )
+            .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showBuySheet) {

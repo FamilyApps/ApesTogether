@@ -19,6 +19,10 @@ struct AddStocksView: View {
     // "buy" = real market purchase (live price / queued after-hours);
     // "seed" = declare already-owned holdings (onboarding / Add Your Stocks).
     let intent: String
+    // When true, the first ticker field grabs focus (raising the keyboard) on
+    // appear so the user can type a ticker immediately. The Buy sheet sets this;
+    // onboarding/seed contexts leave it false.
+    let autofocusTicker: Bool
     
     @State private var entries: [StockEntry] = [StockEntry()]
     @State private var isSubmitting = false
@@ -36,6 +40,7 @@ struct AddStocksView: View {
         submitLabel: String = "Save Stocks",
         submitTint: Color = .primaryAccent,
         intent: String = "seed",
+        autofocusTicker: Bool = false,
         onComplete: @escaping () -> Void
     ) {
         self.headline = headline
@@ -44,6 +49,7 @@ struct AddStocksView: View {
         self.submitLabel = submitLabel
         self.submitTint = submitTint
         self.intent = intent
+        self.autofocusTicker = autofocusTicker
         self.onComplete = onComplete
     }
     
@@ -169,6 +175,14 @@ struct AddStocksView: View {
                 Text("The market is closed. \(queuedCount) \(queuedCount == 1 ? "trade" : "trades") queued and will execute at the next market open.")
             } else {
                 Text("\(successCount) stock\(successCount == 1 ? "" : "s") added to your portfolio.")
+            }
+        }
+        .onAppear {
+            guard autofocusTicker else { return }
+            // Delay slightly so the sheet finishes presenting before we request
+            // focus — without this the keyboard often fails to appear.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                focusedEntryID = entries.first?.id
             }
         }
     }
