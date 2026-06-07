@@ -137,10 +137,26 @@ build machines and different stores.
 - Vercel does **not** build or host the Android app.
 
 ### 4C. iOS app (requires a Mac + Xcode → App Store Connect)
-- **Source:** `ios/ApesTogetherApp/` (SwiftUI). Bundle ID `com.apestogether.app`. Setup steps in
-  `ios/README.md`.
+- **Source-of-truth in THIS repo:** `ios/ApesTogetherApp/` (SwiftUI). Bundle ID `com.apestogether.app`.
+  Setup steps in `ios/README.md`.
 - **CANNOT be built on this Windows machine.** Per `ios/README.md`, the `ios/` folder must be moved to a
   **Mac**, opened in **Xcode 15+**, and built there. No CI/fastlane is configured — it's a manual Xcode flow.
+
+- **⚠️ Mac-side workspace layout (USER-REPORTED 2026-06-07 — CONFIRM ON THE MAC, may be outdated).**
+  This setup keeps getting lost between sessions, so it's recorded here. On the user's MacBook the paths
+  are roughly:
+  - `~/Documents/ApesTogether/` — the iOS/Xcode working area (NOT the same place as the backend clone).
+  - `~/Documents/ApesTogether/ios/ApesTogether/` — the **Xcode project** (`.xcodeproj`/workspace) lives here.
+  - `~/Documents/ApesTogether/ios/ApesTogetherApp/` — the **Swift source + assets**.
+  - `~/CascadeProjects/stock-portfolio-app/` — a clone of the **backend** files (user says "may be outdated").
+
+  **Implication / risk:** the Mac's Xcode project under `~/Documents/ApesTogether/ios/` is a SEPARATE copy
+  from this git repo's `ios/` folder, so the two can drift. Before doing iOS work, **confirm which copy is
+  authoritative** and reconcile (ideally make the Mac build directly from a fresh clone of this repo's
+  `ios/`, or sync changes back into git so `ios/` here stays the source of truth). **Do not assume these
+  paths are current** — verify with `ls` on the Mac first. (TODO: nail this down and update this section
+  with confirmed paths + which copy is canonical.)
+
 - **Release:** Xcode → **Product → Archive** → **Distribute App → TestFlight & App Store** → upload to
   **App Store Connect** → TestFlight for testers, then submit for App Store review.
 - **IAP:** StoreKit 2 (`SubscriptionManager.swift`); products `com.apestogether.subscription.monthly` /
