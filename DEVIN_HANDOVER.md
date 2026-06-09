@@ -232,7 +232,7 @@ build machines and different stores.
 
 | # | Test | Status |
 |---|------|--------|
-| 1 | Google Sign-In round trip | Effectively done (logged in as bobford00 on device). Real-device formal pass optional. |
+| 1 | Google Sign-In round trip | **DONE — verified on physical Pixel 8a (2026-06-09).** Root cause of prior failure was an unregistered signing SHA-1 (`google-services.json` had `oauth_client count: 0`); fixed by registering the Play App Signing SHA-1 `8F:A7:83…` as the Android OAuth client. Logcat: `GetGoogleIdOperation succeeded` → `CREDENTIALS_RECEIVED`. |
 | 2 | Trade-alert FCM (background display + tap-to-navigate) | **Verified on device.** Test push delivered+displayed; all deep-link nav paths confirmed. |
 | 3 | App Link `apestogether.ai/p/<slug>` → PortfolioDetail | **Handling verified on device** (cold+warm). `autoVerify` still pending the assetlinks SHA-256 swap. |
 | 4 | Subscribe via Play Billing → backend validation → MobileSubscription row | **Code fixed; not yet testable.** Gated on Play Console setup + `GOOGLE_PLAY_CREDENTIALS_JSON` + backend redeploy. Cannot run over USB sideload. |
