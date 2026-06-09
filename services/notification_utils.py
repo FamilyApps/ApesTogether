@@ -174,32 +174,46 @@ def format_trade_notification(username, action, ticker, quantity, price, positio
     return msg
 
 
-def send_trade_confirmation_email(user, action, ticker, quantity, price, position_pct=None):
+def build_trade_confirmation_email(
+    action, ticker, quantity, price,
+    position_pct=None,
+    heading="Trade Confirmed",
+    subject_label="Trade Confirmed",
+    footer_note="Your trade has been executed successfully.",
+):
     """
-    Send trade confirmation email to the trader themselves.
+    Build the branded trader-facing trade-confirmation email and return
+    (subject, body, html_body).
+
+    Single source of truth for the green/red-dot (🟢/🔴) branded style shared by
+    every trader confirmation email — the regular execution path, the inbound
+    email path, and the queued-at-market-open path — so they stay consistent.
+    `heading`/`subject_label`/`footer_note` let each caller customize the copy
+    without forking the layout.
     """
     action_upper = action.upper()
     emoji = "🟢" if action.lower() == 'buy' else "🔴"
     total = quantity * price
     qty_str = f"{int(quantity)}" if quantity == int(quantity) else f"{quantity}"
+    show_pct = position_pct is not None and action.lower() == 'sell'
 
-    subject = f"{emoji} Trade Confirmed: {action_upper} {qty_str} {ticker}"
+    subject = f"{emoji} {subject_label}: {action_upper} {qty_str} {ticker}"
 
     body = (
-        f"Trade Confirmed\n\n"
+        f"{heading}\n\n"
         f"Action: {action_upper}\n"
         f"Ticker: {ticker}\n"
         f"Quantity: {qty_str}\n"
         f"Price: ${price:,.2f}\n"
         f"Total: ${total:,.2f}\n"
     )
-    if position_pct is not None and action.lower() == 'sell':
+    if show_pct:
         body += f"Position sold: {position_pct:.1f}%\n"
-    body += f"\nYour trade has been executed successfully.\n\n— Apes Together"
+    body += f"\n{footer_note}\n\n— Apes Together"
 
     html_body = (
         f"<div style='font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px'>"
-        f"<h2 style='margin:0 0 16px'>Trade Confirmed</h2>"
+        f"<h2 style='margin:0 0 16px'>{heading}</h2>"
         f"<table style='width:100%;border-collapse:collapse;font-size:15px'>"
         f"<tr><td style='padding:6px 0;color:#888'>Action</td><td style='padding:6px 0;font-weight:600'>{action_upper}</td></tr>"
         f"<tr><td style='padding:6px 0;color:#888'>Ticker</td><td style='padding:6px 0;font-weight:600'>{ticker}</td></tr>"
@@ -207,18 +221,27 @@ def send_trade_confirmation_email(user, action, ticker, quantity, price, positio
         f"<tr><td style='padding:6px 0;color:#888'>Price</td><td style='padding:6px 0;font-weight:600'>${price:,.2f}</td></tr>"
         f"<tr><td style='padding:6px 0;color:#888'>Total</td><td style='padding:6px 0;font-weight:600'>${total:,.2f}</td></tr>"
     )
-    if position_pct is not None and action.lower() == 'sell':
+    if show_pct:
         html_body += f"<tr><td style='padding:6px 0;color:#888'>Position sold</td><td style='padding:6px 0;font-weight:600'>{position_pct:.1f}%</td></tr>"
     html_body += (
         f"</table>"
-        f"<p style='margin:20px 0 0;color:#888;font-size:13px'>Your trade has been executed successfully.</p>"
+        f"<p style='margin:20px 0 0;color:#888;font-size:13px'>{footer_note}</p>"
         f"<p style='color:#888;font-size:12px'>— Apes Together</p>"
         f"</div>"
     )
+    return subject, body, html_body
 
+
+def send_trade_confirmation_email(user, action, ticker, quantity, price, position_pct=None):
+    """
+    Send trade confirmation email to the trader themselves.
+    """
     if not user.email:
         return {'status': 'failed', 'error': 'User has no email'}
 
+    subject, body, html_body = build_trade_confirmation_email(
+        action, ticker, quantity, price, position_pct=position_pct,
+    )
     return send_email(user.email, subject, body, html_body=html_body)
 
 

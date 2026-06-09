@@ -338,25 +338,16 @@ def _execute_single_trade(db, user, from_email, trade, prices, process_transacti
         return {'status': 'error', 'trade': trade, 'error': str(e)}
 
     # Confirmation + notifications
-    total = quantity * price
-    emoji = "📈" if action == 'buy' else "📉"
     position_pct = None
     if action == 'sell' and position_before_qty and position_before_qty > 0:
         position_pct = round((quantity / position_before_qty) * 100, 1)
 
-    qty_str = f"{int(quantity)}" if quantity == int(quantity) else f"{quantity}"
-    send_email(
-        from_email,
-        f"Trade Confirmed: {action.upper()} {qty_str} {ticker}",
-        f"{emoji} Trade Confirmed\n\n"
-        f"Action: {action.upper()}\n"
-        f"Ticker: {ticker}\n"
-        f"Quantity: {qty_str}\n"
-        f"Price: ${price:,.2f}\n"
-        f"Total: ${total:,.2f}\n"
-        + (f"Position sold: {position_pct}%\n" if position_pct else "")
-        + "\nExecuted via email.\n\n— Apes Together"
+    from services.notification_utils import build_trade_confirmation_email
+    subject, conf_body, conf_html = build_trade_confirmation_email(
+        action, ticker, quantity, price, position_pct=position_pct,
+        footer_note="Executed via email.",
     )
+    send_email(from_email, subject, conf_body, html_body=conf_html)
 
     # Subscriber push + email notifications are fired by
     # process_transaction's internal fan-out above (cash_tracking.py).
@@ -462,24 +453,21 @@ def process_queued_trades():
             executed += 1
 
             # Confirmation email
-            total = qt.quantity * price
-            emoji = "📈" if qt.action == 'buy' else "📉"
             position_pct = None
             if qt.action == 'sell' and position_before_qty and position_before_qty > 0:
                 position_pct = round((qt.quantity / position_before_qty) * 100, 1)
 
-            send_email(
-                qt.user_email,
-                f"Queued Trade Executed: {qt.action.upper()} {int(qt.quantity) if qt.quantity == int(qt.quantity) else qt.quantity} {qt.ticker}",
-                f"{emoji} Your queued trade has been executed at market open.\n\n"
-                f"Action: {qt.action.upper()}\n"
-                f"Ticker: {qt.ticker}\n"
-                f"Quantity: {int(qt.quantity) if qt.quantity == int(qt.quantity) else qt.quantity}\n"
-                f"Price: ${price:,.2f}\n"
-                f"Total: ${total:,.2f}\n"
-                + (f"Position sold: {position_pct}%\n" if position_pct else "")
-                + f"\nOriginally queued at {qt.queued_at.strftime('%b %d, %I:%M %p')} UTC."
+            from services.notification_utils import build_trade_confirmation_email
+            footer = (
+                f"Your queued trade has been executed at market open. "
+                f"Originally queued at {qt.queued_at.strftime('%b %d, %I:%M %p')} UTC."
             )
+            subject, q_body, q_html = build_trade_confirmation_email(
+                qt.action, qt.ticker, qt.quantity, price, position_pct=position_pct,
+                heading="Queued Trade Executed", subject_label="Queued Trade Executed",
+                footer_note=footer,
+            )
+            send_email(qt.user_email, subject, q_body, html_body=q_html)
 
             # Subscriber push + email notifications already fired by
             # process_transaction's internal fan-out above (cash_tracking.py).
