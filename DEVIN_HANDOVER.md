@@ -126,7 +126,19 @@ build machines and different stores.
 
 ### 4B. Android app (built on THIS Windows machine → Google Play)
 - **Source:** `android/` (Kotlin/Compose). Built with Gradle / Android Studio locally on this PC.
-- **Local install for testing:** `.\gradlew.bat :app:installDebug` (USB to the Pixel 8a) — see §5.
+- **✅ Cascade CAN build the Android app from this Windows PC** (verified 2026-06-08). **Critical gotcha:**
+  `java` is **NOT on PATH** and `JAVA_HOME` is **empty**, so a bare `.\gradlew.bat` fails. Set `JAVA_HOME`
+  to Android Studio's bundled JDK 21 (JBR) first, then run Gradle from the `android/` dir:
+  ```powershell
+  $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'   # OpenJDK 21
+  .\gradlew.bat --no-daemon assembleDebug      # APK only (no device needed)
+  .\gradlew.bat --no-daemon :app:installDebug  # build + install (Pixel must be plugged in & authorized)
+  ```
+  Debug APK output: `android/app/build/outputs/apk/debug/app-debug.apk` (~25 MB, versionName `1.0-debug`).
+- **Distribution link:** there is **no** automated App-Distribution/Gradle task in the repo. The "download
+  link" the user shares is a **manual upload** of `app-debug.apk` (e.g. Firebase App Distribution console).
+  A rebuilt APK = the old link is stale; either `adb install -r` to the Pixel directly or re-upload for a new link.
+- **Local install for testing:** `.\gradlew.bat :app:installDebug` (USB to the Pixel 8a) — see §5 (needs `JAVA_HOME`, above).
 - **Release:** build a signed **AAB** → upload to **Google Play Console** → promote through tracks
   (internal-testing → closed → production). Play Console handles signing (Play App Signing).
 - **IAP:** Play Billing; products/base-plans/trial configured in **Play Console**; backend validates the
@@ -179,9 +191,10 @@ build machines and different stores.
 
 - **Device:** Google Pixel 8a, codename **`akita`**, connected by USB-C. Logged into the app as **`bobford00`**.
 - **Build:** debug, package `com.apestogether.app` (same package for debug+release), points at the
-  **production** backend. Install via Android Studio **Run**, or:
+  **production** backend. Install via Android Studio **Run**, or (set `JAVA_HOME` first — see §4B, `java` is not on PATH):
   ```powershell
   # from c:\Users\catal\CascadeProjects\stock-portfolio-app\android
+  $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
   .\gradlew.bat :app:installDebug
   ```
 - **adb is NOT on PATH.** Full path: `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe`. In PowerShell:
