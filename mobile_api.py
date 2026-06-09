@@ -6156,7 +6156,7 @@ def _notify_admin_unroutable_trades(batch_id, trades, reason='no_anchor_30min', 
             )
             return
 
-        body = f"""Unroutable Trade Alert - Apes Together
+        body = f"""Unroutable Trade Alert - ApesTogether
 
 Reason: {reason}
 Batch ID: {batch_id}

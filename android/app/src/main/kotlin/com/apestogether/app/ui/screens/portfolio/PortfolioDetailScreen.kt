@@ -779,7 +779,7 @@ private fun SubscribeAndShareRow(
                 val url = "https://apestogether.ai/p/$slug?period=$period"
                 val intent = Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
-                    putExtra(Intent.EXTRA_TEXT, "Check out this portfolio on Apes Together!\n$url")
+                    putExtra(Intent.EXTRA_TEXT, "Check out this portfolio on ApesTogether!\n$url")
                 }
                 context.startActivity(
                     Intent.createChooser(intent, "Share portfolio"),
@@ -806,7 +806,7 @@ private fun ShareIconButton(slug: String, period: String) {
             val url = "https://apestogether.ai/p/$slug?period=$period"
             val intent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
-                putExtra(Intent.EXTRA_TEXT, "Check out this portfolio on Apes Together!\n$url")
+                putExtra(Intent.EXTRA_TEXT, "Check out this portfolio on ApesTogether!\n$url")
             }
             context.startActivity(
                 Intent.createChooser(intent, "Share portfolio"),

@@ -101,7 +101,7 @@ private fun ShareMyPerformanceButton(slug: String) {
                 type = "text/plain"
                 putExtra(
                     Intent.EXTRA_TEXT,
-                    "Check out my portfolio on Apes Together! 🦍📈\n$url",
+                    "Check out my portfolio on ApesTogether! 🦍📈\n$url",
                 )
             }
             ContextCompat.startActivity(

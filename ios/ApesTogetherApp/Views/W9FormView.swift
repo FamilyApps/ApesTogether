@@ -68,7 +68,7 @@ struct TaxInfoView: View {
                             
                             // Info note
                             VStack(spacing: 8) {
-                                Text("Your tax information is collected and stored securely by Xero, our accounting partner. Apes Together never stores your SSN/EIN.")
+                                Text("Your tax information is collected and stored securely by Xero, our accounting partner. ApesTogether never stores your SSN/EIN.")
                                     .font(.caption)
                                     .foregroundColor(.textSecondary)
                                     .multilineTextAlignment(.center)

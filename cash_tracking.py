@@ -231,7 +231,7 @@ def _check_daily_trade_cap(db, user_id, user):
                     f"• Stock prices are cached for 90 seconds, so rapid trades on the same ticker "
                     f"will use the same price.\n"
                     f"• Each trade generates a notification to all of your subscribers.\n\n"
-                    f"— Apes Together"
+                    f"— ApesTogether"
                 )
                 logger.info(f"Daily trade cap email sent to user {user_id} ({trade_count} trades)")
             except Exception as e:

@@ -315,7 +315,7 @@ let privacyText = """
 Privacy Policy
 Last Updated: February 2026
 
-Family Apps LLC ("Company," "we," "us," or "our") operates the Apes Together service ("Service"). This Privacy Policy describes how we collect, use, store, and share your personal information.
+Family Apps LLC ("Company," "we," "us," or "our") operates the ApesTogether service ("Service"). This Privacy Policy describes how we collect, use, store, and share your personal information.
 
 1. Information We Collect
 

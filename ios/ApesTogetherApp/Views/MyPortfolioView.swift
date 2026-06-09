@@ -100,11 +100,11 @@ struct MyPortfolioView: View {
                 if let image = shareImage {
                     ShareSheet(items: [
                         image,
-                        "Check out my portfolio on Apes Together! 🦍📈\n\(personalURL)" as Any
+                        "Check out my portfolio on ApesTogether! 🦍📈\n\(personalURL)" as Any
                     ])
                 } else {
                     ShareSheet(items: [
-                        "Check out my portfolio on Apes Together! 🦍📈\n\(personalURL)"
+                        "Check out my portfolio on ApesTogether! 🦍📈\n\(personalURL)"
                     ])
                 }
             }
@@ -247,7 +247,7 @@ struct PostTradeSharePrompt: View {
         .padding(24)
         .sheet(isPresented: $showShareSheet) {
             if let image = shareImage {
-                ShareSheet(items: [image, "I just traded \(ticker) on Apes Together! \u{1F98D}" as Any])
+                ShareSheet(items: [image, "I just traded \(ticker) on ApesTogether! \u{1F98D}" as Any])
             }
         }
     }

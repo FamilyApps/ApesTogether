@@ -53,7 +53,7 @@ struct PortfolioShareCardView: View {
                         Text("\u{1F98D}")
                             .font(.system(size: 14))
                     }
-                    Text("Apes Together")
+                    Text("ApesTogether")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(.white)
                 }
@@ -247,7 +247,7 @@ struct TradeShareCardView: View {
                         Text("\u{1F98D}")
                             .font(.system(size: 14))
                     }
-                    Text("Apes Together")
+                    Text("ApesTogether")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(.white)
                 }

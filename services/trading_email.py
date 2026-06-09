@@ -125,7 +125,7 @@ def handle_inbound_email(from_email, subject, body):
         send_email(
             from_email,
             "Trade Failed – Email Not Registered",
-            "This email is not associated with an Apes Together account.\n"
+            "This email is not associated with an ApesTogether account.\n"
             "Please use the email you signed up with."
         )
         return {'status': 'error', 'message': 'User not found'}
@@ -195,7 +195,7 @@ def handle_inbound_email(from_email, subject, body):
             f"Batch Trade Results: {len(succeeded)} executed, {len(failed)} failed",
             f"Your email contained {len(trades)} trades.\n\n"
             + "\n".join(lines)
-            + "\n\n— Apes Together"
+            + "\n\n— ApesTogether"
         )
 
     return {
@@ -218,7 +218,7 @@ def _handle_cancel(db, user, from_email, send_email):
         send_email(
             from_email,
             "No Queued Trades to Cancel",
-            "You don't have any pending queued trades.\n\n— Apes Together"
+            "You don't have any pending queued trades.\n\n— ApesTogether"
         )
         return {'status': 'ok', 'message': 'No queued trades'}
 
@@ -241,7 +241,7 @@ def _handle_cancel(db, user, from_email, send_email):
         f"Cancelled {len(cancelled)} Queued Trade{'s' if len(cancelled) != 1 else ''}",
         f"The following queued trades have been cancelled:\n\n"
         + "\n".join(cancelled)
-        + "\n\nThey will NOT execute at market open.\n\n— Apes Together"
+        + "\n\nThey will NOT execute at market open.\n\n— ApesTogether"
     )
     logger.info(f"Cancelled {len(cancelled)} queued trades for {user.username}")
     return {'status': 'cancelled', 'message': f'{len(cancelled)} trades cancelled'}
@@ -284,7 +284,7 @@ def _handle_after_hours(db, user, from_email, trades, send_email):
         f"(Mon–Fri, 9:30 AM ET) using live prices at that time.\n\n"
         f"Queued:\n"
         + "\n".join(queued_lines)
-        + "\n\nReply CANCEL to cancel all queued trades.\n\n— Apes Together"
+        + "\n\nReply CANCEL to cancel all queued trades.\n\n— ApesTogether"
     )
     return {'status': 'queued', 'message': f'{len(trades)} trades queued for market open'}
 

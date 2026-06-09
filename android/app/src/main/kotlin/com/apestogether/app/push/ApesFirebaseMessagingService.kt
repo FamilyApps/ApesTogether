@@ -67,7 +67,7 @@ class ApesFirebaseMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         super.onMessageReceived(message)
 
-        val title = message.notification?.title ?: message.data["title"] ?: "Apes Together"
+        val title = message.notification?.title ?: message.data["title"] ?: "ApesTogether"
         val body = message.notification?.body ?: buildBodyFromData(message.data)
         val deepLink = message.data["portfolio_slug"]?.let { "https://apestogether.ai/p/$it" }
 

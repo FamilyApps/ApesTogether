@@ -428,14 +428,14 @@ struct FAQView: View {
     @Environment(\.dismiss) var dismiss
     
     let faqItems: [(question: String, answer: String)] = [
-        ("What is Apes Together?", "Apes Together is a portfolio tracking platform that lets you track your investments, share your portfolio with others, and earn money when people subscribe to follow your trades."),
+        ("What is ApesTogether?", "ApesTogether is a portfolio tracking platform that lets you track your investments, share your portfolio with others, and earn money when people subscribe to follow your trades."),
         ("How do I earn money?", "When you add your stocks and enable subscribers, other users can pay to subscribe to your portfolio. You earn 85% of proceeds after app store fees."),
-        ("Is this investment advice?", "No. Apes Together is strictly an educational and informational platform. No content on the platform constitutes investment advice. All users make their own independent investment decisions."),
+        ("Is this investment advice?", "No. ApesTogether is strictly an educational and informational platform. No content on the platform constitutes investment advice. All users make their own independent investment decisions."),
         ("How do I get paid?", "Payments are disbursed monthly via check from Family Apps LLC. You must submit a W-9 form to receive payments."),
         ("What is the 1099-NEC?", "If you earn $600 or more in a calendar year, Family Apps LLC will issue you a 1099-NEC tax form for reporting your earnings to the IRS."),
         ("How do I cancel my subscription?", "You can manage your subscriptions through your Apple ID settings or through the Subscriptions tab in the app."),
         ("How do I delete my account?", "Go to Settings and tap 'Delete Account' at the bottom. This action is permanent and cannot be undone."),
-        ("Who can use this app?", "Apes Together is available to users located in the United States who are U.S. tax residents.")
+        ("Who can use this app?", "ApesTogether is available to users located in the United States who are U.S. tax residents.")
     ]
     
     var body: some View {

@@ -25,7 +25,7 @@ _circuit_open_until = 0
 
 BCC_EMAIL = 'fordutilityapps@gmail.com'
 FROM_EMAIL_DEFAULT = 'notifications@apestogether.ai'
-FROM_NAME_DEFAULT = 'Apes Together'
+FROM_NAME_DEFAULT = 'ApesTogether'
 
 
 def _check_rate_limit(to_email):
@@ -209,7 +209,7 @@ def build_trade_confirmation_email(
     )
     if show_pct:
         body += f"Position sold: {position_pct:.1f}%\n"
-    body += f"\n{footer_note}\n\n— Apes Together"
+    body += f"\n{footer_note}\n\n— ApesTogether"
 
     html_body = (
         f"<div style='font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px'>"
@@ -226,7 +226,7 @@ def build_trade_confirmation_email(
     html_body += (
         f"</table>"
         f"<p style='margin:20px 0 0;color:#888;font-size:13px'>{footer_note}</p>"
-        f"<p style='color:#888;font-size:12px'>— Apes Together</p>"
+        f"<p style='color:#888;font-size:12px'>— ApesTogether</p>"
         f"</div>"
     )
     return subject, body, html_body
@@ -255,13 +255,13 @@ def send_trade_notification_to_subscriber(subscriber_email, trader_username, act
 
     subject = f"{emoji} {trader_username} {action.upper()} {qty_str} {ticker}"
 
-    body = f"Trade Alert\n\n{msg}\n\n— Apes Together"
+    body = f"Trade Alert\n\n{msg}\n\n— ApesTogether"
 
     html_body = (
         f"<div style='font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px'>"
         f"<h2 style='margin:0 0 12px'>Trade Alert</h2>"
         f"<p style='font-size:16px;line-height:1.5'>{msg}</p>"
-        f"<p style='color:#888;font-size:12px;margin-top:20px'>— Apes Together</p>"
+        f"<p style='color:#888;font-size:12px;margin-top:20px'>— ApesTogether</p>"
         f"</div>"
     )
 

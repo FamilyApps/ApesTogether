@@ -81,22 +81,22 @@ def _send_milestone_email(influencer, milestone, total_subs, real_count, gifted_
         subject = "🎉 You got your first subscriber!"
         body = (
             f"Hey {username},\n\n"
-            f"Congratulations — someone just subscribed to follow your trades on Apes Together!\n\n"
+            f"Congratulations — someone just subscribed to follow your trades on ApesTogether!\n\n"
             f"This is a big deal. Every great portfolio starts with subscriber #1.\n\n"
             f"Your subscribers will now see your trades in real time. Keep doing what you're doing, "
             f"and the community will keep growing."
             + share_cta
-            + f"\n— The Apes Together Team"
+            + f"\n— The ApesTogether Team"
         )
     elif milestone == 10:
         subject = "🔥 10 subscribers! You're building momentum"
         body = (
             f"Hey {username},\n\n"
-            f"You just hit 10 subscribers on Apes Together. That's real traction.\n\n"
+            f"You just hit 10 subscribers on ApesTogether. That's real traction.\n\n"
             f"10 people are now watching your trades and trusting your strategy. "
             f"Keep sharing your moves — the next milestone is 25."
             + share_cta
-            + f"\n— The Apes Together Team"
+            + f"\n— The ApesTogether Team"
         )
     elif milestone == 25:
         subject = "⭐ 25 subscribers — you're in the top tier"
@@ -106,34 +106,34 @@ def _send_milestone_email(influencer, milestone, total_subs, real_count, gifted_
             f"At this rate, you're building a real following. "
             f"Your trades are making an impact."
             + share_cta
-            + f"\n— The Apes Together Team"
+            + f"\n— The ApesTogether Team"
         )
     elif milestone == 50:
         subject = "🚀 50 subscribers!"
         body = (
             f"Hey {username},\n\n"
             f"Half a hundred subscribers are now following your trades. Incredible.\n\n"
-            f"You're in elite territory on Apes Together. Keep it up."
+            f"You're in elite territory on ApesTogether. Keep it up."
             + share_cta
-            + f"\n— The Apes Together Team"
+            + f"\n— The ApesTogether Team"
         )
     elif milestone == 100:
         subject = "💯 100 subscribers — triple digits!"
         body = (
             f"Hey {username},\n\n"
-            f"You just crossed 100 subscribers on Apes Together.\n\n"
+            f"You just crossed 100 subscribers on ApesTogether.\n\n"
             f"100 people are following your every trade. That's a real community."
             + share_cta
-            + f"\n— The Apes Together Team"
+            + f"\n— The ApesTogether Team"
         )
     else:
         subject = f"🏆 {milestone} subscribers!"
         body = (
             f"Hey {username},\n\n"
-            f"You've reached {milestone} subscribers on Apes Together. "
+            f"You've reached {milestone} subscribers on ApesTogether. "
             f"That's an incredible milestone."
             + share_cta
-            + f"\n— The Apes Together Team"
+            + f"\n— The ApesTogether Team"
         )
 
     result = send_email(email, subject, body)
