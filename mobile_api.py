@@ -3864,7 +3864,12 @@ def bot_subscribe():
             in_app_purchase_id=iap.id,
             status='active',
             expires_at=now + timedelta(days=365),
-            push_notifications_enabled=False
+            # Push defaults ON (matches MobileSubscription model default and the
+            # app's "on by default" expectation). Previously hardcoded False here,
+            # which silently suppressed trade-alert push for every comped/bot sub
+            # while email still fired. Subscribers can opt out via
+            # PUT /notifications/settings.
+            push_notifications_enabled=True
         )
         db.session.add(sub)
         db.session.commit()

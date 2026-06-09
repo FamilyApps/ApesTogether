@@ -165,7 +165,7 @@ function parseTradesFromEmail(plainBody, htmlBody) {
 
   // Pattern 0a: Public.com HTML/rich format — "You sold $132.99 of GRAB" + "Quantity: 36.0398 shares"
   // Price is NOT sent — the API will fetch current price from AlphaVantage.
-  const summaryPattern = /You\s+(bought|sold)\s+\$[\d,.]+\s+of\s+([A-Z]{1,5})/gi;
+  const summaryPattern = /You\s+(bought|sold)\s+\$[\d,.]+\s+of\s+([A-Z]{1,5}(?:\.[A-Z]{1,2})?)/gi;
   while ((match = summaryPattern.exec(text)) !== null) {
     const action = match[1].toLowerCase() === 'bought' ? 'buy' : 'sell';
     const ticker = match[2].toUpperCase();
@@ -178,7 +178,7 @@ function parseTradesFromEmail(plainBody, htmlBody) {
 
   // Pattern 0b: Public.com plain text format — "You\nsold\nGRAB at\n$3.69 per share"
   // getPlainBody() strips HTML and produces this multiline format
-  const plainPublicPattern = /You\s+(bought|sold)\s+([A-Z]{1,5})\s+at\s+\$?[\d,.]+\s+per\s+share/gi;
+  const plainPublicPattern = /You\s+(bought|sold)\s+([A-Z]{1,5}(?:\.[A-Z]{1,2})?)\s+at\s+\$?[\d,.]+\s+per\s+share/gi;
   while ((match = plainPublicPattern.exec(text)) !== null) {
     const action = match[1].toLowerCase() === 'bought' ? 'buy' : 'sell';
     const ticker = match[2].toUpperCase();
@@ -190,7 +190,7 @@ function parseTradesFromEmail(plainBody, htmlBody) {
   }
 
   // Pattern 1: "Bought 10 shares of AAPL at $150.00"
-  const boughtPattern = /(?:bought|purchased)\s+(\d+(?:\.\d+)?)\s+shares?\s+(?:of\s+)?([A-Z]{1,5})\s+(?:at\s+)?\$?([\d,.]+)/gi;
+  const boughtPattern = /(?:bought|purchased)\s+(\d+(?:\.\d+)?)\s+shares?\s+(?:of\s+)?([A-Z]{1,5}(?:\.[A-Z]{1,2})?)\s+(?:at\s+)?\$?([\d,.]+)/gi;
   while ((match = boughtPattern.exec(text)) !== null) {
     trades.push({
       action: 'buy',
@@ -201,7 +201,7 @@ function parseTradesFromEmail(plainBody, htmlBody) {
   }
 
   // Pattern 2: "Sold 10 shares of AAPL at $150.00"
-  const soldPattern = /(?:sold|selling)\s+(\d+(?:\.\d+)?)\s+shares?\s+(?:of\s+)?([A-Z]{1,5})\s+(?:at\s+)?\$?([\d,.]+)/gi;
+  const soldPattern = /(?:sold|selling)\s+(\d+(?:\.\d+)?)\s+shares?\s+(?:of\s+)?([A-Z]{1,5}(?:\.[A-Z]{1,2})?)\s+(?:at\s+)?\$?([\d,.]+)/gi;
   while ((match = soldPattern.exec(text)) !== null) {
     trades.push({
       action: 'sell',
@@ -212,7 +212,7 @@ function parseTradesFromEmail(plainBody, htmlBody) {
   }
 
   // Pattern 3: "BUY AAPL 10 @ $150" or "SELL AAPL 10 @ $150"
-  const shortPattern = /(buy|sell)\s+([A-Z]{1,5})\s+(\d+(?:\.\d+)?)\s*(?:@|at)\s*\$?([\d,.]+)/gi;
+  const shortPattern = /(buy|sell)\s+([A-Z]{1,5}(?:\.[A-Z]{1,2})?)\s+(\d+(?:\.\d+)?)\s*(?:@|at)\s*\$?([\d,.]+)/gi;
   while ((match = shortPattern.exec(text)) !== null) {
     // Avoid duplicates
     const ticker = match[2].toUpperCase();
@@ -227,7 +227,7 @@ function parseTradesFromEmail(plainBody, htmlBody) {
   }
 
   // Pattern 4: Table format — "AAPL | Buy | 10 | $150.00" (common in rebalance emails)
-  const tablePattern = /([A-Z]{1,5})\s*\|\s*(buy|sell|bought|sold)\s*\|\s*(\d+(?:\.\d+)?)\s*\|\s*\$?([\d,.]+)/gi;
+  const tablePattern = /([A-Z]{1,5}(?:\.[A-Z]{1,2})?)\s*\|\s*(buy|sell|bought|sold)\s*\|\s*(\d+(?:\.\d+)?)\s*\|\s*\$?([\d,.]+)/gi;
   while ((match = tablePattern.exec(text)) !== null) {
     const ticker = match[1].toUpperCase();
     const action = /buy|bought/i.test(match[2]) ? 'buy' : 'sell';
@@ -243,7 +243,7 @@ function parseTradesFromEmail(plainBody, htmlBody) {
 
   // Pattern 5: Simple ticker mention with action — "Added AAPL" / "Removed MSFT"
   // (No quantity/price — API will fetch current price, default 1 share)
-  const addedPattern = /(?:added|adding|new position:?)\s+([A-Z]{1,5})/gi;
+  const addedPattern = /(?:added|adding|new position:?)\s+([A-Z]{1,5}(?:\.[A-Z]{1,2})?)/gi;
   while ((match = addedPattern.exec(text)) !== null) {
     const ticker = match[1].toUpperCase();
     if (!trades.some(t => t.ticker === ticker)) {
@@ -256,7 +256,7 @@ function parseTradesFromEmail(plainBody, htmlBody) {
     }
   }
 
-  const removedPattern = /(?:removed|removing|exited|closed position:?)\s+([A-Z]{1,5})/gi;
+  const removedPattern = /(?:removed|removing|exited|closed position:?)\s+([A-Z]{1,5}(?:\.[A-Z]{1,2})?)/gi;
   while ((match = removedPattern.exec(text)) !== null) {
     const ticker = match[1].toUpperCase();
     if (!trades.some(t => t.ticker === ticker)) {

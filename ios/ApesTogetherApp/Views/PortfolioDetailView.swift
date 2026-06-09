@@ -293,9 +293,9 @@ struct PortfolioDetailView: View {
                                         .padding(.horizontal, 16)
                                     
                                     VStack(spacing: 0) {
-                                        ForEach(Array(trades.prefix(5).enumerated()), id: \.element.id) { index, trade in
+                                        ForEach(Array(trades.prefix(15).enumerated()), id: \.element.id) { index, trade in
                                             TradeRow(trade: trade)
-                                            if index < min(trades.count, 5) - 1 {
+                                            if index < min(trades.count, 15) - 1 {
                                                 AccentDivider()
                                             }
                                         }

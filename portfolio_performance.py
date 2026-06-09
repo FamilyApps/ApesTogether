@@ -41,6 +41,17 @@ def get_market_date():
 stock_price_cache = {}
 cache_duration = 90
 
+
+def _to_av_symbol(ticker: str) -> str:
+    """Translate an internal ticker to AlphaVantage's expected form.
+
+    Internally we store class shares with a dot (e.g. BRK.B), but AlphaVantage
+    expects a hyphen (BRK-B) — querying the dot form returns no data (see the
+    long-standing "symbol-format mismatches like BRK.B" note in the market-data
+    coverage audit). This is a no-op for ordinary tickers, which contain no dot.
+    """
+    return ticker.replace('.', '-')
+
 class PortfolioPerformanceCalculator:
     """Calculate portfolio performance using Modified Dietz method"""
     
@@ -128,7 +139,9 @@ class PortfolioPerformanceCalculator:
             chunk_size = 100
             for i in range(0, len(uncached_tickers), chunk_size):
                 chunk = uncached_tickers[i:i + chunk_size]
-                symbols_str = ','.join(chunk)
+                # Send AlphaVantage the hyphen form for class shares (BRK.B -> BRK-B);
+                # responses are mapped back to the internal dot form below.
+                symbols_str = ','.join(_to_av_symbol(t) for t in chunk)
                 initial_result_count = len(result)  # Track how many we had before this chunk
                 
                 # Use REALTIME_BULK_QUOTES for premium tier (up to 100 symbols)
@@ -140,7 +153,9 @@ class PortfolioPerformanceCalculator:
                 if 'data' in data and data['data']:
                     prices_extracted = 0
                     for quote in data['data']:
-                        ticker = quote.get('symbol', '').upper()
+                        # Map AV's hyphen form back to our internal dot form so the
+                        # result/cache key matches what the caller asked for (BRK-B -> BRK.B).
+                        ticker = quote.get('symbol', '').upper().replace('-', '.')
                         # REALTIME_BULK_QUOTES returns 'close' field for the price
                         price_str = quote.get('close', '0')
                         
@@ -260,7 +275,7 @@ class PortfolioPerformanceCalculator:
             import time
             time.sleep(0.1)  # 100ms delay between API calls
             
-            url = f'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker_symbol}&entitlement=realtime&apikey={api_key}'
+            url = f'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={_to_av_symbol(ticker_symbol)}&entitlement=realtime&apikey={api_key}'
             
             # Log why we're making API call
             if is_market_hours:
@@ -381,8 +396,10 @@ class PortfolioPerformanceCalculator:
             import time
             time.sleep(0.15)  # Rate limit: ~7 calls per second
             
-            # Use compact (100 days) which should cover our date range and works on all API tiers
-            url = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={ticker}&outputsize=compact&apikey={self.alpha_vantage_api_key}'
+            # Use compact (100 days) which should cover our date range and works on all API tiers.
+            # Send AV the hyphen form for class shares (BRK.B -> BRK-B); results are cached under
+            # the internal ticker_upper, so no response-symbol mapping is needed here.
+            url = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={_to_av_symbol(ticker)}&outputsize=compact&apikey={self.alpha_vantage_api_key}'
             response = requests.get(url, timeout=10)
             data = response.json()
             

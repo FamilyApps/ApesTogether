@@ -14,8 +14,11 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # ── Trade command parser ─────────────────────────────────────────────────────
+# Ticker group allows an optional class-share suffix (".B"/"-B") so symbols like
+# BRK.B, BF.B, RDS.A parse. The base + optional suffix is purely additive over the
+# old letters-only pattern, so plain tickers (AAPL, NVDA) are unaffected.
 _TRADE_RE = re.compile(
-    r'^\s*(buy|sell)\s+(\d+(?:\.\d+)?)\s+([A-Za-z]{1,10})\s*$',
+    r'^\s*(buy|sell)\s+(\d+(?:\.\d+)?)\s+([A-Za-z]{1,10}(?:[.\-][A-Za-z]{1,4})?)\s*$',
     re.IGNORECASE
 )
 
@@ -35,7 +38,10 @@ def parse_trade_command(text):
         return None
     return {
         'action': m.group(1).lower(),
-        'ticker': m.group(3).upper(),
+        # Normalize class-share separator to a dot so storage matches the rest of
+        # the app (seed holdings use the dot form, e.g. BRK.B). The AlphaVantage
+        # hyphen form is applied only at fetch time in portfolio_performance.
+        'ticker': m.group(3).upper().replace('-', '.'),
         'quantity': quantity,
     }
 

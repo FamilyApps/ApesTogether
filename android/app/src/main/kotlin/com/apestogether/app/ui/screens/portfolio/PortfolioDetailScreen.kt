@@ -406,7 +406,7 @@ private fun PortfolioBody(
 
                             portfolio.recentTrades?.takeIf { it.isNotEmpty() }?.let { trades ->
                                 RecentTradesSection(
-                                    trades = trades.take(5),
+                                    trades = trades.take(15),
                                     modifier = Modifier.padding(horizontal = 16.dp),
                                 )
                             }

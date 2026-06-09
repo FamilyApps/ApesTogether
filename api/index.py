@@ -7145,6 +7145,63 @@ def run_migration():
         return jsonify({'success': False, 'step': step, 'column': f'{table}.{col}', 'error': str(e)})
 
 
+@app.route('/admin/migrate-push-notification-defaults', methods=['GET', 'POST'])
+@admin_2fa_required
+def admin_migrate_push_notification_defaults():
+    """One-shot data migration: turn trade-alert push back ON for existing
+    mobile subscriptions that were created with it disabled.
+
+    Why: the admin/bot comp-subscription creator (`mobile_api.bot_subscribe`)
+    previously hardcoded `push_notifications_enabled=False`, contradicting the
+    MobileSubscription model default (True) and the app's "on by default"
+    expectation, so every comped/bot subscriber silently got email but no push.
+    Real store purchases (`iap_validation_service`) already set True, so the
+    only affected rows are comped/bot subs.
+
+    Flips ACTIVE subscriptions whose flag is False or NULL back to True.
+    DRY-RUN by default (lists affected rows, changes nothing). Add ?commit=true
+    to apply. Idempotent — re-running after a commit affects 0 rows. Subscribers
+    can still opt out per-subscription via PUT /notifications/settings.
+    """
+    from models import db, MobileSubscription
+    from sqlalchemy import or_
+
+    commit = request.args.get('commit', 'false').lower() in ('1', 'true', 'yes')
+
+    try:
+        affected = MobileSubscription.query.filter(
+            MobileSubscription.status == 'active',
+            or_(
+                MobileSubscription.push_notifications_enabled.is_(False),
+                MobileSubscription.push_notifications_enabled.is_(None),
+            ),
+        ).all()
+
+        rows = [{
+            'subscription_id': s.id,
+            'subscriber_id': s.subscriber_id,
+            'subscribed_to_id': s.subscribed_to_id,
+            'created_at': s.created_at.isoformat() if s.created_at else None,
+        } for s in affected]
+
+        if commit and affected:
+            for s in affected:
+                s.push_notifications_enabled = True
+            db.session.commit()
+
+        return jsonify({
+            'mode': 'commit' if commit else 'dry_run',
+            'affected_count': len(rows),
+            'affected': rows,
+            'note': ('Flipped to True.' if commit
+                     else 'DRY-RUN: nothing changed. Re-run with ?commit=true to apply.'),
+        })
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"migrate-push-notification-defaults error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 # ─── Phase A: Portfolio data correctness admin tools (May 2026) ─────────────
 #
 # These three endpoints fix the "Wolff has zombie 0-share rows", "SLA shows
