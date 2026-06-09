@@ -83,7 +83,7 @@ fun MainTabsScreen(
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            text = "Apes Together",
+                            text = "ApesTogether",
                             color = TextPrimary,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,

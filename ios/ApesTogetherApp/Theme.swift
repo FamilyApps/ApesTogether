@@ -243,7 +243,7 @@ struct AppHeaderRow: View {
                 .scaledToFit()
                 .frame(width: 28, height: 28)
                 .clipShape(Circle())
-            Text("Apes Together")
+            Text("ApesTogether")
                 .font(.system(size: 16, weight: .bold))
                 .foregroundColor(.textPrimary)
                 .lineLimit(1)
