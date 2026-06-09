@@ -9,7 +9,9 @@ import com.apestogether.app.data.models.User
 import android.content.Context
 import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
+import androidx.credentials.exceptions.NoCredentialException
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.messaging.FirebaseMessaging
@@ -101,7 +103,18 @@ class AuthRepository @Inject constructor(
 
             Result.success(authResponse.user)
         } catch (e: GetCredentialException) {
-            _error.value = "Sign-in cancelled or unavailable"
+            // Surface the real cause instead of a single catch-all string. The most common
+            // non-cancellation failure is NoCredentialException, which on a freshly-distributed
+            // build almost always means the APK's signing SHA-1 is not registered as an Android
+            // OAuth client for com.apestogether.app in the Firebase/GCP project — Google's servers
+            // reject the request before any account picker is shown.
+            android.util.Log.e("AuthRepository", "Google sign-in failed: type=${e.type} msg=${e.message}", e)
+            _error.value = when (e) {
+                is GetCredentialCancellationException -> "Sign-in cancelled"
+                is NoCredentialException ->
+                    "No Google credential available. If you have a Google account on this device, this build's signing SHA-1 is likely not registered for Google Sign-In (com.apestogether.app) in Firebase."
+                else -> "Sign-in failed (${e.type})"
+            }
             Result.failure(e)
         } catch (e: Exception) {
             _error.value = e.message ?: "Sign-in failed"
