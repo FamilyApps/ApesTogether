@@ -53,7 +53,11 @@ class SubscriptionManager: ObservableObject {
         }
     }
     
-    func subscribe(to userId: Int) async {
+    /// Subscribe to [userId]. On a successful (backend-validated) purchase,
+    /// posts `.didSubscribe` with the trader's [username] + [slug] so
+    /// ContentView can present the post-subscribe EarnNudge (mirrors the
+    /// Android OnboardingManager.notifyDidSubscribe flow).
+    func subscribe(to userId: Int, username: String? = nil, slug: String? = nil) async {
         // Retry loading products if empty
         if products.isEmpty {
             await loadProducts()
@@ -83,6 +87,19 @@ class SubscriptionManager: ObservableObject {
                 await validateWithBackend(jwsRepresentation: jwsRepresentation, transaction: transaction, userId: userId)
                 
                 await transaction.finish()
+                
+                // Only fire the post-subscribe nudge if the backend accepted
+                // the purchase (validateWithBackend sets `error` on failure).
+                if error == nil {
+                    var info: [String: Any] = [:]
+                    if let username = username { info["username"] = username }
+                    if let slug = slug { info["slug"] = slug }
+                    NotificationCenter.default.post(
+                        name: .didSubscribe,
+                        object: nil,
+                        userInfo: info
+                    )
+                }
                 
             case .pending:
                 error = "Purchase pending approval"

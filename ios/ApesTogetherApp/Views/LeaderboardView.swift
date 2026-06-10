@@ -741,7 +741,13 @@ struct LeaderboardCard: View {
                     CompactPlanToggle(subscriptionManager: subscriptionManager)
                     
                     Button {
-                        Task { await subscriptionManager.subscribe(to: entry.user.id) }
+                        Task {
+                            await subscriptionManager.subscribe(
+                                to: entry.user.id,
+                                username: entry.user.publicName,
+                                slug: entry.user.portfolioSlug
+                            )
+                        }
                     } label: {
                         HStack(spacing: 5) {
                             Image(systemName: "crown.fill")

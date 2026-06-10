@@ -89,7 +89,13 @@ struct PortfolioDetailView: View {
                                 
                                 HStack(spacing: 10) {
                                     Button {
-                                        Task { await subscriptionManager.subscribe(to: portfolio.owner.id) }
+                                        Task {
+                        await subscriptionManager.subscribe(
+                            to: portfolio.owner.id,
+                            username: portfolio.owner.publicName,
+                            slug: portfolio.owner.portfolioSlug
+                        )
+                    }
                                     } label: {
                                         HStack(spacing: 6) {
                                             Image(systemName: "crown.fill")
@@ -310,7 +316,13 @@ struct PortfolioDetailView: View {
                                 username: portfolio.owner.publicName,
                                 subscriptionManager: subscriptionManager,
                                 onSubscribe: {
-                                    Task { await subscriptionManager.subscribe(to: portfolio.owner.id) }
+                                    Task {
+                        await subscriptionManager.subscribe(
+                            to: portfolio.owner.id,
+                            username: portfolio.owner.publicName,
+                            slug: portfolio.owner.portfolioSlug
+                        )
+                    }
                                 }
                             )
                             .padding(.horizontal, 16)
