@@ -328,6 +328,7 @@ private fun PortfolioBody(
                                             activity = it,
                                             subscribedToId = portfolio.owner.id,
                                             subscribedToUsername = portfolio.owner.publicName,
+                                            subscribedToSlug = portfolio.owner.portfolioSlug ?: slug,
                                         )
                                     }
                                 },
@@ -423,6 +424,7 @@ private fun PortfolioBody(
                                             activity = it,
                                             subscribedToId = portfolio.owner.id,
                                             subscribedToUsername = portfolio.owner.publicName,
+                                            subscribedToSlug = portfolio.owner.portfolioSlug ?: slug,
                                         )
                                     }
                                 },
@@ -1420,6 +1422,7 @@ class PortfolioDetailViewModel @Inject constructor(
         activity: android.app.Activity,
         subscribedToId: Int,
         subscribedToUsername: String,
+        subscribedToSlug: String? = null,
     ) {
         viewModelScope.launch {
             _subscribeState.value = SubscribeUiState.Processing
@@ -1470,7 +1473,7 @@ class PortfolioDetailViewModel @Inject constructor(
                         _subscribeState.value = SubscribeUiState.Success
                         // Trigger the EarnNudge flow at the RootApp level —
                         // mirrors iOS .didSubscribe NotificationCenter event.
-                        onboardingManager.notifyDidSubscribe(subscribedToUsername)
+                        onboardingManager.notifyDidSubscribe(subscribedToUsername, subscribedToSlug)
                     } else {
                         _subscribeState.value = SubscribeUiState.Error(
                             resp?.error

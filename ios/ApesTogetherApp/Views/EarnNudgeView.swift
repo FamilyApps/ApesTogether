@@ -4,6 +4,11 @@ struct EarnNudgeView: View {
     let subscribedToUsername: String
     let onAddStocks: () -> Void
     let onSkip: () -> Void
+    // Users who already added their own stocks are creators — skip the
+    // "Add Your Stocks" pitch and offer to view the portfolio they just
+    // subscribed to instead.
+    var userHasStocks: Bool = false
+    var onViewPortfolio: () -> Void = {}
     
     @State private var showConfetti = false
     
@@ -34,7 +39,7 @@ struct EarnNudgeView: View {
                         .font(.system(size: 28, weight: .bold))
                         .foregroundColor(.textPrimary)
                     
-                    Text("You'll get notified the moment\n\(subscribedToUsername) makes a trade.")
+                    Text("You'll get notified as soon as\n\(subscribedToUsername) makes a trade.")
                         .font(.body)
                         .foregroundColor(.textSecondary)
                         .multilineTextAlignment(.center)
@@ -43,46 +48,71 @@ struct EarnNudgeView: View {
                 
                 Spacer()
                 
-                // Earn money nudge card
-                VStack(spacing: 16) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "dollarsign.circle.fill")
-                            .font(.system(size: 28))
-                            .foregroundColor(.primaryAccent)
+                if userHasStocks {
+                    // Already a creator → jump straight into the portfolio
+                    // they just subscribed to.
+                    VStack(spacing: 12) {
+                        Button {
+                            onViewPortfolio()
+                        } label: {
+                            Text(subscribedToUsername.isEmpty
+                                 ? "View Portfolio"
+                                 : "View \(subscribedToUsername)'s Portfolio")
+                        }
+                        .buttonStyle(PrimaryButtonStyle())
                         
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Want to earn money too?")
-                                .font(.headline)
-                                .foregroundColor(.textPrimary)
-                            
-                            Text("Add your stocks and get paid when others follow your trades.")
-                                .font(.caption)
+                        Button {
+                            onSkip()
+                        } label: {
+                            Text("Done")
+                                .font(.subheadline)
                                 .foregroundColor(.textSecondary)
                         }
                     }
-                }
-                .cardStyle()
-                .padding(.horizontal, 20)
-                
-                // Buttons
-                VStack(spacing: 12) {
-                    Button {
-                        onAddStocks()
-                    } label: {
-                        Text("Add Your Stocks")
+                    .padding(.horizontal, 40)
+                    .padding(.bottom, 50)
+                } else {
+                    // Earn money nudge card
+                    VStack(spacing: 16) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "dollarsign.circle.fill")
+                                .font(.system(size: 28))
+                                .foregroundColor(.primaryAccent)
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Want to earn money too?")
+                                    .font(.headline)
+                                    .foregroundColor(.textPrimary)
+                                
+                                Text("Add your stocks and get paid when others follow your trades.")
+                                    .font(.caption)
+                                    .foregroundColor(.textSecondary)
+                            }
+                        }
                     }
-                    .buttonStyle(PrimaryButtonStyle())
+                    .cardStyle()
+                    .padding(.horizontal, 20)
                     
-                    Button {
-                        onSkip()
-                    } label: {
-                        Text("Not now")
-                            .font(.subheadline)
-                            .foregroundColor(.textSecondary)
+                    // Buttons
+                    VStack(spacing: 12) {
+                        Button {
+                            onAddStocks()
+                        } label: {
+                            Text("Add Your Stocks")
+                        }
+                        .buttonStyle(PrimaryButtonStyle())
+                        
+                        Button {
+                            onSkip()
+                        } label: {
+                            Text("Not now")
+                                .font(.subheadline)
+                                .foregroundColor(.textSecondary)
+                        }
                     }
+                    .padding(.horizontal, 40)
+                    .padding(.bottom, 50)
                 }
-                .padding(.horizontal, 40)
-                .padding(.bottom, 50)
             }
         }
         .onAppear {

@@ -35,6 +35,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Refresh
@@ -45,6 +46,8 @@ import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
@@ -117,6 +120,7 @@ import kotlin.math.absoluteValue
  *     in-place, revealing stats, sector mix, View Portfolio + Subscribe CTAs.
  *  4. Filter modal bottom sheet on tap of the filter icon.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LeaderboardScreen(
     modifier: Modifier = Modifier,
@@ -128,6 +132,7 @@ fun LeaderboardScreen(
     val filters by viewModel.filters.collectAsState()
     val selectedPlan by viewModel.selectedPlan.collectAsState()
     val subscribeState by viewModel.subscribeState.collectAsState()
+    val isRefreshing by viewModel.isRefreshing.collectAsState()
     val activity = LocalContext.current.findActivity()
 
     var showFilters by remember { mutableStateOf(false) }
@@ -170,7 +175,13 @@ fun LeaderboardScreen(
                 if (s.entries.isEmpty()) {
                     EmptyPlaceholder(onRefresh = { viewModel.refresh() })
                 } else {
+                    PullToRefreshBox(
+                        isRefreshing = isRefreshing,
+                        onRefresh = { viewModel.refresh(manual = true) },
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
                     LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
@@ -202,11 +213,13 @@ fun LeaderboardScreen(
                                             activity = it,
                                             subscribedToId = entry.user.id,
                                             subscribedToUsername = entry.user.publicName,
+                                            subscribedToSlug = entry.user.portfolioSlug,
                                         )
                                     }
                                 },
                             )
                         }
+                    }
                     }
                 }
             }
@@ -814,51 +827,75 @@ private fun ExpandedDetail(
                 )
             }
 
-            CompactPlanToggle(
-                selected = selectedPlan,
-                onSelect = onSelectPlan,
-            )
-
-            Button(
-                onClick = onSubscribe,
-                enabled = !processing,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 36.dp),
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = PrimaryAccent,
-                    disabledContainerColor = PrimaryAccent.copy(alpha = 0.5f),
-                ),
-                contentPadding = PaddingValues(vertical = 8.dp),
-            ) {
-                if (processing) {
-                    CircularProgressIndicator(
-                        color = AppBackground,
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(14.dp),
-                    )
-                } else {
+            // Already-subscribed viewers don't see the plan toggle / Subscribe
+            // CTA — only "View Portfolio" above, plus a subscribed marker.
+            if (entry.isSubscribed) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Icon(
-                        imageVector = Icons.Default.WorkspacePremium,
+                        imageVector = Icons.Default.CheckCircle,
                         contentDescription = null,
-                        tint = AppBackground,
-                        modifier = Modifier.size(12.dp),
+                        tint = PrimaryAccent,
+                        modifier = Modifier.size(13.dp),
                     )
                     Spacer(Modifier.width(5.dp))
                     Text(
-                        text = ctaText,
-                        color = AppBackground,
-                        fontWeight = FontWeight.Bold,
-                        style = tightTextStyle(13.sp),
+                        "Subscribed",
+                        color = PrimaryAccent,
+                        fontWeight = FontWeight.SemiBold,
+                        style = tightTextStyle(12.sp),
                     )
                 }
-            }
+            } else {
+                CompactPlanToggle(
+                    selected = selectedPlan,
+                    onSelect = onSelectPlan,
+                )
 
-            SubscribeStatusBanner(
-                state = subscribeState,
-                onDismiss = onDismissSubscribeState,
-            )
+                Button(
+                    onClick = onSubscribe,
+                    enabled = !processing,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 36.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = PrimaryAccent,
+                        disabledContainerColor = PrimaryAccent.copy(alpha = 0.5f),
+                    ),
+                    contentPadding = PaddingValues(vertical = 8.dp),
+                ) {
+                    if (processing) {
+                        CircularProgressIndicator(
+                            color = AppBackground,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.WorkspacePremium,
+                            contentDescription = null,
+                            tint = AppBackground,
+                            modifier = Modifier.size(12.dp),
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            text = ctaText,
+                            color = AppBackground,
+                            fontWeight = FontWeight.Bold,
+                            style = tightTextStyle(13.sp),
+                        )
+                    }
+                }
+
+                SubscribeStatusBanner(
+                    state = subscribeState,
+                    onDismiss = onDismissSubscribeState,
+                )
+            }
         }
     }
 }
@@ -1026,6 +1063,12 @@ class LeaderboardViewModel @Inject constructor(
     private val _subscribeState = MutableStateFlow<SubscribeUiState>(SubscribeUiState.Idle)
     val subscribeState: StateFlow<SubscribeUiState> = _subscribeState.asStateFlow()
 
+    // Drives the pull-to-refresh spinner. Distinct from LeaderboardState.Loading
+    // (the full-screen first-load placeholder) so a manual pull keeps the
+    // existing list visible underneath the indicator.
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
     fun setPeriod(period: String) {
         _period.value = period
         refresh()
@@ -1063,6 +1106,7 @@ class LeaderboardViewModel @Inject constructor(
         activity: android.app.Activity,
         subscribedToId: Int,
         subscribedToUsername: String,
+        subscribedToSlug: String? = null,
     ) {
         viewModelScope.launch {
             _subscribeState.value = SubscribeUiState.Processing
@@ -1107,7 +1151,7 @@ class LeaderboardViewModel @Inject constructor(
                         _subscribeState.value = SubscribeUiState.Success
                         // Trigger the EarnNudge flow at the RootApp level —
                         // mirrors iOS .didSubscribe NotificationCenter event.
-                        onboardingManager.notifyDidSubscribe(subscribedToUsername)
+                        onboardingManager.notifyDidSubscribe(subscribedToUsername, subscribedToSlug)
                         // Refresh so newly-subscribed creators reflect the
                         // 'isSubscribed' state on next render.
                         refresh()
@@ -1123,11 +1167,17 @@ class LeaderboardViewModel @Inject constructor(
         }
     }
 
-    fun refresh() {
+    /**
+     * Reload the leaderboard. [manual] = true is the pull-to-refresh path: it
+     * shows the pull indicator and leaves the current list in place (and on
+     * failure keeps it, rather than swapping to the full-screen error), so a
+     * failed refresh-gesture isn't destructive.
+     */
+    fun refresh(manual: Boolean = false) {
         val period = _period.value
         val filters = _filters.value
         viewModelScope.launch {
-            _state.value = LeaderboardState.Loading
+            if (manual) _isRefreshing.value = true else _state.value = LeaderboardState.Loading
             runCatching {
                 apiService.getLeaderboard(
                     period = period,
@@ -1146,8 +1196,11 @@ class LeaderboardViewModel @Inject constructor(
                     )
                 }
                 .onFailure { e ->
-                    _state.value = LeaderboardState.Error(e.message ?: "Failed to load leaderboard")
+                    if (!manual) {
+                        _state.value = LeaderboardState.Error(e.message ?: "Failed to load leaderboard")
+                    }
                 }
+            if (manual) _isRefreshing.value = false
         }
     }
 }

@@ -30,6 +30,12 @@ class OnboardingManager @Inject constructor() {
     private val _subscribedToUsername = MutableStateFlow<String?>(null)
     val subscribedToUsername: StateFlow<String?> = _subscribedToUsername.asStateFlow()
 
+    // Portfolio slug of the just-subscribed creator, captured alongside the
+    // username so the EarnNudge can offer a "View Portfolio" button (for users
+    // who already have their own stocks and don't need the Add-Stocks pitch).
+    private val _subscribedToSlug = MutableStateFlow<String?>(null)
+    val subscribedToSlug: StateFlow<String?> = _subscribedToSlug.asStateFlow()
+
     /** Called from MainActivity when the cold-start intent carries a slug. */
     fun setPendingSlug(slug: String?) {
         _pendingSlug.value = slug?.takeIf { it.isNotBlank() }
@@ -43,12 +49,14 @@ class OnboardingManager @Inject constructor() {
     }
 
     /** Called by Subscribe ViewModels on success. Triggers EarnNudge. */
-    fun notifyDidSubscribe(username: String) {
+    fun notifyDidSubscribe(username: String, slug: String? = null) {
         _subscribedToUsername.value = username
+        _subscribedToSlug.value = slug?.takeIf { it.isNotBlank() }
     }
 
     /** Called when the user dismisses (or completes) the EarnNudge flow. */
     fun clearSubscribedToUsername() {
         _subscribedToUsername.value = null
+        _subscribedToSlug.value = null
     }
 }

@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var showEarnNudge = false
     @State private var showAddStocks = false
     @State private var subscribedToUsername: String = ""
+    @State private var subscribedToSlug: String = ""
     
     var body: some View {
         Group {
@@ -23,6 +24,23 @@ struct ContentView: View {
                         onSkip: {
                             showEarnNudge = false
                             deepLinkManager.completeOnboarding()
+                        },
+                        // Creators (users with their own stocks) skip the
+                        // earn pitch and get a View-Portfolio button instead.
+                        userHasStocks: (authManager.currentUser?.numStocks ?? 0) > 0,
+                        onViewPortfolio: {
+                            showEarnNudge = false
+                            deepLinkManager.completeOnboarding()
+                            let slug = subscribedToSlug
+                            if !slug.isEmpty {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                    NotificationCenter.default.post(
+                                        name: .openPortfolio,
+                                        object: nil,
+                                        userInfo: ["slug": slug]
+                                    )
+                                }
+                            }
                         }
                     )
                 } else if showAddStocks {
@@ -86,6 +104,7 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .didSubscribe)) { notification in
             if let username = notification.userInfo?["username"] as? String {
                 subscribedToUsername = username
+                subscribedToSlug = notification.userInfo?["slug"] as? String ?? ""
                 showEarnNudge = true
             }
         }

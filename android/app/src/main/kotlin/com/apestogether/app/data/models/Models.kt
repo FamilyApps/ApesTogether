@@ -25,6 +25,10 @@ data class User(
     val username: String,
     @SerialName("display_name") val displayName: String? = null,
     @SerialName("portfolio_slug") val portfolioSlug: String? = null,
+    // Count of the user's own holdings. Returned by GET /auth/user so the
+    // post-subscribe nudge can skip the "Add Your Stocks" pitch for users
+    // who are already creators. Null until /auth/user has been hydrated.
+    @SerialName("num_stocks") val numStocks: Int? = null,
 ) {
     val publicName: String get() = displayName?.takeIf { it.isNotEmpty() } ?: username
 }
@@ -81,6 +85,10 @@ data class LeaderboardEntry(
     @SerialName("industry_mix") val industryMix: Map<String, Double>? = null,
     @SerialName("last_trade_date") val lastTradeDate: String? = null,
     @SerialName("rank_change") val rankChange: Int? = null,
+    // Per-viewer: true when the signed-in viewer already follows this creator
+    // (or is this creator). Drives "View Portfolio"-only rendering on the
+    // leaderboard card. Defaults false for anonymous/legacy responses.
+    @SerialName("is_subscribed") val isSubscribed: Boolean = false,
 )
 
 @Serializable

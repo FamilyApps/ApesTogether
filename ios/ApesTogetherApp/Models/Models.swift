@@ -8,6 +8,10 @@ struct User: Codable, Identifiable {
     let username: String
     let displayName: String?
     let portfolioSlug: String?
+    // Count of the user's own holdings (from GET /auth/user). Lets the
+    // post-subscribe nudge skip the "Add Your Stocks" pitch for users who
+    // are already creators. Optional for backward-compat with older payloads.
+    let numStocks: Int?
 
     /// Public-facing name. Falls back to `username` when `displayName` is nil/empty.
     var publicName: String {
@@ -61,6 +65,10 @@ struct LeaderboardEntry: Codable, Identifiable {
     let industryMix: [String: Double]?
     let lastTradeDate: String?
     let rankChange: Int?
+    // Per-viewer: true when the signed-in viewer already follows this creator
+    // (or is this creator). Drives "View Portfolio"-only rendering. Optional
+    // for backward-compat with anonymous/legacy responses.
+    let isSubscribed: Bool?
     
     var id: Int { user.id }
 }

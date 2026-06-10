@@ -218,6 +218,29 @@ def require_auth(f):
     return decorated
 
 
+def _optional_user_id():
+    """Return the authenticated user's id if a valid Bearer token is present,
+    else None. Unlike @require_auth this never aborts the request — used by
+    endpoints that are viewable anonymously but personalize when signed in
+    (e.g. the leaderboard's per-viewer `is_subscribed` flag). Both mobile
+    clients attach the Authorization header globally, so a signed-in viewer's
+    token rides along on these calls."""
+    auth_header = request.headers.get('Authorization')
+    if not auth_header:
+        return None
+    try:
+        parts = auth_header.split()
+        if len(parts) != 2 or parts[0].lower() != 'bearer':
+            return None
+        secret = os.environ.get('JWT_SECRET') or os.environ.get('SECRET_KEY')
+        if not secret:
+            return None
+        payload = jwt.decode(parts[1], secret, algorithms=['HS256'])
+        return payload.get('user_id')
+    except Exception:
+        return None
+
+
 def generate_jwt_token(user_id: int, email: str, expires_hours: int = 24 * 7) -> str:
     """Generate JWT token for mobile authentication"""
     from datetime import timedelta
@@ -1216,6 +1239,23 @@ def get_leaderboard():
         
         # Map 1W -> 5D for backend cache lookup (cache uses 5D key)
         cache_period = '5D' if period == '1W' else period
+
+        # ── Per-viewer subscription state ──
+        # The leaderboard is served from a viewer-agnostic cache, so we layer
+        # the signed-in viewer's active subscriptions on top here. Clients use
+        # this to render "View Portfolio" instead of the Subscribe CTA on rows
+        # the viewer already follows. Anonymous viewers get an empty set.
+        viewer_id = _optional_user_id()
+        subscribed_ids = set()
+        if viewer_id:
+            try:
+                from models import MobileSubscription
+                sub_rows = MobileSubscription.query.filter_by(
+                    subscriber_id=viewer_id, status='active'
+                ).with_entities(MobileSubscription.subscribed_to_id).all()
+                subscribed_ids = {r[0] for r in sub_rows}
+            except Exception as e:
+                logger.warning(f"Leaderboard viewer-subscription lookup failed: {e}")
         
         # ── Cache-first architecture (scales to thousands of users) ──
         # 1) Try pre-computed LeaderboardCache (populated at market close)
@@ -1599,7 +1639,10 @@ def get_leaderboard():
                 'large_cap_pct': round(large_cap_pct, 1),
                 'account_age_days': account_age_days,
                 'industry_mix': industry_mix,
-                'last_trade_date': last_trade_date
+                'last_trade_date': last_trade_date,
+                # Per-viewer: true if the signed-in viewer already follows this
+                # creator (or is this creator). Clients hide the Subscribe CTA.
+                'is_subscribed': (user_id == viewer_id) or (user_id in subscribed_ids)
             })
         
         # Sort by performance descending, then re-rank
@@ -2473,7 +2516,7 @@ def get_auth_token():
 @require_auth
 def get_current_user():
     """Get the authenticated user's profile data"""
-    from models import db, User
+    from models import db, User, Stock
     
     try:
         user = User.query.get(g.user_id)
@@ -2485,12 +2528,18 @@ def get_current_user():
             user.portfolio_slug = _generate_portfolio_slug()
             db.session.commit()
         
+        # num_stocks lets clients tell "creator" users (who have added their
+        # own holdings) from pure-subscriber users. Used by the post-subscribe
+        # nudge to skip the "Add Your Stocks" pitch for users who already have.
+        num_stocks = Stock.query.filter_by(user_id=user.id).count()
+        
         return jsonify({
             'id': user.id,
             'email': user.email,
             'username': user.username,
             'display_name': user.public_name,
-            'portfolio_slug': user.portfolio_slug
+            'portfolio_slug': user.portfolio_slug,
+            'num_stocks': num_stocks
         })
         
     except Exception as e:

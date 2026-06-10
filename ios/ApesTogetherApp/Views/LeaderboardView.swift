@@ -724,26 +724,40 @@ struct LeaderboardCard: View {
                     )
                 }
                 
-                // Compact plan toggle
-                CompactPlanToggle(subscriptionManager: subscriptionManager)
-                
-                Button {
-                    Task { await subscriptionManager.subscribe(to: entry.user.id) }
-                } label: {
+                // Already-subscribed viewers only see "View Portfolio" above,
+                // plus a subscribed marker — no plan toggle / Subscribe CTA.
+                if entry.isSubscribed == true {
                     HStack(spacing: 5) {
-                        Image(systemName: "crown.fill")
+                        Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 12))
-                        Text(subscriptionManager.selectedPlan == .annual
-                             ? "Try Free for 7 Days, then $69/yr"
-                             : "Try Free for 7 Days, then $\(String(format: "%.0f", entry.subscriptionPrice))/mo")
-                            .font(.system(size: 13, weight: .bold))
+                        Text("Subscribed")
+                            .font(.system(size: 12, weight: .semibold))
                     }
-                    .foregroundColor(.appBackground)
+                    .foregroundColor(.primaryAccent)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10).fill(Color.primaryAccent)
-                    )
+                    .padding(.vertical, 4)
+                } else {
+                    // Compact plan toggle
+                    CompactPlanToggle(subscriptionManager: subscriptionManager)
+                    
+                    Button {
+                        Task { await subscriptionManager.subscribe(to: entry.user.id) }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "crown.fill")
+                                .font(.system(size: 12))
+                            Text(subscriptionManager.selectedPlan == .annual
+                                 ? "Try Free for 7 Days, then $69/yr"
+                                 : "Try Free for 7 Days, then $\(String(format: "%.0f", entry.subscriptionPrice))/mo")
+                                .font(.system(size: 13, weight: .bold))
+                        }
+                        .foregroundColor(.appBackground)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10).fill(Color.primaryAccent)
+                        )
+                    }
                 }
             }
             .padding(.horizontal, 14)

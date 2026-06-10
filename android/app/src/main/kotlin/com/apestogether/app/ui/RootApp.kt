@@ -17,6 +17,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.compose.rememberNavController
 import com.apestogether.app.data.auth.AuthRepository
+import com.apestogether.app.data.models.User
 import com.apestogether.app.data.onboarding.OnboardingManager
 import com.apestogether.app.data.onboarding.OnboardingPreferences
 import com.apestogether.app.ui.navigation.RootNavGraph
@@ -74,6 +75,8 @@ fun RootApp() {
     }
     val pendingSlug by rootViewModel.pendingSlug.collectAsState()
     val subscribedToUsername by rootViewModel.subscribedToUsername.collectAsState()
+    val subscribedToSlug by rootViewModel.subscribedToSlug.collectAsState()
+    val currentUser by rootViewModel.currentUser.collectAsState()
 
     val navController = rememberNavController()
 
@@ -139,6 +142,18 @@ fun RootApp() {
                 subscribedToUsername = subscribedToUsername.orEmpty(),
                 onAddStocks = { showAddStocksOverlay = true },
                 onSkip = { rootViewModel.clearSubscribedToUsername() },
+                // Users who already added their own stocks are creators —
+                // skip the "Add Your Stocks" pitch and offer to view the
+                // portfolio they just subscribed to instead.
+                userHasStocks = (currentUser?.numStocks ?: 0) > 0,
+                onViewPortfolio = {
+                    val slug = subscribedToSlug
+                    // Dismiss the nudge first so the NavHost recomposes, then
+                    // reuse the pending-slug deep-link path (LaunchedEffect
+                    // above) to navigate once it's live.
+                    rootViewModel.clearSubscribedToUsername()
+                    if (!slug.isNullOrBlank()) rootViewModel.setPendingSlug(slug)
+                },
             )
         }
 
@@ -185,6 +200,8 @@ class RootViewModel @Inject constructor(
     val hasCompletedOnboarding = onboardingPreferences.hasCompletedOnboarding
     val pendingSlug: StateFlow<String?> = onboardingManager.pendingSlug
     val subscribedToUsername: StateFlow<String?> = onboardingManager.subscribedToUsername
+    val subscribedToSlug: StateFlow<String?> = onboardingManager.subscribedToSlug
+    val currentUser: StateFlow<User?> = authRepository.currentUser
 
     fun hydrateUser() {
         viewModelScope.launch { authRepository.refreshUserData() }
