@@ -5,6 +5,7 @@ import UserNotifications
 struct SubscriptionsView: View {
     @StateObject private var viewModel = SubscriptionsViewModel()
     @State private var showSettings = false
+    @Environment(\.scenePhase) private var scenePhase
 
     /// Clear the app icon badge and the system-level delivered notifications
     /// list. Called when the user opens the Subscriptions tab, since the Trade
@@ -69,7 +70,19 @@ struct SubscriptionsView: View {
                 // first one). See clearNotificationBadge() docs above.
                 clearNotificationBadge()
 
-                if viewModel.subscriptions.isEmpty && viewModel.subscribers.isEmpty {
+                // Always reload on appear (not only when empty) so switching
+                // back to this tab picks up new trade alerts. loadAll() leaves
+                // existing data in place while fetching, and the loading
+                // overlay only shows when the lists are empty, so there's no
+                // spinner flash on a background refresh.
+                Task { await viewModel.loadAll() }
+            }
+            .onChange(of: scenePhase) { newPhase in
+                // Reopening the app from the background (e.g. after tapping a
+                // trade-alert push) doesn't fire onAppear, so refresh here too
+                // — new alerts then appear without a manual pull-to-refresh.
+                if newPhase == .active {
+                    clearNotificationBadge()
                     Task { await viewModel.loadAll() }
                 }
             }

@@ -31,13 +31,14 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.viewModelScope
 import com.apestogether.app.data.api.ApiService
 import com.apestogether.app.data.models.NotificationItem
@@ -91,6 +93,7 @@ import javax.inject.Inject
  * The Cancel CTA opens a confirmation dialog (matching iOS `.alert`). Push
  * toggle persists via `PUT /notifications/settings`.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SubscriptionsScreen(
     modifier: Modifier = Modifier,
@@ -98,8 +101,16 @@ fun SubscriptionsScreen(
 ) {
     val viewModel: SubscriptionsViewModel = hiltViewModel()
     val state by viewModel.state.collectAsState()
+    val isRefreshing by viewModel.isRefreshing.collectAsState()
 
-    LaunchedEffect(Unit) { viewModel.refresh() }
+    // Refresh on every resume — initial load, returning to this tab, AND coming
+    // back from the background (e.g. after tapping a trade-alert push). Because
+    // refresh() is silent once data exists, this updates Trade Alerts in place
+    // with no spinner flash, so new alerts appear without a manual pull.
+    LifecycleResumeEffect(Unit) {
+        viewModel.refresh()
+        onPauseOrDispose { }
+    }
 
     var pendingCancelId by remember { mutableStateOf<Int?>(null) }
 
@@ -120,23 +131,29 @@ fun SubscriptionsScreen(
                 modifier = Modifier.align(Alignment.Center).padding(24.dp),
             )
 
-            is SubsState.Loaded -> Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(24.dp),
+            is SubsState.Loaded -> PullToRefreshBox(
+                isRefreshing = isRefreshing,
+                onRefresh = { viewModel.refresh(manual = true) },
+                modifier = Modifier.fillMaxSize(),
             ) {
-                SubscribersSection(s.subscribers, s.subscriberCount)
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(24.dp),
+                ) {
+                    SubscribersSection(s.subscribers, s.subscriberCount)
 
-                SubscriptionsSection(
-                    subscriptions = s.subscriptions,
-                    onTogglePush = { id, enabled -> viewModel.togglePush(id, enabled) },
-                    onCancel = { id -> pendingCancelId = id },
-                    onOpenPortfolio = onOpenPortfolio,
-                )
+                    SubscriptionsSection(
+                        subscriptions = s.subscriptions,
+                        onTogglePush = { id, enabled -> viewModel.togglePush(id, enabled) },
+                        onCancel = { id -> pendingCancelId = id },
+                        onOpenPortfolio = onOpenPortfolio,
+                    )
 
-                NotificationsSection(s.notifications)
+                    NotificationsSection(s.notifications)
+                }
             }
         }
     }
@@ -660,14 +677,44 @@ class SubscriptionsViewModel @Inject constructor(
     private val _state = MutableStateFlow<SubsState>(SubsState.Loading)
     val state: StateFlow<SubsState> = _state.asStateFlow()
 
-    fun refresh() {
+    // Drives the pull-to-refresh spinner. Distinct from SubsState.Loading (the
+    // full-screen first-load placeholder) so a manual pull keeps the existing
+    // content visible underneath the indicator.
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
+    /**
+     * Reload subscriptions + notification history. Three modes:
+     *  - [manual] = true (pull-to-refresh): shows the pull indicator, leaves the
+     *    current content in place, and keeps it on failure (a failed gesture
+     *    isn't destructive).
+     *  - first load (no data yet): shows the full-screen Loading placeholder,
+     *    and a full-screen Error on failure.
+     *  - silent (data already present, e.g. on lifecycle resume / tab re-entry):
+     *    refetches in the background and swaps the data in without any spinner
+     *    flash; on failure the existing content is kept.
+     *
+     * The silent path is what makes new trade alerts appear automatically when
+     * the app is reopened after receiving a push — no manual pull required.
+     */
+    fun refresh(manual: Boolean = false) {
         viewModelScope.launch {
-            _state.value = SubsState.Loading
+            val hadData = _state.value is SubsState.Loaded
+            when {
+                manual -> _isRefreshing.value = true
+                !hadData -> _state.value = SubsState.Loading
+                // else: silent refresh — keep showing existing content.
+            }
             val subsResult = runCatching { apiService.getSubscriptions() }
             val notifResult = runCatching { apiService.getNotificationHistory(limit = 30, offset = 0) }
             val resp = subsResult.getOrNull()
             if (resp == null) {
-                _state.value = SubsState.Error(subsResult.exceptionOrNull()?.message ?: "Failed to load")
+                // Only surface a full-screen error on the very first load; a
+                // failed manual/silent refresh keeps whatever is already shown.
+                if (!hadData && !manual) {
+                    _state.value = SubsState.Error(subsResult.exceptionOrNull()?.message ?: "Failed to load")
+                }
+                if (manual) _isRefreshing.value = false
                 return@launch
             }
             _state.value = SubsState.Loaded(
@@ -676,6 +723,7 @@ class SubscriptionsViewModel @Inject constructor(
                 subscriberCount = resp.subscriberCount,
                 notifications = notifResult.getOrNull()?.notifications ?: emptyList(),
             )
+            if (manual) _isRefreshing.value = false
         }
     }
 

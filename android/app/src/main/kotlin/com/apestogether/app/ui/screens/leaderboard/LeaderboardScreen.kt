@@ -132,6 +132,7 @@ fun LeaderboardScreen(
     val filters by viewModel.filters.collectAsState()
     val selectedPlan by viewModel.selectedPlan.collectAsState()
     val subscribeState by viewModel.subscribeState.collectAsState()
+    val subscribeTargetId by viewModel.subscribeTargetId.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     val activity = LocalContext.current.findActivity()
 
@@ -195,7 +196,11 @@ fun LeaderboardScreen(
                                 isExpanded = isExpanded,
                                 selectedPlan = selectedPlan,
                                 onSelectPlan = viewModel::setPlan,
-                                subscribeState = subscribeState,
+                                subscribeState = if (subscribeTargetId == entry.user.id) {
+                                    subscribeState
+                                } else {
+                                    SubscribeUiState.Idle
+                                },
                                 onDismissSubscribeState = viewModel::clearSubscribeState,
                                 onTap = {
                                     autoExpandedTop = false
@@ -1063,6 +1068,13 @@ class LeaderboardViewModel @Inject constructor(
     private val _subscribeState = MutableStateFlow<SubscribeUiState>(SubscribeUiState.Idle)
     val subscribeState: StateFlow<SubscribeUiState> = _subscribeState.asStateFlow()
 
+    // The leaderboard entry the in-progress / just-finished subscribe applies to.
+    // [_subscribeState] is a single shared flow, so without this every NOT-yet-
+    // subscribed card would render the success/error banner. The screen only
+    // shows the banner on the card whose user.id matches this value.
+    private val _subscribeTargetId = MutableStateFlow<Int?>(null)
+    val subscribeTargetId: StateFlow<Int?> = _subscribeTargetId.asStateFlow()
+
     // Drives the pull-to-refresh spinner. Distinct from LeaderboardState.Loading
     // (the full-screen first-load placeholder) so a manual pull keeps the
     // existing list visible underneath the indicator.
@@ -1092,6 +1104,7 @@ class LeaderboardViewModel @Inject constructor(
 
     fun clearSubscribeState() {
         _subscribeState.value = SubscribeUiState.Idle
+        _subscribeTargetId.value = null
     }
 
     /**
@@ -1109,6 +1122,7 @@ class LeaderboardViewModel @Inject constructor(
         subscribedToSlug: String? = null,
     ) {
         viewModelScope.launch {
+            _subscribeTargetId.value = subscribedToId
             _subscribeState.value = SubscribeUiState.Processing
 
             val ensure = runCatching { billingService.ensureConnected() }.getOrNull()
