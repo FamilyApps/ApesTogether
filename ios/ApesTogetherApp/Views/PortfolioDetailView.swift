@@ -8,6 +8,7 @@ struct PortfolioDetailView: View {
     var onPeriodChanged: ((String) -> Void)? = nil
     @StateObject private var viewModel = PortfolioDetailViewModel()
     @EnvironmentObject var subscriptionManager: SubscriptionManager
+    @Environment(\.scenePhase) private var scenePhase
     @State private var tradeSheet: TradeSheetInfo?
     @State private var showBuySheet = false
     @State private var showAddStocks = false
@@ -380,6 +381,24 @@ struct PortfolioDetailView: View {
             Task {
                 await viewModel.loadPortfolio(slug: slug)
                 await viewModel.loadChart(slug: slug)
+            }
+        }
+        .refreshable {
+            // Pull-to-refresh. Holdings are scaled server-side from the
+            // creator's CURRENT positions, so a reload reflects a rebalance.
+            await viewModel.loadPortfolio(slug: slug)
+            await viewModel.loadChart(slug: slug)
+        }
+        .onChange(of: scenePhase) { newPhase in
+            // Reopening from the background (e.g. after a trade-alert push)
+            // doesn't fire onAppear, so reload here too. loadPortfolio keeps
+            // the existing holdings on screen while fetching (the spinner only
+            // shows when there's no portfolio yet), so there's no flash.
+            if newPhase == .active {
+                Task {
+                    await viewModel.loadPortfolio(slug: slug)
+                    await viewModel.loadChart(slug: slug)
+                }
             }
         }
         .sheet(item: $tradeSheet) { info in

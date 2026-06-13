@@ -329,6 +329,24 @@ fileprivate func parseBackendDate(_ s: String) -> Date? {
         let stripped = s.replacingCharacters(in: dot, with: "")
         if let d = plain.date(from: stripped) { return d }
     }
+
+    // Fallback for timezone-LESS timestamps, e.g. subscription expires_at
+    // ("2026-06-11T02:54:44.082000") or "2026-06-11T02:54:44". Every branch
+    // above relies on ISO8601DateFormatter, which REQUIRES a trailing 'Z' or
+    // offset and rejects these outright — that's why the renewal date rendered
+    // as a raw ISO string. The backend emits these as naive UTC, so parse with
+    // a fixed-format UTC DateFormatter. Microseconds are first truncated to
+    // milliseconds since DateFormatter's 'S' field only handles 3 digits.
+    let normalized = s.replacingOccurrences(
+        of: #"\.(\d{3})\d+"#, with: ".$1", options: .regularExpression
+    )
+    let utc = DateFormatter()
+    utc.locale = Locale(identifier: "en_US_POSIX")
+    utc.timeZone = TimeZone(identifier: "UTC")
+    for fmt in ["yyyy-MM-dd'T'HH:mm:ss.SSS", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd"] {
+        utc.dateFormat = fmt
+        if let d = utc.date(from: normalized) { return d }
+    }
     return nil
 }
 

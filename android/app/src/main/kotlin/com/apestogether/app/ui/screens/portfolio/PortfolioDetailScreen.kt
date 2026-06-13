@@ -46,12 +46,12 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -71,6 +71,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.viewModelScope
 import com.apestogether.app.data.api.ApiService
 import com.apestogether.app.data.billing.BillingService
@@ -150,8 +151,16 @@ fun PortfolioDetailScreen(
     val state by viewModel.state.collectAsState()
     val period by viewModel.period.collectAsState()
 
-    LaunchedEffect(slug) {
+    // Reload on every resume (first appear, returning to the screen, AND
+    // foreground-from-background) and whenever the slug changes. Holdings are
+    // scaled server-side from the creator's CURRENT positions, so a re-fetch is
+    // all that's needed to reflect a rebalance — previously the screen only
+    // loaded once, so stale holdings lingered until the user re-applied the
+    // scale (which forced a reload). load() is silent once data exists, so
+    // there's no spinner flash on resume.
+    LifecycleResumeEffect(slug) {
         viewModel.load(slug)
+        onPauseOrDispose { }
     }
 
     if (showOwnHeader) {
@@ -212,6 +221,7 @@ fun PortfolioDetailScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PortfolioBody(
     modifier: Modifier = Modifier,
@@ -223,6 +233,7 @@ private fun PortfolioBody(
 ) {
     val selectedPlan by viewModel.selectedPlan.collectAsState()
     val subscribeState by viewModel.subscribeState.collectAsState()
+    val isRefreshing by viewModel.isRefreshing.collectAsState()
     val activity = LocalContext.current.findActivity()
 
     // ── Phase D: portfolio resizer state ────────────────────────────────
@@ -258,6 +269,11 @@ private fun PortfolioBody(
             }
 
             is PortfolioState.Loaded -> {
+              PullToRefreshBox(
+                isRefreshing = isRefreshing,
+                onRefresh = { viewModel.load(slug, manual = true) },
+                modifier = Modifier.fillMaxSize(),
+              ) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -437,6 +453,7 @@ private fun PortfolioBody(
                         }
                     }
                 }
+              }
             }
         }
     }
@@ -1347,21 +1364,50 @@ class PortfolioDetailViewModel @Inject constructor(
     private val _scaleSaving = MutableStateFlow(false)
     val scaleSaving: StateFlow<Boolean> = _scaleSaving.asStateFlow()
 
-    fun load(slug: String) {
+    // Drives pull-to-refresh. Distinct from PortfolioState.Loading (the
+    // full-screen first-load placeholder) so a manual pull / silent resume
+    // refresh keeps the existing content visible underneath.
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
+    /**
+     * Load (or reload) the portfolio + chart. Three modes:
+     *  - [manual] = true (pull-to-refresh): shows the pull indicator, keeps the
+     *    current content, and keeps it on failure (a failed pull isn't
+     *    destructive).
+     *  - first load (no data yet): shows the full-screen Loading placeholder,
+     *    and a full-screen Error on failure.
+     *  - silent (data already present, e.g. lifecycle resume / returning to the
+     *    screen): refetches in the background and swaps the data in with no
+     *    spinner flash. This is what makes a creator's rebalance show up in the
+     *    Holdings card automatically — the backend scales the creator's CURRENT
+     *    positions on every fetch, so a plain reload reflects the new holdings.
+     */
+    fun load(slug: String, manual: Boolean = false) {
         if (slug.isBlank()) {
             _state.value = PortfolioState.Error("Invalid portfolio")
             return
         }
         viewModelScope.launch {
-            _state.value = PortfolioState.Loading
+            val hadData = _state.value is PortfolioState.Loaded
+            when {
+                manual -> _isRefreshing.value = true
+                !hadData -> _state.value = PortfolioState.Loading
+                // else: silent refresh — keep showing existing content.
+            }
             val portfolioResult = runCatching { apiService.getPortfolio(slug) }
             val chartResult = runCatching { apiService.getPortfolioChart(slug, _period.value) }
 
             val portfolio = portfolioResult.getOrNull()
             if (portfolio == null) {
-                _state.value = PortfolioState.Error(
-                    portfolioResult.exceptionOrNull()?.message ?: "Failed to load portfolio"
-                )
+                // Only surface a full-screen error on the very first load; a
+                // failed manual/silent refresh keeps whatever is already shown.
+                if (!hadData && !manual) {
+                    _state.value = PortfolioState.Error(
+                        portfolioResult.exceptionOrNull()?.message ?: "Failed to load portfolio"
+                    )
+                }
+                if (manual) _isRefreshing.value = false
                 return@launch
             }
 
@@ -1383,6 +1429,7 @@ class PortfolioDetailViewModel @Inject constructor(
             if (!portfolio.isOwner && !portfolio.isSubscribed) {
                 runCatching { billingService.queryProducts() }
             }
+            if (manual) _isRefreshing.value = false
         }
     }
 

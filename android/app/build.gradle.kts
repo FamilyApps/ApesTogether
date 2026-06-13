@@ -18,6 +18,13 @@ val secrets = Properties().apply {
 fun secret(key: String, default: String = ""): String =
     secrets.getProperty(key) ?: System.getenv(key) ?: default
 
+// Load release signing config from local keystore.properties (gitignored).
+// Expected keys: storeFile, storePassword, keyAlias, keyPassword.
+val keystoreFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystoreFile.exists()) load(keystoreFile.inputStream())
+}
+
 android {
     namespace = "com.apestogether.app"
     compileSdk = 35
@@ -46,6 +53,17 @@ android {
             "GOOGLE_WEB_CLIENT_ID",
             "\"${secret("GOOGLE_WEB_CLIENT_ID")}\"",
         )
+    }
+
+    signingConfigs {
+        if (keystoreFile.exists()) {
+            create("release") {
+                storeFile = file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {

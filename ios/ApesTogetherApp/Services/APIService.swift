@@ -65,7 +65,14 @@ class APIService {
         let ae = activeEdge ? "1" : "0"
         let hf = hideFractional ? "1" : "0"
         let ind = industry.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? industry
-        return try await get("/leaderboard?period=\(period)&category=\(category)&limit=\(limit)&active_edge=\(ae)&industry=\(ind)&frequency=\(frequency)&hide_fractional=\(hf)", authenticated: false)
+        // authenticated: true — the leaderboard endpoint uses OPTIONAL auth: the
+        // backend layers the signed-in viewer's active subscriptions on top of
+        // the viewer-agnostic cache to set each entry's `is_subscribed`. Without
+        // the Bearer token the viewer is anonymous, so every entry comes back
+        // not-subscribed and the UI shows "Subscribe" even for creators the user
+        // already follows. (The token is only attached when present, and the
+        // endpoint still works for logged-out callers.)
+        return try await get("/leaderboard?period=\(period)&category=\(category)&limit=\(limit)&active_edge=\(ae)&industry=\(ind)&frequency=\(frequency)&hide_fractional=\(hf)", authenticated: true)
     }
     
     // MARK: - Portfolio
