@@ -7,6 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AA000001AAAA000100000001 /* TopInfluencersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000001AAAA000100000002 /* TopInfluencersView.swift */; };
+		AA000002AAAA000200000001 /* PortfolioShareCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000002AAAA000200000002 /* PortfolioShareCardView.swift */; };
+		AA000003AAAA000300000001 /* PerformanceChartView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000003AAAA000300000002 /* PerformanceChartView.swift */; };
+		AA000004AAAA000400000001 /* TradeSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000004AAAA000400000002 /* TradeSheetView.swift */; };
+		AA000005AAAA000500000001 /* W9FormView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000005AAAA000500000002 /* W9FormView.swift */; };
+		AA000006AAAA000600000001 /* FeaturePollView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000006AAAA000600000002 /* FeaturePollView.swift */; };
+		D00A8DCB2FABE3920032E2A9 /* CompactPlanToggle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00A8DCA2FABE3920032E2A9 /* CompactPlanToggle.swift */; };
 		D0679C242F50E73B009960CC /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = D0679C232F50E73B009960CC /* FirebaseMessaging */; };
 		D0679C542F50F046009960CC /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0679C522F50F046009960CC /* ContentView.swift */; };
 		D0679C552F50F046009960CC /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0679C532F50F046009960CC /* Theme.swift */; };
@@ -31,15 +38,16 @@
 		D0679C7F2F50F29A009960CC /* StoreKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D0679C7E2F50F29A009960CC /* StoreKit.framework */; };
 		D0679C822F51381F009960CC /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = D0679C812F51381F009960CC /* GoogleService-Info.plist */; };
 		D0679C862F52A01B009960CC /* LegalText.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0679C852F52A01B009960CC /* LegalText.swift */; };
-		AA000001AAAA000100000001 /* TopInfluencersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000001AAAA000100000002 /* TopInfluencersView.swift */; };
-		AA000002AAAA000200000001 /* PortfolioShareCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000002AAAA000200000002 /* PortfolioShareCardView.swift */; };
-		AA000003AAAA000300000001 /* PerformanceChartView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000003AAAA000300000002 /* PerformanceChartView.swift */; };
-		AA000004AAAA000400000001 /* TradeSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000004AAAA000400000002 /* TradeSheetView.swift */; };
-		AA000005AAAA000500000001 /* W9FormView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000005AAAA000500000002 /* W9FormView.swift */; };
-		AA000006AAAA000600000001 /* FeaturePollView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000006AAAA000600000002 /* FeaturePollView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		AA000001AAAA000100000002 /* TopInfluencersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopInfluencersView.swift; sourceTree = "<group>"; };
+		AA000002AAAA000200000002 /* PortfolioShareCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioShareCardView.swift; sourceTree = "<group>"; };
+		AA000003AAAA000300000002 /* PerformanceChartView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceChartView.swift; sourceTree = "<group>"; };
+		AA000004AAAA000400000002 /* TradeSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradeSheetView.swift; sourceTree = "<group>"; };
+		AA000005AAAA000500000002 /* W9FormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = W9FormView.swift; sourceTree = "<group>"; };
+		AA000006AAAA000600000002 /* FeaturePollView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeaturePollView.swift; sourceTree = "<group>"; };
+		D00A8DCA2FABE3920032E2A9 /* CompactPlanToggle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactPlanToggle.swift; sourceTree = "<group>"; };
 		D0679BE92F50E652009960CC /* ApesTogether.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ApesTogether.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D0679C512F50F046009960CC /* ApesTogetherApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ApesTogetherApp.swift; path = ../ApesTogetherApp/ApesTogetherApp.swift; sourceTree = SOURCE_ROOT; };
 		D0679C522F50F046009960CC /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ContentView.swift; path = ../ApesTogetherApp/ContentView.swift; sourceTree = SOURCE_ROOT; };
@@ -66,12 +74,7 @@
 		D0679C812F51381F009960CC /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = "GoogleService-Info.plist"; path = "../ApesTogetherApp/GoogleService-Info.plist"; sourceTree = SOURCE_ROOT; };
 		D0679C842F514FAD009960CC /* ApesTogether.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ApesTogether.entitlements; sourceTree = "<group>"; };
 		D0679C852F52A01B009960CC /* LegalText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LegalText.swift; path = ../ApesTogetherApp/LegalText.swift; sourceTree = SOURCE_ROOT; };
-		AA000001AAAA000100000002 /* TopInfluencersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopInfluencersView.swift; sourceTree = "<group>"; };
-		AA000002AAAA000200000002 /* PortfolioShareCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortfolioShareCardView.swift; sourceTree = "<group>"; };
-		AA000003AAAA000300000002 /* PerformanceChartView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceChartView.swift; sourceTree = "<group>"; };
-		AA000004AAAA000400000002 /* TradeSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradeSheetView.swift; sourceTree = "<group>"; };
-		AA000005AAAA000500000002 /* W9FormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = W9FormView.swift; sourceTree = "<group>"; };
-		AA000006AAAA000600000002 /* FeaturePollView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeaturePollView.swift; sourceTree = "<group>"; };
+		D0679C952F8C543E009960CC /* Configuration.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; name = Configuration.storekit; path = ../ApesTogetherApp/Configuration.storekit; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -90,6 +93,7 @@
 		D0679BE02F50E652009960CC = {
 			isa = PBXGroup;
 			children = (
+				D0679C952F8C543E009960CC /* Configuration.storekit */,
 				D0679C3C2F50EFFF009960CC /* ApesTogether */,
 				D0679C7D2F50F29A009960CC /* Frameworks */,
 				D0679BEA2F50E652009960CC /* Products */,
@@ -125,6 +129,7 @@
 		D0679C612F50F075009960CC /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				D00A8DCA2FABE3920032E2A9 /* CompactPlanToggle.swift */,
 				D0679C572F50F075009960CC /* AddStocksView.swift */,
 				D0679C582F50F075009960CC /* EarnNudgeView.swift */,
 				D0679C592F50F075009960CC /* LeaderboardView.swift */,
@@ -265,6 +270,7 @@
 				D0679C672F50F075009960CC /* SubscriptionsView.swift in Sources */,
 				D0679C722F50F089009960CC /* KeychainService.swift in Sources */,
 				D0679C732F50F089009960CC /* APIService.swift in Sources */,
+				D00A8DCB2FABE3920032E2A9 /* CompactPlanToggle.swift in Sources */,
 				D0679C742F50F089009960CC /* AuthenticationManager.swift in Sources */,
 				D0679C862F52A01B009960CC /* LegalText.swift in Sources */,
 				D0679C752F50F089009960CC /* DeepLinkManager.swift in Sources */,
@@ -413,7 +419,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = ApesTogether/ApesTogether.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 40;
 				DEVELOPMENT_TEAM = M8R8YVW472;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -447,7 +453,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = ApesTogether/ApesTogether.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 40;
 				DEVELOPMENT_TEAM = M8R8YVW472;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
