@@ -1140,7 +1140,32 @@ class LeaderboardViewModel @Inject constructor(
                 runCatching { billingService.queryProducts() }
             }
 
-            val result = billingService.purchase(activity, _selectedPlan.value.productId)
+            // Resolve which per-creator "slot" product to buy. The store only
+            // knows generic "Subscription A/B/..."; the backend maps slot →
+            // creator per-user. See docs/PER_CREATOR_SUBSCRIPTION_SLOTS.md.
+            val slotResp = runCatching { apiService.getSubscriptionSlot(subscribedToId) }.getOrNull()
+            if (slotResp == null) {
+                _subscribeState.value = SubscribeUiState.Error("Couldn't start the subscription. Please try again.")
+                return@launch
+            }
+            slotResp.error?.let { err ->
+                _subscribeState.value = when (err) {
+                    "max_reached" -> SubscribeUiState.Error(
+                        "You've reached the maximum of ${slotResp.maxSlots ?: 20} subscriptions. Cancel one to subscribe to another."
+                    )
+                    "already_subscribed" -> SubscribeUiState.Error("You're already subscribed to this trader.")
+                    else -> SubscribeUiState.Error("Couldn't start the subscription. Please try again.")
+                }
+                return@launch
+            }
+            val slotProductId = if (_selectedPlan.value == SubscriptionPlan.Annual)
+                slotResp.annualProductId else slotResp.monthlyProductId
+            if (slotProductId == null) {
+                _subscribeState.value = SubscribeUiState.Error("Subscription not available yet. Please try again later.")
+                return@launch
+            }
+
+            val result = billingService.purchase(activity, slotProductId)
             when (result) {
                 is BillingService.PurchaseResult.UserCanceled ->
                     _subscribeState.value = SubscribeUiState.Idle
@@ -1156,6 +1181,9 @@ class LeaderboardViewModel @Inject constructor(
                                 platform = "google",
                                 subscribedToId = subscribedToId,
                                 purchaseToken = purchase.purchaseToken,
+                                // Real purchased SKU; falls back to the resolved
+                                // slot product so the backend binds the right slot.
+                                productId = purchase.products.firstOrNull() ?: slotProductId,
                             )
                         )
                     }

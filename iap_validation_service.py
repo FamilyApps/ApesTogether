@@ -667,6 +667,13 @@ async def validate_and_save_purchase(
     db.session.add(purchase)
     db.session.flush()  # Get the ID
     
+    # Which generic store "slot" product backs this purchase. Derived from the
+    # AUTHORITATIVE product_id the store returned (not the client hint), so the
+    # backend can map this slot back to the creator per-user and render the
+    # "Subscription A/B/..." label on the Subscriptions tab.
+    from subscription_slots import slot_for_product_id
+    resolved_slot = slot_for_product_id(result.get('product_id'))
+
     # Create or update mobile subscription
     existing_sub = MobileSubscription.query.filter_by(
         subscriber_id=subscriber_id,
@@ -677,6 +684,8 @@ async def validate_and_save_purchase(
         existing_sub.in_app_purchase_id = purchase.id
         existing_sub.status = 'active' if result['status'] == 'active' else 'expired'
         existing_sub.expires_at = result.get('expires_date')
+        if resolved_slot:
+            existing_sub.slot = resolved_slot
     else:
         subscription = MobileSubscription(
             subscriber_id=subscriber_id,
@@ -684,6 +693,7 @@ async def validate_and_save_purchase(
             in_app_purchase_id=purchase.id,
             status='active' if result['status'] == 'active' else 'expired',
             expires_at=result.get('expires_date'),
+            slot=resolved_slot,
             push_notifications_enabled=True
         )
         db.session.add(subscription)

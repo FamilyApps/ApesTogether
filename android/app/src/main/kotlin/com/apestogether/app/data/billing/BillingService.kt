@@ -190,7 +190,9 @@ class BillingService @Inject constructor(
         val result = billingClient.queryProductDetails(params)
         if (result.billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
             val byId = result.productDetailsList.orEmpty().associateBy { it.productId }
-            _productDetails.value = byId
+            // Merge (don't clobber) so any per-creator "slot" products fetched on
+            // demand via [queryProduct] survive a refresh of the default pair.
+            _productDetails.value = _productDetails.value + byId
             Log.d(TAG, "Loaded ${byId.size} subscription products: ${byId.keys}")
         } else {
             Log.w(
@@ -199,6 +201,42 @@ class BillingService @Inject constructor(
             )
         }
         return result.billingResult
+    }
+
+    /**
+     * Query Play for a single subscription product's details and cache it. Used
+     * for the per-creator "slot" products (Subscription B..T) that aren't part of
+     * the default monthly/annual pair loaded by [queryProducts]. Returns null if
+     * Play is unavailable or the product isn't published.
+     */
+    suspend fun queryProduct(productId: String): ProductDetails? {
+        val ensure = ensureConnected()
+        if (ensure.responseCode != BillingClient.BillingResponseCode.OK) return null
+
+        val params = QueryProductDetailsParams.newBuilder()
+            .setProductList(
+                listOf(
+                    QueryProductDetailsParams.Product.newBuilder()
+                        .setProductId(productId)
+                        .setProductType(BillingClient.ProductType.SUBS)
+                        .build()
+                )
+            )
+            .build()
+
+        val result = billingClient.queryProductDetails(params)
+        if (result.billingResult.responseCode != BillingClient.BillingResponseCode.OK) {
+            Log.w(
+                TAG,
+                "queryProduct($productId) failed: code=${result.billingResult.responseCode} msg=${result.billingResult.debugMessage}",
+            )
+            return null
+        }
+        val pd = result.productDetailsList.orEmpty().firstOrNull { it.productId == productId }
+        if (pd != null) {
+            _productDetails.value = _productDetails.value + (productId to pd)
+        }
+        return pd
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -214,11 +252,9 @@ class BillingService @Inject constructor(
      * orders offers so that promotional offers come first).
      */
     suspend fun purchase(activity: Activity, productId: String): PurchaseResult {
-        val product = _productDetails.value[productId] ?: run {
-            // Try one more time in case the user just opened the screen.
-            queryProducts()
-            _productDetails.value[productId]
-        }
+        // Slot products (Subscription B..T) aren't in the default pair, so fetch
+        // the specific product on demand if it isn't cached yet.
+        val product = _productDetails.value[productId] ?: queryProduct(productId)
         if (product == null) {
             return PurchaseResult.Error(
                 "Subscription product not available. The product may not be published in Play Console yet."

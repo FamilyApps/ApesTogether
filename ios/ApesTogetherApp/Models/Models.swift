@@ -247,12 +247,29 @@ struct SubscriptionsResponse: Codable {
     let subscriberCount: Int
 }
 
+/// Response from /subscriptions/slot-for-creator. On success `slot` + the
+/// product IDs are set; on a 409 `error` is "max_reached" or "already_subscribed".
+struct SubscriptionSlotResponse: Codable {
+    let slot: Int?
+    let slotLabel: String?
+    let monthlyProductId: String?
+    let annualProductId: String?
+    let maxSlots: Int?
+    let error: String?
+}
+
 struct SubscriptionMade: Codable, Identifiable {
     let id: Int
     let portfolioOwner: PortfolioOwner?
     let status: String
     let expiresAt: String?
     let pushNotificationsEnabled: Bool
+    // Per-creator store slot (1..N) + its letter label ("A".."T"). The store
+    // shows generic "Subscription A/B/..." entries; this tells the user which
+    // one maps to this creator so they cancel the right one. Optional for
+    // legacy rows created before the slot feature.
+    let slot: Int?
+    let slotLabel: String?
 }
 
 struct Subscriber: Codable, Identifiable {

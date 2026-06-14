@@ -905,7 +905,18 @@ class MobileSubscription(db.Model):
     status = db.Column(db.String(20), nullable=False, default='active')  # 'active', 'expired', 'canceled'
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     expires_at = db.Column(db.DateTime, nullable=True)
-    
+
+    # ── Per-creator subscription slot (1..MAX_SUBSCRIPTION_SLOTS) ─────────
+    # Which generic store "slot" product backs this subscription. The store
+    # only knows about slots ("Subscription A/B/..."); this column + the
+    # subscribed_to_id is how we map a slot back to a creator, per user. Lets
+    # the user hold independently-cancelable subs to many creators despite the
+    # stores allowing only one active sub per group/product. Derived from the
+    # purchased product_id at validate time (subscription_slots.slot_for_product_id).
+    # NULL for legacy rows created before this feature.
+    # Migration: scripts/migrations/2026_06_14_subscription_slot.sql
+    slot = db.Column(db.Integer, nullable=True)
+
     # Notification preferences
     push_notifications_enabled = db.Column(db.Boolean, default=True)
 

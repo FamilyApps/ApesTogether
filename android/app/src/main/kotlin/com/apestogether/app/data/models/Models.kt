@@ -261,6 +261,26 @@ data class SubscriptionMade(
     val status: String,
     @SerialName("expires_at") val expiresAt: String? = null,
     @SerialName("push_notifications_enabled") val pushNotificationsEnabled: Boolean,
+    // Per-creator store slot (1..N) + its letter label ("A".."T"). The store
+    // shows generic "Subscription A/B/..." entries; this tells the user which
+    // one maps to this creator. Null for legacy rows predating the slot feature.
+    val slot: Int? = null,
+    @SerialName("slot_label") val slotLabel: String? = null,
+)
+
+/**
+ * Response from GET subscriptions/slot-for-creator. On success [slot] + the
+ * product IDs are set; otherwise [error] is "max_reached" or "already_subscribed".
+ * The backend always returns HTTP 200 so this decodes uniformly.
+ */
+@Serializable
+data class SubscriptionSlotResponse(
+    val slot: Int? = null,
+    @SerialName("slot_label") val slotLabel: String? = null,
+    @SerialName("monthly_product_id") val monthlyProductId: String? = null,
+    @SerialName("annual_product_id") val annualProductId: String? = null,
+    @SerialName("max_slots") val maxSlots: Int? = null,
+    val error: String? = null,
 )
 
 @Serializable

@@ -59,7 +59,11 @@ struct SubscriptionsView: View {
                     Task { await subscriptionManager.openManageSubscriptions() }
                 }
             } message: {
-                Text("We'll open your App Store subscription settings, where you can cancel. Canceling there stops future billing — you'll keep access until your current billing period ends.")
+                if let label = viewModel.managingSlotLabel {
+                    Text("We'll open your App Store subscription settings. To cancel this one, choose the entry labeled “Subscription \(label).” Canceling stops future billing — you'll keep access until your current billing period ends.")
+                } else {
+                    Text("We'll open your App Store subscription settings, where you can cancel. Canceling there stops future billing — you'll keep access until your current billing period ends.")
+                }
             }
             .onAppear {
                 // Clear the iOS home-screen badge each time the user opens
@@ -372,6 +376,15 @@ struct SubscriptionCard: View {
                             text: subscription.status.capitalized,
                             color: subscription.status == "active" ? .gains : .textSecondary
                         )
+                        if let label = subscription.slotLabel {
+                            Text("Subscription \(label)")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.textMuted)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.cardBorder.opacity(0.3))
+                                .cornerRadius(4)
+                        }
                         if let expires = subscription.expiresAt {
                             Text("Renews \(formatDate(expires))")
                                 .font(.system(size: 11))
@@ -422,6 +435,7 @@ struct SubscriptionCard: View {
                 Rectangle().fill(Color.cardBorder.opacity(0.4)).frame(width: 0.5, height: 20)
                 
                 Button {
+                    viewModel.managingSlotLabel = subscription.slotLabel
                     viewModel.showCancelConfirm = true
                 } label: {
                     HStack(spacing: 5) {
@@ -467,6 +481,9 @@ class SubscriptionsViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var error: String?
     @Published var showCancelConfirm = false
+    // The store slot label ("A".."T") of the subscription the user tapped
+    // "Manage" on, so the confirm alert can name the exact store entry to cancel.
+    @Published var managingSlotLabel: String?
     
     func loadAll() async {
         isLoading = true
@@ -506,7 +523,9 @@ class SubscriptionsViewModel: ObservableObject {
                     portfolioOwner: updated.portfolioOwner,
                     status: updated.status,
                     expiresAt: updated.expiresAt,
-                    pushNotificationsEnabled: enabled
+                    pushNotificationsEnabled: enabled,
+                    slot: updated.slot,
+                    slotLabel: updated.slotLabel
                 )
             }
         } catch {

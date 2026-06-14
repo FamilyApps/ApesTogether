@@ -86,6 +86,35 @@ class APIService {
     func getSubscriptions() async throws -> SubscriptionsResponse {
         return try await get("/subscriptions")
     }
+
+    /// Resolve which generic store "slot" product to purchase to subscribe to
+    /// [subscribedToId]. The backend maps slots to creators per-user (the store
+    /// only knows about "Subscription A/B/..."). Returns the slot's product IDs,
+    /// or an `error` of "max_reached" / "already_subscribed" (HTTP 409). We decode
+    /// the body on both 200 and 409 so the caller can branch on `error`.
+    func getSubscriptionSlot(subscribedToId: Int) async throws -> SubscriptionSlotResponse {
+        guard let url = URL(string: baseURL + "/subscriptions/slot-for-creator?subscribed_to_id=\(subscribedToId)") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let token = authToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        if httpResponse.statusCode == 401 { throw APIError.unauthorized }
+        // 200 = a slot was assigned; 409 = max_reached / already_subscribed.
+        // Both carry a JSON body we want to inspect.
+        guard httpResponse.statusCode == 200 || httpResponse.statusCode == 409 else {
+            throw APIError.serverError(httpResponse.statusCode)
+        }
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return try decoder.decode(SubscriptionSlotResponse.self, from: data)
+    }
     
     func validatePurchase(platform: String, receiptData: String?, purchaseToken: String?, subscribedToId: Int) async throws -> PurchaseValidationResponse {
         var body: [String: Any] = [

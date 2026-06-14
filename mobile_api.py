@@ -553,6 +553,7 @@ def get_subscriptions():
             subscribed_to_id=g.user_id
         ).all()
         
+        from subscription_slots import slot_label as _slot_label
         subscriptions_made = []
         for sub in made_subs:
             owner = User.query.get(sub.subscribed_to_id)
@@ -566,7 +567,11 @@ def get_subscriptions():
                 } if owner else None,
                 'status': sub.status,
                 'expires_at': sub.expires_at.isoformat() if sub.expires_at else None,
-                'push_notifications_enabled': sub.push_notifications_enabled
+                'push_notifications_enabled': sub.push_notifications_enabled,
+                # Per-creator slot so the app can show "Subscription A/B/..." and
+                # tell the user which entry to cancel on the store Manage page.
+                'slot': sub.slot,
+                'slot_label': _slot_label(sub.slot) if sub.slot else None
             })
         
         subscribers = []
@@ -602,6 +607,83 @@ def get_subscriptions():
     except Exception as e:
         logger.error(f"Get subscriptions error: {e}")
         return jsonify({'error': 'failed_to_get_subscriptions'}), 500
+
+
+def _subscription_occupies_slot(sub, now):
+    """A subscription still occupies its store slot while the store entitlement
+    exists: when it's active, or canceled but not yet past its paid-through date
+    (canceling stops renewal but access/billing-period runs to expires_at)."""
+    if sub.status == 'active':
+        return True
+    if sub.status == 'canceled' and sub.expires_at and sub.expires_at > now:
+        return True
+    return False
+
+
+@mobile_api.route('/subscriptions/slot-for-creator', methods=['GET'])
+@require_auth
+def slot_for_creator():
+    """Resolve which generic store "slot" product the client should purchase to
+    subscribe to a given creator.
+
+    The stores only allow one active subscription per group/product, and products
+    must be pre-approved, so we can't mint a product per creator. Instead we keep a
+    bounded pool of identical-price slot products (Subscription A..T) and map a slot
+    to a creator per-user on the backend. This endpoint hands the client the slot's
+    product IDs to launch the purchase with; the binding is finalized at
+    /purchase/validate. See docs/PER_CREATOR_SUBSCRIPTION_SLOTS.md.
+
+    Query: ?subscribed_to_id=<creator user id>
+    Always 200 (so both mobile clients decode the body uniformly); the outcome is
+    in the body:
+      {slot, slot_label, monthly_product_id, annual_product_id, max_slots}  (ok)
+      {error:"already_subscribed", slot, slot_label}   (route them to Manage)
+      {error:"max_reached", max_slots}                 (cap hit)
+    """
+    from datetime import datetime
+    from models import MobileSubscription
+    from subscription_slots import (
+        MAX_SUBSCRIPTION_SLOTS, monthly_product_id, annual_product_id, slot_label,
+    )
+
+    subscribed_to_id = request.args.get('subscribed_to_id', type=int)
+    if not subscribed_to_id:
+        return jsonify({'error': 'subscribed_to_id_required'}), 400
+    if subscribed_to_id == g.user_id:
+        return jsonify({'error': 'cannot_subscribe_to_self'}), 400
+
+    try:
+        now = datetime.utcnow()
+        subs = MobileSubscription.query.filter_by(subscriber_id=g.user_id).all()
+
+        # Already subscribed to THIS creator (live entitlement)? Don't let them
+        # buy a 2nd slot for the same creator — route them to Manage instead.
+        for s in subs:
+            if s.subscribed_to_id == subscribed_to_id and _subscription_occupies_slot(s, now):
+                return jsonify({
+                    'error': 'already_subscribed',
+                    'slot': s.slot,
+                    'slot_label': slot_label(s.slot) if s.slot else None,
+                })
+
+        # Lowest-numbered free slot. Slot 1 (with the only free trial) is always
+        # first, so a user's first-ever sub gets the trial; the store then refuses
+        # a 2nd trial on slot 1 forever (once-per-group eligibility).
+        occupied = {s.slot for s in subs if s.slot and _subscription_occupies_slot(s, now)}
+        slot = next((n for n in range(1, MAX_SUBSCRIPTION_SLOTS + 1) if n not in occupied), None)
+        if slot is None:
+            return jsonify({'error': 'max_reached', 'max_slots': MAX_SUBSCRIPTION_SLOTS})
+
+        return jsonify({
+            'slot': slot,
+            'slot_label': slot_label(slot),
+            'monthly_product_id': monthly_product_id(slot),
+            'annual_product_id': annual_product_id(slot),
+            'max_slots': MAX_SUBSCRIPTION_SLOTS,
+        })
+    except Exception as e:
+        logger.error(f"slot-for-creator error: {e}")
+        return jsonify({'error': 'slot_resolution_failed'}), 500
 
 
 @mobile_api.route('/unsubscribe/<int:subscription_id>', methods=['DELETE'])

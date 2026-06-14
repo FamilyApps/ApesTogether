@@ -58,37 +58,75 @@ class SubscriptionManager: ObservableObject {
     /// posts `.didSubscribe` with the trader's [username] + [slug] so
     /// ContentView can present the post-subscribe EarnNudge (mirrors the
     /// Android OnboardingManager.notifyDidSubscribe flow).
+    ///
+    /// Per-creator slots: the backend assigns this creator a generic store
+    /// "slot" product (Subscription A/B/…) so the user can hold independently
+    /// cancelable subs to many creators. We resolve the slot's product IDs
+    /// first, then purchase that specific product. See
+    /// docs/PER_CREATOR_SUBSCRIPTION_SLOTS.md.
     func subscribe(to userId: Int, username: String? = nil, slug: String? = nil) async {
-        // Retry loading products if empty
-        if products.isEmpty {
-            await loadProducts()
-        }
-        
-        guard let product = selectedProduct ?? products.first else {
-            error = "Subscription not available yet. Please try again later."
-            print("[SubscriptionManager] subscribe() failed: no products loaded for IDs: \(productIds)")
-            return
-        }
-        
-        print("[SubscriptionManager] Starting purchase of \(product.id) (\(selectedPlan.rawValue)) for user \(userId)")
-        
         isProcessing = true
         error = nil
-        
+        defer { isProcessing = false }
+
+        // 1) Ask the backend which slot product to buy for THIS creator.
+        let resolution: SubscriptionSlotResponse
+        do {
+            resolution = try await APIService.shared.getSubscriptionSlot(subscribedToId: userId)
+        } catch {
+            self.error = error.localizedDescription
+            return
+        }
+        if let err = resolution.error {
+            switch err {
+            case "max_reached":
+                let maxSlots = resolution.maxSlots ?? 20
+                self.error = "You've reached the maximum of \(maxSlots) subscriptions. Cancel one to subscribe to another."
+            case "already_subscribed":
+                self.error = "You're already subscribed to this trader."
+            default:
+                self.error = "Couldn't start the subscription. Please try again."
+            }
+            return
+        }
+        guard let productId = (selectedPlan == .annual ? resolution.annualProductId : resolution.monthlyProductId) else {
+            self.error = "Subscription not available yet. Please try again later."
+            return
+        }
+
+        // 2) Load that slot's product from the App Store.
+        let product: Product
+        do {
+            let fetched = try await Product.products(for: [productId])
+            guard let p = fetched.first else {
+                self.error = "Subscription product not available. The product may not be published yet."
+                print("[SubscriptionManager] subscribe() failed: no App Store product for \(productId)")
+                return
+            }
+            product = p
+        } catch {
+            self.error = error.localizedDescription
+            return
+        }
+
+        print("[SubscriptionManager] Starting purchase of \(product.id) (slot \(resolution.slotLabel ?? "?"), \(selectedPlan.rawValue)) for user \(userId)")
+
+        // 3) Purchase + validate.
         do {
             let result = try await product.purchase()
-            
+
             switch result {
             case .success(let verification):
                 // Extract JWS from the VerificationResult before unwrapping
                 let jwsRepresentation = verification.jwsRepresentation
                 let transaction = try checkVerified(verification)
-                
-                // Validate with backend
+
+                // Validate with backend (it derives the slot from the receipt's
+                // authoritative product_id and binds the token → creator).
                 await validateWithBackend(jwsRepresentation: jwsRepresentation, transaction: transaction, userId: userId)
-                
+
                 await transaction.finish()
-                
+
                 // Only fire the post-subscribe nudge if the backend accepted
                 // the purchase (validateWithBackend sets `error` on failure).
                 if error == nil {
@@ -101,21 +139,19 @@ class SubscriptionManager: ObservableObject {
                         userInfo: info
                     )
                 }
-                
+
             case .pending:
                 error = "Purchase pending approval"
-                
+
             case .userCancelled:
                 break
-                
+
             @unknown default:
                 error = "Unknown purchase result"
             }
         } catch {
             self.error = error.localizedDescription
         }
-        
-        isProcessing = false
     }
     
     private func validateWithBackend(jwsRepresentation: String, transaction: StoreKit.Transaction, userId: Int) async {

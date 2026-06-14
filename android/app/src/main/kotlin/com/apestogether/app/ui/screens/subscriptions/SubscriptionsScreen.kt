@@ -115,7 +115,7 @@ fun SubscriptionsScreen(
         onPauseOrDispose { }
     }
 
-    var pendingCancelId by remember { mutableStateOf<Int?>(null) }
+    var pendingCancel by remember { mutableStateOf<SubscriptionMade?>(null) }
 
     Box(
         modifier = modifier
@@ -151,7 +151,7 @@ fun SubscriptionsScreen(
                     SubscriptionsSection(
                         subscriptions = s.subscriptions,
                         onTogglePush = { id, enabled -> viewModel.togglePush(id, enabled) },
-                        onCancel = { id -> pendingCancelId = id },
+                        onCancel = { sub -> pendingCancel = sub },
                         onOpenPortfolio = onOpenPortfolio,
                     )
 
@@ -161,15 +161,19 @@ fun SubscriptionsScreen(
         }
     }
 
-    pendingCancelId?.let {
+    pendingCancel?.let { sub ->
         val context = LocalContext.current
         AlertDialog(
-            onDismissRequest = { pendingCancelId = null },
+            onDismissRequest = { pendingCancel = null },
             title = { Text("Manage Subscription", color = TextPrimary) },
             text = {
                 Text(
-                    "We'll open Google Play, where you can cancel this subscription. " +
-                        "Canceling there stops future billing — you'll keep access until your current billing period ends.",
+                    if (sub.slotLabel != null)
+                        "We'll open Google Play. To cancel this one, choose the entry labeled \u201cSubscription ${sub.slotLabel}.\u201d " +
+                            "Canceling there stops future billing — you'll keep access until your current billing period ends."
+                    else
+                        "We'll open Google Play, where you can cancel this subscription. " +
+                            "Canceling there stops future billing — you'll keep access until your current billing period ends.",
                     color = TextSecondary,
                 )
             },
@@ -186,14 +190,14 @@ fun SubscriptionsScreen(
                                 )
                             )
                         }
-                        pendingCancelId = null
+                        pendingCancel = null
                     }
                 ) {
                     Text("Open Google Play", color = PrimaryAccent)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { pendingCancelId = null }) {
+                TextButton(onClick = { pendingCancel = null }) {
                     Text("Not Now", color = TextSecondary)
                 }
             },
@@ -273,7 +277,7 @@ private fun SubscriberRow(sub: Subscriber) {
 private fun SubscriptionsSection(
     subscriptions: List<SubscriptionMade>,
     onTogglePush: (Int, Boolean) -> Unit,
-    onCancel: (Int) -> Unit,
+    onCancel: (SubscriptionMade) -> Unit,
     onOpenPortfolio: (String) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -291,7 +295,7 @@ private fun SubscriptionsSection(
                     SubscriptionCard(
                         subscription = sub,
                         onTogglePush = { onTogglePush(sub.id, it) },
-                        onCancel = { onCancel(sub.id) },
+                        onCancel = { onCancel(sub) },
                         onOpenPortfolio = onOpenPortfolio,
                     )
                 }
@@ -345,6 +349,18 @@ private fun SubscriptionCard(
                         text = subscription.status.replaceFirstChar { it.uppercase() },
                         color = if (subscription.status == "active") Gains else TextSecondary,
                     )
+                    subscription.slotLabel?.let { label ->
+                        Text(
+                            text = "Subscription $label",
+                            color = TextMuted,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(CardBorder.copy(alpha = 0.3f))
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
                     subscription.expiresAt?.let { exp ->
                         Text(
                             text = "Renews ${formatShortDate(exp)}",

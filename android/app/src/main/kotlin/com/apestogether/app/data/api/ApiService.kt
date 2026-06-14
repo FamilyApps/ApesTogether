@@ -20,6 +20,7 @@ import com.apestogether.app.data.models.SetScaleRequest
 import com.apestogether.app.data.models.SetScaleResponse
 import com.apestogether.app.data.models.UpdatePortfolioPreferencesRequest
 import com.apestogether.app.data.models.StockPriceResponse
+import com.apestogether.app.data.models.SubscriptionSlotResponse
 import com.apestogether.app.data.models.SubscriptionsResponse
 import com.apestogether.app.data.models.TaxStatusResponse
 import com.apestogether.app.data.models.TopInfluencersResponse
@@ -104,6 +105,17 @@ interface ApiService {
     // ── Subscriptions / IAP ──────────────────────────────────────────────
     @GET("subscriptions")
     suspend fun getSubscriptions(): SubscriptionsResponse
+
+    /**
+     * Resolve which generic store "slot" product to purchase to subscribe to
+     * [subscribedToId]. The backend maps slots to creators per-user (the store
+     * only knows "Subscription A/B/..."). Always returns HTTP 200; on no-go the
+     * body carries `error` = "max_reached" / "already_subscribed".
+     */
+    @GET("subscriptions/slot-for-creator")
+    suspend fun getSubscriptionSlot(
+        @Query("subscribed_to_id") subscribedToId: Int,
+    ): SubscriptionSlotResponse
 
     @POST("purchase/validate")
     suspend fun validatePurchase(@Body request: PurchaseValidationRequest): PurchaseValidationResponse
