@@ -60,6 +60,28 @@ Five issues reported after Wolff's rebalance + a Public alert for a BRK.B buy. R
 
 ---
 
+## 💳 Subscription Lifecycle & Billing — opened Session 14 (2026-06-14)
+
+Cohesive cluster opened after a code audit of the cancel / trial / billing path (triggered by USER questions: “is cancel fully wired?”, “is the trial-end reminder wired?”). Findings + the work they spawned. Recommended order at the bottom.
+
+- [x] **CTA copy standardized across both apps (Session 14).** All subscribe buttons now read **“Try Free for 7 Days, then $69/yr”** (annual) / **“…then $X/mo”** (monthly), toggle-aware. Research-backed (front-loads “Free”; keeps price on the button = Apple 3.1.2 disclosure). Changes: iOS `PortfolioDetailView.swift` below-chart button (`:104-106`) + bottom locked-overlay button (was “Start Free Trial”, `:1299-1301`); Android `PortfolioDetailScreen.kt` (`:750-751`). Removed the redundant grey **“7-day free trial, then $69/year ($5.75/mo)”** subtext from the iOS overlay (the button now carries the price; Terms/Privacy links remain — the grey “Cancel anytime…” subtext was later removed too; see the trial-end reminder item). iOS + Android **leaderboard** buttons already matched. **Ships on the next iOS archive / Android build. NOT yet committed.**
+
+- [x] **In-app cancel now routes to the store — DONE (Session 14, client; uncommitted).** iOS: `SubscriptionManager.openManageSubscriptions()` (StoreKit 2 `AppStore.showManageSubscriptions(in:)`) is called from the cancel alert. Android: opens `https://play.google.com/store/account/subscriptions?package=<pkg>` after the local unsubscribe. Both alerts reworded to explain billing stops in the store. The local `/unsubscribe` (`mobile_api.py:607`) still flips `MobileSubscription.status='canceled'` to drop the in-app follow + alerts immediately. *(Original finding: in-app “Cancel” only marked our DB canceled and never took the user to the store → charge-after-cancel + App Store rejection risk.)*
+
+- [~] **Server-to-server subscription notifications — CODE BUILT (Session 14), external config pending.** New `iap_webhooks.py` + two public routes: `POST /api/mobile/webhooks/apple/notifications` (verifies Apple’s `x5c`-signed JWS, decodes the notification + nested `signedTransactionInfo`, updates the matching InAppPurchase/MobileSubscription by `originalTransactionId`) and `POST /api/mobile/webhooks/google/rtdn` (decodes the Pub/Sub message, re-fetches authoritative state via `validate_google_purchase`, updates by `purchaseToken`). Handlers only UPDATE existing rows (never create); refund/revoke → `expired`. Both files compile. **REMAINING (config, user):** Apple — set the ASSN V2 URL in App Store Connect (prod **and** sandbox) and pin Apple’s root via `APPLE_ROOT_CA_G3_PEM` or `certs/AppleRootCA-G3.cer` (else it falls back to chain-structure + leaf-signature verification with a logged warning). Google — create a Pub/Sub topic, grant the Play system service account Publisher, set it in Play Console → Monetization setup, add a push subscription POSTing to the RTDN URL. Then test via App Store Connect “Request a Test Notification” + Play Console “Send test notification”. *(Original gap: backend only learned of renew/cancel/expire/refund when the client next called `POST /purchase/validate`.)*
+
+- [x] **Trial-end reminder — RESOLVED by removing the promise (Session 14).** Decided NOT to build a reminder. Research finding: **Apple does not send a pre-conversion (“trial ending”) notice in the US** — only a sign-up receipt (renewal date + price) and price-increase notices; dedicated trial reminders are driven by non-US consumer-protection law. Apple’s omission is conversion-friendly, and we want conversions too. So we **removed the grey “Cancel anytime…” subtext** from the iOS overlay (`PortfolioDetailView.swift`) and confirmed no other surface promises a reminder (web `public_portfolio.html` only says “Cancel anytime”, which is accurate and stays). The button’s price/trial disclosure + Terms/Privacy links keep us Apple-3.1.2 compliant. *(A server-side reminder via `push_notification_service.py` remains a future option if conversion testing ever favors it.)*
+
+- [ ] **(MED) Cancel-path testing (no real payments).** **iOS:** use the new `Configuration.storekit` + Xcode **Debug ▸ StoreKit ▸ Manage Transactions** to simulate cancel / refund / expire / renew, then reopen the app → confirm `/purchase/validate` flips the status + access gating; Sandbox subs also auto-renew fast and auto-cancel after ~6 renewals. **Android:** license tester cancels via **Play ▸ Subscriptions**, reopen the app to re-validate. *(Observed Session 14: Google test subs renewed several times then auto-canceled with emails — expected Play license-test behavior, not a bug.)* Confirm `MobileSubscription.status` + that access is actually revoked in both apps.
+
+- [x] **Accounting/payout test harness — DONE (Session 14, uncommitted).** New `POST /admin/bot/simulate-subscription-lifecycle` (`@require_admin_2fa`, DRY-RUN, **no DB writes / no Xero sync**): (1) walks one sub through PURCHASED → RENEWED → CANCELED → EXPIRED → REFUND and shows, at each step, whether it’s still payable + the payout breakdown using the SAME `XeroPayoutRecord.calculate_totals()` math and the same `status=='active'` rule as `generate-payout-records`; (2) read-only live count of current active subs per creator → what this period’s payouts WOULD be (company bots = $0), with grand totals; (3) optional `include_xero:true` → `get_xero_status()`. Body: `{ "base_active_subs": 0, "include_xero": false }`. **Note surfaced:** flipping a sub to `canceled` immediately drops it from the payable count (matches the active-only query). (Actual Xero money-movement still needs sandbox→prod transactions — overlaps Section F “E2E paid subscription flow”.)
+
+- [x] **Bot username pool — CONFIRMED expanded + wired (Session 14).** `bot_personas.generate_username()` produces **5 styles** — CamelCase compounds (e.g. `CoastHillBear`), lowercase-fused, short handles, real-ish names, letters+number — for **~1M+** unique combinations, no underscores/corporate suffixes. Wired into creation via `generate_bot_batch` → `bot_agent.py:133/135` + admin `POST /admin/bot/batch-seed` (`mobile_api.py:8094`) and `/admin/bot/auto-create-run` (`:8386`). **Existing bots keep their pre-expansion names** — generate a fresh batch to see the variety.
+
+**Status (Session 14):** CTA copy, in-app cancel deep-links + reword, trial-reminder removal, ASSN V2 + RTDN endpoint *code*, and the accounting/payout test harness are all DONE (uncommitted). **Remaining:** commit the client + backend changes → next iOS archive / Android build; do the store-side config for ASSN V2 + RTDN (App Store Connect URL + root-cert pin; Play Console RTDN topic + Pub/Sub push); then USER runs the on-device cancel-path tests.
+
+---
+
 ## ⏰ Monday market-open checklist (next trading day)
 
 Things to verify when the market is open and the bot pipeline is running. Hit each URL and report back.
@@ -231,7 +253,7 @@ Things to verify when the market is open and the bot pipeline is running. Hit ea
 - [ ] End-to-end W-9 flow via Xero 1099 contractor group with a real paid subscriber
 - [ ] Push notification delivery on both iOS + Android once FCM is live
 - [ ] Chart rendering on every current bot portfolio, every period — no spikes, no empty periods where bots are old enough
-- [ ] Stripe webhook handling on subscription cancellation / refund edge cases
+- [ ] ~~Stripe webhook handling on subscription cancellation / refund edge cases~~ — **Stripe is disabled (`app.py:734`); cancel/refund/renewal edge cases now belong to Apple ASSN V2 + Google RTDN.** Tracked in the **💳 Subscription Lifecycle & Billing** section (incl. the in-app cancel deep-link path).
 
 ## G. Marketing / Launch Calendar
 
@@ -299,6 +321,10 @@ At the end of each session, the assistant should:
 ---
 
 ## Last updated
+
+**2026-06-14 — session 14 ended with:**
+- **Shipped Mac-side (commit `d5c8510`, build `1.0 (40)`):** the i1/i2/i3 fixes (holdings auto-refresh, iOS leaderboard `authenticated:true`, iOS renewal-date UTC parser) archived + uploaded. i2/i3 verified on-device; **i1 still pending** the next Wolff rebalance to confirm.
+- **Subscription/billing audit (new `💳 Subscription Lifecycle & Billing` section):** standardized the CTA copy to “Try Free for 7 Days, then $X” on both apps + removed the redundant grey trial subtext (done, uncommitted). Found four open items — in-app cancel doesn’t cancel at the store / no deep-link; no Apple ASSN V2 or Google RTDN handlers; the “we’ll remind you before the trial ends” promise is unimplemented; cancel-path + accounting test harnesses to add. Confirmed the expanded bot-username generator is live + wired.
 
 **2026-06-01 — session 8 ended with:**
 - **iOS Buy/Sell sheet polish (#5/#6)** shipped (`9d5463c`, `038f37a`): lighter inputs, "Quantity" label, swipe-down + close affordances, green Buy button, banknote/cart icons, fixed Sell top cut-off.

@@ -1,5 +1,7 @@
 package com.apestogether.app.ui.screens.subscriptions
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -48,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -159,12 +162,13 @@ fun SubscriptionsScreen(
     }
 
     pendingCancelId?.let { id ->
+        val context = LocalContext.current
         AlertDialog(
             onDismissRequest = { pendingCancelId = null },
             title = { Text("Cancel Subscription", color = TextPrimary) },
             text = {
                 Text(
-                    "You'll lose access to this trader's portfolio and trade alerts. You can resubscribe anytime.",
+                    "You'll lose access to this trader's portfolio and trade alerts. To stop future billing, you'll also need to cancel in your Google Play subscriptions.",
                     color = TextSecondary,
                 )
             },
@@ -172,6 +176,16 @@ fun SubscriptionsScreen(
                 TextButton(
                     onClick = {
                         viewModel.cancel(id)
+                        runCatching {
+                            context.startActivity(
+                                Intent(
+                                    Intent.ACTION_VIEW,
+                                    Uri.parse(
+                                        "https://play.google.com/store/account/subscriptions?package=${context.packageName}"
+                                    ),
+                                )
+                            )
+                        }
                         pendingCancelId = null
                     }
                 ) {

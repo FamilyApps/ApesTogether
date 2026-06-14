@@ -632,6 +632,62 @@ def unsubscribe(subscription_id):
 
 
 # =============================================================================
+# Store Server-to-Server Notifications (no auth — verified per-platform)
+# =============================================================================
+
+@mobile_api.route('/webhooks/apple/notifications', methods=['POST'])
+def apple_server_notifications():
+    """Apple App Store Server Notifications V2.
+
+    Receives {"signedPayload": "<JWS>"}, verifies Apple's signature, and updates
+    the matching subscription on renew / expire / refund / revoke events.
+    """
+    from models import db
+    from iap_webhooks import handle_apple_notification
+
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+        signed_payload = data.get('signedPayload')
+        if not signed_payload:
+            return jsonify({'error': 'missing_signed_payload'}), 400
+
+        result = handle_apple_notification(db, signed_payload)
+        logger.info(f"[ASSN] {result}")
+        return jsonify({'success': True}), 200
+
+    except ValueError as e:
+        # Signature/verification failure — do not retry.
+        logger.warning(f"[ASSN] verification failed: {e}")
+        return jsonify({'error': 'invalid_signature'}), 400
+    except Exception as e:
+        # Transient/internal error — non-2xx so Apple retries with backoff.
+        logger.error(f"[ASSN] error: {e}")
+        return jsonify({'error': 'internal_error'}), 500
+
+
+@mobile_api.route('/webhooks/google/rtdn', methods=['POST'])
+def google_rtdn_notifications():
+    """Google Play Real-time Developer Notifications (Cloud Pub/Sub push).
+
+    Decodes the Pub/Sub message and re-fetches authoritative state from the
+    Play Developer API before updating the matching subscription.
+    """
+    from models import db
+    from iap_webhooks import handle_google_rtdn
+
+    try:
+        body = request.get_json(force=True, silent=True) or {}
+        result = handle_google_rtdn(db, body)
+        logger.info(f"[RTDN] {result}")
+        # 200 on handled messages so Pub/Sub doesn't redeliver indefinitely.
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        # Non-2xx lets Pub/Sub retry transient failures (then dead-letter).
+        logger.error(f"[RTDN] error: {e}")
+        return jsonify({'error': 'internal_error'}), 500
+
+
+# =============================================================================
 # Portfolio Endpoints
 # =============================================================================
 
@@ -7350,6 +7406,135 @@ def bot_revenue_summary():
     except Exception as e:
         logger.error(f"Revenue summary error: {e}")
         return jsonify({'error': 'revenue_summary_failed'}), 500
+
+
+@mobile_api.route('/admin/bot/simulate-subscription-lifecycle', methods=['POST'])
+@require_admin_2fa
+@with_db_retry
+def bot_simulate_subscription_lifecycle():
+    """
+    Accounting / payout test harness — NO real payments, NO DB writes, NO Xero sync.
+
+    Lets us validate the money math end-to-end without a live transaction:
+
+    1) lifecycle_simulation — walks ONE subscription through
+       PURCHASED -> RENEWED -> CANCELED -> EXPIRED -> REFUND and, at each step,
+       reports whether it still counts as a payable active subscriber and the
+       resulting payout breakdown. Uses the SAME XeroPayoutRecord.calculate_totals()
+       math + the SAME "status == 'active'" rule that generate-payout-records uses.
+
+    2) live_dry_run — read-only. Counts current active MobileSubscriptions per
+       creator (the exact query generate-payout-records runs), computes what this
+       period's payouts WOULD be (company bots get $0), and totals them. Nothing
+       is written.
+
+    Body (all optional):
+      { "base_active_subs": 0, "include_xero": false }
+    """
+    from models import User, AdminSubscription, XeroPayoutRecord, MobileSubscription
+    from sqlalchemy import func
+
+    data = request.get_json(silent=True) or {}
+    base_active_subs = int(data.get('base_active_subs', 0))
+    include_xero = bool(data.get('include_xero', False))
+
+    def payout_for(real_subs, gifted_subs=0):
+        # Transient (never added to the session) — pure calculation only.
+        rec = XeroPayoutRecord(
+            portfolio_user_id=0,
+            period_start=date.today(), period_end=date.today(),
+            real_subscriber_count=real_subs, bonus_subscriber_count=gifted_subs,
+        )
+        rec.calculate_totals()
+        return {
+            'real_subs': real_subs,
+            'gifted_subs': gifted_subs,
+            'gross_revenue': round(rec.gross_revenue, 2),
+            'store_fees': round(rec.store_fees, 2),
+            'platform_revenue': round(rec.platform_revenue, 2),
+            'influencer_payout': round(rec.influencer_payout, 2),
+            'bonus_payout': round(rec.bonus_payout, 2),
+        }
+
+    # 1) Lifecycle simulation — only status == 'active' is payable (matches the
+    #    generate-payout-records query). Cancel/expire/refund drop it from payout.
+    steps = [
+        ('PURCHASED (trial started / active)', 'active'),
+        ('DID_RENEW (renewed for another period)', 'active'),
+        ('CANCELED (auto-renew turned off)', 'canceled'),
+        ('EXPIRED (paid period ended)', 'expired'),
+        ('REFUND / REVOKE (money returned)', 'refunded'),
+    ]
+    lifecycle = []
+    for label, status in steps:
+        counts = (status == 'active')
+        lifecycle.append({
+            'event': label,
+            'subscription_status': status,
+            'counts_as_payable': counts,
+            'creator_payout_this_state': payout_for(base_active_subs + (1 if counts else 0)),
+        })
+
+    # 2) Live dry-run — current active counts per creator (read-only).
+    live = []
+    grand = {'real_subs': 0, 'gross_revenue': 0.0, 'store_fees': 0.0,
+             'platform_revenue': 0.0, 'influencer_payout_owed': 0.0}
+    try:
+        rows = db.session.query(
+            MobileSubscription.subscribed_to_id, func.count(MobileSubscription.id)
+        ).filter_by(status='active').group_by(
+            MobileSubscription.subscribed_to_id
+        ).all()
+        for uid, cnt in rows:
+            user = User.query.get(uid)
+            is_bot = bool(user and getattr(user, 'role', None) == 'agent')
+            p = payout_for(cnt)
+            # Company bots get no payout — the company keeps post-store revenue.
+            owed = 0.0 if is_bot else p['influencer_payout']
+            live.append({
+                'creator_id': uid,
+                'username': user.username if user else None,
+                'is_company_bot': is_bot,
+                'active_subs': cnt,
+                'gross_revenue': p['gross_revenue'],
+                'store_fees': p['store_fees'],
+                'platform_revenue': p['platform_revenue'],
+                'influencer_payout_owed': owed,
+            })
+            grand['real_subs'] += cnt
+            grand['gross_revenue'] += p['gross_revenue']
+            grand['store_fees'] += p['store_fees']
+            grand['platform_revenue'] += p['platform_revenue']
+            grand['influencer_payout_owed'] += owed
+    except Exception as e:
+        logger.warning(f"[harness] live dry-run query failed: {e}")
+
+    grand = {k: round(v, 2) for k, v in grand.items()}
+
+    result = {
+        'dry_run': True,
+        'note': 'No DB rows written, no Xero sync. Pure calculation + read-only counts.',
+        'per_sub_economics': {
+            'price': AdminSubscription.SUBSCRIPTION_PRICE,
+            'store_fee': AdminSubscription.STORE_FEE_PER_SUB,
+            'platform_cut': AdminSubscription.PLATFORM_CUT_PER_SUB,
+            'influencer_payout': AdminSubscription.INFLUENCER_PAYOUT_PER_SUB,
+        },
+        'lifecycle_simulation': lifecycle,
+        'live_dry_run': {
+            'creators_with_active_subs': sorted(live, key=lambda x: x['active_subs'], reverse=True),
+            'grand_totals': grand,
+        },
+    }
+
+    if include_xero:
+        try:
+            from xero_service import get_xero_status
+            result['xero_status'] = get_xero_status()
+        except Exception as e:
+            result['xero_status'] = {'error': str(e)}
+
+    return jsonify(result)
 
 
 @mobile_api.route('/admin/bot/generate-payout-records', methods=['POST'])

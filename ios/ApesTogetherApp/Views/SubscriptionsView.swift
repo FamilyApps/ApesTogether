@@ -4,6 +4,7 @@ import UserNotifications
 
 struct SubscriptionsView: View {
     @StateObject private var viewModel = SubscriptionsViewModel()
+    @EnvironmentObject var subscriptionManager: SubscriptionManager
     @State private var showSettings = false
     @Environment(\.scenePhase) private var scenePhase
 
@@ -56,11 +57,14 @@ struct SubscriptionsView: View {
                 Button("Keep Subscription", role: .cancel) {}
                 Button("Cancel", role: .destructive) {
                     if let id = viewModel.pendingCancelId {
-                        Task { await viewModel.cancelSubscription(id: id) }
+                        Task {
+                            await viewModel.cancelSubscription(id: id)
+                            await subscriptionManager.openManageSubscriptions()
+                        }
                     }
                 }
             } message: {
-                Text("You'll lose access to this trader's portfolio and trade alerts. You can resubscribe anytime.")
+                Text("You'll lose access to this trader's portfolio and trade alerts. To stop future billing, you'll also need to cancel in your App Store subscriptions.")
             }
             .onAppear {
                 // Clear the iOS home-screen badge each time the user opens

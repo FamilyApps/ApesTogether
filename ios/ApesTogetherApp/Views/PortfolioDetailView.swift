@@ -102,8 +102,8 @@ struct PortfolioDetailView: View {
                                             Image(systemName: "crown.fill")
                                                 .font(.system(size: 13))
                                             Text(subscriptionManager.selectedPlan == .annual
-                                                 ? "Try 7 Days Free, then $69/yr"
-                                                 : "Try 7 Days Free, then $\(String(format: "%.0f", portfolio.subscriptionPrice))/mo")
+                                                 ? "Try Free for 7 Days, then $69/yr"
+                                                 : "Try Free for 7 Days, then $\(String(format: "%.0f", portfolio.subscriptionPrice))/mo")
                                                 .font(.system(size: 14, weight: .bold))
                                         }
                                         .frame(maxWidth: .infinity)
@@ -1296,7 +1296,9 @@ struct BlurredHoldingsTeaser: View {
                     HStack(spacing: 6) {
                         Image(systemName: "crown.fill")
                             .font(.system(size: 13))
-                        Text("Start Free Trial")
+                        Text(subscriptionManager.selectedPlan == .annual
+                             ? "Try Free for 7 Days, then $69/yr"
+                             : "Try Free for 7 Days, then $9/mo")
                             .font(.system(size: 16, weight: .bold))
                     }
                     .foregroundColor(.white)
@@ -1307,25 +1309,6 @@ struct BlurredHoldingsTeaser: View {
                 }
                 .disabled(subscriptionManager.isProcessing)
                 .padding(.horizontal, 16)
-                
-                // Price disclosure (Apple requirement: total amount most prominent)
-                Group {
-                    if subscriptionManager.selectedPlan == .annual {
-                        Text("7-day free trial, then $69/year ($5.75/mo)")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.textSecondary)
-                    } else {
-                        Text("7-day free trial, then $9/month")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.textSecondary)
-                    }
-                }
-                
-                Text("Cancel anytime — we'll remind you before the trial ends")
-                    .font(.system(size: 10))
-                    .foregroundColor(.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.top, 2)
                 
                 // Legal links
                 HStack(spacing: 12) {

@@ -1,6 +1,7 @@
 import SwiftUI
 import Combine
 import StoreKit
+import UIKit
 
 @MainActor
 class SubscriptionManager: ObservableObject {
@@ -165,6 +166,19 @@ class SubscriptionManager: ObservableObject {
         }
         
         isProcessing = false
+    }
+
+    /// Opens the system "Manage Subscriptions" sheet so the user can actually
+    /// stop billing. Apps cannot cancel auto-renewable subscriptions
+    /// programmatically — only the user can, via the App Store.
+    func openManageSubscriptions() async {
+        guard let scene = UIApplication.shared.connectedScenes
+            .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene else { return }
+        do {
+            try await AppStore.showManageSubscriptions(in: scene)
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 }
 

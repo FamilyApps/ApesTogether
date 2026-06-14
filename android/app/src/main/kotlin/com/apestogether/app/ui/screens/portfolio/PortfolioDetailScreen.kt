@@ -747,8 +747,8 @@ private fun SubscribeAndShareRow(
     val context = LocalContext.current
     val processing = subscribeState is SubscribeUiState.Processing
     val ctaText = when (selectedPlan) {
-        SubscriptionPlan.Annual -> "Try 7 Days Free, then $69/yr"
-        SubscriptionPlan.Monthly -> "Try 7 Days Free, then $${subscriptionPrice.toInt()}/mo"
+        SubscriptionPlan.Annual -> "Try Free for 7 Days, then $69/yr"
+        SubscriptionPlan.Monthly -> "Try Free for 7 Days, then $${subscriptionPrice.toInt()}/mo"
     }
 
     Row(
