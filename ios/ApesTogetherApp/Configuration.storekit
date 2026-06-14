@@ -1,92 +1,973 @@
 {
-  "identifier" : "D8A3B5E2-4F1C-4D9A-8E7B-1A2C3D4E5F6G",
-  "type" : "Configuration",
-  "version" : 3,
-  "localizations" : [
-
-  ],
-  "settings" : {
-    "_applicationInternalID" : "6504619234",
-    "_developerTeamID" : "5437W495L9",
-    "_locale" : "en_US",
-    "_storeCountryCode" : "USA",
-    "_storeKitErrors" : [
+  "identifier": "D8A3B5E2-4F1C-4D9A-8E7B-1A2C3D4E5F6G",
+  "type": "Configuration",
+  "version": 3,
+  "localizations": [],
+  "settings": {
+    "_applicationInternalID": "6504619234",
+    "_developerTeamID": "5437W495L9",
+    "_locale": "en_US",
+    "_storeCountryCode": "USA",
+    "_storeKitErrors": [
       {
-        "current" : null,
-        "enabled" : false,
-        "name" : "Load Products"
+        "current": null,
+        "enabled": false,
+        "name": "Load Products"
       }
     ]
   },
-  "subscriptionGroups" : [
+  "subscriptionGroups": [
     {
-      "id" : "21586488",
-      "localizations" : [
-
-      ],
-      "name" : "Apes Together Premium",
-      "subscriptions" : [
+      "id": "21586488",
+      "localizations": [],
+      "name": "Apes Together Premium",
+      "subscriptions": [
         {
-          "adHocOffers" : [
-
-          ],
-          "codeOffers" : [
-
-          ],
-          "displayPrice" : "69.00",
-          "familyShareable" : false,
-          "groupNumber" : 1,
-          "internalID" : "6742894372",
-          "introductoryOffer" : {
-            "displayPrice" : "0",
-            "internalID" : "FREE_TRIAL_7D_ANNUAL",
-            "numberOfPeriods" : 1,
-            "paymentMode" : "free",
-            "subscriptionPeriod" : "P1W"
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "69.00",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "6742894372",
+          "introductoryOffer": {
+            "displayPrice": "0",
+            "internalID": "FREE_TRIAL_7D_ANNUAL",
+            "numberOfPeriods": 1,
+            "paymentMode": "free",
+            "subscriptionPeriod": "P1W"
           },
-          "localizations" : [
+          "localizations": [
             {
-              "description" : "Follow a trader's moves in real-time — best value",
-              "displayName" : "Annual Subscription",
-              "locale" : "en_US"
+              "description": "Follow a trader's moves in real-time \u2014 best value",
+              "displayName": "Annual Subscription",
+              "locale": "en_US"
             }
           ],
-          "productID" : "com.apestogether.subscription.annual",
-          "recurringSubscriptionPeriod" : "P1Y",
-          "referenceName" : "Annual - $69",
-          "subscriptionGroupID" : "21586488",
-          "type" : "RecurringSubscription"
+          "productID": "com.apestogether.subscription.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Annual - $69",
+          "subscriptionGroupID": "21586488",
+          "type": "RecurringSubscription"
         },
         {
-          "adHocOffers" : [
-
-          ],
-          "codeOffers" : [
-
-          ],
-          "displayPrice" : "9.00",
-          "familyShareable" : false,
-          "groupNumber" : 2,
-          "internalID" : "6742894371",
-          "introductoryOffer" : {
-            "displayPrice" : "0",
-            "internalID" : "FREE_TRIAL_7D",
-            "numberOfPeriods" : 1,
-            "paymentMode" : "free",
-            "subscriptionPeriod" : "P1W"
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "9.00",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "6742894371",
+          "introductoryOffer": {
+            "displayPrice": "0",
+            "internalID": "FREE_TRIAL_7D",
+            "numberOfPeriods": 1,
+            "paymentMode": "free",
+            "subscriptionPeriod": "P1W"
           },
-          "localizations" : [
+          "localizations": [
             {
-              "description" : "Follow a trader's moves in real-time",
-              "displayName" : "Monthly Subscription",
-              "locale" : "en_US"
+              "description": "Follow a trader's moves in real-time",
+              "displayName": "Monthly Subscription",
+              "locale": "en_US"
             }
           ],
-          "productID" : "com.apestogether.subscription.monthly",
-          "recurringSubscriptionPeriod" : "P1M",
-          "referenceName" : "Monthly - $9",
-          "subscriptionGroupID" : "21586488",
-          "type" : "RecurringSubscription"
+          "productID": "com.apestogether.subscription.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Monthly - $9",
+          "subscriptionGroupID": "21586488",
+          "type": "RecurringSubscription"
+        }
+      ]
+    },
+    {
+      "id": "21000002",
+      "localizations": [],
+      "name": "Trader Subscription B",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "69.00",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "22000002",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time \u2014 best value",
+              "displayName": "Annual Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s02.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Slot B Annual - $69",
+          "subscriptionGroupID": "21000002",
+          "type": "RecurringSubscription"
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "9.00",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "23000002",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time",
+              "displayName": "Monthly Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s02.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Slot B Monthly - $9",
+          "subscriptionGroupID": "21000002",
+          "type": "RecurringSubscription"
+        }
+      ]
+    },
+    {
+      "id": "21000003",
+      "localizations": [],
+      "name": "Trader Subscription C",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "69.00",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "22000003",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time \u2014 best value",
+              "displayName": "Annual Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s03.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Slot C Annual - $69",
+          "subscriptionGroupID": "21000003",
+          "type": "RecurringSubscription"
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "9.00",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "23000003",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time",
+              "displayName": "Monthly Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s03.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Slot C Monthly - $9",
+          "subscriptionGroupID": "21000003",
+          "type": "RecurringSubscription"
+        }
+      ]
+    },
+    {
+      "id": "21000004",
+      "localizations": [],
+      "name": "Trader Subscription D",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "69.00",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "22000004",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time \u2014 best value",
+              "displayName": "Annual Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s04.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Slot D Annual - $69",
+          "subscriptionGroupID": "21000004",
+          "type": "RecurringSubscription"
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "9.00",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "23000004",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time",
+              "displayName": "Monthly Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s04.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Slot D Monthly - $9",
+          "subscriptionGroupID": "21000004",
+          "type": "RecurringSubscription"
+        }
+      ]
+    },
+    {
+      "id": "21000005",
+      "localizations": [],
+      "name": "Trader Subscription E",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "69.00",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "22000005",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time \u2014 best value",
+              "displayName": "Annual Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s05.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Slot E Annual - $69",
+          "subscriptionGroupID": "21000005",
+          "type": "RecurringSubscription"
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "9.00",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "23000005",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time",
+              "displayName": "Monthly Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s05.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Slot E Monthly - $9",
+          "subscriptionGroupID": "21000005",
+          "type": "RecurringSubscription"
+        }
+      ]
+    },
+    {
+      "id": "21000006",
+      "localizations": [],
+      "name": "Trader Subscription F",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "69.00",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "22000006",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time \u2014 best value",
+              "displayName": "Annual Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s06.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Slot F Annual - $69",
+          "subscriptionGroupID": "21000006",
+          "type": "RecurringSubscription"
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "9.00",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "23000006",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time",
+              "displayName": "Monthly Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s06.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Slot F Monthly - $9",
+          "subscriptionGroupID": "21000006",
+          "type": "RecurringSubscription"
+        }
+      ]
+    },
+    {
+      "id": "21000007",
+      "localizations": [],
+      "name": "Trader Subscription G",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "69.00",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "22000007",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time \u2014 best value",
+              "displayName": "Annual Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s07.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Slot G Annual - $69",
+          "subscriptionGroupID": "21000007",
+          "type": "RecurringSubscription"
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "9.00",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "23000007",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time",
+              "displayName": "Monthly Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s07.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Slot G Monthly - $9",
+          "subscriptionGroupID": "21000007",
+          "type": "RecurringSubscription"
+        }
+      ]
+    },
+    {
+      "id": "21000008",
+      "localizations": [],
+      "name": "Trader Subscription H",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "69.00",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "22000008",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time \u2014 best value",
+              "displayName": "Annual Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s08.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Slot H Annual - $69",
+          "subscriptionGroupID": "21000008",
+          "type": "RecurringSubscription"
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "9.00",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "23000008",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time",
+              "displayName": "Monthly Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s08.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Slot H Monthly - $9",
+          "subscriptionGroupID": "21000008",
+          "type": "RecurringSubscription"
+        }
+      ]
+    },
+    {
+      "id": "21000009",
+      "localizations": [],
+      "name": "Trader Subscription I",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "69.00",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "22000009",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time \u2014 best value",
+              "displayName": "Annual Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s09.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Slot I Annual - $69",
+          "subscriptionGroupID": "21000009",
+          "type": "RecurringSubscription"
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "9.00",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "23000009",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time",
+              "displayName": "Monthly Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s09.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Slot I Monthly - $9",
+          "subscriptionGroupID": "21000009",
+          "type": "RecurringSubscription"
+        }
+      ]
+    },
+    {
+      "id": "21000010",
+      "localizations": [],
+      "name": "Trader Subscription J",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "69.00",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "22000010",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time \u2014 best value",
+              "displayName": "Annual Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s10.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Slot J Annual - $69",
+          "subscriptionGroupID": "21000010",
+          "type": "RecurringSubscription"
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "9.00",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "23000010",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time",
+              "displayName": "Monthly Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s10.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Slot J Monthly - $9",
+          "subscriptionGroupID": "21000010",
+          "type": "RecurringSubscription"
+        }
+      ]
+    },
+    {
+      "id": "21000011",
+      "localizations": [],
+      "name": "Trader Subscription K",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "69.00",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "22000011",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time \u2014 best value",
+              "displayName": "Annual Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s11.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Slot K Annual - $69",
+          "subscriptionGroupID": "21000011",
+          "type": "RecurringSubscription"
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "9.00",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "23000011",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time",
+              "displayName": "Monthly Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s11.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Slot K Monthly - $9",
+          "subscriptionGroupID": "21000011",
+          "type": "RecurringSubscription"
+        }
+      ]
+    },
+    {
+      "id": "21000012",
+      "localizations": [],
+      "name": "Trader Subscription L",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "69.00",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "22000012",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time \u2014 best value",
+              "displayName": "Annual Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s12.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Slot L Annual - $69",
+          "subscriptionGroupID": "21000012",
+          "type": "RecurringSubscription"
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "9.00",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "23000012",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time",
+              "displayName": "Monthly Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s12.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Slot L Monthly - $9",
+          "subscriptionGroupID": "21000012",
+          "type": "RecurringSubscription"
+        }
+      ]
+    },
+    {
+      "id": "21000013",
+      "localizations": [],
+      "name": "Trader Subscription M",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "69.00",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "22000013",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time \u2014 best value",
+              "displayName": "Annual Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s13.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Slot M Annual - $69",
+          "subscriptionGroupID": "21000013",
+          "type": "RecurringSubscription"
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "9.00",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "23000013",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time",
+              "displayName": "Monthly Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s13.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Slot M Monthly - $9",
+          "subscriptionGroupID": "21000013",
+          "type": "RecurringSubscription"
+        }
+      ]
+    },
+    {
+      "id": "21000014",
+      "localizations": [],
+      "name": "Trader Subscription N",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "69.00",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "22000014",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time \u2014 best value",
+              "displayName": "Annual Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s14.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Slot N Annual - $69",
+          "subscriptionGroupID": "21000014",
+          "type": "RecurringSubscription"
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "9.00",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "23000014",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time",
+              "displayName": "Monthly Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s14.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Slot N Monthly - $9",
+          "subscriptionGroupID": "21000014",
+          "type": "RecurringSubscription"
+        }
+      ]
+    },
+    {
+      "id": "21000015",
+      "localizations": [],
+      "name": "Trader Subscription O",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "69.00",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "22000015",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time \u2014 best value",
+              "displayName": "Annual Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s15.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Slot O Annual - $69",
+          "subscriptionGroupID": "21000015",
+          "type": "RecurringSubscription"
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "9.00",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "23000015",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time",
+              "displayName": "Monthly Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s15.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Slot O Monthly - $9",
+          "subscriptionGroupID": "21000015",
+          "type": "RecurringSubscription"
+        }
+      ]
+    },
+    {
+      "id": "21000016",
+      "localizations": [],
+      "name": "Trader Subscription P",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "69.00",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "22000016",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time \u2014 best value",
+              "displayName": "Annual Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s16.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Slot P Annual - $69",
+          "subscriptionGroupID": "21000016",
+          "type": "RecurringSubscription"
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "9.00",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "23000016",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time",
+              "displayName": "Monthly Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s16.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Slot P Monthly - $9",
+          "subscriptionGroupID": "21000016",
+          "type": "RecurringSubscription"
+        }
+      ]
+    },
+    {
+      "id": "21000017",
+      "localizations": [],
+      "name": "Trader Subscription Q",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "69.00",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "22000017",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time \u2014 best value",
+              "displayName": "Annual Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s17.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Slot Q Annual - $69",
+          "subscriptionGroupID": "21000017",
+          "type": "RecurringSubscription"
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "9.00",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "23000017",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time",
+              "displayName": "Monthly Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s17.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Slot Q Monthly - $9",
+          "subscriptionGroupID": "21000017",
+          "type": "RecurringSubscription"
+        }
+      ]
+    },
+    {
+      "id": "21000018",
+      "localizations": [],
+      "name": "Trader Subscription R",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "69.00",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "22000018",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time \u2014 best value",
+              "displayName": "Annual Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s18.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Slot R Annual - $69",
+          "subscriptionGroupID": "21000018",
+          "type": "RecurringSubscription"
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "9.00",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "23000018",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time",
+              "displayName": "Monthly Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s18.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Slot R Monthly - $9",
+          "subscriptionGroupID": "21000018",
+          "type": "RecurringSubscription"
+        }
+      ]
+    },
+    {
+      "id": "21000019",
+      "localizations": [],
+      "name": "Trader Subscription S",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "69.00",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "22000019",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time \u2014 best value",
+              "displayName": "Annual Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s19.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Slot S Annual - $69",
+          "subscriptionGroupID": "21000019",
+          "type": "RecurringSubscription"
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "9.00",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "23000019",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time",
+              "displayName": "Monthly Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s19.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Slot S Monthly - $9",
+          "subscriptionGroupID": "21000019",
+          "type": "RecurringSubscription"
+        }
+      ]
+    },
+    {
+      "id": "21000020",
+      "localizations": [],
+      "name": "Trader Subscription T",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "69.00",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "22000020",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time \u2014 best value",
+              "displayName": "Annual Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s20.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Slot T Annual - $69",
+          "subscriptionGroupID": "21000020",
+          "type": "RecurringSubscription"
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "9.00",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "23000020",
+          "localizations": [
+            {
+              "description": "Follow a trader's moves in real-time",
+              "displayName": "Monthly Subscription",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.apestogether.subscription.s20.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Slot T Monthly - $9",
+          "subscriptionGroupID": "21000020",
+          "type": "RecurringSubscription"
         }
       ]
     }

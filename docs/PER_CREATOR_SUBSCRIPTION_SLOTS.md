@@ -2,6 +2,22 @@
 
 **Status:** building (Session 15). **Decision:** N=20 concurrent subs/user, **one free trial per user (lifetime)**, uniform pricing.
 
+---
+
+## ✅ What YOU need to do (everything below this section is code reference)
+
+The code is built + committed. These are the only **manual, operator-only** steps, in order:
+
+1. **[✅ DONE] Run the DB migration** `scripts/migrations/2026_06_14_subscription_slot.sql` in the Supabase SQL Editor. ("Success. No rows returned" is the expected result.)
+2. **Confirm the backend deployed.** The slot code is already pushed to `master`; Vercel auto-deploys. Just verify the deploy went green.
+3. **Create the slot products in BOTH stores** (the big one): Slots 2–20, **same price** as Slot 1, **no free trial**. Click-by-click in the **"Store console setup"** section further down. *(Until you do this, a user's FIRST subscription still works — it uses Slot 1's existing products — but a SECOND concurrent subscription will fail with "product not available.")*
+4. **Ship the apps:** archive a new **iOS** build to TestFlight (picks up the client changes); the **Android** build is already on your Pixel — also push it to the Play internal track.
+5. **Test on-device:** subscribe to **two** creators → confirm two independent entries on the store Manage page, the in-app "Subscription A / B" chips match, and canceling one leaves the other active.
+
+*Local testing (optional):* Slots 2–20 are also in `ios/ApesTogetherApp/Configuration.storekit` (regenerate with `python scripts/gen_storekit_slots.py`), so you can exercise the monthly/annual toggle + multi-sub flow in Xcode's local StoreKit environment before creating the real store products.
+
+---
+
 ## Problem
 
 A user can subscribe to many creators, each independently billed and independently
