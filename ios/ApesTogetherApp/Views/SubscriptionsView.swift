@@ -53,18 +53,13 @@ struct SubscriptionsView: View {
             }
             .appNavBar(showSettings: $showSettings)
             .sheet(isPresented: $showSettings) { SettingsView() }
-            .alert("Cancel Subscription", isPresented: $viewModel.showCancelConfirm) {
-                Button("Keep Subscription", role: .cancel) {}
-                Button("Cancel", role: .destructive) {
-                    if let id = viewModel.pendingCancelId {
-                        Task {
-                            await viewModel.cancelSubscription(id: id)
-                            await subscriptionManager.openManageSubscriptions()
-                        }
-                    }
+            .alert("Manage Subscription", isPresented: $viewModel.showCancelConfirm) {
+                Button("Not Now", role: .cancel) {}
+                Button("Manage") {
+                    Task { await subscriptionManager.openManageSubscriptions() }
                 }
             } message: {
-                Text("You'll lose access to this trader's portfolio and trade alerts. To stop future billing, you'll also need to cancel in your App Store subscriptions.")
+                Text("We'll open your App Store subscription settings, where you can cancel. Canceling there stops future billing — you'll keep access until your current billing period ends.")
             }
             .onAppear {
                 // Clear the iOS home-screen badge each time the user opens
@@ -427,13 +422,12 @@ struct SubscriptionCard: View {
                 Rectangle().fill(Color.cardBorder.opacity(0.4)).frame(width: 0.5, height: 20)
                 
                 Button {
-                    viewModel.pendingCancelId = subscription.id
                     viewModel.showCancelConfirm = true
                 } label: {
                     HStack(spacing: 5) {
-                        Image(systemName: "xmark.circle")
+                        Image(systemName: "gearshape")
                             .font(.system(size: 11))
-                        Text("Cancel")
+                        Text("Manage")
                             .font(.system(size: 12, weight: .medium))
                     }
                     .foregroundColor(.textMuted)
@@ -473,7 +467,6 @@ class SubscriptionsViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var error: String?
     @Published var showCancelConfirm = false
-    var pendingCancelId: Int?
     
     func loadAll() async {
         isLoading = true
@@ -521,24 +514,6 @@ class SubscriptionsViewModel: ObservableObject {
         }
     }
     
-    func cancelSubscription(id: Int) async {
-        do {
-            let _ = try await APIService.shared.unsubscribe(subscriptionId: id)
-            // Remove from local list or update status
-            if let index = subscriptions.firstIndex(where: { $0.id == id }) {
-                let updated = subscriptions[index]
-                subscriptions[index] = SubscriptionMade(
-                    id: updated.id,
-                    portfolioOwner: updated.portfolioOwner,
-                    status: "canceled",
-                    expiresAt: updated.expiresAt,
-                    pushNotificationsEnabled: updated.pushNotificationsEnabled
-                )
-            }
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
 }
 
 struct SubscriptionsView_Previews: PreviewProvider {

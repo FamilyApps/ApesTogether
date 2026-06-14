@@ -22,7 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
-import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
@@ -161,21 +161,21 @@ fun SubscriptionsScreen(
         }
     }
 
-    pendingCancelId?.let { id ->
+    pendingCancelId?.let {
         val context = LocalContext.current
         AlertDialog(
             onDismissRequest = { pendingCancelId = null },
-            title = { Text("Cancel Subscription", color = TextPrimary) },
+            title = { Text("Manage Subscription", color = TextPrimary) },
             text = {
                 Text(
-                    "You'll lose access to this trader's portfolio and trade alerts. To stop future billing, you'll also need to cancel in your Google Play subscriptions.",
+                    "We'll open Google Play, where you can cancel this subscription. " +
+                        "Canceling there stops future billing — you'll keep access until your current billing period ends.",
                     color = TextSecondary,
                 )
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        viewModel.cancel(id)
                         runCatching {
                             context.startActivity(
                                 Intent(
@@ -189,12 +189,12 @@ fun SubscriptionsScreen(
                         pendingCancelId = null
                     }
                 ) {
-                    Text("Cancel", color = PrimaryAccent)
+                    Text("Open Google Play", color = PrimaryAccent)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { pendingCancelId = null }) {
-                    Text("Keep Subscription", color = TextSecondary)
+                    Text("Not Now", color = TextSecondary)
                 }
             },
             containerColor = CardBackground,
@@ -429,12 +429,12 @@ private fun SubscriptionCard(
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Cancel,
+                        imageVector = Icons.Default.Settings,
                         contentDescription = null,
                         tint = TextMuted,
                         modifier = Modifier.size(11.dp),
                     )
-                    Text("Cancel", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    Text("Manage", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 }
             }
         }
@@ -764,18 +764,4 @@ class SubscriptionsViewModel @Inject constructor(
         }
     }
 
-    fun cancel(id: Int) {
-        viewModelScope.launch {
-            runCatching { apiService.unsubscribe(id) }
-            _state.update { current ->
-                if (current is SubsState.Loaded) {
-                    current.copy(
-                        subscriptions = current.subscriptions.map {
-                            if (it.id == id) it.copy(status = "canceled") else it
-                        },
-                    )
-                } else current
-            }
-        }
-    }
 }
