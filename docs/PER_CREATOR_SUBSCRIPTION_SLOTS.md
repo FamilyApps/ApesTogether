@@ -195,6 +195,26 @@ Create every row below. Notes on the columns:
 
 ### App Store Connect (iOS) — 19 new subscription groups
 
+> **What users see on the Manage Subscriptions screen:** iOS lists each active
+> subscription by its **subscription *group* Display Name**, with the per-subscription
+> Display Name shown beneath as the selected plan. A user subscribed to three creators
+> sees:
+>
+> ```
+> Trader Subscription A
+>    Monthly Subscription · $9/mo · Renews …
+> Trader Subscription B
+>    Annual Subscription · $69/yr · Renews …
+> Trader Subscription C
+>    Monthly Subscription · $9/mo · Renews …
+> ```
+>
+> So the **group Display Name** (unique per slot, A..T) is the differentiator; the
+> "Monthly/Annual Subscription" per-subscription name is intentionally **identical**
+> across slots and only tells the user which plan they're on. That's why the group
+> Display Name must match the in-app cancel hint exactly. (Source: subscription
+> groups' localized data drive the Manage-screen appearance.)
+
 Each slot must be its **own subscription group** (Apple allows only one active sub
 per group → separate groups = independently cancelable). For each slot `s02`..`s20`:
 
