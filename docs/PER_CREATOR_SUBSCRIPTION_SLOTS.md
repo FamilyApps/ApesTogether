@@ -132,9 +132,20 @@ Create every row below. Notes on the columns:
   *Reference Name* (internal, never shown to users). In Google Play, use it as the
   product **Name**.
 - **Product ID** — identical on both stores and **must match exactly** (lowercase,
-  zero-padded `sNN`). This is the only field the app depends on.
+  zero-padded `sNN`). This is the only field the app depends on. Enter the **bare
+  ID with no surrounding quotes or backticks** — type
+  `com.apestogether.subscription.s02.monthly`, not the quoted version you may see
+  in this doc or in `subscription_slots.py` (those quotes/backticks are only
+  formatting / Python string delimiters).
 
-Slot 1 (A) already exists — shown only for reference; do **not** recreate it.
+**Slot 1 (A) already exists** — shown only for reference:
+- **Never recreate it or change its Product IDs** (`com.apestogether.subscription.monthly`
+  / `.annual`). Both stores forbid editing a product ID after creation, and the
+  backend keys Slot 1 off those exact legacy IDs (`subscription_slots.py`).
+- **Keep its existing 7-day trial** — that's the one-trial-per-user mechanism.
+- Renaming its group / subscription *Reference Names* to match the A-row above is
+  **optional** (Reference Names are internal-only and editable anytime); it changes
+  nothing functional, so you can leave them as they are.
 
 | Slot | Subscription Group | Reference Name | Product ID | Billing | Price |
 |------|--------------------|----------------|------------|---------|-------|
