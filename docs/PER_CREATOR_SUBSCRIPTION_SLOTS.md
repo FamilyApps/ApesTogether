@@ -128,9 +128,10 @@ Create every row below. Notes on the columns:
 - **Subscription Group** — in App Store Connect, use this string for **both** the
   group's *Reference Name* and its (user-facing) *Display Name*. Google Play has no
   groups; ignore this column there.
-- **Reference Name** — in App Store Connect this is the per-subscription
-  *Reference Name* (internal, never shown to users). In Google Play, use it as the
-  product **Name**.
+- **Reference Name** — App Store Connect only: the per-subscription *Reference Name*
+  (internal, never shown to users). **Google Play has no equivalent** — for Play, set
+  each product's user-facing **Name** to the *Subscription Group* value
+  (`Trader Subscription B`) instead, so it matches the in-app cancel hint.
 - **Product ID** — identical on both stores and **must match exactly** (lowercase,
   zero-padded `sNN`). This is the only field the app depends on. Enter the **bare
   ID with no surrounding quotes or backticks** — type
@@ -143,9 +144,11 @@ Create every row below. Notes on the columns:
   / `.annual`). Both stores forbid editing a product ID after creation, and the
   backend keys Slot 1 off those exact legacy IDs (`subscription_slots.py`).
 - **Keep its existing 7-day trial** — that's the one-trial-per-user mechanism.
-- Renaming its group / subscription *Reference Names* to match the A-row above is
-  **optional** (Reference Names are internal-only and editable anytime); it changes
-  nothing functional, so you can leave them as they are.
+- **Rename its subscription-group Display Name** from `Apes Together Premium` to
+  `Trader Subscription A` so it matches the in-app cancel hint ("cancel the entry
+  labeled *Trader Subscription A*"). Group Display Names are editable anytime and
+  safe to change (unlike Product IDs). The internal *Reference Names* don't matter —
+  align them if you like, but that's optional.
 
 | Slot | Subscription Group | Reference Name | Product ID | Billing | Price |
 |------|--------------------|----------------|------------|---------|-------|
@@ -196,16 +199,21 @@ Each slot must be its **own subscription group** (Apple allows only one active s
 per group → separate groups = independently cancelable). For each slot `s02`..`s20`:
 
 1. App Store Connect → your app → **Monetization ▸ Subscriptions**.
-2. **Subscription Groups → Create** → name it e.g. `Trader Subscription B` (B for
-   s02, C for s03, …). The group **Display Name** is what users see on the Manage
-   page, so keep it generic-but-clear (do NOT put a creator name — the mapping is
-   per-user and lives in-app).
+2. **Subscription Groups → Create** → set both its Reference Name and its
+   user-facing **Display Name** to `Trader Subscription B` (B for s02, C for s03, …).
+   The Display Name is what users see on the Manage page and **must match the in-app
+   cancel hint exactly** ("cancel the entry labeled *Trader Subscription B*"). Do NOT
+   put a creator name — the slot→creator mapping is per-user and lives in-app.
 3. Inside the group, **Create** two subscriptions, using the exact **Reference
    Name** + **Product ID** from the *"Exact products to create"* table above
    (monthly = duration **1 month**, **$9**; annual = duration **1 year**, **$69**).
-4. Add a localized display name ("Monthly Subscription" / "Annual Subscription") +
-   description (copy from Slot 1). *(The Reference Name in step 3 is internal-only;
-   this display name is what users see.)*
+4. Add the localized **Display Name** + **Description** — **identical for every
+   slot**, matching your existing Slot 1 products:
+   - Monthly → Display Name `Monthly Subscription` · Description `Follow a trader's moves in real-time`
+   - Annual → Display Name `Annual Subscription` · Description `Follow a trader's moves in real-time — best value`
+   *(The per-subscription Reference Name from step 3 is internal-only; this Display
+   Name + Description are what users see. They're the same across all slots — the
+   slot letter is carried by the GROUP display name, see step 2.)*
 5. **Do NOT add an Introductory Offer** (no free trial) on any slot ≥ 2.
 6. Submit for review (can be bundled with the next app version or submitted alone).
 
@@ -216,17 +224,25 @@ per group → separate groups = independently cancelable). For each slot `s02`..
 
 ### Google Play — 38 new products
 
-Play has no "group" concept; distinct products are independently cancelable.
+Play has no "group" concept; distinct products are independently cancelable. The
+product's **Name** is what users see on the Play Manage-subscriptions page, so set it
+to the slot's *Subscription Group* value (`Trader Subscription B`) so it matches the
+in-app cancel hint. Both the monthly and annual product of a slot share that same
+Name (a user only ever has one of them active at a time).
+
 Play Console → **Monetize ▸ Products ▸ Subscriptions** → for each `s02`..`s20`:
 
-1. **Create subscription** — use the **Product ID** + **Reference Name** (as the
-   product *Name*) from the *"Exact products to create"* table above, starting with
-   `…sNN.monthly`.
+1. **Create subscription** with the **Product ID** from the table (start with
+   `…sNN.monthly`); set its **Name** to the slot's *Subscription Group* value
+   (e.g. `Trader Subscription B`).
 2. Add a **base plan**: auto-renewing, **1 month**, **$9**, no offer.
-3. Repeat for `…sNN.annual`: auto-renewing, **1 year**, **$69**, **no** free-trial offer.
+3. Repeat for `…sNN.annual`: same **Name** (`Trader Subscription B`), auto-renewing,
+   **1 year**, **$69**, **no** free-trial offer.
 4. **Activate** each.
 
-> Only Slot 1's products keep their existing 7-day free-trial offer.
+> **Slot 1:** rename your existing `…subscription.monthly` / `.annual` products'
+> **Name** to `Trader Subscription A` too (Product IDs stay unchanged). Only Slot 1's
+> products keep their existing 7-day free-trial offer.
 
 ### Don't forget
 - Same Small-Business-Program / tax settings as Slot 1 so the payout math

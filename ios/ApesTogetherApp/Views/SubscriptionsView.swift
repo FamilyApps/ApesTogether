@@ -60,7 +60,7 @@ struct SubscriptionsView: View {
                 }
             } message: {
                 if let label = viewModel.managingSlotLabel {
-                    Text("We'll open your App Store subscription settings. To cancel this one, choose the entry labeled “Subscription \(label).” Canceling stops future billing — you'll keep access until your current billing period ends.")
+                    Text("We'll open your App Store subscription settings. To cancel this one, choose the entry labeled “Trader Subscription \(label).” Canceling stops future billing — you'll keep access until your current billing period ends.")
                 } else {
                     Text("We'll open your App Store subscription settings, where you can cancel. Canceling there stops future billing — you'll keep access until your current billing period ends.")
                 }
@@ -377,7 +377,7 @@ struct SubscriptionCard: View {
                             color: subscription.status == "active" ? .gains : .textSecondary
                         )
                         if let label = subscription.slotLabel {
-                            Text("Subscription \(label)")
+                            Text("Trader Subscription \(label)")
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundColor(.textMuted)
                                 .padding(.horizontal, 6)

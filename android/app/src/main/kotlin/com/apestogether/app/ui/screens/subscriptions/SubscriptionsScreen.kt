@@ -169,7 +169,7 @@ fun SubscriptionsScreen(
             text = {
                 Text(
                     if (sub.slotLabel != null)
-                        "We'll open Google Play. To cancel this one, choose the entry labeled \u201cSubscription ${sub.slotLabel}.\u201d " +
+                        "We'll open Google Play. To cancel this one, choose the entry labeled \u201cTrader Subscription ${sub.slotLabel}.\u201d " +
                             "Canceling there stops future billing — you'll keep access until your current billing period ends."
                     else
                         "We'll open Google Play, where you can cancel this subscription. " +
@@ -351,7 +351,7 @@ private fun SubscriptionCard(
                     )
                     subscription.slotLabel?.let { label ->
                         Text(
-                            text = "Subscription $label",
+                            text = "Trader Subscription $label",
                             color = TextMuted,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Medium,
