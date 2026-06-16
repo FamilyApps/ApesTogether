@@ -271,13 +271,14 @@ Play Console → **Monetize ▸ Products ▸ Subscriptions** → for each `s02`.
 1. **Create subscription** with the **Product ID** from the table (start with
    `…sNN.monthly`); set its **Name** to the slot's *Subscription Group* value
    (e.g. `Trader Subscription B`).
-2. Add a **base plan**: auto-renewing, **1 month**, **$9**, no offer. Base plan IDs
-   allow only lowercase letters, numbers, and hyphens (no periods/underscores) — use
-   `monthly` (and `annual` below). If Play rejects a duplicate, prefix the slot:
-   `s02-monthly`. The code uses the *Product ID*, not the base plan ID, so any valid
-   value works.
-3. Repeat for `…sNN.annual`: same **Name** (`Trader Subscription B`), auto-renewing,
-   **1 year**, **$69**, **no** free-trial offer.
+2. Add a **base plan** → ID **`monthly`**, auto-renewing, **1 month**, **$9**, no
+   offer. (Base plan IDs allow only lowercase letters, numbers, and hyphens — no
+   periods/underscores. They must be unique only *within a subscription*, so reusing
+   `monthly` across every monthly product is fine. The app uses the *Product ID*, not
+   the base plan ID, so the value is purely organizational — but it can't be renamed
+   once activated.)
+3. Repeat for `…sNN.annual`: same **Name** (`Trader Subscription B`), base plan ID
+   **`annual`**, auto-renewing, **1 year**, **$69**, **no** free-trial offer.
 4. **Activate** each.
 
 > **Slot 1:** rename your existing `…subscription.monthly` / `.annual` products'
