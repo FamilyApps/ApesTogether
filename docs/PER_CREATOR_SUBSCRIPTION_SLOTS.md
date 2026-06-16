@@ -202,13 +202,17 @@ Create every row below. Notes on the columns:
 ### App Store Connect (iOS) — 19 new subscription groups
 
 > **⚠️ Already created the iOS slots with the long `…subscription.sNN.*` IDs?**
-> App Store Connect product IDs are **permanent** — you can't edit or delete them.
-> Don't recreate the *groups* (keep `Trader Subscription B`..`T` and Slot 1). For each
-> Slot **B–T**, inside its existing group:
-> 1. **Create a new subscription** using the short ID from the table
->    (`com.apestogether.sub.sNN.monthly` / `.annual`), $9 / $69, no intro offer.
-> 2. **Remove the old long-ID product from sale** (clear its price / "Remove from
->    Sale") so it can never be purchased. It will linger as an unused draft — harmless.
+> A product ID can't be *edited or reused*, but a subscription that's still a **draft
+> (never submitted)** *can be deleted*. Don't touch the *groups* (keep
+> `Trader Subscription B`..`T` and Slot 1). For each Slot **B–T**, inside its group:
+> - **If the long-ID subs are drafts (recommended):** delete the two long-ID subs
+>   (this frees their Reference Names), then **create two new subs** with the short
+>   IDs (`com.apestogether.sub.sNN.monthly` / `.annual`), reusing the same Reference
+>   Names, $9 / $69, same localization, **no intro offer**.
+> - **If one was already submitted/approved (can't delete):** create the short-ID sub
+>   with a *distinct* Reference Name (e.g. `Slot B Monthly v2`) and **remove the old
+>   long-ID one from sale** so it can never be purchased (lingers harmlessly).
+>
 > The short ID is the only one the backend hands the app, so only it can ever sell.
 
 > **What users see on the Manage Subscriptions screen:** iOS lists each active
