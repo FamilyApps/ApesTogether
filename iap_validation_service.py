@@ -75,8 +75,19 @@ class IAPValidationService:
     INFLUENCER_PAYOUT = 6.50
     
     def _get_pricing(self, product_id: str) -> dict:
-        """Get pricing breakdown for a product ID, defaulting to monthly."""
-        return self.PRICING.get(product_id, self.PRICING[self.PRODUCT_ID])
+        """Get pricing breakdown for a product ID.
+
+        Every per-creator slot product (Subscription A..T) is the SAME price as
+        Slot 1, so when an id isn't explicitly listed in PRICING we resolve by its
+        billing-period suffix (.monthly/.annual). Without this, slot annual ids
+        (e.g. com.apestogether.sub.s02.annual) — which aren't PRICING keys — would
+        wrongly fall back to MONTHLY pricing, corrupting price + payout splits.
+        """
+        if product_id in self.PRICING:
+            return self.PRICING[product_id]
+        if product_id and product_id.endswith('.annual'):
+            return self.PRICING[self.ANNUAL_PRODUCT_ID]
+        return self.PRICING[self.PRODUCT_ID]
     
     def __init__(self):
         # Apple credentials
