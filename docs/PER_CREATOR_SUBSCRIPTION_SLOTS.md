@@ -49,9 +49,9 @@ auto-renew).
 | Slot | Label | Monthly product ID | Annual product ID | Trial? |
 |------|-------|--------------------|-------------------|--------|
 | 1 | A | `com.apestogether.subscription.monthly` *(existing)* | `com.apestogether.subscription.annual` *(existing)* | **Yes** |
-| 2 | B | `com.apestogether.subscription.s02.monthly` | `com.apestogether.subscription.s02.annual` | No |
+| 2 | B | `com.apestogether.sub.s02.monthly` | `com.apestogether.sub.s02.annual` | No |
 | … | … | … | … | No |
-| 20 | T | `com.apestogether.subscription.s20.monthly` | `com.apestogether.subscription.s20.annual` | No |
+| 20 | T | `com.apestogether.sub.s20.monthly` | `com.apestogether.sub.s20.annual` | No |
 
 Slot 1 **reuses the existing products** (no client/store churn; they already carry
 the 7-day trial). Source of truth: `subscription_slots.py`.
@@ -120,7 +120,13 @@ product is the **same price** as Slot 1 ($9/mo, $69/yr) and has **no** intro off
 (only Slot 1 keeps its 7-day trial → one trial per user, lifetime).
 
 Product IDs follow `subscription_slots.py` exactly:
-`com.apestogether.subscription.s02.monthly` / `.s02.annual` … through `s20`.
+`com.apestogether.sub.s02.monthly` / `.s02.annual` … through `s20`.
+
+> **Why `sub`, not `subscription`?** Google Play caps product IDs at **40 chars**.
+> `com.apestogether.subscription.s02.monthly` is 41 (rejected); the abbreviated
+> `com.apestogether.sub.s02.monthly` is 32. Slot 1 keeps its existing (longer) legacy
+> IDs — those already exist in both stores and are under 40 (`…subscription.monthly`
+> = 37).
 
 ### Exact products to create (Slots 2–20)
 
@@ -135,7 +141,7 @@ Create every row below. Notes on the columns:
 - **Product ID** — identical on both stores and **must match exactly** (lowercase,
   zero-padded `sNN`). This is the only field the app depends on. Enter the **bare
   ID with no surrounding quotes or backticks** — type
-  `com.apestogether.subscription.s02.monthly`, not the quoted version you may see
+  `com.apestogether.sub.s02.monthly`, not the quoted version you may see
   in this doc or in `subscription_slots.py` (those quotes/backticks are only
   formatting / Python string delimiters).
 
@@ -154,46 +160,56 @@ Create every row below. Notes on the columns:
 |------|--------------------|----------------|------------|---------|-------|
 | A (1) | Trader Subscription A | _(exists)_ Monthly A | `com.apestogether.subscription.monthly` | 1 month | $9 |
 | A (1) | Trader Subscription A | _(exists)_ Annual A | `com.apestogether.subscription.annual` | 1 year | $69 |
-| B (2) | Trader Subscription B | Slot B Monthly | `com.apestogether.subscription.s02.monthly` | 1 month | $9 |
-| B (2) | Trader Subscription B | Slot B Annual | `com.apestogether.subscription.s02.annual` | 1 year | $69 |
-| C (3) | Trader Subscription C | Slot C Monthly | `com.apestogether.subscription.s03.monthly` | 1 month | $9 |
-| C (3) | Trader Subscription C | Slot C Annual | `com.apestogether.subscription.s03.annual` | 1 year | $69 |
-| D (4) | Trader Subscription D | Slot D Monthly | `com.apestogether.subscription.s04.monthly` | 1 month | $9 |
-| D (4) | Trader Subscription D | Slot D Annual | `com.apestogether.subscription.s04.annual` | 1 year | $69 |
-| E (5) | Trader Subscription E | Slot E Monthly | `com.apestogether.subscription.s05.monthly` | 1 month | $9 |
-| E (5) | Trader Subscription E | Slot E Annual | `com.apestogether.subscription.s05.annual` | 1 year | $69 |
-| F (6) | Trader Subscription F | Slot F Monthly | `com.apestogether.subscription.s06.monthly` | 1 month | $9 |
-| F (6) | Trader Subscription F | Slot F Annual | `com.apestogether.subscription.s06.annual` | 1 year | $69 |
-| G (7) | Trader Subscription G | Slot G Monthly | `com.apestogether.subscription.s07.monthly` | 1 month | $9 |
-| G (7) | Trader Subscription G | Slot G Annual | `com.apestogether.subscription.s07.annual` | 1 year | $69 |
-| H (8) | Trader Subscription H | Slot H Monthly | `com.apestogether.subscription.s08.monthly` | 1 month | $9 |
-| H (8) | Trader Subscription H | Slot H Annual | `com.apestogether.subscription.s08.annual` | 1 year | $69 |
-| I (9) | Trader Subscription I | Slot I Monthly | `com.apestogether.subscription.s09.monthly` | 1 month | $9 |
-| I (9) | Trader Subscription I | Slot I Annual | `com.apestogether.subscription.s09.annual` | 1 year | $69 |
-| J (10) | Trader Subscription J | Slot J Monthly | `com.apestogether.subscription.s10.monthly` | 1 month | $9 |
-| J (10) | Trader Subscription J | Slot J Annual | `com.apestogether.subscription.s10.annual` | 1 year | $69 |
-| K (11) | Trader Subscription K | Slot K Monthly | `com.apestogether.subscription.s11.monthly` | 1 month | $9 |
-| K (11) | Trader Subscription K | Slot K Annual | `com.apestogether.subscription.s11.annual` | 1 year | $69 |
-| L (12) | Trader Subscription L | Slot L Monthly | `com.apestogether.subscription.s12.monthly` | 1 month | $9 |
-| L (12) | Trader Subscription L | Slot L Annual | `com.apestogether.subscription.s12.annual` | 1 year | $69 |
-| M (13) | Trader Subscription M | Slot M Monthly | `com.apestogether.subscription.s13.monthly` | 1 month | $9 |
-| M (13) | Trader Subscription M | Slot M Annual | `com.apestogether.subscription.s13.annual` | 1 year | $69 |
-| N (14) | Trader Subscription N | Slot N Monthly | `com.apestogether.subscription.s14.monthly` | 1 month | $9 |
-| N (14) | Trader Subscription N | Slot N Annual | `com.apestogether.subscription.s14.annual` | 1 year | $69 |
-| O (15) | Trader Subscription O | Slot O Monthly | `com.apestogether.subscription.s15.monthly` | 1 month | $9 |
-| O (15) | Trader Subscription O | Slot O Annual | `com.apestogether.subscription.s15.annual` | 1 year | $69 |
-| P (16) | Trader Subscription P | Slot P Monthly | `com.apestogether.subscription.s16.monthly` | 1 month | $9 |
-| P (16) | Trader Subscription P | Slot P Annual | `com.apestogether.subscription.s16.annual` | 1 year | $69 |
-| Q (17) | Trader Subscription Q | Slot Q Monthly | `com.apestogether.subscription.s17.monthly` | 1 month | $9 |
-| Q (17) | Trader Subscription Q | Slot Q Annual | `com.apestogether.subscription.s17.annual` | 1 year | $69 |
-| R (18) | Trader Subscription R | Slot R Monthly | `com.apestogether.subscription.s18.monthly` | 1 month | $9 |
-| R (18) | Trader Subscription R | Slot R Annual | `com.apestogether.subscription.s18.annual` | 1 year | $69 |
-| S (19) | Trader Subscription S | Slot S Monthly | `com.apestogether.subscription.s19.monthly` | 1 month | $9 |
-| S (19) | Trader Subscription S | Slot S Annual | `com.apestogether.subscription.s19.annual` | 1 year | $69 |
-| T (20) | Trader Subscription T | Slot T Monthly | `com.apestogether.subscription.s20.monthly` | 1 month | $9 |
-| T (20) | Trader Subscription T | Slot T Annual | `com.apestogether.subscription.s20.annual` | 1 year | $69 |
+| B (2) | Trader Subscription B | Slot B Monthly | `com.apestogether.sub.s02.monthly` | 1 month | $9 |
+| B (2) | Trader Subscription B | Slot B Annual | `com.apestogether.sub.s02.annual` | 1 year | $69 |
+| C (3) | Trader Subscription C | Slot C Monthly | `com.apestogether.sub.s03.monthly` | 1 month | $9 |
+| C (3) | Trader Subscription C | Slot C Annual | `com.apestogether.sub.s03.annual` | 1 year | $69 |
+| D (4) | Trader Subscription D | Slot D Monthly | `com.apestogether.sub.s04.monthly` | 1 month | $9 |
+| D (4) | Trader Subscription D | Slot D Annual | `com.apestogether.sub.s04.annual` | 1 year | $69 |
+| E (5) | Trader Subscription E | Slot E Monthly | `com.apestogether.sub.s05.monthly` | 1 month | $9 |
+| E (5) | Trader Subscription E | Slot E Annual | `com.apestogether.sub.s05.annual` | 1 year | $69 |
+| F (6) | Trader Subscription F | Slot F Monthly | `com.apestogether.sub.s06.monthly` | 1 month | $9 |
+| F (6) | Trader Subscription F | Slot F Annual | `com.apestogether.sub.s06.annual` | 1 year | $69 |
+| G (7) | Trader Subscription G | Slot G Monthly | `com.apestogether.sub.s07.monthly` | 1 month | $9 |
+| G (7) | Trader Subscription G | Slot G Annual | `com.apestogether.sub.s07.annual` | 1 year | $69 |
+| H (8) | Trader Subscription H | Slot H Monthly | `com.apestogether.sub.s08.monthly` | 1 month | $9 |
+| H (8) | Trader Subscription H | Slot H Annual | `com.apestogether.sub.s08.annual` | 1 year | $69 |
+| I (9) | Trader Subscription I | Slot I Monthly | `com.apestogether.sub.s09.monthly` | 1 month | $9 |
+| I (9) | Trader Subscription I | Slot I Annual | `com.apestogether.sub.s09.annual` | 1 year | $69 |
+| J (10) | Trader Subscription J | Slot J Monthly | `com.apestogether.sub.s10.monthly` | 1 month | $9 |
+| J (10) | Trader Subscription J | Slot J Annual | `com.apestogether.sub.s10.annual` | 1 year | $69 |
+| K (11) | Trader Subscription K | Slot K Monthly | `com.apestogether.sub.s11.monthly` | 1 month | $9 |
+| K (11) | Trader Subscription K | Slot K Annual | `com.apestogether.sub.s11.annual` | 1 year | $69 |
+| L (12) | Trader Subscription L | Slot L Monthly | `com.apestogether.sub.s12.monthly` | 1 month | $9 |
+| L (12) | Trader Subscription L | Slot L Annual | `com.apestogether.sub.s12.annual` | 1 year | $69 |
+| M (13) | Trader Subscription M | Slot M Monthly | `com.apestogether.sub.s13.monthly` | 1 month | $9 |
+| M (13) | Trader Subscription M | Slot M Annual | `com.apestogether.sub.s13.annual` | 1 year | $69 |
+| N (14) | Trader Subscription N | Slot N Monthly | `com.apestogether.sub.s14.monthly` | 1 month | $9 |
+| N (14) | Trader Subscription N | Slot N Annual | `com.apestogether.sub.s14.annual` | 1 year | $69 |
+| O (15) | Trader Subscription O | Slot O Monthly | `com.apestogether.sub.s15.monthly` | 1 month | $9 |
+| O (15) | Trader Subscription O | Slot O Annual | `com.apestogether.sub.s15.annual` | 1 year | $69 |
+| P (16) | Trader Subscription P | Slot P Monthly | `com.apestogether.sub.s16.monthly` | 1 month | $9 |
+| P (16) | Trader Subscription P | Slot P Annual | `com.apestogether.sub.s16.annual` | 1 year | $69 |
+| Q (17) | Trader Subscription Q | Slot Q Monthly | `com.apestogether.sub.s17.monthly` | 1 month | $9 |
+| Q (17) | Trader Subscription Q | Slot Q Annual | `com.apestogether.sub.s17.annual` | 1 year | $69 |
+| R (18) | Trader Subscription R | Slot R Monthly | `com.apestogether.sub.s18.monthly` | 1 month | $9 |
+| R (18) | Trader Subscription R | Slot R Annual | `com.apestogether.sub.s18.annual` | 1 year | $69 |
+| S (19) | Trader Subscription S | Slot S Monthly | `com.apestogether.sub.s19.monthly` | 1 month | $9 |
+| S (19) | Trader Subscription S | Slot S Annual | `com.apestogether.sub.s19.annual` | 1 year | $69 |
+| T (20) | Trader Subscription T | Slot T Monthly | `com.apestogether.sub.s20.monthly` | 1 month | $9 |
+| T (20) | Trader Subscription T | Slot T Annual | `com.apestogether.sub.s20.annual` | 1 year | $69 |
 
 ### App Store Connect (iOS) — 19 new subscription groups
+
+> **⚠️ Already created the iOS slots with the long `…subscription.sNN.*` IDs?**
+> App Store Connect product IDs are **permanent** — you can't edit or delete them.
+> Don't recreate the *groups* (keep `Trader Subscription B`..`T` and Slot 1). For each
+> Slot **B–T**, inside its existing group:
+> 1. **Create a new subscription** using the short ID from the table
+>    (`com.apestogether.sub.sNN.monthly` / `.annual`), $9 / $69, no intro offer.
+> 2. **Remove the old long-ID product from sale** (clear its price / "Remove from
+>    Sale") so it can never be purchased. It will linger as an unused draft — harmless.
+> The short ID is the only one the backend hands the app, so only it can ever sell.
 
 > **What users see on the Manage Subscriptions screen:** iOS lists each active
 > subscription by its **subscription *group* Display Name**, with the per-subscription
@@ -255,7 +271,11 @@ Play Console → **Monetize ▸ Products ▸ Subscriptions** → for each `s02`.
 1. **Create subscription** with the **Product ID** from the table (start with
    `…sNN.monthly`); set its **Name** to the slot's *Subscription Group* value
    (e.g. `Trader Subscription B`).
-2. Add a **base plan**: auto-renewing, **1 month**, **$9**, no offer.
+2. Add a **base plan**: auto-renewing, **1 month**, **$9**, no offer. Base plan IDs
+   allow only lowercase letters, numbers, and hyphens (no periods/underscores) — use
+   `monthly` (and `annual` below). If Play rejects a duplicate, prefix the slot:
+   `s02-monthly`. The code uses the *Product ID*, not the base plan ID, so any valid
+   value works.
 3. Repeat for `…sNN.annual`: same **Name** (`Trader Subscription B`), auto-renewing,
    **1 year**, **$69**, **no** free-trial offer.
 4. **Activate** each.

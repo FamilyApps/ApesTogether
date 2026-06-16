@@ -49,8 +49,10 @@ def _subscription(slot: int, annual: bool) -> dict:
                 "locale": "en_US",
             }
         ],
+        # Short id ("sub" not "subscription") to fit Google Play's 40-char limit;
+        # must match subscription_slots.monthly_product_id/annual_product_id.
         "productID": (
-            f"com.apestogether.subscription.s{slot:02d}.{'annual' if annual else 'monthly'}"
+            f"com.apestogether.sub.s{slot:02d}.{'annual' if annual else 'monthly'}"
         ),
         "recurringSubscriptionPeriod": "P1Y" if annual else "P1M",
         "referenceName": f"Slot {letter(slot)} {'Annual - $69' if annual else 'Monthly - $9'}",
@@ -79,7 +81,7 @@ def main() -> None:
 
     added = 0
     for slot in range(2, MAX_SLOTS + 1):
-        if f"com.apestogether.subscription.s{slot:02d}.annual" in existing:
+        if f"com.apestogether.sub.s{slot:02d}.annual" in existing:
             continue
         groups.append(_group(slot))
         added += 1

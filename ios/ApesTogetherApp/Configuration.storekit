@@ -97,7 +97,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s02.annual",
+          "productID": "com.apestogether.sub.s02.annual",
           "recurringSubscriptionPeriod": "P1Y",
           "referenceName": "Slot B Annual - $69",
           "subscriptionGroupID": "21000002",
@@ -117,7 +117,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s02.monthly",
+          "productID": "com.apestogether.sub.s02.monthly",
           "recurringSubscriptionPeriod": "P1M",
           "referenceName": "Slot B Monthly - $9",
           "subscriptionGroupID": "21000002",
@@ -144,7 +144,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s03.annual",
+          "productID": "com.apestogether.sub.s03.annual",
           "recurringSubscriptionPeriod": "P1Y",
           "referenceName": "Slot C Annual - $69",
           "subscriptionGroupID": "21000003",
@@ -164,7 +164,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s03.monthly",
+          "productID": "com.apestogether.sub.s03.monthly",
           "recurringSubscriptionPeriod": "P1M",
           "referenceName": "Slot C Monthly - $9",
           "subscriptionGroupID": "21000003",
@@ -191,7 +191,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s04.annual",
+          "productID": "com.apestogether.sub.s04.annual",
           "recurringSubscriptionPeriod": "P1Y",
           "referenceName": "Slot D Annual - $69",
           "subscriptionGroupID": "21000004",
@@ -211,7 +211,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s04.monthly",
+          "productID": "com.apestogether.sub.s04.monthly",
           "recurringSubscriptionPeriod": "P1M",
           "referenceName": "Slot D Monthly - $9",
           "subscriptionGroupID": "21000004",
@@ -238,7 +238,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s05.annual",
+          "productID": "com.apestogether.sub.s05.annual",
           "recurringSubscriptionPeriod": "P1Y",
           "referenceName": "Slot E Annual - $69",
           "subscriptionGroupID": "21000005",
@@ -258,7 +258,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s05.monthly",
+          "productID": "com.apestogether.sub.s05.monthly",
           "recurringSubscriptionPeriod": "P1M",
           "referenceName": "Slot E Monthly - $9",
           "subscriptionGroupID": "21000005",
@@ -285,7 +285,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s06.annual",
+          "productID": "com.apestogether.sub.s06.annual",
           "recurringSubscriptionPeriod": "P1Y",
           "referenceName": "Slot F Annual - $69",
           "subscriptionGroupID": "21000006",
@@ -305,7 +305,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s06.monthly",
+          "productID": "com.apestogether.sub.s06.monthly",
           "recurringSubscriptionPeriod": "P1M",
           "referenceName": "Slot F Monthly - $9",
           "subscriptionGroupID": "21000006",
@@ -332,7 +332,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s07.annual",
+          "productID": "com.apestogether.sub.s07.annual",
           "recurringSubscriptionPeriod": "P1Y",
           "referenceName": "Slot G Annual - $69",
           "subscriptionGroupID": "21000007",
@@ -352,7 +352,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s07.monthly",
+          "productID": "com.apestogether.sub.s07.monthly",
           "recurringSubscriptionPeriod": "P1M",
           "referenceName": "Slot G Monthly - $9",
           "subscriptionGroupID": "21000007",
@@ -379,7 +379,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s08.annual",
+          "productID": "com.apestogether.sub.s08.annual",
           "recurringSubscriptionPeriod": "P1Y",
           "referenceName": "Slot H Annual - $69",
           "subscriptionGroupID": "21000008",
@@ -399,7 +399,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s08.monthly",
+          "productID": "com.apestogether.sub.s08.monthly",
           "recurringSubscriptionPeriod": "P1M",
           "referenceName": "Slot H Monthly - $9",
           "subscriptionGroupID": "21000008",
@@ -426,7 +426,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s09.annual",
+          "productID": "com.apestogether.sub.s09.annual",
           "recurringSubscriptionPeriod": "P1Y",
           "referenceName": "Slot I Annual - $69",
           "subscriptionGroupID": "21000009",
@@ -446,7 +446,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s09.monthly",
+          "productID": "com.apestogether.sub.s09.monthly",
           "recurringSubscriptionPeriod": "P1M",
           "referenceName": "Slot I Monthly - $9",
           "subscriptionGroupID": "21000009",
@@ -473,7 +473,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s10.annual",
+          "productID": "com.apestogether.sub.s10.annual",
           "recurringSubscriptionPeriod": "P1Y",
           "referenceName": "Slot J Annual - $69",
           "subscriptionGroupID": "21000010",
@@ -493,7 +493,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s10.monthly",
+          "productID": "com.apestogether.sub.s10.monthly",
           "recurringSubscriptionPeriod": "P1M",
           "referenceName": "Slot J Monthly - $9",
           "subscriptionGroupID": "21000010",
@@ -520,7 +520,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s11.annual",
+          "productID": "com.apestogether.sub.s11.annual",
           "recurringSubscriptionPeriod": "P1Y",
           "referenceName": "Slot K Annual - $69",
           "subscriptionGroupID": "21000011",
@@ -540,7 +540,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s11.monthly",
+          "productID": "com.apestogether.sub.s11.monthly",
           "recurringSubscriptionPeriod": "P1M",
           "referenceName": "Slot K Monthly - $9",
           "subscriptionGroupID": "21000011",
@@ -567,7 +567,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s12.annual",
+          "productID": "com.apestogether.sub.s12.annual",
           "recurringSubscriptionPeriod": "P1Y",
           "referenceName": "Slot L Annual - $69",
           "subscriptionGroupID": "21000012",
@@ -587,7 +587,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s12.monthly",
+          "productID": "com.apestogether.sub.s12.monthly",
           "recurringSubscriptionPeriod": "P1M",
           "referenceName": "Slot L Monthly - $9",
           "subscriptionGroupID": "21000012",
@@ -614,7 +614,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s13.annual",
+          "productID": "com.apestogether.sub.s13.annual",
           "recurringSubscriptionPeriod": "P1Y",
           "referenceName": "Slot M Annual - $69",
           "subscriptionGroupID": "21000013",
@@ -634,7 +634,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s13.monthly",
+          "productID": "com.apestogether.sub.s13.monthly",
           "recurringSubscriptionPeriod": "P1M",
           "referenceName": "Slot M Monthly - $9",
           "subscriptionGroupID": "21000013",
@@ -661,7 +661,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s14.annual",
+          "productID": "com.apestogether.sub.s14.annual",
           "recurringSubscriptionPeriod": "P1Y",
           "referenceName": "Slot N Annual - $69",
           "subscriptionGroupID": "21000014",
@@ -681,7 +681,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s14.monthly",
+          "productID": "com.apestogether.sub.s14.monthly",
           "recurringSubscriptionPeriod": "P1M",
           "referenceName": "Slot N Monthly - $9",
           "subscriptionGroupID": "21000014",
@@ -708,7 +708,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s15.annual",
+          "productID": "com.apestogether.sub.s15.annual",
           "recurringSubscriptionPeriod": "P1Y",
           "referenceName": "Slot O Annual - $69",
           "subscriptionGroupID": "21000015",
@@ -728,7 +728,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s15.monthly",
+          "productID": "com.apestogether.sub.s15.monthly",
           "recurringSubscriptionPeriod": "P1M",
           "referenceName": "Slot O Monthly - $9",
           "subscriptionGroupID": "21000015",
@@ -755,7 +755,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s16.annual",
+          "productID": "com.apestogether.sub.s16.annual",
           "recurringSubscriptionPeriod": "P1Y",
           "referenceName": "Slot P Annual - $69",
           "subscriptionGroupID": "21000016",
@@ -775,7 +775,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s16.monthly",
+          "productID": "com.apestogether.sub.s16.monthly",
           "recurringSubscriptionPeriod": "P1M",
           "referenceName": "Slot P Monthly - $9",
           "subscriptionGroupID": "21000016",
@@ -802,7 +802,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s17.annual",
+          "productID": "com.apestogether.sub.s17.annual",
           "recurringSubscriptionPeriod": "P1Y",
           "referenceName": "Slot Q Annual - $69",
           "subscriptionGroupID": "21000017",
@@ -822,7 +822,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s17.monthly",
+          "productID": "com.apestogether.sub.s17.monthly",
           "recurringSubscriptionPeriod": "P1M",
           "referenceName": "Slot Q Monthly - $9",
           "subscriptionGroupID": "21000017",
@@ -849,7 +849,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s18.annual",
+          "productID": "com.apestogether.sub.s18.annual",
           "recurringSubscriptionPeriod": "P1Y",
           "referenceName": "Slot R Annual - $69",
           "subscriptionGroupID": "21000018",
@@ -869,7 +869,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s18.monthly",
+          "productID": "com.apestogether.sub.s18.monthly",
           "recurringSubscriptionPeriod": "P1M",
           "referenceName": "Slot R Monthly - $9",
           "subscriptionGroupID": "21000018",
@@ -896,7 +896,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s19.annual",
+          "productID": "com.apestogether.sub.s19.annual",
           "recurringSubscriptionPeriod": "P1Y",
           "referenceName": "Slot S Annual - $69",
           "subscriptionGroupID": "21000019",
@@ -916,7 +916,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s19.monthly",
+          "productID": "com.apestogether.sub.s19.monthly",
           "recurringSubscriptionPeriod": "P1M",
           "referenceName": "Slot S Monthly - $9",
           "subscriptionGroupID": "21000019",
@@ -943,7 +943,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s20.annual",
+          "productID": "com.apestogether.sub.s20.annual",
           "recurringSubscriptionPeriod": "P1Y",
           "referenceName": "Slot T Annual - $69",
           "subscriptionGroupID": "21000020",
@@ -963,7 +963,7 @@
               "locale": "en_US"
             }
           ],
-          "productID": "com.apestogether.subscription.s20.monthly",
+          "productID": "com.apestogether.sub.s20.monthly",
           "recurringSubscriptionPeriod": "P1M",
           "referenceName": "Slot T Monthly - $9",
           "subscriptionGroupID": "21000020",

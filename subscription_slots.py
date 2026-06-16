@@ -27,19 +27,23 @@ MAX_SUBSCRIPTION_SLOTS = 20
 LEGACY_MONTHLY_PRODUCT_ID = "com.apestogether.subscription.monthly"
 LEGACY_ANNUAL_PRODUCT_ID = "com.apestogether.subscription.annual"
 
-_SLOT_RE = re.compile(r"^com\.apestogether\.subscription\.s(\d{2})\.(monthly|annual)$")
+# Slots 2..N use a SHORTER id ("sub" not "subscription") so they fit Google Play's
+# 40-char product-id limit: "com.apestogether.subscription.s02.monthly" is 41 chars
+# (rejected by Play), while "com.apestogether.sub.s02.monthly" is 32. Slot 1 keeps
+# its original (longer) legacy ids above, which already exist in both stores.
+_SLOT_RE = re.compile(r"^com\.apestogether\.sub\.s(\d{2})\.(monthly|annual)$")
 
 
 def monthly_product_id(slot: int) -> str:
     if slot == 1:
         return LEGACY_MONTHLY_PRODUCT_ID
-    return f"com.apestogether.subscription.s{slot:02d}.monthly"
+    return f"com.apestogether.sub.s{slot:02d}.monthly"
 
 
 def annual_product_id(slot: int) -> str:
     if slot == 1:
         return LEGACY_ANNUAL_PRODUCT_ID
-    return f"com.apestogether.subscription.s{slot:02d}.annual"
+    return f"com.apestogether.sub.s{slot:02d}.annual"
 
 
 def slot_for_product_id(product_id: str):
