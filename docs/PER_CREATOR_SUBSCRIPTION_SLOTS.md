@@ -279,7 +279,11 @@ Play Console → **Monetize ▸ Products ▸ Subscriptions** → for each `s02`.
    once activated.)
 3. Repeat for `…sNN.annual`: same **Name** (`Trader Subscription B`), base plan ID
    **`annual`**, auto-renewing, **1 year**, **$69**, **no** free-trial offer.
-4. **Activate** each.
+4. **Activate** each (both the subscription and its base plan) — Play won't return
+   *Draft* products to the app, so un-activated slots are invisible/unpurchasable.
+   Double-check the **billing period** first: it's locked once activated (price can
+   still be changed later; billing period and base plan ID cannot). Newly activated
+   products can take a few minutes to become queryable on-device.
 
 > **Slot 1:** rename your existing `…subscription.monthly` / `.annual` products'
 > **Name** to `Trader Subscription A` too (Product IDs stay unchanged). Only Slot 1's
