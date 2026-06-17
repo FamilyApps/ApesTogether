@@ -163,10 +163,11 @@ class IAPValidationService:
         """
         Parse a StoreKit 2 signed transaction (JWS/JWT).
         
-        The JWS payload contains all transaction fields. In production,
-        the signature should be verified against Apple's public key chain
-        (provided in the JWS header's x5c field). For now we decode the
-        payload which is sufficient for sandbox + early production.
+        The JWS is cryptographically verified against Apple's pinned root cert
+        (full x5c chain + ES256 signature) via apple_jws_verifier before we trust
+        any field. If the trust anchor (certs/AppleRootCA-G3.cer) isn't installed
+        yet, we fall back to decode-only and log a CRITICAL warning so shipping
+        this code can't break live purchases before the cert is committed.
         """
         import base64
         
@@ -182,12 +183,39 @@ class IAPValidationService:
             if padding != 4:
                 payload_b64 += '=' * padding
             
-            payload_bytes = base64.urlsafe_b64decode(payload_b64)
-            payload = json.loads(payload_bytes)
+            # ── Verify the JWS chain + signature before trusting any field ──
+            # apple_jws_verifier pins Apple Root CA - G3. Fail CLOSED on a bad
+            # signature/chain; fall back to decode-only ONLY when the trust
+            # anchor file isn't installed yet (so shipping this can't break live
+            # purchases before certs/AppleRootCA-G3.cer is committed).
+            from apple_jws_verifier import (
+                verify_and_decode, AppleJWSVerificationError, ROOT_NOT_CONFIGURED,
+            )
+            jws_verified = True
+            try:
+                payload = verify_and_decode(jws)
+            except AppleJWSVerificationError as _e:
+                if str(_e) == ROOT_NOT_CONFIGURED:
+                    logger.critical("Apple Root CA not configured \u2014 StoreKit JWS "
+                                    "signature NOT verified (decode-only). Commit "
+                                    "certs/AppleRootCA-G3.cer to enable verification.")
+                    jws_verified = False
+                    payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+                else:
+                    logger.warning("StoreKit 2 JWS verification failed: %s", _e)
+                    return {'valid': False, 'error': f'jws_verification_failed: {_e}'}
+
+            # A verified transaction must belong to OUR app (replay protection).
+            if jws_verified and self.apple_bundle_id and payload.get('bundleId') \
+                    and payload.get('bundleId') != self.apple_bundle_id:
+                logger.warning("StoreKit 2 JWS bundleId mismatch: %s != %s",
+                               payload.get('bundleId'), self.apple_bundle_id)
+                return {'valid': False, 'error': 'bundle_id_mismatch'}
             
-            logger.info(f"StoreKit 2 JWS decoded: productId={payload.get('productId')}, "
-                        f"transactionId={payload.get('transactionId')}, "
-                        f"environment={payload.get('environment')}")
+            logger.info("StoreKit 2 JWS %s: productId=%s, transactionId=%s, environment=%s",
+                        'verified' if jws_verified else 'DECODED-UNVERIFIED',
+                        payload.get('productId'), payload.get('transactionId'),
+                        payload.get('environment'))
             
             # Extract fields from StoreKit 2 transaction payload
             product_id = payload.get('productId', '')
