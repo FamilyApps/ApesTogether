@@ -515,13 +515,42 @@ data class UpdatePortfolioPreferencesRequest(
     @SerialName("prefer_fractional") val preferFractional: Boolean? = null,
 )
 
-// ── Tax status ────────────────────────────────────────────────────────────
+// ── Tax info / W-9 (in-app collection; full TIN stored only in Xero) ───────
 
 @Serializable
-data class TaxStatusResponse(
-    @SerialName("tax_info_on_file") val taxInfoOnFile: Boolean,
+data class W9StatusResponse(
+    val status: String,                                  // not_submitted | submitted | on_file | failed
+    val required: Boolean = false,                       // payout-eligible and not yet on file
+    @SerialName("on_file") val onFile: Boolean = false,
+    @SerialName("tin_last4") val tinLast4: String? = null,
+    @SerialName("legal_name") val legalName: String? = null,
+    @SerialName("held_payout_count") val heldPayoutCount: Int = 0,
+    @SerialName("held_payout_total") val heldPayoutTotal: Double = 0.0,
+)
+
+@Serializable
+data class W9Request(
+    @SerialName("legal_name") val legalName: String,
+    @SerialName("business_name") val businessName: String? = null,
+    @SerialName("tax_classification") val taxClassification: String,
+    @SerialName("tin_type") val tinType: String,         // "ssn" | "ein"
+    val tin: String,                                     // 9 digits (server strips non-digits)
+    @SerialName("address_line1") val addressLine1: String,
+    @SerialName("address_line2") val addressLine2: String? = null,
+    val city: String,
+    val state: String,
+    @SerialName("postal_code") val postalCode: String,
+    val country: String = "US",
+    val certified: Boolean,
+)
+
+@Serializable
+data class W9SubmitResponse(
     val status: String,
-    val message: String,
+    @SerialName("on_file") val onFile: Boolean = false,
+    @SerialName("tin_last4") val tinLast4: String? = null,
+    @SerialName("released_payouts") val releasedPayouts: Int? = null,
+    val message: String? = null,
 )
 
 // ── Empty response (for endpoints that just return {success: true}) ───────

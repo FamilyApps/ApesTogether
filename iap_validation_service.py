@@ -677,14 +677,16 @@ async def validate_and_save_purchase(
         db.session.commit()
         return True, {'purchase_id': existing.id, 'updated': True, **result}
     
-    # Check if the portfolio owner is a company-owned bot — if so, the
-    # influencer share stays with the company (no payout needed).
+    # If the portfolio owner is a company-owned account (a bot OR the founder's
+    # own accounts), no creator payout is owed — the post-store remainder stays
+    # with Family Apps LLC as profit. The store still takes its cut (store_fee);
+    # we just roll the influencer share into platform_revenue.
     from models import User
     portfolio_owner = User.query.get(subscribed_to_id)
-    is_company_bot = portfolio_owner and portfolio_owner.role == 'agent'
+    is_company_owned = bool(portfolio_owner and portfolio_owner.is_company_owned)
     
-    inf_payout = 0.0 if is_company_bot else result['influencer_payout']
-    plat_rev = (result['platform_revenue'] + result['influencer_payout']) if is_company_bot else result['platform_revenue']
+    inf_payout = 0.0 if is_company_owned else result['influencer_payout']
+    plat_rev = (result['platform_revenue'] + result['influencer_payout']) if is_company_owned else result['platform_revenue']
     
     # Create new purchase record
     purchase = InAppPurchase(

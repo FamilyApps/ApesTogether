@@ -22,7 +22,9 @@ import com.apestogether.app.data.models.UpdatePortfolioPreferencesRequest
 import com.apestogether.app.data.models.StockPriceResponse
 import com.apestogether.app.data.models.SubscriptionSlotResponse
 import com.apestogether.app.data.models.SubscriptionsResponse
-import com.apestogether.app.data.models.TaxStatusResponse
+import com.apestogether.app.data.models.W9Request
+import com.apestogether.app.data.models.W9StatusResponse
+import com.apestogether.app.data.models.W9SubmitResponse
 import com.apestogether.app.data.models.TopInfluencersResponse
 import com.apestogether.app.data.models.TradeRequest
 import com.apestogether.app.data.models.TradeResponse
@@ -162,9 +164,12 @@ interface ApiService {
     @POST("poll/vote")
     suspend fun voteOnPoll(@Body request: PollVoteRequest): PollVoteResponse
 
-    // ── Tax status ───────────────────────────────────────────────────────
-    @GET("user/tax-status")
-    suspend fun getTaxStatus(): TaxStatusResponse
+    // ── Tax info / W-9 (in-app collection; full TIN stored only in Xero) ──
+    @GET("tax/w9/status")
+    suspend fun getW9Status(): W9StatusResponse
+
+    @POST("tax/w9")
+    suspend fun submitW9(@Body request: W9Request): W9SubmitResponse
 }
 
 /**

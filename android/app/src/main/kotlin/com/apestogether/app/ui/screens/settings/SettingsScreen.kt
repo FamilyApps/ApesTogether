@@ -65,6 +65,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -120,6 +122,7 @@ fun SettingsScreen(
     var allowSubscribers by remember { mutableStateOf(true) }
     var showSignOutConfirm by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showTaxInfo by remember { mutableStateOf(false) }
     var urlCopied by remember { mutableStateOf(false) }
 
     val personalURL = remember(user?.portfolioSlug) {
@@ -230,8 +233,8 @@ fun SettingsScreen(
                 Divider()
                 NavRow(
                     icon = Icons.Default.Receipt,
-                    label = "Tax Info",
-                    onClick = { /* TODO: W-9 / tax info sheet */ },
+                    label = "Tax Info (W-9)",
+                    onClick = { showTaxInfo = true },
                 )
             }
 
@@ -344,6 +347,16 @@ fun SettingsScreen(
             },
             containerColor = CardBackground,
         )
+    }
+
+    // ── Tax Info (W-9) full-screen sheet ──
+    if (showTaxInfo) {
+        Dialog(
+            onDismissRequest = { showTaxInfo = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            TaxInfoScreen(onClose = { showTaxInfo = false })
+        }
     }
 }
 

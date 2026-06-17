@@ -238,10 +238,18 @@ class APIService {
         return try await post("/portfolio/stocks", body: body, authenticated: true)
     }
     
-    // MARK: - Tax Info (Xero handles W-9 collection natively)
-    
-    func getTaxStatus() async throws -> TaxStatusResponse {
-        return try await get("/user/tax-status")
+    // MARK: - Tax Info (in-app W-9 collection; full TIN is stored only in Xero)
+
+    /// Whether the signed-in creator's W-9 is on file, and whether it's required
+    /// (i.e., they're payout-eligible but haven't submitted one yet).
+    func getW9Status() async throws -> W9StatusResponse {
+        return try await get("/tax/w9/status")
+    }
+
+    /// Submit the creator's W-9. The full TIN is forwarded to Xero and never
+    /// persisted on our servers. Releases any held payouts on success.
+    func submitW9(_ body: [String: Any]) async throws -> W9SubmitResponse {
+        return try await post("/tax/w9", body: body, authenticated: true)
     }
     
     // MARK: - Private Helpers

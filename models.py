@@ -8,6 +8,12 @@ from flask_sqlalchemy import SQLAlchemy
 # Initialize SQLAlchemy without binding to app yet
 db = SQLAlchemy()
 
+# Founder's own creator accounts. Like company bots, these never receive real
+# creator payouts — subscription revenue to them stays with Family Apps LLC as
+# profit, and they never need a W-9. Keep lowercase for case-insensitive match.
+OWNER_EMAILS = frozenset({'bobford00@gmail.com', 'fordutilityapps@gmail.com'})
+
+
 class User(UserMixin, db.Model):
     __tablename__ = 'user'  # Explicitly set - will be quoted in PostgreSQL as "user"
     
@@ -62,6 +68,19 @@ class User(UserMixin, db.Model):
         slugs, and internal identifiers.
         """
         return self.display_name or self.username
+
+    @property
+    def is_company_owned(self) -> bool:
+        """True for accounts that never receive creator payouts: company bots
+        (role == 'agent') and the founder's own accounts (OWNER_EMAILS).
+
+        Subscription revenue to these stays with Family Apps LLC as profit —
+        the store still takes its cut, but no creator payout is owed and no
+        W-9 is required. Single source of truth for payout/W-9/accounting gates.
+        """
+        if self.role == 'agent':
+            return True
+        return (self.email or '').strip().lower() in OWNER_EMAILS
 
 
 class Stock(db.Model):
@@ -999,9 +1018,63 @@ class BetaWaitlist(db.Model):
         return f"<BetaWaitlist {self.email} role={self.role}>"
 
 
-# NOTE: W-9 / tax info collection is handled natively by Xero via the
-# '1099 Contractors' contact group. No in-app W-9 form or model needed.
-# See xero_service.py → contact_has_tax_number() for payout hold logic.
+class TaxpayerProfile(db.Model):
+    """In-app W-9 collection status for a creator/payee.
+
+    PII minimization: the full TIN (SSN/EIN) is NEVER stored here. It is pushed
+    directly to the creator's Xero contact (the `TaxNumber` field), which is the
+    system of record for 1099 reporting. Locally we keep only non-sensitive
+    status fields plus the TIN's last 4 digits (for support/display).
+
+    The `status == 'on_file'` flag is the authoritative signal for releasing
+    held payouts — see xero_service.contact_has_tax_number() for the Xero-side
+    reconciliation check.
+    """
+    __tablename__ = 'taxpayer_profile'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), unique=True, nullable=False)
+
+    # W-9 identity (non-sensitive parts retained for display/support)
+    legal_name = db.Column(db.String(200), nullable=True)         # W-9 Line 1 (name)
+    business_name = db.Column(db.String(200), nullable=True)      # W-9 Line 2 (optional DBA/entity)
+    tax_classification = db.Column(db.String(40), nullable=True)  # individual_sole_prop, c_corp, s_corp, partnership, trust, llc_c, llc_s, llc_p
+    tin_type = db.Column(db.String(10), nullable=True)            # 'ssn' or 'ein'
+    tin_last4 = db.Column(db.String(4), nullable=True)            # last 4 only — full TIN lives in Xero
+
+    # Mailing address (also pushed to the Xero contact)
+    address_line1 = db.Column(db.String(200), nullable=True)
+    address_line2 = db.Column(db.String(200), nullable=True)
+    city = db.Column(db.String(100), nullable=True)
+    state = db.Column(db.String(50), nullable=True)
+    postal_code = db.Column(db.String(20), nullable=True)
+    country = db.Column(db.String(2), default='US')
+
+    # Submission status
+    status = db.Column(db.String(20), default='not_submitted', nullable=False)
+    # 'not_submitted' | 'submitted' (saved locally, Xero push pending/failed) | 'on_file' | 'failed'
+    certified = db.Column(db.Boolean, default=False)             # user checked the W-9 perjury certification
+    certified_at = db.Column(db.DateTime, nullable=True)
+    submitted_at = db.Column(db.DateTime, nullable=True)
+
+    # Xero push status
+    xero_contact_id = db.Column(db.String(100), nullable=True)
+    xero_pushed_at = db.Column(db.DateTime, nullable=True)
+    xero_push_status = db.Column(db.String(20), default='pending')  # 'pending' | 'synced' | 'failed'
+    xero_error = db.Column(db.String(500), nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = db.relationship('User', backref=db.backref('taxpayer_profile', uselist=False))
+
+    @property
+    def has_tin_on_file(self):
+        """Authoritative local signal used to release/hold payouts."""
+        return self.status == 'on_file' and bool(self.tin_last4)
+
+    def __repr__(self):
+        return f"<TaxpayerProfile user={self.user_id} status={self.status}>"
 
 
 # =============================================================================

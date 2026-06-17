@@ -4,16 +4,20 @@ Xero OAuth2 + Accounting API integration for influencer payouts and 1099-NEC rep
 Handles:
 - OAuth2 authorization code flow with PKCE (connect/callback/refresh)
 - Creating/updating Xero contacts for influencers
-- Managing '1099 Contractors' contact group (Xero collects W-9 info natively)
+- Managing '1099 Contractors' contact group (for the year-end 1099 report)
+- Pushing in-app W-9 data (legal name, address, TIN) onto the Xero contact
 - Checking if a contact has a TaxNumber on file (payout hold logic)
 - Creating bills (Accounts Payable) from XeroPayoutRecord entries
 - Token refresh (access tokens expire every 30 min, refresh tokens last 60 days)
 
 End-to-end 1099-NEC flow:
-1. Creator earns payouts → added to Xero as contact in '1099 Contractors' group
-2. Xero emails contractor to collect W-9 / tax info (TIN, legal name, address)
+1. Creator becomes payout-eligible → app prompts for W-9 (legal name, address, TIN)
+2. App pushes W-9 to the Xero contact (TaxNumber + address) and adds it to the
+   '1099 Contractors' group. NOTE: Xero does NOT email contractors for a W-9 —
+   collection is done in-app; Xero only stores the TaxNumber and runs the report.
 3. Monthly: generate-payout-records → sync-payouts → bills appear in Xero AP
-4. Payouts held until Xero contact has TaxNumber set (contact_has_tax_number())
+4. Payouts HELD (not synced/paid) until the contact has a TaxNumber
+   (contact_has_tax_number()); released automatically once the W-9 is on file.
 5. Admin pays bills in Xero → marks as paid
 6. Tax season: Xero → Reports → 1099 → e-file via Tax1099/SmartFile/TaxBandits
 
@@ -356,8 +360,8 @@ def find_or_create_contact(token, username, email=None):
     """Find or create a Xero contact for an influencer.
     
     All creators are added to the '1099 Contractors' contact group.
-    Xero handles W-9 / tax info collection natively — it will email
-    the contractor to provide their TIN, legal name, and address.
+    W-9 data (TIN, legal name, address) is collected in-app and pushed onto
+    the contact via update_contact_tax_info(); Xero does NOT solicit it.
     
     Args:
         token: Valid XeroOAuthToken
@@ -418,8 +422,8 @@ def find_or_create_contact(token, username, email=None):
 def contact_has_tax_number(username):
     """Check if a Xero contact has a TaxNumber (TIN) on file.
     
-    Used to determine if payouts should be held — Xero collects
-    W-9 / tax info directly from contractors.
+    Used to determine if payouts should be held — the TaxNumber is set from the
+    creator's in-app W-9 submission (see update_contact_tax_info()).
     
     Returns:
         True if the contact exists and has a TaxNumber set, False otherwise.
@@ -444,6 +448,64 @@ def contact_has_tax_number(username):
         logger.error(f"Xero contact tax check failed for {username}: {e}")
     
     return False
+
+
+def update_contact_tax_info(username, email, w9):
+    """Push in-app W-9 data onto the creator's Xero contact.
+
+    Sets the TaxNumber (TIN), legal name, and mailing address on the contact,
+    marks it a supplier, and ensures it's in the '1099 Contractors' group.
+
+    Args:
+        username: creator's username (stable Xero contact Name — used for matching)
+        email: creator's email (optional)
+        w9: dict with keys legal_name, business_name, tin (full digits),
+            address_line1, address_line2, city, state, postal_code, country
+
+    Returns:
+        {'contact_id': ...} on success, or {'error': ...} on failure.
+    """
+    token = get_valid_token()
+    if not token:
+        return {'error': 'No valid Xero token — connect at /admin/xero/connect first'}
+
+    # Keep Name == username for stable matching; identity goes in First/Last name.
+    contact_id = find_or_create_contact(token, username, email)
+    if not contact_id:
+        return {'error': f'Failed to find/create Xero contact for {username}'}
+
+    contact = {
+        'ContactID': contact_id,
+        'TaxNumber': (w9.get('tin') or '').strip(),
+        'IsSupplier': True,
+        'Addresses': [{
+            'AddressType': 'STREET',
+            'AddressLine1': w9.get('address_line1') or '',
+            'AddressLine2': w9.get('address_line2') or '',
+            'City': w9.get('city') or '',
+            'Region': w9.get('state') or '',
+            'PostalCode': w9.get('postal_code') or '',
+            'Country': w9.get('country') or 'US',
+        }],
+    }
+
+    # Split legal name into First/Last for 1099 reporting (best effort).
+    legal = (w9.get('legal_name') or '').strip()
+    if legal:
+        parts = legal.split()
+        contact['FirstName'] = parts[0]
+        if len(parts) > 1:
+            contact['LastName'] = ' '.join(parts[1:])
+
+    resp = _xero_post('Contacts', token, {'Contacts': [contact]})
+    if resp.status_code == 200:
+        _add_contact_to_1099_group(token, contact_id)
+        logger.info(f"Pushed W-9 tax info to Xero contact for {username}: {contact_id}")
+        return {'contact_id': contact_id}
+
+    error = resp.text[:500]
+    logger.error(f"Xero W-9 push failed for {username}: {resp.status_code} {error}")
+    return {'error': f'Xero API error {resp.status_code}: {error}'}
 
 
 # ── Bill Creation ──────────────────────────────────────────────────────────
@@ -473,12 +535,18 @@ def create_bill_for_payout(token, payout_record, username, email=None):
     line_items = []
     payout_per_sub = AdminSubscription.INFLUENCER_PAYOUT_PER_SUB  # $6.50
     
+    # Both real and bonus/gifted payouts are nonemployee compensation paid to the
+    # creator, so BOTH are 1099-reportable and post to 6010 (User Payments) under
+    # the creator's contact. (Previously real->6000 [nonexistent] and bonus->6100
+    # [that's the store-fee account] — both were wrong.)
+    PAYOUT_ACCOUNT_CODE = '6010'  # User Payments (creator payouts / contract labor)
+
     if payout_record.real_subscriber_count > 0:
         line_items.append({
             'Description': f'Influencer payout — {payout_record.real_subscriber_count} real subscriber(s) @ ${payout_per_sub:.2f}',
             'Quantity': payout_record.real_subscriber_count,
             'UnitAmount': payout_per_sub,
-            'AccountCode': '6000',  # Cost of Revenue (adjust to your chart of accounts)
+            'AccountCode': PAYOUT_ACCOUNT_CODE,
             'TaxType': 'NONE',
         })
     
@@ -487,7 +555,7 @@ def create_bill_for_payout(token, payout_record, username, email=None):
             'Description': f'Promotional payout — {payout_record.bonus_subscriber_count} bonus subscriber(s) @ ${payout_per_sub:.2f}',
             'Quantity': payout_record.bonus_subscriber_count,
             'UnitAmount': payout_per_sub,
-            'AccountCode': '6100',  # Marketing / Promotion expense (adjust to your chart of accounts)
+            'AccountCode': PAYOUT_ACCOUNT_CODE,
             'TaxType': 'NONE',
         })
     
@@ -687,3 +755,185 @@ def list_accounts(token=None):
         })
     accounts.sort(key=lambda x: ((x['class'] or 'ZZZ'), (x['code'] or 'zzz')))
     return {'accounts': accounts, 'count': len(accounts)}
+
+
+# ── Subscription Revenue + Store Fees (gross/principal posting) ─────────────
+
+# Confirm these exist via /admin/xero/accounts before the first real posting.
+REVENUE_ACCOUNT_CODE = '4010'    # Subscription Revenue (income)
+STORE_FEE_ACCOUNT_CODE = '6100'  # Apple/Google store fees (expense)
+
+_STORE_CONTACT_NAMES = {
+    'apple': 'Apple App Store',
+    'google': 'Google Play',
+}
+
+
+def _period_entity_id(platform, period_start):
+    """Deterministic XeroSyncLog.entity_id for a (platform, month) so re-runs are
+    idempotent. e.g. apple 2026-03 -> 2026031."""
+    idx = {'apple': 1, 'google': 2}.get(platform, 9)
+    return int(period_start.strftime('%Y%m')) * 10 + idx
+
+
+def _period_already_posted(sync_type, entity_id):
+    from models import XeroSyncLog
+    return XeroSyncLog.query.filter_by(
+        sync_type=sync_type, entity_id=entity_id, status='success'
+    ).first() is not None
+
+
+def find_or_create_store_contact(token, platform):
+    """Find/create the storefront counterparty contact (NOT in the 1099 group)."""
+    name = _STORE_CONTACT_NAMES.get(platform, platform.title())
+    search = requests.get(
+        f"{XERO_API_BASE}/Contacts",
+        headers=_xero_headers(token),
+        params={'where': f'Name=="{name}"'},
+        timeout=15,
+    )
+    if search.status_code == 200:
+        contacts = search.json().get('Contacts', [])
+        if contacts:
+            return contacts[0]['ContactID']
+    resp = _xero_post('Contacts', token, {'Contacts': [{
+        'Name': name,
+        'ContactStatus': 'ACTIVE',
+        'IsCustomer': True,
+        'IsSupplier': True,
+    }]})
+    if resp.status_code == 200:
+        c = resp.json().get('Contacts', [{}])[0]
+        logger.info(f"Created Xero store contact '{name}': {c.get('ContactID')}")
+        return c.get('ContactID')
+    logger.error(f"Failed to create store contact '{name}': {resp.status_code} {resp.text[:300]}")
+    return None
+
+
+def post_subscription_revenue(period_start, period_end):
+    """Post gross subscription revenue (4010) and store fees (6100) for a period,
+    summed transaction-by-transaction from InAppPurchase (annual-aware).
+
+    Gross/principal: the FULL price is booked as revenue and the store fee as an
+    expense. Per platform we create one ACCREC invoice (line 4010 = gross) and one
+    ACCPAY bill (line 6100 = store fee) against an "Apple App Store" / "Google Play"
+    contact, so net (invoice − bill) equals the deposit you reconcile in the bank.
+
+    Idempotent: a deterministic period key + XeroSyncLog guard prevent double
+    posting; re-running only posts platforms/periods not already 'success'.
+    """
+    from models import db, InAppPurchase, XeroSyncLog
+    from sqlalchemy import func
+
+    token = get_valid_token()
+    if not token:
+        return {'error': 'No valid Xero token — connect at /admin/xero/connect first'}
+
+    results = {'posted': [], 'skipped': [], 'failed': [], 'gross': 0.0, 'store_fees': 0.0}
+    period_key = period_start.strftime('%Y-%m')
+    start_dt = datetime.combine(period_start, datetime.min.time())
+    end_dt = datetime.combine(period_end, datetime.max.time())
+
+    for platform in ('apple', 'google'):
+        gross, store_fee, txn_count = db.session.query(
+            func.coalesce(func.sum(InAppPurchase.price), 0.0),
+            func.coalesce(func.sum(InAppPurchase.store_fee), 0.0),
+            func.count(InAppPurchase.id),
+        ).filter(
+            InAppPurchase.platform == platform,
+            InAppPurchase.status != 'refunded',
+            InAppPurchase.purchase_date >= start_dt,
+            InAppPurchase.purchase_date <= end_dt,
+        ).one()
+        gross, store_fee, txn_count = float(gross), float(store_fee), int(txn_count)
+
+        if txn_count == 0 or gross <= 0:
+            results['skipped'].append({'platform': platform, 'reason': 'no_transactions'})
+            continue
+
+        entity_id = _period_entity_id(platform, period_start)
+        if _period_already_posted('subscription_revenue', entity_id):
+            results['skipped'].append({'platform': platform, 'reason': 'already_posted'})
+            continue
+
+        contact_id = find_or_create_store_contact(token, platform)
+        if not contact_id:
+            results['failed'].append({'platform': platform, 'error': 'contact_failed'})
+            continue
+
+        store_label = _STORE_CONTACT_NAMES.get(platform, platform.title())
+        date_str = period_end.strftime('%Y-%m-%d')
+
+        # 1) Revenue — ACCREC invoice (income to 4010)
+        inv = _xero_post('Invoices', token, {'Invoices': [{
+            'Type': 'ACCREC',
+            'Contact': {'ContactID': contact_id},
+            'Date': date_str,
+            'DueDate': date_str,
+            'Reference': f"Rev-{platform}-{period_key}",
+            'Status': 'AUTHORISED',
+            'CurrencyCode': 'USD',
+            'LineItems': [{
+                'Description': f'{store_label} subscription revenue — {period_key} ({txn_count} txns)',
+                'Quantity': 1,
+                'UnitAmount': round(gross, 2),
+                'AccountCode': REVENUE_ACCOUNT_CODE,
+                'TaxType': 'NONE',
+            }],
+        }]})
+        if inv.status_code != 200:
+            err = inv.text[:300]
+            results['failed'].append({'platform': platform, 'stage': 'revenue', 'error': err})
+            db.session.add(XeroSyncLog(
+                sync_type='subscription_revenue', entity_id=entity_id, entity_type='revenue',
+                amount=gross, status='failed', error_message=err))
+            db.session.commit()
+            continue
+        rev_invoice_id = inv.json().get('Invoices', [{}])[0].get('InvoiceID')
+
+        # 2) Store fee — ACCPAY bill (expense to 6100)
+        fee_bill_id = None
+        if store_fee > 0:
+            bill = _xero_post('Invoices', token, {'Invoices': [{
+                'Type': 'ACCPAY',
+                'Contact': {'ContactID': contact_id},
+                'Date': date_str,
+                'DueDate': date_str,
+                'Reference': f"Fee-{platform}-{period_key}",
+                'Status': 'AUTHORISED',
+                'CurrencyCode': 'USD',
+                'LineItems': [{
+                    'Description': f'{store_label} commission/store fee — {period_key}',
+                    'Quantity': 1,
+                    'UnitAmount': round(store_fee, 2),
+                    'AccountCode': STORE_FEE_ACCOUNT_CODE,
+                    'TaxType': 'NONE',
+                }],
+            }]})
+            if bill.status_code == 200:
+                fee_bill_id = bill.json().get('Invoices', [{}])[0].get('InvoiceID')
+            else:
+                results['failed'].append({'platform': platform, 'stage': 'store_fee', 'error': bill.text[:300]})
+
+        db.session.add(XeroSyncLog(
+            sync_type='subscription_revenue', entity_id=entity_id, entity_type='revenue',
+            xero_invoice_id=rev_invoice_id, xero_contact_id=contact_id, amount=gross, status='success'))
+        if fee_bill_id:
+            db.session.add(XeroSyncLog(
+                sync_type='store_fee', entity_id=entity_id, entity_type='fee',
+                xero_invoice_id=fee_bill_id, xero_contact_id=contact_id, amount=store_fee, status='success'))
+        db.session.commit()
+
+        results['posted'].append({
+            'platform': platform, 'period': period_key, 'transactions': txn_count,
+            'gross_revenue': round(gross, 2), 'store_fee': round(store_fee, 2),
+            'net': round(gross - store_fee, 2),
+            'revenue_invoice_id': rev_invoice_id, 'store_fee_bill_id': fee_bill_id,
+        })
+        results['gross'] += gross
+        results['store_fees'] += store_fee
+
+    results['gross'] = round(results['gross'], 2)
+    results['store_fees'] = round(results['store_fees'], 2)
+    results['net'] = round(results['gross'] - results['store_fees'], 2)
+    return results

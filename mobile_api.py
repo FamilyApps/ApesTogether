@@ -686,6 +686,189 @@ def slot_for_creator():
         return jsonify({'error': 'slot_resolution_failed'}), 500
 
 
+# ── W-9 / Taxpayer Info (Layer 1: in-app collection + payout hold) ──────────
+
+_TAX_CLASSIFICATIONS = {
+    'individual_sole_prop', 'c_corp', 's_corp', 'partnership', 'trust',
+    'llc_c', 'llc_s', 'llc_p',
+}
+
+
+def _user_is_company_owned(user) -> bool:
+    """True for accounts that never receive real payouts: company bots
+    (role == 'agent') and the platform owner's own accounts. No money changes
+    hands for these, so a W-9 is never required. Delegates to the canonical
+    `User.is_company_owned` rule in models.py."""
+    return bool(user and user.is_company_owned)
+
+
+def _user_is_payout_eligible(user_id):
+    """True if the user will be owed real money and therefore needs a W-9 on
+    file. Company bots and the owner's own accounts are never eligible (no money
+    changes hands), even when they have subscribers — e.g. a gifted sub to a bot."""
+    from models import User, MobileSubscription, AdminSubscription, XeroPayoutRecord
+    user = User.query.get(user_id)
+    if _user_is_company_owned(user):
+        return False
+    if MobileSubscription.query.filter_by(subscribed_to_id=user_id).first():
+        return True
+    admin = AdminSubscription.query.filter_by(portfolio_user_id=user_id).first()
+    if admin and (admin.bonus_subscriber_count or 0) > 0:
+        return True
+    if XeroPayoutRecord.query.filter_by(portfolio_user_id=user_id).first():
+        return True
+    return False
+
+
+@mobile_api.route('/tax/w9/status', methods=['GET'])
+@require_auth
+def tax_w9_status():
+    """Return the signed-in creator's W-9 status so the client can prompt."""
+    from models import TaxpayerProfile, XeroPayoutRecord
+
+    profile = TaxpayerProfile.query.filter_by(user_id=g.user_id).first()
+    eligible = _user_is_payout_eligible(g.user_id)
+    on_file = bool(profile and profile.has_tin_on_file)
+
+    held = XeroPayoutRecord.query.filter_by(
+        portfolio_user_id=g.user_id, payment_status='held'
+    ).all()
+
+    return jsonify({
+        'status': profile.status if profile else 'not_submitted',
+        'required': eligible and not on_file,
+        'on_file': on_file,
+        'tin_last4': profile.tin_last4 if profile else None,
+        'legal_name': profile.legal_name if profile else None,
+        'held_payout_count': len(held),
+        'held_payout_total': round(sum(h.total_payout for h in held), 2),
+    })
+
+
+@mobile_api.route('/tax/w9', methods=['POST'])
+@require_auth
+@with_db_retry
+def tax_w9_submit():
+    """Collect a creator's W-9 in-app, push it to Xero, and release held payouts.
+
+    The full TIN is forwarded to Xero (the 1099 system of record) and is NEVER
+    persisted in our DB — we keep only the last 4 digits + status locally.
+    """
+    import re
+    import xero_service
+    from models import db, User, TaxpayerProfile, XeroPayoutRecord
+
+    data = request.get_json(silent=True) or {}
+
+    legal_name = (data.get('legal_name') or '').strip()
+    tax_classification = (data.get('tax_classification') or '').strip()
+    tin_type = (data.get('tin_type') or '').strip().lower()
+    tin_digits = re.sub(r'\D', '', data.get('tin') or '')
+    certified = bool(data.get('certified'))
+
+    address_line1 = (data.get('address_line1') or '').strip()
+    city = (data.get('city') or '').strip()
+    state = (data.get('state') or '').strip()
+    postal_code = (data.get('postal_code') or '').strip()
+
+    errors = {}
+    if not legal_name:
+        errors['legal_name'] = 'required'
+    if tax_classification not in _TAX_CLASSIFICATIONS:
+        errors['tax_classification'] = 'invalid'
+    if tin_type not in ('ssn', 'ein'):
+        errors['tin_type'] = 'invalid'
+    if len(tin_digits) != 9:
+        errors['tin'] = 'must_be_9_digits'
+    if not (address_line1 and city and state and postal_code):
+        errors['address'] = 'incomplete'
+    if not certified:
+        errors['certified'] = 'required'
+    if errors:
+        return jsonify({'error': 'validation_failed', 'fields': errors}), 400
+
+    user = User.query.get(g.user_id)
+    if not user:
+        return jsonify({'error': 'user_not_found'}), 404
+
+    profile = TaxpayerProfile.query.filter_by(user_id=g.user_id).first()
+    if not profile:
+        profile = TaxpayerProfile(user_id=g.user_id)
+        db.session.add(profile)
+
+    now = datetime.utcnow()
+    profile.legal_name = legal_name
+    profile.business_name = (data.get('business_name') or '').strip() or None
+    profile.tax_classification = tax_classification
+    profile.tin_type = tin_type
+    profile.tin_last4 = tin_digits[-4:]
+    profile.address_line1 = address_line1
+    profile.address_line2 = (data.get('address_line2') or '').strip() or None
+    profile.city = city
+    profile.state = state
+    profile.postal_code = postal_code
+    profile.country = ((data.get('country') or 'US').strip().upper()[:2]) or 'US'
+    profile.certified = True
+    profile.certified_at = now
+    profile.submitted_at = now
+    profile.status = 'submitted'
+    db.session.commit()
+
+    # Push full TIN to Xero (system of record). Not persisted locally.
+    push = xero_service.update_contact_tax_info(
+        username=user.username,
+        email=user.email,
+        w9={
+            'legal_name': legal_name,
+            'business_name': profile.business_name,
+            'tin': tin_digits,
+            'address_line1': address_line1,
+            'address_line2': profile.address_line2,
+            'city': city,
+            'state': state,
+            'postal_code': postal_code,
+            'country': profile.country,
+        },
+    )
+
+    if 'contact_id' not in push:
+        # W-9 saved locally but Xero push failed — keep 'submitted' so a retry can
+        # finish it. Payouts stay held until the TIN is actually on file.
+        profile.xero_push_status = 'failed'
+        profile.xero_error = (push.get('error') or 'unknown')[:500]
+        db.session.commit()
+        return jsonify({
+            'status': profile.status,
+            'on_file': False,
+            'xero_push': 'failed',
+            'message': 'Your W-9 was saved but could not sync yet. We will retry automatically.',
+        }), 202
+
+    profile.status = 'on_file'
+    profile.xero_contact_id = push['contact_id']
+    profile.xero_pushed_at = now
+    profile.xero_push_status = 'synced'
+    profile.xero_error = None
+
+    # Release any held payout records for this creator.
+    held = XeroPayoutRecord.query.filter_by(
+        portfolio_user_id=g.user_id, payment_status='held'
+    ).all()
+    for rec in held:
+        rec.payment_status = 'pending'
+        if not rec.xero_contact_id:
+            rec.xero_contact_id = push['contact_id']
+    db.session.commit()
+
+    return jsonify({
+        'status': profile.status,
+        'on_file': True,
+        'tin_last4': profile.tin_last4,
+        'released_payouts': len(held),
+        'message': 'W-9 received. Your payouts are now cleared for payment.',
+    })
+
+
 @mobile_api.route('/unsubscribe/<int:subscription_id>', methods=['DELETE'])
 @require_auth
 def unsubscribe(subscription_id):
@@ -7385,7 +7568,7 @@ def bot_revenue_summary():
         for row in gifted_rows:
             user = User.query.get(row.portfolio_user_id)
             username = user.username if user else f'user_{row.portfolio_user_id}'
-            is_bot = user and user.role == 'agent'
+            is_bot = _user_is_company_owned(user)
             
             # Count real subs for this user
             real_for_user = 0
@@ -7425,7 +7608,7 @@ def bot_revenue_summary():
             for uid, cnt in users_with_real:
                 if uid not in existing_ids:
                     user = User.query.get(uid)
-                    is_bot = user and user.role == 'agent'
+                    is_bot = _user_is_company_owned(user)
                     influencers.append({
                         'user_id': uid,
                         'username': user.username if user else f'user_{uid}',
@@ -7569,7 +7752,7 @@ def bot_simulate_subscription_lifecycle():
         ).all()
         for uid, cnt in rows:
             user = User.query.get(uid)
-            is_bot = bool(user and getattr(user, 'role', None) == 'agent')
+            is_bot = _user_is_company_owned(user)
             p = payout_for(cnt)
             # Company bots get no payout — the company keeps post-store revenue.
             owed = 0.0 if is_bot else p['influencer_payout']
@@ -7636,7 +7819,7 @@ def bot_generate_payout_records():
         "period_month": 3      (optional — defaults to current month)
     }
     """
-    from models import db, User, AdminSubscription, XeroPayoutRecord, MobileSubscription
+    from models import db, User, AdminSubscription, XeroPayoutRecord, MobileSubscription, TaxpayerProfile
     from sqlalchemy import func
     from calendar import monthrange
     
@@ -7696,9 +7879,9 @@ def bot_generate_payout_records():
             if not user:
                 continue
             
-            # Skip company bots — they don't get paid
-            is_bot = hasattr(user, 'role') and user.role == 'agent'
-            if is_bot:
+            # Skip company bots and the owner's own accounts — no money changes
+            # hands for these, so they're never paid and never need a W-9.
+            if _user_is_company_owned(user):
                 continue
             
             real_count = real_map.get(uid, 0)
@@ -7707,13 +7890,20 @@ def bot_generate_payout_records():
             if real_count == 0 and bonus_count == 0:
                 continue
             
+            # Hold the payout unless the creator's W-9 is on file (Layer 1).
+            # Held records are skipped by sync-payouts and released automatically
+            # when the creator submits their W-9 (POST /tax/w9).
+            profile = TaxpayerProfile.query.filter_by(user_id=uid).first()
+            has_w9 = bool(profile and profile.has_tin_on_file)
+            
             record = XeroPayoutRecord(
                 portfolio_user_id=uid,
                 period_start=period_start,
                 period_end=period_end,
                 real_subscriber_count=real_count,
                 bonus_subscriber_count=bonus_count,
-                payment_status='pending',
+                payment_status='pending' if has_w9 else 'held',
+                xero_contact_id=(profile.xero_contact_id if profile else None),
             )
             record.calculate_totals()
             db.session.add(record)
@@ -7728,16 +7918,21 @@ def bot_generate_payout_records():
                 'bonus_payout': record.bonus_payout,
                 'total_payout': record.total_payout,
                 'payment_status': record.payment_status,
+                'w9_on_file': has_w9,
             })
         
         db.session.commit()
         
         total_obligation = sum(r['total_payout'] for r in records_created)
+        held_count = sum(1 for r in records_created if r['payment_status'] == 'held')
         
         return jsonify({
             'success': True,
             'period': f'{period_start} to {period_end}',
             'records_created': len(records_created),
+            'held_pending_w9': held_count,
+            'held_obligation': round(
+                sum(r['total_payout'] for r in records_created if r['payment_status'] == 'held'), 2),
             'total_payout_obligation': round(total_obligation, 2),
             'records': sorted(records_created, key=lambda x: x['total_payout'], reverse=True),
         })
@@ -7939,10 +8134,43 @@ def xero_accounts():
         'count': len(shown),
         'accounts': shown,
         'posting_codes_check': {
-            '6000_influencer_payout': '6000' in codes,
-            '6100_promo_payout': '6100' in codes,
+            '4010_subscription_revenue': '4010' in codes,
+            '6010_user_payments': '6010' in codes,
+            '6100_store_fees': '6100' in codes,
         },
-        'hint': "REVENUE class = subscription income; EXPENSE class = store fees / payouts.",
+        'hint': "4010 REVENUE = gross subscription income; 6100 EXPENSE = store fees; 6010 EXPENSE = creator payouts (contract labor).",
+    })
+
+
+@mobile_api.route('/admin/xero/post-revenue', methods=['POST'])
+@require_admin_2fa
+@with_db_retry
+def xero_post_revenue():
+    """Post gross subscription revenue (4010) + store fees (6100) to Xero for a
+    period, summed transaction-by-transaction from InAppPurchase (annual-aware).
+
+    Gross/principal (Option A). Idempotent — re-running skips periods already
+    posted. Body (optional): {"period_year": 2026, "period_month": 3}; defaults
+    to the current month.
+    """
+    import xero_service
+    from calendar import monthrange
+
+    data = request.get_json() or {}
+    now = datetime.utcnow()
+    year = data.get('period_year', now.year)
+    month = data.get('period_month', now.month)
+    period_start = date(year, month, 1)
+    period_end = date(year, month, monthrange(year, month)[1])
+
+    result = xero_service.post_subscription_revenue(period_start, period_end)
+    if 'error' in result:
+        return jsonify(result), 400
+
+    return jsonify({
+        'success': True,
+        'period': f'{period_start} to {period_end}',
+        **result,
     })
 
 
