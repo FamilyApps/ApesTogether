@@ -7910,6 +7910,42 @@ def xero_status():
     return jsonify(xero_service.get_xero_status())
 
 
+@mobile_api.route('/admin/xero/accounts', methods=['GET'])
+@require_admin_2fa
+def xero_accounts():
+    """List the connected Xero org's chart of accounts (read-only).
+
+    Use this to find which account codes to use for subscription revenue and
+    store fees, and to confirm the payout codes (6000/6100) actually exist.
+
+    Optional query param: ?class=REVENUE,EXPENSE  (filters the displayed list;
+    the code-existence check always runs against the full chart).
+    """
+    import xero_service
+    result = xero_service.list_accounts()
+    if 'error' in result:
+        return jsonify(result), 400
+
+    all_accounts = result['accounts']
+    codes = {a['code'] for a in all_accounts if a['code']}
+
+    shown = all_accounts
+    class_arg = request.args.get('class')
+    if class_arg:
+        wanted = {c.strip().upper() for c in class_arg.split(',') if c.strip()}
+        shown = [a for a in all_accounts if (a['class'] or '') in wanted]
+
+    return jsonify({
+        'count': len(shown),
+        'accounts': shown,
+        'posting_codes_check': {
+            '6000_influencer_payout': '6000' in codes,
+            '6100_promo_payout': '6100' in codes,
+        },
+        'hint': "REVENUE class = subscription income; EXPENSE class = store fees / payouts.",
+    })
+
+
 @mobile_api.route('/admin/xero/sync-payouts', methods=['POST'])
 @require_admin_2fa
 @with_db_retry

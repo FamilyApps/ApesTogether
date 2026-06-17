@@ -650,3 +650,40 @@ def get_xero_status():
         'expires_at': token.expires_at.isoformat() if token.expires_at else None,
         'last_updated': token.updated_at.isoformat() if token.updated_at else None,
     }
+
+
+# ── Chart of Accounts (read-only) ─────────────────────────────────────────
+
+def list_accounts(token=None):
+    """Fetch the connected org's chart of accounts (read-only).
+
+    Uses the already-granted accounting.settings.read scope. Returns
+    {'accounts': [...], 'count': N} where each account is
+    {code, name, type, class, status, tax_type, description}, or {'error': ...}.
+
+    Use this to discover which account codes to post revenue / store fees /
+    payouts to (the codes differ per Xero organisation's chart of accounts).
+    """
+    if token is None:
+        token = get_valid_token()
+    if not token:
+        return {'error': 'No valid Xero token — connect at /admin/xero/connect first'}
+
+    resp = _xero_get('Accounts', token)
+    if resp.status_code != 200:
+        logger.error(f"Xero list accounts failed: {resp.status_code} {resp.text[:300]}")
+        return {'error': f'Xero API error {resp.status_code}: {resp.text[:300]}'}
+
+    accounts = []
+    for a in resp.json().get('Accounts', []):
+        accounts.append({
+            'code': a.get('Code'),
+            'name': a.get('Name'),
+            'type': a.get('Type'),          # e.g. SALES, REVENUE, EXPENSE, DIRECTCOSTS
+            'class': a.get('Class'),        # ASSET, EQUITY, EXPENSE, LIABILITY, REVENUE
+            'status': a.get('Status'),
+            'tax_type': a.get('TaxType'),
+            'description': a.get('Description'),
+        })
+    accounts.sort(key=lambda x: ((x['class'] or 'ZZZ'), (x['code'] or 'zzz')))
+    return {'accounts': accounts, 'count': len(accounts)}
