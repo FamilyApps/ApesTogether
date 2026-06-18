@@ -450,6 +450,40 @@ def contact_has_tax_number(username):
     return False
 
 
+def reconcile_w9_on_file(username, token=None):
+    """Re-check Xero for a creator's TaxNumber (TIN) and return its contact id.
+
+    Used by the W-9 retry job. Because the full TIN is never stored locally
+    (PII minimization), a failed push can't be re-sent from our DB — instead we
+    reconcile against Xero's authoritative state: if the contact now has a
+    TaxNumber (the original push actually landed, or it was added manually), the
+    creator is on file and held payouts can be released.
+
+    Returns {'on_file': bool, 'contact_id': str|None}, or {'error': ...}.
+    """
+    if token is None:
+        token = get_valid_token()
+    if not token:
+        return {'error': 'No valid Xero token — connect at /api/mobile/admin/xero/connect first'}
+    try:
+        resp = requests.get(
+            f"{XERO_API_BASE}/Contacts",
+            headers=_xero_headers(token),
+            params={'where': f'Name=="{username}"'},
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            contacts = resp.json().get('Contacts', [])
+            if contacts:
+                c = contacts[0]
+                tax_number = (c.get('TaxNumber') or '').strip()
+                return {'on_file': bool(tax_number), 'contact_id': c.get('ContactID')}
+        return {'on_file': False, 'contact_id': None}
+    except Exception as e:
+        logger.error(f"W-9 reconcile failed for {username}: {e}")
+        return {'error': str(e)}
+
+
 def update_contact_tax_info(username, email, w9):
     """Push in-app W-9 data onto the creator's Xero contact.
 
@@ -467,7 +501,7 @@ def update_contact_tax_info(username, email, w9):
     """
     token = get_valid_token()
     if not token:
-        return {'error': 'No valid Xero token — connect at /admin/xero/connect first'}
+        return {'error': 'No valid Xero token — connect at /api/mobile/admin/xero/connect first'}
 
     # Keep Name == username for stable matching; identity goes in First/Last name.
     contact_id = find_or_create_contact(token, username, email)
@@ -531,36 +565,40 @@ def create_bill_for_payout(token, payout_record, username, email=None):
         if not contact_id:
             return {'error': f'Failed to find/create Xero contact for {username}'}
     
-    # Build line items
+    # Build line items from the record's ACTUAL dollar amounts (transaction-driven
+    # and already net of any refund clawback), NOT count×rate — annual subs and
+    # clawbacks make the per-sub rate wrong as a multiplier.
     line_items = []
-    payout_per_sub = AdminSubscription.INFLUENCER_PAYOUT_PER_SUB  # $6.50
-    
+
     # Both real and bonus/gifted payouts are nonemployee compensation paid to the
     # creator, so BOTH are 1099-reportable and post to 6010 (User Payments) under
     # the creator's contact. (Previously real->6000 [nonexistent] and bonus->6100
     # [that's the store-fee account] — both were wrong.)
     PAYOUT_ACCOUNT_CODE = '6010'  # User Payments (creator payouts / contract labor)
 
-    if payout_record.real_subscriber_count > 0:
+    real_amt = round(float(payout_record.influencer_payout or 0.0), 2)
+    bonus_amt = round(float(payout_record.bonus_payout or 0.0), 2)
+
+    if real_amt > 0:
         line_items.append({
-            'Description': f'Influencer payout — {payout_record.real_subscriber_count} real subscriber(s) @ ${payout_per_sub:.2f}',
-            'Quantity': payout_record.real_subscriber_count,
-            'UnitAmount': payout_per_sub,
+            'Description': f'Influencer payout — {payout_record.real_subscriber_count} subscriber transaction(s), net of refunds',
+            'Quantity': 1,
+            'UnitAmount': real_amt,
             'AccountCode': PAYOUT_ACCOUNT_CODE,
             'TaxType': 'NONE',
         })
-    
-    if payout_record.bonus_subscriber_count > 0:
+
+    if bonus_amt > 0:
         line_items.append({
-            'Description': f'Promotional payout — {payout_record.bonus_subscriber_count} bonus subscriber(s) @ ${payout_per_sub:.2f}',
-            'Quantity': payout_record.bonus_subscriber_count,
-            'UnitAmount': payout_per_sub,
+            'Description': f'Promotional payout — {payout_record.bonus_subscriber_count} bonus subscriber(s)',
+            'Quantity': 1,
+            'UnitAmount': bonus_amt,
             'AccountCode': PAYOUT_ACCOUNT_CODE,
             'TaxType': 'NONE',
         })
     
     if not line_items:
-        return {'error': 'No line items to bill (0 subscribers)'}
+        return {'error': 'No line items to bill (zero net payout)'}
     
     # Due date: 30 days from now
     due_date = (datetime.utcnow() + timedelta(days=30)).strftime('%Y-%m-%d')
@@ -611,7 +649,7 @@ def sync_payout_records_to_xero(period_start=None, period_end=None):
     
     token = get_valid_token()
     if not token:
-        return {'error': 'No valid Xero token — connect at /admin/xero/connect first'}
+        return {'error': 'No valid Xero token — connect at /api/mobile/admin/xero/connect first'}
     
     # Get pending payout records (skip held — those need tax info first)
     query = XeroPayoutRecord.query.filter_by(xero_sync_status='pending').filter(
@@ -708,7 +746,7 @@ def get_xero_status():
     if not token:
         return {
             'connected': False,
-            'message': 'No Xero connection — visit /admin/xero/connect',
+            'message': 'No Xero connection — visit /api/mobile/admin/xero/connect',
         }
     
     return {
@@ -735,7 +773,7 @@ def list_accounts(token=None):
     if token is None:
         token = get_valid_token()
     if not token:
-        return {'error': 'No valid Xero token — connect at /admin/xero/connect first'}
+        return {'error': 'No valid Xero token — connect at /api/mobile/admin/xero/connect first'}
 
     resp = _xero_get('Accounts', token)
     if resp.status_code != 200:
@@ -827,7 +865,7 @@ def post_subscription_revenue(period_start, period_end):
 
     token = get_valid_token()
     if not token:
-        return {'error': 'No valid Xero token — connect at /admin/xero/connect first'}
+        return {'error': 'No valid Xero token — connect at /api/mobile/admin/xero/connect first'}
 
     results = {'posted': [], 'skipped': [], 'failed': [], 'gross': 0.0, 'store_fees': 0.0}
     period_key = period_start.strftime('%Y-%m')
@@ -937,3 +975,148 @@ def post_subscription_revenue(period_start, period_end):
     results['store_fees'] = round(results['store_fees'], 2)
     results['net'] = round(results['gross'] - results['store_fees'], 2)
     return results
+
+
+# ── Refund / chargeback reversal (credit notes) ────────────────────────────
+
+def _refund_entity_id(purchase_id):
+    """Per-purchase idempotency key for refund reversals."""
+    return int(purchase_id)
+
+
+def reverse_refunded_purchase(purchase, token=None):
+    """Reverse the Xero revenue + store fee for ONE refunded InAppPurchase.
+
+    Why this is needed: `post_subscription_revenue` books gross revenue (4010)
+    and store fees (6100) per period and EXCLUDES `status == 'refunded'` rows.
+    So a refund that lands BEFORE that period is posted needs no reversal (the
+    row is simply never booked). But a refund that lands AFTER the period was
+    already posted (e.g. a late chargeback) leaves revenue overstated — this
+    issues credit notes to reverse exactly that transaction's revenue + fee.
+
+    Idempotent: a per-purchase XeroSyncLog guard (sync_type='subscription_refund')
+    prevents double-reversal. Returns a dict describing what happened.
+    """
+    from models import db, XeroSyncLog
+    from datetime import date as _date
+
+    entity_id = _refund_entity_id(purchase.id)
+    if _period_already_posted('subscription_refund', entity_id):
+        return {'skipped': 'already_reversed', 'purchase_id': purchase.id}
+
+    pdate = purchase.purchase_date.date() if hasattr(purchase.purchase_date, 'date') else purchase.purchase_date
+    period_start = _date(pdate.year, pdate.month, 1)
+
+    # Only reverse if the original revenue was actually posted; otherwise the
+    # refunded row is already excluded from posting and there is nothing to undo.
+    if not _period_already_posted('subscription_revenue', _period_entity_id(purchase.platform, period_start)):
+        return {'skipped': 'revenue_not_posted', 'purchase_id': purchase.id}
+
+    if token is None:
+        token = get_valid_token()
+    if not token:
+        return {'error': 'No valid Xero token — connect at /api/mobile/admin/xero/connect first'}
+
+    contact_id = find_or_create_store_contact(token, purchase.platform)
+    if not contact_id:
+        return {'error': 'store_contact_failed', 'purchase_id': purchase.id}
+
+    store_label = _STORE_CONTACT_NAMES.get(purchase.platform, purchase.platform.title())
+    date_str = datetime.utcnow().strftime('%Y-%m-%d')
+    period_key = period_start.strftime('%Y-%m')
+    price = round(float(purchase.price or 0.0), 2)
+    store_fee = round(float(purchase.store_fee or 0.0), 2)
+
+    # 1) Reverse revenue — ACCRECCREDIT (credit note against the store customer),
+    #    reduces income booked to 4010.
+    rev_credit = _xero_post('CreditNotes', token, {'CreditNotes': [{
+        'Type': 'ACCRECCREDIT',
+        'Contact': {'ContactID': contact_id},
+        'Date': date_str,
+        'Reference': f"Refund-Rev-{purchase.platform}-{purchase.id}",
+        'Status': 'AUTHORISED',
+        'CurrencyCode': 'USD',
+        'LineItems': [{
+            'Description': f'{store_label} refund reversal — txn {purchase.transaction_id} ({period_key})',
+            'Quantity': 1,
+            'UnitAmount': price,
+            'AccountCode': REVENUE_ACCOUNT_CODE,
+            'TaxType': 'NONE',
+        }],
+    }]})
+    if rev_credit.status_code != 200:
+        err = rev_credit.text[:300]
+        db.session.add(XeroSyncLog(
+            sync_type='subscription_refund', entity_id=entity_id, entity_type='refund',
+            amount=price, status='failed', error_message=err))
+        db.session.commit()
+        return {'error': f'revenue_credit_failed: {err}', 'purchase_id': purchase.id}
+    rev_credit_id = rev_credit.json().get('CreditNotes', [{}])[0].get('CreditNoteID')
+
+    # 2) Reverse store fee — ACCPAYCREDIT (the store returns its commission on a
+    #    refund), reduces expense booked to 6100.
+    fee_credit_id = None
+    if store_fee > 0:
+        fee_credit = _xero_post('CreditNotes', token, {'CreditNotes': [{
+            'Type': 'ACCPAYCREDIT',
+            'Contact': {'ContactID': contact_id},
+            'Date': date_str,
+            'Reference': f"Refund-Fee-{purchase.platform}-{purchase.id}",
+            'Status': 'AUTHORISED',
+            'CurrencyCode': 'USD',
+            'LineItems': [{
+                'Description': f'{store_label} commission reversal — txn {purchase.transaction_id} ({period_key})',
+                'Quantity': 1,
+                'UnitAmount': store_fee,
+                'AccountCode': STORE_FEE_ACCOUNT_CODE,
+                'TaxType': 'NONE',
+            }],
+        }]})
+        if fee_credit.status_code == 200:
+            fee_credit_id = fee_credit.json().get('CreditNotes', [{}])[0].get('CreditNoteID')
+        else:
+            logger.error(f"Store-fee credit note failed for purchase {purchase.id}: {fee_credit.text[:300]}")
+
+    db.session.add(XeroSyncLog(
+        sync_type='subscription_refund', entity_id=entity_id, entity_type='refund',
+        xero_invoice_id=rev_credit_id, xero_contact_id=contact_id, amount=price, status='success'))
+    db.session.commit()
+
+    logger.info(f"Reversed refunded purchase {purchase.id}: -${price:.2f} revenue, "
+                f"-${store_fee:.2f} store fee ({purchase.platform} {period_key})")
+    return {'reversed': True, 'purchase_id': purchase.id, 'revenue_reversed': price,
+            'store_fee_reversed': store_fee, 'revenue_credit_note_id': rev_credit_id,
+            'store_fee_credit_note_id': fee_credit_id}
+
+
+def reverse_refunded_purchases(period_start=None, period_end=None):
+    """Sweep: reverse every refunded purchase whose revenue was already posted
+    and that hasn't been reversed yet. Idempotent (per-purchase guard).
+
+    Optional date filter narrows by purchase_date; default scans all refunds.
+    """
+    from models import db, InAppPurchase
+
+    token = get_valid_token()
+    if not token:
+        return {'error': 'No valid Xero token — connect at /api/mobile/admin/xero/connect first'}
+
+    q = InAppPurchase.query.filter(InAppPurchase.status == 'refunded')
+    if period_start:
+        q = q.filter(InAppPurchase.purchase_date >= datetime.combine(period_start, datetime.min.time()))
+    if period_end:
+        q = q.filter(InAppPurchase.purchase_date <= datetime.combine(period_end, datetime.max.time()))
+
+    out = {'reversed': [], 'skipped': 0, 'failed': [], 'total_revenue_reversed': 0.0}
+    for p in q.all():
+        res = reverse_refunded_purchase(p, token=token)
+        if res.get('reversed'):
+            out['reversed'].append({'purchase_id': p.id, 'revenue': res['revenue_reversed'],
+                                    'store_fee': res['store_fee_reversed']})
+            out['total_revenue_reversed'] += res['revenue_reversed']
+        elif res.get('error'):
+            out['failed'].append({'purchase_id': p.id, 'error': res['error']})
+        else:
+            out['skipped'] += 1
+    out['total_revenue_reversed'] = round(out['total_revenue_reversed'], 2)
+    return out

@@ -707,6 +707,13 @@ class InAppPurchase(db.Model):
     platform_revenue = db.Column(db.Float, default=1.15)   # 15% of post-store ($7.65)
     store_fee = db.Column(db.Float, default=1.35)           # 15% of $9.00
     
+    # Clawback bookkeeping: set when this row was refunded AFTER its period's
+    # creator payout had already been PAID, and the refund has since been netted
+    # against a later month's payout. Refunds before payment need no clawback
+    # (they're simply excluded from that month's transaction-driven total), so
+    # this stays NULL for them. Prevents double-clawing the same refund.
+    payout_reversed_at = db.Column(db.DateTime, nullable=True)
+    
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -791,6 +798,13 @@ class XeroPayoutRecord(db.Model):
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # One payout record per creator per period — a hard guard against generating
+    # (and billing) the same month twice. Enforced in DB by 2026_06_17 migration.
+    __table_args__ = (
+        db.UniqueConstraint('portfolio_user_id', 'period_start', 'period_end',
+                            name='uq_payout_user_period'),
+    )
     
     # Relationship
     portfolio_user = db.relationship('User', backref='payout_records')

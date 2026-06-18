@@ -172,6 +172,99 @@ def _apply_update(db, platform: str, original_transaction_id: str = None,
     return count
 
 
+def _record_renewal(db, platform: str, new_transaction_id: str,
+                    purchase_date: datetime = None, expires_date: datetime = None,
+                    original_transaction_id: str = None,
+                    purchase_token: str = None) -> int:
+    """Record a NEW billing period for a renewed subscription.
+
+    Each renewal is a fresh charge, so it needs its own InAppPurchase row for
+    revenue recognition and creator payouts to be transaction-driven-correct
+    (monthly subs accrue a row per month; annual subs once per year). Without
+    this, renewal revenue/payouts would never be booked.
+
+    The renewal's economics (price + payout split) are CLONED from the most
+    recent prior row for the same subscription, because the product and creator
+    don't change on renewal and the prior split already reflects the correct
+    store/platform rates and any company-owned-account adjustment. (Consented
+    Apple/Google price changes arrive as their own notification types and are
+    out of scope here.)
+
+    Safe within the webhook security model: the caller only invokes this with
+    store-authenticated data (Apple JWS-verified transaction info; Google state
+    re-fetched from the Play Developer API). If no prior row exists (the initial
+    purchase was never validated) we do NOT fabricate one — returns 0.
+
+    Returns the new InAppPurchase id, or 0 if nothing was created (already
+    recorded, or no template found).
+    """
+    from models import InAppPurchase, MobileSubscription
+
+    new_transaction_id = str(new_transaction_id or '')
+    if not new_transaction_id:
+        return 0
+
+    # Dedupe: if the renewal txn was already recorded (e.g. the client called
+    # /purchase/validate on the renewal first), just ensure access is current.
+    existing = InAppPurchase.query.filter_by(transaction_id=new_transaction_id).first()
+    if existing:
+        if existing.status != 'active':
+            existing.status = 'active'
+        if expires_date:
+            existing.expires_date = expires_date
+        existing.updated_at = datetime.utcnow()
+        db.session.commit()
+        return 0
+
+    # Find the template (most recent prior row for this subscription).
+    q = InAppPurchase.query.filter_by(platform=platform)
+    if original_transaction_id:
+        q = q.filter(
+            (InAppPurchase.original_transaction_id == original_transaction_id) |
+            (InAppPurchase.transaction_id == original_transaction_id)
+        )
+    elif purchase_token:
+        q = q.filter(InAppPurchase.receipt_data == purchase_token)
+    else:
+        return 0
+
+    template = q.order_by(InAppPurchase.purchase_date.desc()).first()
+    if not template:
+        logger.warning(f"[renewal] no template row for {platform} "
+                       f"orig={original_transaction_id} token={'set' if purchase_token else None} "
+                       f"— not fabricating a renewal row")
+        return 0
+
+    renewal = InAppPurchase(
+        subscriber_id=template.subscriber_id,
+        subscribed_to_id=template.subscribed_to_id,
+        platform=platform,
+        product_id=template.product_id,
+        transaction_id=new_transaction_id,
+        original_transaction_id=(original_transaction_id or template.original_transaction_id),
+        receipt_data=template.receipt_data,
+        status='active',
+        purchase_date=purchase_date or datetime.utcnow(),
+        expires_date=expires_date,
+        price=template.price,
+        influencer_payout=template.influencer_payout,
+        platform_revenue=template.platform_revenue,
+        store_fee=template.store_fee,
+    )
+    db.session.add(renewal)
+
+    # Keep the access subscription(s) current (continuity — no new row needed).
+    for s in MobileSubscription.query.filter_by(in_app_purchase_id=template.id).all():
+        s.status = 'active'
+        if expires_date:
+            s.expires_at = expires_date
+
+    db.session.commit()
+    logger.info(f"[renewal] recorded {platform} period txn={new_transaction_id} "
+                f"creator={template.subscribed_to_id} payout=${template.influencer_payout:.2f}")
+    return renewal.id
+
+
 # ---------------------------------------------------------------------------
 # Apple App Store Server Notifications V2
 # ---------------------------------------------------------------------------
@@ -193,10 +286,26 @@ def handle_apple_notification(db, signed_payload: str) -> dict:
         return {'type': notification_type, 'subtype': subtype, 'no_transaction': True}
 
     tx = verify_apple_jws(signed_tx)
-    original_transaction_id = str(tx.get('originalTransactionId') or tx.get('transactionId') or '')
+    transaction_id = str(tx.get('transactionId') or '')
+    original_transaction_id = str(tx.get('originalTransactionId') or transaction_id or '')
     expires_ms = tx.get('expiresDate')
+    purchase_ms = tx.get('purchaseDate')
     revocation_ms = tx.get('revocationDate')
     expires_date = datetime.utcfromtimestamp(expires_ms / 1000) if expires_ms else None
+    purchase_date = datetime.utcfromtimestamp(purchase_ms / 1000) if purchase_ms else None
+
+    # A renewal is a brand-new billing period (new charge) — record it as its own
+    # row so revenue + creator payouts accrue per period. Not a refund/revoke.
+    if notification_type == 'DID_RENEW' and not revocation_ms:
+        created = _record_renewal(
+            db, platform='apple', new_transaction_id=transaction_id,
+            purchase_date=purchase_date, expires_date=expires_date,
+            original_transaction_id=original_transaction_id,
+        )
+        return {'type': notification_type, 'subtype': subtype,
+                'original_transaction_id': original_transaction_id,
+                'new_transaction_id': transaction_id,
+                'renewal_recorded': bool(created)}
 
     new_status = None
     if notification_type == 'REFUND' or revocation_ms:
@@ -214,6 +323,13 @@ def handle_apple_notification(db, signed_payload: str) -> dict:
         original_transaction_id=original_transaction_id,
         new_status=new_status, expires_date=expires_date,
     )
+
+    # If a refund/revoke landed and the period revenue was already posted to
+    # Xero, reverse it (credit notes) — best-effort; the monthly reconcile
+    # sweep is the authoritative safety net.
+    if new_status == 'refunded':
+        _try_reverse_refund(original_transaction_id=original_transaction_id, platform='apple')
+
     return {'type': notification_type, 'subtype': subtype,
             'original_transaction_id': original_transaction_id,
             'status': new_status, 'updated': updated}
@@ -247,6 +363,8 @@ def handle_google_rtdn(db, body: dict) -> dict:
         token = voided.get('purchaseToken')
         updated = _apply_update(db, platform='google', purchase_token=token,
                                 new_status='refunded')
+        # Reverse revenue if it was already posted (best-effort).
+        _try_reverse_refund(purchase_token=token, platform='google')
         return {'voided': True, 'updated': updated}
 
     sub_notif = notif.get('subscriptionNotification')
@@ -269,7 +387,51 @@ def handle_google_rtdn(db, body: dict) -> dict:
 
     new_status = result.get('status') if result.get('valid') else None
     expires_date = result.get('expires_date')
+
+    # A new authoritative order id (latest charge) that we haven't recorded yet
+    # means a fresh billing period (renewal / recovered) — record it as its own
+    # row for per-period revenue + payout. The clone is keyed on the token.
+    renewal_recorded = False
+    if result.get('valid'):
+        from models import InAppPurchase
+        new_txn = str(result.get('transaction_id') or '')
+        if new_txn and not InAppPurchase.query.filter_by(transaction_id=new_txn).first():
+            created = _record_renewal(
+                db, platform='google', new_transaction_id=new_txn,
+                purchase_date=result.get('purchase_date'),
+                expires_date=expires_date, purchase_token=token,
+            )
+            renewal_recorded = bool(created)
+
     updated = _apply_update(db, platform='google', purchase_token=token,
                             new_status=new_status, expires_date=expires_date)
     return {'type': notification_type, 'product_id': product_id,
-            'status': new_status, 'updated': updated}
+            'status': new_status, 'renewal_recorded': renewal_recorded,
+            'updated': updated}
+
+
+def _try_reverse_refund(platform: str, original_transaction_id: str = None,
+                        purchase_token: str = None) -> None:
+    """Best-effort: reverse Xero revenue/store-fee for refunded purchase(s).
+
+    Never raises — webhook delivery must still ACK 200 even if Xero is down.
+    The monthly `/admin/xero/reconcile-refunds` sweep re-attempts anything missed.
+    """
+    try:
+        from models import InAppPurchase
+        import xero_service
+
+        q = InAppPurchase.query.filter_by(platform=platform, status='refunded')
+        if original_transaction_id:
+            q = q.filter(
+                (InAppPurchase.original_transaction_id == original_transaction_id) |
+                (InAppPurchase.transaction_id == original_transaction_id)
+            )
+        elif purchase_token:
+            q = q.filter(InAppPurchase.receipt_data == purchase_token)
+        else:
+            return
+        for p in q.all():
+            xero_service.reverse_refunded_purchase(p)
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning(f"[refund] reversal deferred to reconcile sweep: {e}")

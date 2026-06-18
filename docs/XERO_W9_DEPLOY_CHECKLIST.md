@@ -20,7 +20,7 @@ accounting work. Check items off as you go.
 
 ## C. Post-deploy verification (Xero chart of accounts)
 
-- [ ] If Xero isn't connected yet: visit **`/admin/xero/connect`** and authorize.
+- [ ] If Xero isn't connected yet: visit **`https://apestogether.ai/api/mobile/admin/xero/connect`** and authorize (note the `/api/mobile` prefix — the bare `/admin/xero/connect` 404s).
 - [ ] **`GET /admin/xero/accounts`** and confirm all three show `true`:
       - `4010_subscription_revenue` (REVENUE — gross subscription income)
       - `6100_store_fees` (EXPENSE — Apple/Google commission)
@@ -68,12 +68,22 @@ Subscriptions to **your own accounts** (`bobford00@gmail.com`,
 
 ---
 
-## F. Known gaps (NOT yet built — proposed next work)
+## F. Known gaps — ALL BUILT in Session 16 (see `LAUNCH_TODO.md` for live status)
 
-- [ ] **Refund/chargeback handling** — Apple ASSN V2 `REFUND` webhook + Google
-      RTDN / Voided Purchases sweep → reverse 4010/6100 via credit notes and claw
-      back the payout. (Highest priority — real money leaks without it.)
-- [ ] **Transaction-driven payouts** — pay annual subs once (sum of period
-      `InAppPurchase.influencer_payout`) instead of `active_count × $9`.
-- [ ] **Idempotency guard on payout sync** keyed on `(user, period)`.
-- [ ] **$600 / missing-TIN dashboard** + W-9 push-retry job for failed Xero syncs.
+These were the proposed next-work items; they are now implemented (code complete,
+tested via `tests/test_payout_integrity.py`). Tasks are tracked only in
+`LAUNCH_TODO.md` going forward.
+
+- [x] **Refund/chargeback handling** — `xero_service.reverse_refunded_purchase[s]`
+      issues idempotent revenue (4010) + store-fee (6100) credit notes; best-effort
+      hook in the webhooks + authoritative sweep `POST /admin/xero/reconcile-refunds`.
+- [x] **Transaction-driven payouts** — `bot_generate_payout_records` now sums the
+      period's non-refunded `InAppPurchase` rows (annual paid once), and
+      `create_bill_for_payout` bills the actual amount (not `active_count × $`).
+- [x] **Idempotency guard on payout sync** — unique index `uq_payout_user_period`
+      on `(portfolio_user_id, period_start, period_end)`.
+- [x] **$600 / missing-TIN dashboard** — `GET /admin/tax/1099-readiness` — plus the
+      W-9 push-retry/reconcile job `POST /admin/tax/w9/retry-sync`.
+
+> **Migration:** run `scripts/migrations/2026_06_17_payout_integrity.sql` (adds
+> `in_app_purchase.payout_reversed_at` + the unique index) before deploying this work.

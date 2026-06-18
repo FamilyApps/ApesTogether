@@ -26,5 +26,10 @@ android/icon_silhouette_check.png
 android/icon_source_flat.png
 android/icon_alignment_check.png
 
+# Local debug capture artifacts (logcat dumps, screenshots from test runs)
+_signin_log.txt
+_screen.png
+*.logcat
+
 # Bot agent profile storage (tracked — needed by GitHub Actions for bot trading)
 # .bot_profiles/
