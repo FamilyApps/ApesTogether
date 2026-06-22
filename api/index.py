@@ -12018,18 +12018,34 @@ def apple_app_site_association():
 
 @app.route('/.well-known/assetlinks.json')
 def android_asset_links():
-    """Serve Digital Asset Links for Android App Links (deep links)"""
-    package_name = os.environ.get('ANDROID_PACKAGE_NAME', 'com.apestogether.app')
-    sha256_fingerprint = os.environ.get('ANDROID_SHA256_FINGERPRINT', '')
-    fingerprints = [fp.strip() for fp in sha256_fingerprint.split(',') if fp.strip()]
-    return jsonify([{
-        "relation": ["delegate_permission/common.handle_all_urls"],
-        "target": {
-            "namespace": "android_app",
-            "package_name": package_name,
-            "sha256_cert_fingerprints": fingerprints
-        }
-    }]), 200, {'Content-Type': 'application/json'}
+    """Serve Digital Asset Links for Android App Links (deep links).
+
+    Source of truth is the committed file public/.well-known/assetlinks.json
+    (bundled into the deployment via vercel.json includeFiles). Falls back to
+    the ANDROID_SHA256_FINGERPRINT env var if the file is unreadable.
+    """
+    import json
+    asset_links_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'public', '.well-known', 'assetlinks.json'
+    )
+    try:
+        with open(asset_links_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return jsonify(data), 200, {'Content-Type': 'application/json'}
+    except Exception as e:
+        logger.warning(f"assetlinks.json file unavailable ({e}); falling back to env var")
+        package_name = os.environ.get('ANDROID_PACKAGE_NAME', 'com.apestogether.app')
+        sha256_fingerprint = os.environ.get('ANDROID_SHA256_FINGERPRINT', '')
+        fingerprints = [fp.strip() for fp in sha256_fingerprint.split(',') if fp.strip()]
+        return jsonify([{
+            "relation": ["delegate_permission/common.handle_all_urls"],
+            "target": {
+                "namespace": "android_app",
+                "package_name": package_name,
+                "sha256_cert_fingerprints": fingerprints
+            }
+        }]), 200, {'Content-Type': 'application/json'}
 
 @app.route('/p/<slug>')
 def public_portfolio_view(slug):

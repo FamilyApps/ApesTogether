@@ -6,7 +6,8 @@
       "src": "api/vercel.py",
       "use": "@vercel/python",
       "config": {
-        "maxDuration": 60
+        "maxDuration": 60,
+        "includeFiles": "public/.well-known/**"
       }
     }
   ],
@@ -15,20 +16,6 @@
       "src": "/static/(.*)",
       "headers": { "Cache-Control": "public, max-age=31536000, immutable" },
       "continue": true
-    },
-    {
-      "src": "/.well-known/apple-app-site-association",
-      "dest": "/public/.well-known/apple-app-site-association",
-      "headers": {
-        "Content-Type": "application/json"
-      }
-    },
-    {
-      "src": "/.well-known/assetlinks.json",
-      "dest": "/public/.well-known/assetlinks.json",
-      "headers": {
-        "Content-Type": "application/json"
-      }
     },
     {
       "src": "/(.*)",
