@@ -7,8 +7,8 @@
       "namespace": "android_app",
       "package_name": "com.apestogether.app",
       "sha256_cert_fingerprints": [
-        "REPLACE_WITH_RELEASE_SIGNING_CERT_SHA256",
-        "REPLACE_WITH_PLAY_APP_SIGNING_CERT_SHA256"
+        "64:47:B5:21:9B:F5:9F:95:12:E1:5D:8C:1E:50:F8:CB:35:60:EA:61:45:A4:7D:8B:51:37:C5:44:7D:10:2B:57",
+        "0A:3A:A0:63:34:F2:64:8A:2E:93:CD:CA:B0:93:D2:23:62:43:29:CE:2F:00:8E:81:05:C7:BE:49:C2:DA:1C:CA"
       ]
     }
   }
