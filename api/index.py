@@ -9407,6 +9407,34 @@ def manual_intraday_collection():
 
 
 
+@app.route('/api/cron/monthly-payouts', methods=['POST', 'GET'])
+def monthly_payouts_cron():
+    """Month-end creator payout pipeline (runs on the 3rd of each month).
+
+    Generates the PRIOR month's XeroPayoutRecord rows and syncs them to Xero as
+    ACCPAY bills, so the operator can open Xero -> Bills to pay and see exactly
+    which checks to cut. Creates bills only — never marks anything paid (cutting
+    the physical check stays manual). End-to-end idempotent: generation is guarded
+    by the unique (creator, period) index and the Xero sync skips already-synced /
+    W-9-held records, so an accidental re-run is harmless.
+    """
+    try:
+        auth_error = verify_cron_request()
+        if auth_error:
+            return auth_error
+
+        from mobile_api import run_monthly_payout_pipeline
+        result = run_monthly_payout_pipeline()
+        logger.info(f"[CRON monthly-payouts] {result}")
+        return jsonify({'success': True, **result}), 200
+
+    except Exception as e:
+        logger.error(f"[CRON monthly-payouts] error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({'error': f'monthly_payouts_failed: {e}'}), 500
+
+
 @app.route('/api/cron/market-open', methods=['POST', 'GET'])
 def market_open_cron():
     """Market open cron job endpoint - initializes daily tracking"""

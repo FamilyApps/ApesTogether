@@ -61,6 +61,10 @@
       "schedule": "0 2 * * *"
     },
     {
+      "path": "/api/cron/monthly-payouts",
+      "schedule": "0 9 3 * *"
+    },
+    {
       "path": "/api/cron/drift-check",
       "schedule": "0 14 * * 0"
     },

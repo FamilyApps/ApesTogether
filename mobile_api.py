@@ -7843,6 +7843,206 @@ def _compute_creator_clawback(uid, period_start, budget):
     return round(applied, 2), round(carried, 2), netted
 
 
+def _generate_payout_records_for_period(year, month):
+    """Core month-end payout-record generation (transaction-driven, with refund
+    clawback). Returns a JSON-serializable result dict.
+
+    Idempotent: if records already exist for the period, returns
+    ``{'already_exists': True, ...}`` and creates nothing (also enforced by the
+    DB unique index on (creator, period)). Raises on unexpected errors after
+    rolling back, so callers decide how to surface them.
+
+    Shared by ``POST /admin/bot/generate-payout-records`` (manual) and
+    ``run_monthly_payout_pipeline`` (the monthly cron).
+    """
+    from models import db, User, AdminSubscription, XeroPayoutRecord, MobileSubscription, TaxpayerProfile, InAppPurchase
+    from sqlalchemy import func
+    from calendar import monthrange
+
+    period_start = date(year, month, 1)
+    period_end = date(year, month, monthrange(year, month)[1])
+
+    try:
+        # Check for existing records this period (idempotent)
+        existing = XeroPayoutRecord.query.filter_by(
+            period_start=period_start,
+            period_end=period_end
+        ).count()
+
+        if existing > 0:
+            return {
+                'already_exists': True,
+                'period': f'{period_start} to {period_end}',
+                'existing_count': existing,
+            }
+
+        records_created = []
+        start_dt = datetime.combine(period_start, datetime.min.time())
+        end_dt = datetime.combine(period_end, datetime.max.time())
+
+        # 1. Real earnings per creator — summed transaction-by-transaction from
+        #    this period's non-refunded InAppPurchase rows (annual-aware).
+        real_map = {}
+        real_rows = db.session.query(
+            InAppPurchase.subscribed_to_id,
+            func.count(InAppPurchase.id),
+            func.coalesce(func.sum(InAppPurchase.price), 0.0),
+            func.coalesce(func.sum(InAppPurchase.store_fee), 0.0),
+            func.coalesce(func.sum(InAppPurchase.platform_revenue), 0.0),
+            func.coalesce(func.sum(InAppPurchase.influencer_payout), 0.0),
+        ).filter(
+            InAppPurchase.status != 'refunded',
+            InAppPurchase.purchase_date >= start_dt,
+            InAppPurchase.purchase_date <= end_dt,
+        ).group_by(InAppPurchase.subscribed_to_id).all()
+        for uid, cnt, gross, fee, plat, payout in real_rows:
+            real_map[uid] = {
+                'count': int(cnt), 'gross': float(gross), 'store_fees': float(fee),
+                'platform_revenue': float(plat), 'influencer_payout': float(payout),
+            }
+
+        # 2. Gifted/bonus subs (company-funded; no store fee, no subscriber refunds).
+        gifted_map = {}
+        gifted_rows = AdminSubscription.query.filter(
+            AdminSubscription.bonus_subscriber_count > 0
+        ).all()
+        for row in gifted_rows:
+            gifted_map[row.portfolio_user_id] = row.bonus_subscriber_count or 0
+
+        all_user_ids = set(gifted_map.keys()) | set(real_map.keys())
+        payout_per_sub = AdminSubscription.INFLUENCER_PAYOUT_PER_SUB
+        total_clawback_applied = 0.0
+        total_clawback_carried = 0.0
+
+        for uid in all_user_ids:
+            user = User.query.get(uid)
+            if not user:
+                continue
+
+            # Skip company bots and the owner's own accounts — no money changes
+            # hands for these, so they're never paid and never need a W-9.
+            if _user_is_company_owned(user):
+                continue
+
+            real = real_map.get(uid)
+            real_count = real['count'] if real else 0
+            bonus_count = gifted_map.get(uid, 0)
+
+            if real_count == 0 and bonus_count == 0:
+                continue
+
+            real_payout = real['influencer_payout'] if real else 0.0
+            bonus_payout = bonus_count * payout_per_sub
+
+            # Clawback: net refunds-after-payment against this month's REAL
+            # earnings (bonus is company-gifted, never subject to refunds).
+            clawback_applied, clawback_carried, netted_rows = _compute_creator_clawback(
+                uid, period_start, budget=real_payout)
+            real_net = max(0.0, real_payout - clawback_applied)
+            total_clawback_applied += clawback_applied
+            total_clawback_carried += clawback_carried
+
+            # Hold the payout unless the creator's W-9 is on file (Layer 1).
+            # Held records are skipped by sync-payouts and released automatically
+            # when the creator submits their W-9 (POST /tax/w9).
+            profile = TaxpayerProfile.query.filter_by(user_id=uid).first()
+            has_w9 = bool(profile and profile.has_tin_on_file)
+
+            record = XeroPayoutRecord(
+                portfolio_user_id=uid,
+                period_start=period_start,
+                period_end=period_end,
+                real_subscriber_count=real_count,
+                bonus_subscriber_count=bonus_count,
+                payment_status='pending' if has_w9 else 'held',
+                xero_contact_id=(profile.xero_contact_id if profile else None),
+            )
+            # Transaction-driven amounts (do NOT call calculate_totals — that uses
+            # count×rate math which overpays annual subs).
+            record.total_subscriber_count = real_count + bonus_count
+            record.gross_revenue = round(real['gross'], 2) if real else 0.0
+            record.store_fees = round(real['store_fees'], 2) if real else 0.0
+            record.platform_revenue = round(real['platform_revenue'], 2) if real else 0.0
+            record.influencer_payout = round(real_net, 2)
+            record.bonus_payout = round(bonus_payout, 2)
+            db.session.add(record)
+
+            # Mark the refund rows that were actually netted this month so they
+            # can't be clawed back again; unnetted ones carry to next month.
+            now_ts = datetime.utcnow()
+            for r in netted_rows:
+                r.payout_reversed_at = now_ts
+
+            records_created.append({
+                'user_id': uid,
+                'username': user.username,
+                'real_subs': real_count,
+                'bonus_subs': bonus_count,
+                'total_subs': record.total_subscriber_count,
+                'influencer_payout': record.influencer_payout,
+                'bonus_payout': record.bonus_payout,
+                'total_payout': record.total_payout,
+                'clawback_applied': round(clawback_applied, 2),
+                'clawback_carried_forward': round(clawback_carried, 2),
+                'payment_status': record.payment_status,
+                'w9_on_file': has_w9,
+            })
+
+        db.session.commit()
+
+        total_obligation = sum(r['total_payout'] for r in records_created)
+        held_count = sum(1 for r in records_created if r['payment_status'] == 'held')
+
+        return {
+            'success': True,
+            'period': f'{period_start} to {period_end}',
+            'records_created': len(records_created),
+            'held_pending_w9': held_count,
+            'held_obligation': round(
+                sum(r['total_payout'] for r in records_created if r['payment_status'] == 'held'), 2),
+            'total_payout_obligation': round(total_obligation, 2),
+            'refund_clawback_applied': round(total_clawback_applied, 2),
+            'refund_clawback_carried_forward': round(total_clawback_carried, 2),
+            'records': sorted(records_created, key=lambda x: x['total_payout'], reverse=True),
+        }
+    except Exception:
+        db.session.rollback()
+        raise
+
+
+def run_monthly_payout_pipeline(year=None, month=None):
+    """Generate the prior month's payout records and sync them to Xero as bills.
+
+    Invoked by the ``/api/cron/monthly-payouts`` cron. Defaults to the PRIOR
+    calendar month relative to today. End-to-end idempotent: generation is guarded
+    by the unique (creator, period) index, and the Xero sync skips records that are
+    already synced or W-9-held. Creates Xero ACCPAY *bills* only — it never marks
+    anything paid, so cutting the actual check stays a manual step.
+    """
+    import xero_service
+    from datetime import timedelta
+    from calendar import monthrange
+
+    if year is None or month is None:
+        now = datetime.utcnow()
+        first_of_this_month = date(now.year, now.month, 1)
+        last_of_prev_month = first_of_this_month - timedelta(days=1)
+        year, month = last_of_prev_month.year, last_of_prev_month.month
+
+    period_start = date(year, month, 1)
+    period_end = date(year, month, monthrange(year, month)[1])
+
+    generation = _generate_payout_records_for_period(year, month)
+    xero_sync = xero_service.sync_payout_records_to_xero(
+        period_start=period_start, period_end=period_end)
+
+    return {
+        'period': f'{period_start} to {period_end}',
+        'generation': generation,
+        'xero_sync': xero_sync,
+    }
+
+
 @mobile_api.route('/admin/bot/generate-payout-records', methods=['POST'])
 @require_admin_2fa
 @with_db_retry
@@ -7872,168 +8072,28 @@ def bot_generate_payout_records():
         "period_month": 3      (optional — defaults to current month)
     }
     """
-    from models import db, User, AdminSubscription, XeroPayoutRecord, MobileSubscription, TaxpayerProfile, InAppPurchase
-    from sqlalchemy import func
-    from calendar import monthrange
-    
     data = request.get_json() or {}
     now = datetime.utcnow()
     year = data.get('period_year', now.year)
     month = data.get('period_month', now.month)
-    
-    period_start = date(year, month, 1)
-    period_end = date(year, month, monthrange(year, month)[1])
-    
+
     try:
-        # Check for existing records this period (idempotent)
-        existing = XeroPayoutRecord.query.filter_by(
-            period_start=period_start,
-            period_end=period_end
-        ).count()
-        
-        if existing > 0:
-            return jsonify({
-                'error': 'payout_records_already_exist',
-                'period': f'{period_start} to {period_end}',
-                'existing_count': existing,
-                'hint': 'Delete existing records first if you want to regenerate'
-            }), 409
-        
-        records_created = []
-        start_dt = datetime.combine(period_start, datetime.min.time())
-        end_dt = datetime.combine(period_end, datetime.max.time())
-        
-        # 1. Real earnings per creator — summed transaction-by-transaction from
-        #    this period's non-refunded InAppPurchase rows (annual-aware).
-        real_map = {}
-        real_rows = db.session.query(
-            InAppPurchase.subscribed_to_id,
-            func.count(InAppPurchase.id),
-            func.coalesce(func.sum(InAppPurchase.price), 0.0),
-            func.coalesce(func.sum(InAppPurchase.store_fee), 0.0),
-            func.coalesce(func.sum(InAppPurchase.platform_revenue), 0.0),
-            func.coalesce(func.sum(InAppPurchase.influencer_payout), 0.0),
-        ).filter(
-            InAppPurchase.status != 'refunded',
-            InAppPurchase.purchase_date >= start_dt,
-            InAppPurchase.purchase_date <= end_dt,
-        ).group_by(InAppPurchase.subscribed_to_id).all()
-        for uid, cnt, gross, fee, plat, payout in real_rows:
-            real_map[uid] = {
-                'count': int(cnt), 'gross': float(gross), 'store_fees': float(fee),
-                'platform_revenue': float(plat), 'influencer_payout': float(payout),
-            }
-        
-        # 2. Gifted/bonus subs (company-funded; no store fee, no subscriber refunds).
-        gifted_map = {}
-        gifted_rows = AdminSubscription.query.filter(
-            AdminSubscription.bonus_subscriber_count > 0
-        ).all()
-        for row in gifted_rows:
-            gifted_map[row.portfolio_user_id] = row.bonus_subscriber_count or 0
-        
-        all_user_ids = set(gifted_map.keys()) | set(real_map.keys())
-        payout_per_sub = AdminSubscription.INFLUENCER_PAYOUT_PER_SUB
-        total_clawback_applied = 0.0
-        total_clawback_carried = 0.0
-        
-        for uid in all_user_ids:
-            user = User.query.get(uid)
-            if not user:
-                continue
-            
-            # Skip company bots and the owner's own accounts — no money changes
-            # hands for these, so they're never paid and never need a W-9.
-            if _user_is_company_owned(user):
-                continue
-            
-            real = real_map.get(uid)
-            real_count = real['count'] if real else 0
-            bonus_count = gifted_map.get(uid, 0)
-            
-            if real_count == 0 and bonus_count == 0:
-                continue
-            
-            real_payout = real['influencer_payout'] if real else 0.0
-            bonus_payout = bonus_count * payout_per_sub
-            
-            # Clawback: net refunds-after-payment against this month's REAL
-            # earnings (bonus is company-gifted, never subject to refunds).
-            clawback_applied, clawback_carried, netted_rows = _compute_creator_clawback(
-                uid, period_start, budget=real_payout)
-            real_net = max(0.0, real_payout - clawback_applied)
-            total_clawback_applied += clawback_applied
-            total_clawback_carried += clawback_carried
-            
-            # Hold the payout unless the creator's W-9 is on file (Layer 1).
-            # Held records are skipped by sync-payouts and released automatically
-            # when the creator submits their W-9 (POST /tax/w9).
-            profile = TaxpayerProfile.query.filter_by(user_id=uid).first()
-            has_w9 = bool(profile and profile.has_tin_on_file)
-            
-            record = XeroPayoutRecord(
-                portfolio_user_id=uid,
-                period_start=period_start,
-                period_end=period_end,
-                real_subscriber_count=real_count,
-                bonus_subscriber_count=bonus_count,
-                payment_status='pending' if has_w9 else 'held',
-                xero_contact_id=(profile.xero_contact_id if profile else None),
-            )
-            # Transaction-driven amounts (do NOT call calculate_totals — that uses
-            # count×rate math which overpays annual subs).
-            record.total_subscriber_count = real_count + bonus_count
-            record.gross_revenue = round(real['gross'], 2) if real else 0.0
-            record.store_fees = round(real['store_fees'], 2) if real else 0.0
-            record.platform_revenue = round(real['platform_revenue'], 2) if real else 0.0
-            record.influencer_payout = round(real_net, 2)
-            record.bonus_payout = round(bonus_payout, 2)
-            db.session.add(record)
-            
-            # Mark the refund rows that were actually netted this month so they
-            # can't be clawed back again; unnetted ones carry to next month.
-            now_ts = datetime.utcnow()
-            for r in netted_rows:
-                r.payout_reversed_at = now_ts
-            
-            records_created.append({
-                'user_id': uid,
-                'username': user.username,
-                'real_subs': real_count,
-                'bonus_subs': bonus_count,
-                'total_subs': record.total_subscriber_count,
-                'influencer_payout': record.influencer_payout,
-                'bonus_payout': record.bonus_payout,
-                'total_payout': record.total_payout,
-                'clawback_applied': round(clawback_applied, 2),
-                'clawback_carried_forward': round(clawback_carried, 2),
-                'payment_status': record.payment_status,
-                'w9_on_file': has_w9,
-            })
-        
-        db.session.commit()
-        
-        total_obligation = sum(r['total_payout'] for r in records_created)
-        held_count = sum(1 for r in records_created if r['payment_status'] == 'held')
-        
-        return jsonify({
-            'success': True,
-            'period': f'{period_start} to {period_end}',
-            'records_created': len(records_created),
-            'held_pending_w9': held_count,
-            'held_obligation': round(
-                sum(r['total_payout'] for r in records_created if r['payment_status'] == 'held'), 2),
-            'total_payout_obligation': round(total_obligation, 2),
-            'refund_clawback_applied': round(total_clawback_applied, 2),
-            'refund_clawback_carried_forward': round(total_clawback_carried, 2),
-            'records': sorted(records_created, key=lambda x: x['total_payout'], reverse=True),
-        })
-        
+        result = _generate_payout_records_for_period(year, month)
     except Exception as e:
         logger.error(f"Generate payout records error: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return jsonify({'error': 'generate_payout_failed'}), 500
+
+    if result.get('already_exists'):
+        return jsonify({
+            'error': 'payout_records_already_exist',
+            'period': result['period'],
+            'existing_count': result['existing_count'],
+            'hint': 'Delete existing records first if you want to regenerate'
+        }), 409
+
+    return jsonify(result)
 
 
 @mobile_api.route('/admin/bot/payout-records', methods=['GET'])
