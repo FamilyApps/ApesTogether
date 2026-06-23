@@ -810,7 +810,7 @@ def create_portfolio_snapshot():
 if __name__ == '__main__':
     # In development, run with debug mode
     if os.environ.get('FLASK_ENV') == 'development':
-        app.run(host='0.0.0.0', port=5003, debug=True)
+        app.run(host='0.0.0.0', port=5003, debug=os.environ.get('FLASK_DEBUG') == '1')
     else:
         # In production, let the WSGI server handle it
         app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)

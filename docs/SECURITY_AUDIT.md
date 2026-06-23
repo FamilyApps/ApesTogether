@@ -12,11 +12,13 @@ This is the first dedicated pass requested in `LAUNCH_TODO.md §1` (the USER fla
 
 | ID | Area | Severity | Status |
 |----|------|----------|--------|
-| S-1 | Rate-limiting is in-memory (no-op on serverless) + absent on `/auth/token` | **Medium** | Open |
-| S-2 | Google RTDN webhook does not verify the Pub/Sub OIDC push token | **Low–Med** | Open |
-| S-3 | Legacy `app.py` runs Flask `debug=True` (NOT the deployed entrypoint) | **Low / Info** | Open |
+| S-1 | Rate-limiting is in-memory (no-op on serverless) + absent on `/auth/token` | **Medium** | Fixed (code; run SQL) |
+| S-2 | Google RTDN webhook does not verify the Pub/Sub OIDC push token | **Low–Med** | Fixed (opt-in env) |
+| S-3 | Legacy `app.py` runs Flask `debug=True` (NOT the deployed entrypoint) | **Low / Info** | Fixed |
 | S-4 | No dependency-vulnerability scan in CI (`pip-audit`/Dependabot) | **Low / Process** | Open |
-| S-5 | No centralized request-body size / input-validation guard | **Low** | Open |
+| S-5 | No centralized request-body size / input-validation guard | **Low** | Fixed (body size) |
+
+**Session 18 remediation (commit pending):** S-1 — `rate_limit` now uses a shared Postgres fixed-window counter (`_rate_limit_db_hit` + `mobile_rate_limit` table via `scripts/migrations/2026_06_22_rate_limit.sql`) with in-memory fallback; `@rate_limit(10,60)` applied to `/auth/token`. S-2 — `/webhooks/google/rtdn` honors optional `RTDN_WEBHOOK_TOKEN` (`?token=`). S-3 — `app.py` debug gated behind `FLASK_DEBUG=1`. S-5 — `MAX_CONTENT_LENGTH = 1 MB`. Plus a separate price-integrity fix: `execute_trade` now fetches price server-side (see `LAUNCH_TODO.md` W3). **Still TODO:** free-text field validation (display name / W-9) and S-4 CI scanning.
 
 ---
 
@@ -75,11 +77,11 @@ Handlers validate fields ad-hoc (good in the spots checked, e.g. `target_dollars
 ---
 
 ## Remediation checklist (priority order)
-- [ ] **S-1a** Move rate-limiter to a shared store (Postgres/KV).
-- [ ] **S-1b** Add `@rate_limit` to `/auth/token` (and confirm `/leaderboard`).
-- [ ] **S-2** Verify Pub/Sub OIDC token (or add shared-secret URL token) on `/webhooks/google/rtdn`.
-- [ ] **S-5** Set `MAX_CONTENT_LENGTH` + validate free-text fields (display name, W-9).
-- [ ] **S-3** Guard/remove `app.py` `debug=True`.
+- [x] **S-1a** Shared Postgres-backed rate-limiter (`_rate_limit_db_hit` + `mobile_rate_limit`); in-memory fallback. *(Run `scripts/migrations/2026_06_22_rate_limit.sql` to activate.)*
+- [x] **S-1b** `@rate_limit(10,60)` on `/auth/token` (`/leaderboard` already rate-limited).
+- [x] **S-2** Shared-secret URL token (`RTDN_WEBHOOK_TOKEN`) on `/webhooks/google/rtdn`. *(Set env + append `?token=` to the Pub/Sub push URL.)*
+- [x] **S-5 (partial)** `MAX_CONTENT_LENGTH = 1 MB` set. *(Still TODO: per-field length/charset validation for display name + W-9.)*
+- [x] **S-3** `app.py` debug gated behind `FLASK_DEBUG=1`.
 - [ ] **S-4** Add `pip-audit` + Dependabot + CodeQL to CI (see `LAUNCH_TODO.md §10`).
 
 ## Out of scope / recommended ongoing

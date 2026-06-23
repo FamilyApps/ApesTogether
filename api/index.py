@@ -415,6 +415,10 @@ try:
     app.config['SESSION_COOKIE_SECURE'] = True
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+
+    # Cap request body size (audit S-5): reject oversized/garbage payloads before
+    # they reach handlers. These JSON APIs never legitimately need >1 MB.
+    app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024  # 1 MB
     
     # Debug logging for session configuration
     logger.info(f"Session configuration: TYPE={app.config.get('SESSION_TYPE')}, LIFETIME={app.config.get('PERMANENT_SESSION_LIFETIME')}")

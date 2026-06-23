@@ -140,8 +140,36 @@ def with_db_retry(f):
 _rate_limit_store = defaultdict(list)
 
 
+def _rate_limit_db_hit(key, max_requests, per_seconds):
+    """Atomic FIXED-window counter backed by Postgres so a limit holds across
+    Vercel's ephemeral/concurrent serverless instances (the in-memory store does
+    not — see docs/SECURITY_AUDIT.md S-1). Returns (allowed, retry_after_seconds).
+    Raises on any DB error (incl. a missing table) so the caller falls back to
+    the in-memory window."""
+    from models import db
+    from sqlalchemy import text
+    now = int(_time.time())
+    window_start = now - (now % per_seconds)
+    hits = db.session.execute(text(
+        "INSERT INTO mobile_rate_limit (client_key, window_start, hits) "
+        "VALUES (:k, :ws, 1) "
+        "ON CONFLICT (client_key, window_start) "
+        "DO UPDATE SET hits = mobile_rate_limit.hits + 1 "
+        "RETURNING hits"
+    ), {'k': key[:200], 'ws': window_start}).scalar()
+    if now % 100 == 0:  # ~1% of calls: prune windows older than a day
+        db.session.execute(text("DELETE FROM mobile_rate_limit WHERE window_start < :cut"),
+                           {'cut': now - 86400})
+    db.session.commit()
+    if hits > max_requests:
+        return False, (per_seconds - (now % per_seconds)) or 1
+    return True, 0
+
+
 def rate_limit(max_requests, per_seconds=60):
-    """Rate limit decorator using in-memory sliding window.
+    """Rate limit decorator. Prefers a shared Postgres-backed fixed-window
+    counter (correct across serverless instances); transparently falls back to a
+    per-instance in-memory sliding window if the DB/table is unavailable.
     
     Args:
         max_requests: Maximum number of requests allowed in the window
@@ -162,6 +190,26 @@ def rate_limit(max_requests, per_seconds=60):
                 client_id = f"ip:{request.remote_addr}"
             
             key = f"{client_id}:{f.__name__}"
+
+            # Shared (Postgres) path — correct across serverless instances; on any
+            # DB error fall through to the per-instance in-memory window so a DB
+            # hiccup never 500s a request. (audit S-1)
+            try:
+                _allowed, _retry = _rate_limit_db_hit(key, max_requests, per_seconds)
+                if not _allowed:
+                    return jsonify({
+                        'error': 'rate_limit_exceeded',
+                        'message': f'Too many requests. Limit: {max_requests} per {per_seconds}s.',
+                        'retry_after': _retry,
+                    }), 429, {'Retry-After': str(_retry)}
+                return f(*args, **kwargs)
+            except Exception:
+                try:
+                    from models import db as _db
+                    _db.session.rollback()
+                except Exception:
+                    pass
+
             now = _time.time()
             window_start = now - per_seconds
             
@@ -945,6 +993,14 @@ def google_rtdn_notifications():
     """
     from models import db
     from iap_webhooks import handle_google_rtdn
+
+    # Optional shared-secret gate (audit S-2): if RTDN_WEBHOOK_TOKEN is set, the
+    # Pub/Sub push URL must include ?token=<secret>. Forged state changes are
+    # already blocked (we re-fetch from the Play API), but this stops abuse of
+    # the open endpoint. No token configured → allow (back-compat).
+    _rtdn_token = os.environ.get('RTDN_WEBHOOK_TOKEN')
+    if _rtdn_token and request.args.get('token') != _rtdn_token:
+        return jsonify({'error': 'forbidden'}), 403
 
     try:
         body = request.get_json(force=True, silent=True) or {}
@@ -2700,6 +2756,7 @@ def _strict_oauth_enabled():
 
 
 @mobile_api.route('/auth/token', methods=['POST'])
+@rate_limit(10, 60)
 def get_auth_token():
     """
     Exchange OAuth credentials for a JWT token
