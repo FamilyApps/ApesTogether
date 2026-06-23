@@ -67,6 +67,18 @@ def slot_label(slot: int) -> str:
     return chr(ord('A') + (slot - 1))
 
 
+def lowest_free_slot(occupied) -> int:
+    """Lowest 1-based slot index not present in `occupied` (any iterable of ints),
+    or None if all MAX_SUBSCRIPTION_SLOTS are taken. Used to assign a distinct
+    slot to each of a subscriber's concurrent subscriptions (so they render as
+    'Subscription A/B/C...' rather than colliding)."""
+    occ = set(occupied or ())
+    for n in range(1, MAX_SUBSCRIPTION_SLOTS + 1):
+        if n not in occ:
+            return n
+    return None
+
+
 def all_product_ids() -> list:
     """Every slot product ID (monthly + annual), for client product-detail queries."""
     ids = []

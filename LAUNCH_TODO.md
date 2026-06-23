@@ -106,6 +106,22 @@ The authoritative, deduplicated checklist of **everything** required for public 
 
 ---
 
+## 🛠 SESSION 19 WORK ITEMS (opened 2026-06-22, from USER review)
+
+Tracked here so nothing is dropped; checked off as resolved. Detail/answers land in the linked docs.
+
+- [ ] **W1 — Security fixes (audit S-1..S-5).** Design choice resolved: **Postgres-backed** rate limiter (no new infra — reuse Supabase; not Redis/KV). (a) S-1 shared rate-limiter + apply to `/auth/token`; (b) S-2 shared-secret token on Google RTDN webhook; (c) S-3 guard `app.py` `debug`; (d) S-5 `MAX_CONTENT_LENGTH` + free-text validation. → `docs/SECURITY_AUDIT.md`.
+- [x] **W2 — Anti-abuse caps (DONE).** `mobile_api.py` constants `MAX_SHARES_PER_ORDER=1M`, `MAX_ORDER_NOTIONAL_USD=$10M`, `MAX_HOLDINGS_PER_PORTFOLIO=200`, enforced in `execute_trade` (both live + after-hours paths). Ships on next backend deploy.
+- [x] **W3 — Price-integrity guarantee (DONE).** Found + fixed a real hole: `execute_trade` previously trusted the client's `price`. Now the live price is fetched **server-side** (`PortfolioPerformanceCalculator().get_stock_data`) and any client `price` is ignored. After-hours trades already settle at the cron's open price. (`bot_execute_trade` is internal/`@require_cron_secret` — our backend; the future inbound API will inherit `execute_trade`'s no-price contract.) Invariant documented in the docstring.
+- [x] **W4 — Renamed "obfuscate/obfuscation" (DONE). Chosen term: `bot_multiplier` (identifier) / "privacy multiplier" (prose).** Renamed `obfuscation_multiplier`→`bot_multiplier`, `scripts/obfuscate_bot_holdings.py`→`scripts/scale_bot_holdings.py`, and all prose across `api/index.py` + `mobile_api.py`. **Left intact (not ours):** Google Billing's real `obfuscatedAccountId` field (LAUNCH_TODO §C note) and ProGuard "deobfuscation" in `docs/PLAY_STORE_LISTING_GUIDE.md`.
+- [~] **W5 — Subscription SLOT bug (code DONE; 1 SQL for USER).** (a) `bot_subscribe` now assigns the lowest free slot via `subscription_slots.lowest_free_slot()`; (b) **USER must run** `scripts/migrations/2026_06_22_reslot_comped_subs.sql` in Supabase to re-slot bobford00's existing 3 subs → A/B/C. Display already maps `slot`→label, so it'll be correct after the SQL + next `GET /subscriptions`.
+- [x] **W6 — iOS Subscriptions UI (DONE).** `SubscriptionsView.swift`: slot pill now `lineLimit(1)` + `fixedSize` (no mid-word wrap) and "Renews …" moved to its own line below the badges. Ships on next iOS build.
+- [ ] **W7 — Leaderboard vs. "Allow Subscribers" OFF.** Answer (and fix if it's a bug): does a user still appear on the leaderboard / is their public portfolio viewable when "Allow Subscribers" is toggled off? Clarify the intended gating.
+- [ ] **W8 — Inbound/outbound API design answers** → `docs/TRADER_API_SCOPING.md`: (a) interface = no GUI, signed-in account + generated API key + docs/endpoint; (b) preserve Apple/Google sign-in friction (API access requires an app account first — no new anti-Sybil hole); (c) outbound = non-personalized machine-readable trade-event feed (JSON/CSV) vs. human email.
+- [ ] **W9 — Price-cache + AlphaVantage scaling analysis** → new `docs/PRICE_CACHE_AND_SCALING.md`: current TTL/quota (150/min, 2 users + bots), scaling to 500 vs 50k users, when to bump the AV tier, and how low we can push the cache (target ~30s for AI traders on the inbound API).
+
+---
+
 ## ▶ RESUME HERE — Sunday (AI tokens reset)
 
 **Last worked: Session 11, 2026-06-04. Committed `7a21b67` (8 files, +254/−95).** Stopped because AI tokens ran low.

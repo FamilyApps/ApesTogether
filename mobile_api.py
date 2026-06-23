@@ -182,6 +182,12 @@ def rate_limit(max_requests, per_seconds=60):
     return decorator
 
 
+# ── Trade integrity / anti-abuse caps ──────────────────────────────────────────
+MAX_SHARES_PER_ORDER = 1_000_000        # shares per single buy/sell
+MAX_ORDER_NOTIONAL_USD = 10_000_000     # $ value cap on one order
+MAX_HOLDINGS_PER_PORTFOLIO = 200        # distinct tickers per portfolio
+
+
 def require_auth(f):
     """Decorator to require JWT authentication for mobile endpoints"""
     @wraps(f)
@@ -3416,9 +3422,12 @@ def execute_trade():
     {
         "ticker": "AAPL",
         "quantity": 10,
-        "price": 175.50,
         "type": "buy" or "sell"
     }
+
+    NOTE: the execution price is fetched SERVER-SIDE from our market-data layer;
+    any `price` in the request body is ignored. No caller (app or future inbound
+    API) can set or alter a stock price.
     """
     from models import db, Stock, Transaction
     
@@ -3428,7 +3437,7 @@ def execute_trade():
     
     ticker = (data.get('ticker') or '').strip().upper()
     quantity = data.get('quantity')
-    price = data.get('price', 0)
+    price = 0  # authoritative price is fetched server-side below; never from the client
     trade_type = (data.get('type') or '').lower()
     
     if not ticker:
@@ -3437,8 +3446,8 @@ def execute_trade():
         return jsonify({'error': 'invalid_ticker'}), 400
     if not quantity or quantity <= 0:
         return jsonify({'error': 'positive_quantity_required'}), 400
-    if quantity > 1_000_000:
-        return jsonify({'error': 'quantity_too_large', 'max': 1000000}), 400
+    if quantity > MAX_SHARES_PER_ORDER:
+        return jsonify({'error': 'quantity_too_large', 'max': MAX_SHARES_PER_ORDER}), 400
     if trade_type not in ('buy', 'sell'):
         return jsonify({'error': 'type_must_be_buy_or_sell'}), 400
     
@@ -3455,6 +3464,12 @@ def execute_trade():
         # Instead we queue it; the existing /api/cron/market-open job settles
         # it at the next open price via process_queued_trades(). Cash-on-hand
         # ordering (cash_proceeds before new capital) is handled there too.
+        # Anti-abuse: cap distinct holdings so no portfolio grows large enough
+        # to break leaderboard math / chart rendering (also guards the future
+        # inbound API). Applies to both the live and after-hours-queued paths.
+        if trade_type == 'buy' and not existing and Stock.query.filter_by(user_id=g.user_id).count() >= MAX_HOLDINGS_PER_PORTFOLIO:
+            return jsonify({'error': 'too_many_holdings', 'max_holdings': MAX_HOLDINGS_PER_PORTFOLIO}), 400
+
         if not is_market_hours():
             from models import QueuedEmailTrade, User
             from sqlalchemy import func as _func
@@ -3503,6 +3518,22 @@ def execute_trade():
                 }
             })
         
+        # ── Price integrity: authoritative price comes from OUR backend ──────
+        # Fetch the live price server-side; the client-supplied price (if any)
+        # is ignored so no caller — app or future inbound API — can set or alter
+        # a stock price. (After-hours trades above settle at the next open via
+        # the market-open cron, which is also server-priced.)
+        from portfolio_performance import PortfolioPerformanceCalculator
+        _pdata = PortfolioPerformanceCalculator().get_stock_data(ticker)
+        server_price = float(_pdata['price']) if _pdata and _pdata.get('price') else None
+        if not server_price or server_price <= 0:
+            return jsonify({'error': 'price_unavailable', 'ticker': ticker}), 503
+        price = round(server_price, 2)
+
+        # Anti-abuse: cap the value of a single order.
+        if price * quantity > MAX_ORDER_NOTIONAL_USD:
+            return jsonify({'error': 'order_too_large', 'max_order_value': MAX_ORDER_NOTIONAL_USD}), 400
+
         if trade_type == 'sell':
             if not existing or existing.quantity < quantity:
                 available = existing.quantity if existing else 0
@@ -4098,7 +4129,7 @@ def create_poll():
 def bot_scale_holdings():
     """
     Scale all holdings and cash values for a bot user by a multiplier.
-    Used to obfuscate portfolio values so they don't match source accounts.
+    Used to scale bot portfolio values (privacy multiplier) so they don't perfectly mirror source accounts.
     
     Request body:
     {
@@ -4228,11 +4259,22 @@ def bot_subscribe():
         db.session.add(iap)
         db.session.flush()  # assigns iap.id
 
+        # Assign the lowest free per-creator slot so concurrent comped subs
+        # render as distinct "Subscription A/B/C..." (mirrors the store-purchase
+        # model where each subscription occupies its own slot product). Without
+        # this, every comped sub defaulted to NULL → backfilled to slot 1, so
+        # they all showed "Subscription A".
+        from subscription_slots import lowest_free_slot
+        _existing_subs = MobileSubscription.query.filter_by(subscriber_id=subscriber_id).all()
+        _occupied = {s.slot for s in _existing_subs if s.slot and _subscription_occupies_slot(s, now)}
+        assigned_slot = lowest_free_slot(_occupied)
+
         sub = MobileSubscription(
             subscriber_id=subscriber_id,
             subscribed_to_id=subscribed_to_id,
             in_app_purchase_id=iap.id,
             status='active',
+            slot=assigned_slot,
             expires_at=now + timedelta(days=365),
             # Push defaults ON (matches MobileSubscription model default and the
             # app's "on by default" expectation). Previously hardcoded False here,
@@ -5764,7 +5806,7 @@ def _parse_email_received_at(iso_str):
 def _execute_single_bot_trade(bot, action, ticker, quantity, price, source, timestamp):
     """Execute a single buy/sell for a copytrade bot.
 
-    Applies the bot's trade_multiplier (obfuscation), fetches the price
+    Applies the bot's trade_multiplier (privacy multiplier), fetches the price
     from AlphaVantage if missing, runs the trade through
     cash_tracking.process_transaction (single source of truth for
     subscriber push/email fan-out), and updates the Stock row.
@@ -5780,7 +5822,7 @@ def _execute_single_bot_trade(bot, action, ticker, quantity, price, source, time
     if not ticker:
         return {'error': 'ticker required'}
 
-    # Apply trade multiplier (obfuscation) — set per bot via
+    # Apply trade multiplier (privacy multiplier) — set per bot via
     # extra_data['trade_multiplier'] by the scale-holdings endpoint.
     trade_multiplier = 1.0
     if bot.extra_data and isinstance(bot.extra_data, dict):

@@ -1,9 +1,10 @@
 """
-Obfuscate bot portfolio values so they don't match the real Public.com account.
-Calls /admin/bot/scale-holdings to multiply all quantities and cash by a factor.
+Scale bot portfolio values by a privacy multiplier so they don't perfectly
+mirror the operator's real Public.com account. Calls /admin/bot/scale-holdings
+to multiply all quantities and cash by a per-bot factor.
 
 Usage:
-    python scripts/obfuscate_bot_holdings.py
+    python scripts/scale_bot_holdings.py
 """
 import os
 import sys
@@ -29,7 +30,7 @@ HEADERS = {
     'X-Cron-Secret': CRON_SECRET
 }
 
-# Different multipliers per bot for extra obfuscation
+# Different multipliers per bot for extra privacy
 # Grok: 1.37x  (~$13,892 -> ~$19,032)
 # Wolff: 1.52x (~$9,953 -> ~$15,129)
 BOTS = [
@@ -39,7 +40,7 @@ BOTS = [
 
 
 def main():
-    print("[*] Obfuscating Bot Portfolio Values")
+    print("[*] Scaling Bot Portfolio Values (privacy multiplier)")
     print(f"    API: {API_BASE}")
 
     for bot in BOTS:
@@ -68,7 +69,7 @@ def main():
             print(f"  [FAIL] {resp.status_code} {resp.text}")
 
     print(f"\n{'='*60}")
-    print("[OK] Obfuscation complete!")
+    print("[OK] Scaling complete!")
 
 
 if __name__ == '__main__':

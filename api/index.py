@@ -8071,18 +8071,18 @@ def admin_set_cost_basis():
 #  up for bobford00. Going through process_transaction here means a clean
 #  audit trail of buy/sell rows from this point forward.
 #
-# Note on obfuscation: scripts/obfuscate_bot_holdings.py multiplies both
+# Note on privacy scaling: scripts/scale_bot_holdings.py multiplies both
 # shares AND cash by a per-bot factor (1.52 for Wolff, 1.37 for Grok) so
 # our public displays don't perfectly mirror the operator's real
 # brokerage account. The screenshots reflect the REAL Public.com state,
 # so when migrating we apply the same multiplier here to keep the
-# obfuscation in place.
+# privacy scaling in place.
 HOLDINGS_PRESETS_PHASE_C = {
     'wolff': {
         'user_id': 14,
         'username': 'CoastHillBear',
         'display_name': "Wolff's Flagship Fund",
-        'obfuscation_multiplier': 1.52,
+        'bot_multiplier': 1.52,
         'cash_balance_real': 12.45,  # brokerage value; multiplier applied below
         'target_real': {  # screenshot share counts; multiplier applied below
             'AMD':   0.90988,
@@ -8111,7 +8111,7 @@ HOLDINGS_PRESETS_PHASE_C = {
         'user_id': 13,
         'username': 'marblethehill72',
         'display_name': 'The Grok Portfolio',
-        'obfuscation_multiplier': 1.37,
+        'bot_multiplier': 1.37,
         'cash_balance_real': 32.93,
         'target_real': {
             'CLSK':  79.4603,
@@ -8201,10 +8201,10 @@ def admin_migrate_bot_holdings():
     current_qty = {s.ticker.upper(): float(s.quantity) for s in current_stocks}
     current_purchase_price = {s.ticker.upper(): float(s.purchase_price or 0) for s in current_stocks}
 
-    # Apply per-bot obfuscation multiplier to convert brokerage screenshot
-    # share counts into the obfuscated values stored in our DB. Wolff uses
+    # Apply per-bot privacy scaling multiplier to convert brokerage screenshot
+    # share counts into the scaled values stored in our DB. Wolff uses
     # 1.52x, Grok uses 1.37x — see comment block above.
-    multiplier = float(preset.get('obfuscation_multiplier', 1.0))
+    multiplier = float(preset.get('bot_multiplier', 1.0))
     target_qty = {t.upper(): float(q) * multiplier for t, q in preset['target_real'].items()}
     target_cash = float(preset['cash_balance_real']) * multiplier
 
@@ -8298,7 +8298,7 @@ def admin_migrate_bot_holdings():
     target_stock_value = sum(
         (batch_prices.get(tk, 0) or 0) * q for tk, q in target_qty.items()
     )
-    # target_cash already computed above with obfuscation multiplier.
+    # target_cash already computed above with privacy scaling multiplier.
 
     summary = {
         'tickers_in_plan': len(plan),
@@ -8319,7 +8319,7 @@ def admin_migrate_bot_holdings():
         'user_id': user.id,
         'username': user.username,
         'display_name': user.display_name,
-        'obfuscation_multiplier': multiplier,
+        'bot_multiplier': multiplier,
         'real_brokerage_state': {
             'cash_balance': round(float(preset['cash_balance_real']), 2),
             'note': (
@@ -8600,8 +8600,8 @@ def admin_delete_transactions():
     # NOTE: We deliberately do NOT replay transactions from zero here.
     # The bot accounts (and many seeded users) have positions written
     # directly to the Stock table without corresponding Transaction
-    # rows (signup seed, /admin/bot/scale-holdings obfuscation event,
-    # etc.). A from-zero replay misses the seed + obfuscation entirely
+    # rows (signup seed, /admin/bot/scale-holdings privacy scaling event,
+    # etc.). A from-zero replay misses the seed + privacy scaling entirely
     # and would either drop the Stock row (qty goes negative) or
     # massively understate quantity. Instead we start from the CURRENT
     # Stock row state and reverse only the impact of the to-be-deleted
@@ -8680,7 +8680,7 @@ def admin_delete_transactions():
     # ── Predict user-level after-state via DELTA adjustment ──────────
     #
     # Same reasoning: replay-from-zero would drop max_cash_deployed
-    # below the real seed + obfuscation level. Delta logic:
+    # below the real seed + privacy scaling level. Delta logic:
     #   - Removed BUY of $V: assume V was funded by capital
     #     (max_cash_deployed -= V). For pure-bot-trade accounts this
     #     under-counts when the buy was actually funded by accumulated
@@ -8804,7 +8804,7 @@ def admin_delete_transactions():
 
         # Apply DELTA-adjusted user state (do NOT call
         # backfill_cash_tracking_for_user — see notes above on why
-        # replay-from-zero would corrupt seed/obfuscated accounts).
+        # replay-from-zero would corrupt seed/scaled accounts).
         user.cash_proceeds = pred_cash
         user.max_cash_deployed = pred_deployed
 
@@ -8953,7 +8953,7 @@ def admin_recompute_portfolio_snapshots():
 
     # ── Seed-state reconstruction ─────────────────────────────────────
     # Bot accounts (and many seeded users) have Stock rows created
-    # directly by the obfuscation/seed scripts without corresponding
+    # directly by the privacy scaling/seed scripts without corresponding
     # Transaction records. A naive replay-from-zero would treat those
     # seed positions as if they didn't exist, zeroing out every
     # snapshot before the first transaction and under-counting all
