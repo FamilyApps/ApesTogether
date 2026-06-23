@@ -106,3 +106,50 @@ If both ship, they share one spine and reinforce each other:
 - **D-6:** Rate-limit/quota tiers (free vs. paid API access)?
 
 *Next step on approval: I can turn UC-A into an implementation plan (data model, the `/api/v1` blueprint, API-key issuance + the S-1 shared rate-limiter, OpenAPI spec) and/or open the UC-D legal/aggregator checklist.*
+
+---
+
+## Design clarifications (Session 19, from USER Q&A)
+
+### 1. What does the interface actually look like? (no GUI)
+Correct — **there is no GUI for the bot.** The "interface" is:
+1. A set of **documented HTTPS REST endpoints** (e.g. `POST /api/v1/orders`) + an **OpenAPI spec**.
+2. A **per-user API key** the developer generates inside the app.
+3. The developer's own code/bot calls our endpoints over HTTPS with `Authorization: Bearer <api_key>` and a JSON body.
+
+We publish docs + issue the key; the customer writes the client. No dashboard is required for v1 (a simple "API Keys" screen in Settings to create/revoke keys is the only UI we add).
+
+### 2. Preserving the Apple/Google sign-in friction (anti-low-quality / anti-Sybil)
+This is preserved **by construction**, and it's the key design rule:
+
+- **API access requires an existing in-app account.** To get a key you must (a) install the app, (b) **sign in with Apple or Google** (the friction that limits multi-accounting), then (c) generate an API key in Settings.
+- **No separate web/API signup.** There is no API-only registration path, so the API introduces **no new account-creation surface** and therefore **no new Sybil hole** — every API key is bound to exactly one Apple/Google-verified account and its single portfolio.
+- **Keys are scoped to that one account.** A key can only act on its owner's portfolio (`g.user_id` ownership, same as the app — see `docs/SECURITY_AUDIT.md`). It cannot read or trade on anyone else's behalf.
+- Net effect: an algo/AI trader has exactly the same one-identity-per-person ceiling as a human app user.
+
+### 3. Price integrity — "no one but our backend can ever set a price" ✅ guaranteed
+Already enforced and the API inherits it for free:
+
+- The trade path (`execute_trade`) now **fetches the authoritative price server-side** and **ignores any client-supplied `price`** (Session 19 W3 fix).
+- The inbound API will route through this **same** path and accept **only** `{ticker, side, quantity}` (or a target weight) — **there is no `price` parameter**. A caller physically cannot submit, set, or alter a price.
+- Prices come exclusively from our market-data layer (`PortfolioPerformanceCalculator.get_stock_data` → AlphaVantage), served from the shared cache (see `docs/PRICE_CACHE_AND_SCALING.md`). This is a **hard invariant** of the API contract.
+
+### 4. Outbound API (UC-D) output format — same event as email, machine-readable, not personalized
+You're right: the outbound payload is the creator's **trade-notification stream**, just structured for machines instead of humans.
+
+- **Same underlying event** as today's trade email/push (a creator bought/sold X shares of TICKER at time T).
+- **Not personalized.** It's the creator's raw trade feed; the *consumer's* bot decides what to do with it (e.g. scale to its own account). We can optionally include the creator's resulting **position weight** so a follower can mirror proportionally — but the feed itself isn't tailored per subscriber.
+- **Format:** JSON by default (one object per trade), with an optional **CSV export** of history. Example row:
+  `{"creator":"wolff","ticker":"NVDA","side":"buy","quantity":2.5,"weight_pct":4.1,"ts":"2026-06-22T14:03:11Z"}`
+- **Delivery:** pollable (`GET /api/v1/creators/{id}/trades?since=<cursor>`) and/or push (a **webhook** we POST to the subscriber's URL on each new trade — reuses the existing trade fan-out that already sends email/push).
+- **How it differs from the email notification:**
+  | | Trade email (today) | Outbound API feed |
+  |---|---|---|
+  | Audience | human, in their inbox | the subscriber's bot/program |
+  | Format | prose / HTML | JSON (or CSV export) |
+  | Delivery | email | poll endpoint + optional webhook |
+  | Parseable | no (free text) | yes (stable schema + cursor) |
+  | Personalized | no | no (raw creator stream; optional weight to enable mirroring) |
+- **Access control:** identical to who gets the email/push today — **only active subscribers** of that creator can read its feed (entitlement check on the API key's account).
+
+*(These answers resolve parts of D-1/D-2/D-3 above: keys not OAuth for v1; no price param ever; UC-D is a non-personalized structured trade feed, not a brokerage executor — real-money execution stays the consumer's responsibility, which also keeps our compliance surface smaller.)*
