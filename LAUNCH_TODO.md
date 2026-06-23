@@ -30,7 +30,7 @@ This file is the **only** task tracker. Everything else is reference (no tasks t
 The authoritative, deduplicated checklist of **everything** required for public launch — consolidated from this file *and* every `docs/*.md` (PLAYBOOK, CONTENT, OUTREACH, ASO, PLAY_STORE_LISTING_GUIDE, PRICING, IAP_WEBHOOK_SETUP, XERO_W9_DEPLOY_CHECKLIST, PER_CREATOR_SUBSCRIPTION_SLOTS, bot_agent_*). Detail/history for each item lives in the dated sections below and in the referenced docs. Status reflects sessions 1–18.
 
 ### 0. 🚦 Critical path (do roughly in this order)
-1. [ ] **Run both Supabase migrations** — `2026_06_14_subscription_slot.sql` + `2026_06_17_payout_integrity.sql` (full SQL: §"Migration SQL to paste" below). Gates the already-deployed slot + payout code.
+1. [x] **Run both Supabase migrations — DONE (Session 18, USER); both ran clean, `mobile_subscription.slot` verified integer/nullable.** — `2026_06_14_subscription_slot.sql` + `2026_06_17_payout_integrity.sql` (full SQL: §"Migration SQL to paste" below). Gates the already-deployed slot + payout code.
 2. [x] **Payout-integrity + monthly-cron + 1099/W-9 code PUSHED** — commits `e630f13` + `1c9eaa5` on `origin/master` (verified Session 18; no uncommitted money-file changes).
 3. [x] **Slot 2–20 store products CREATED** — 19 iOS subscription groups (monthly+annual) + 38 Play products (USER, Session 18).
 4. [ ] **Verify Apple ASSN V2** via a real sandbox subscription (no test-button in ASC). Google RTDN already [x] verified (Session 18).
@@ -42,8 +42,8 @@ The authoritative, deduplicated checklist of **everything** required for public 
 10. [ ] **Google Play 14-day Closed-Testing gate** (wall-clock; first confirm the Family Apps LLC *org* account is even subject to it, then start ASAP).
 
 ### 1. 🔒 Security & Backend
-- [ ] **NEW — Full pre-launch security audit (owed; never done).** Dedicated pass for: **SQL/ORM injection** (raw `text()` / `jsonb_set` / any f-string SQL in `mobile_api.py`, `admin_cash_tracking.py`, audit endpoints), **IDOR/authorization** on every `/api/mobile/*` resource (portfolio, subscription, W-9, device tokens), **webhook signature verification** (Apple JWS pin + Google RTDN), secrets handling, and **rate-limiting/abuse**. *(Already done: OAuth ID-token signature verification = `enforce`; admin-route 2FA sweep — see §A. The injection/IDOR/rate-limit sweep itself is NOT done.)*
-- [ ] **NEW — Rate-limit / abuse controls** on `/auth/token`, `/feed`, trade execution, and any new public API.
+- [~] **Full pre-launch security audit — DONE (Session 18) → `docs/SECURITY_AUDIT.md`.** Verdict: **no SQL injection, no IDOR, strong authz** — raw SQL is uniformly parameterized (the one f-string DDL at `api/index.py:7105` is hardcoded constants + `@admin_2fa_required`); per-user resources scope to `g.user_id` (`/unsubscribe`, `/subscriptions/<id>/scale`, `/pending-trades/<id>` all checked); 90/97 mobile routes auth-gated; Apple webhook JWS verified + root-pinned; OAuth `enforce`; no CORS wildcard; secrets via env. **Open hardening (fix S-1/S-2 pre-launch):** S-1 rate-limiter is in-memory = no-op on Vercel serverless + `/auth/token` unthrottled; S-2 Google RTDN webhook lacks Pub/Sub OIDC verification; S-3 legacy `app.py` `debug=True` (NOT the deployed entrypoint); S-4 no `pip-audit`/Dependabot in CI; S-5 no `MAX_CONTENT_LENGTH`/central input guard.
+- [ ] **Rate-limit / abuse controls (audit finding S-1).** Move the in-memory `rate_limit` to a shared store (Postgres/Vercel KV) so it actually works across serverless instances, then add it to `/auth/token` + confirm `/leaderboard` + trade execution + any new public API.
 - [ ] Load-test `/api/mobile/feed` at 100 concurrent users (§A).
 - [x] OAuth ID-token verification hardened + verified live; admin-route auth sweep complete; dead admin stubs deleted.
 
