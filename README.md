@@ -1,90 +1,92 @@
-# Stock Portfolio Tracker
+# Apes Together
 
-A web application that allows users to log in with Apple or Google authentication (with FaceID and Face Unlock support), and manage their stock portfolio by inputting the quantity of shares and ticker symbols for each stock they own.
+A copy-trading social platform: people follow real traders' and bot-driven portfolios,
+get push notifications on every trade, and subscribe to unlock full portfolios. Native
+**iOS** (Swift/SwiftUI) and **Android** (Kotlin/Compose) apps on a shared **Python/Flask**
+backend deployed serverless on **Vercel**.
 
-<!-- Deployment: Redeploying working version for cleanup process -->
+> **History:** this started as a Flask web app with Stripe + Twilio SMS. In Jan 2026 it
+> pivoted to native mobile apps with in-app purchases and push notifications. Web-era
+> planning/setup docs are archived under `_legacy/docs_web_era/`.
 
-## Features
+---
 
-- **Secure Authentication**: Sign in with Apple or Google accounts with biometric authentication support (FaceID/Face Unlock)
-- **Stock Portfolio Management**: Add stocks to your portfolio by entering ticker symbols and quantities
-- **Real-time Data**: View current stock prices and portfolio value using Yahoo Finance data
-- **Portfolio Analysis**: Visual breakdown of your portfolio allocation with interactive charts
-- **Responsive Design**: Works on desktop and mobile devices
+## 📚 Documentation map (read in this order)
 
-## Technology Stack
+| If you want… | Read |
+|---|---|
+| **What's left before launch / current status** | `LAUNCH_TODO.md` (the single task tracker) |
+| **Onboarding / environment / how to build & deploy** | `DEVIN_HANDOVER.md` |
+| **Current system design** | `CURRENT_ARCHITECTURE.md` (+ `ARCHITECTURE_CHANGELOG.md` for history) |
+| **Performance %, snapshots, cash tracking** | `docs/PERFORMANCE_AND_SNAPSHOTS.md` |
+| **Money: IAP → Xero → influencer payouts → 1099/W-9** | `XERO_PAYOUT_INTEGRATION.md` (+ `docs/XERO_W9_DEPLOY_CHECKLIST.md`) |
+| **Per-creator subscription slots** | `docs/PER_CREATOR_SUBSCRIPTION_SLOTS.md` |
+| **Store webhooks (Apple ASSN V2 / Google RTDN)** | `docs/IAP_WEBHOOK_SETUP.md` |
+| **Environment variables** | `ENV_VARIABLES.md` |
+| **When to upgrade infrastructure** | `SCALING_TRIGGERS.md` |
+| **Feature specs** | `PENDING_TRADES_DESIGN.md`, `POLL_ADMIN_GUIDE.md` |
+| **Store listing / launch copy** | `docs/` (`ASO_STRATEGY.md`, `PLAY_STORE_LISTING_GUIDE.md`, `LAUNCH_PLAYBOOK.md`) |
 
-- **Backend**: Python with Flask
-- **Database**: SQLAlchemy with SQLite
-- **Authentication**: OAuth with Authlib (Google and Apple)
-- **Stock Data**: Yahoo Finance API (yfinance)
-- **Frontend**: HTML, CSS, JavaScript
-- **Charts**: Chart.js for data visualization
-- **Styling**: Bootstrap 5 for responsive design
+---
 
-## Setup Instructions
+## 🏗 Architecture at a glance
 
-1. Clone the repository:
 ```
-git clone <repository-url>
-cd stock-portfolio-app
-```
-
-2. Create a virtual environment and activate it:
-```
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install the required dependencies:
-```
-pip install -r api/requirements.txt
-```
-
-4. Set up environment variables (for production):
-```
-export SECRET_KEY=your_secret_key
-export GOOGLE_CLIENT_ID=your_google_client_id
-export GOOGLE_CLIENT_SECRET=your_google_client_secret
-export APPLE_CLIENT_ID=your_apple_client_id
-export APPLE_CLIENT_SECRET=your_apple_client_secret
+iOS (Swift)   Android (Kotlin)
+      \             /
+       \           /
+     Flask API (Vercel serverless, /api/mobile/*)
+      |        |          |             |
+  Supabase   Upstash    Firebase      Xero
+ (Postgres)  (Redis)     (FCM)     (accounting)
 ```
 
-5. Run the application:
-```
-python app.py
-```
+- **Auth:** Sign in with Apple (iOS) + Google Sign-In via Credential Manager (Android),
+  exchanged for a backend JWT at `/api/mobile/auth/token`.
+- **Payments:** Apple StoreKit 2 + Google Play Billing (in-app purchases). No Stripe.
+- **Notifications:** Firebase Cloud Messaging (FCM). No SMS.
+- **Market data:** Alpha Vantage.
+- **Domain:** `https://apestogether.ai` · API base `https://apestogether.ai/api/mobile/`.
 
-6. Open your browser and navigate to `http://localhost:5000`
+## 💵 Pricing & revenue split
 
-## OAuth Configuration
+**Flat $9.00/month** per creator subscription. Under Apple/Google's Small Business
+Program rate the split per sub is:
 
-### Google OAuth Setup
+| Recipient | Amount |
+|---|---|
+| Apple / Google store fee (15%) | $1.35 |
+| Influencer / creator payout | $6.50 |
+| Platform | $1.15 |
 
-1. Go to the [Google Developer Console](https://console.developers.google.com/)
-2. Create a new project
-3. Enable the Google+ API
-4. Configure the OAuth consent screen
-5. Create OAuth 2.0 credentials
-6. Add authorized redirect URIs (e.g., `http://localhost:5000/login/google/authorize`)
-7. Copy the Client ID and Client Secret to your environment variables
+Payouts are **transaction-driven** (booked per verified purchase/renewal), net of
+refund clawbacks, and synced to Xero monthly as bills; creators over the $600/yr
+threshold need a W-9 on file (payout held until then). See `XERO_PAYOUT_INTEGRATION.md`.
 
-### Apple OAuth Setup
+---
 
-1. Go to the [Apple Developer Portal](https://developer.apple.com/)
-2. Register a new App ID with "Sign In with Apple" capability
-3. Create a Services ID for your web app
-4. Configure domains and redirect URIs
-5. Generate a private key and note the Key ID
-6. Set up the necessary environment variables
+## 📁 Repo layout
 
-## Security Notes
+| Path | What |
+|---|---|
+| `api/` | Vercel entrypoint (`api/vercel.py` → `api/index.py`) + cron routes |
+| `mobile_api.py` | All `/api/mobile/*` endpoints |
+| `models.py` | SQLAlchemy models |
+| `iap_validation_service.py`, `iap_webhooks.py` | IAP validation + Apple ASSN / Google RTDN webhooks |
+| `xero_service.py` | Xero OAuth + bills/credit notes |
+| `push_notification_service.py` | FCM |
+| `performance_calculator.py`, `cash_tracking.py`, `leaderboard_utils.py` | Snapshots / performance |
+| `ios/` | SwiftUI app (built on a Mac; see `ios/README.md`) |
+| `android/` | Kotlin/Compose app (built on Windows; see `android/README.md`) |
+| `scripts/migrations/` | SQL migrations (run in Supabase) |
+| `_legacy/` | Archived web-era code + docs |
 
-- In production, always use HTTPS
-- Store API keys and secrets securely using environment variables
-- The current implementation uses SQLite for simplicity, but for production, consider using a more robust database like PostgreSQL
-- Implement rate limiting for API requests to prevent abuse
+## 🚀 Deploy
 
-## License
+- **Backend/web:** `git push origin master` → Vercel production deploy. Env vars live in
+  the Vercel dashboard (see `ENV_VARIABLES.md`), not in the repo.
+- **iOS:** Xcode Archive → App Store Connect → TestFlight / review.
+- **Android:** signed AAB → Google Play Console → track promotion (Play App Signing).
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+Backend, iOS, and Android ship through **three independent pipelines** — see
+`DEVIN_HANDOVER.md` §4 for the full breakdown and build gotchas.

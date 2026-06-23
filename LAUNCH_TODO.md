@@ -15,11 +15,13 @@ This file is the **only** task tracker. Everything else is reference (no tasks t
 
 - **Tasks / launch status:** this file (`LAUNCH_TODO.md`).
 - **Scaling thresholds + AlphaVantage plan upgrades (150→300/min):** `SCALING_TRIGGERS.md`.
-- **Current system design:** `CURRENT_ARCHITECTURE.md` (+ `ARCHITECTURE_CHANGELOG.md`).
-- **Feature specs:** `PENDING_TRADES_DESIGN.md`, `GHOST_SUBSCRIBER_VISIBILITY.md`, `XERO_PAYOUT_INTEGRATION.md`, `MOBILE_ARCHITECTURE_PLAN.md`.
+- **Current system design:** `CURRENT_ARCHITECTURE.md` (+ `ARCHITECTURE_CHANGELOG.md` for history).
+- **Onboarding / build & deploy:** `DEVIN_HANDOVER.md` (+ front door `README.md`).
+- **Performance %, snapshots, cash tracking:** `docs/PERFORMANCE_AND_SNAPSHOTS.md`.
+- **Feature specs:** `PENDING_TRADES_DESIGN.md`, `XERO_PAYOUT_INTEGRATION.md`, `docs/PER_CREATOR_SUBSCRIPTION_SLOTS.md`, `POLL_ADMIN_GUIDE.md`.
 - **Env / setup:** `ENV_VARIABLES.md`.
 - **Launch calendar template + store copy:** `docs/` (`LAUNCH_PLAYBOOK.md`, `ASO_STRATEGY.md`, `PLAY_STORE_LISTING_GUIDE.md`).
-- **Superseded planning/implementation docs:** archived under `_legacy/docs_web_era/` + `_legacy/docs_debug_history/` (2026-06 cleanup — `DEPLOYMENT_CHECKLIST`, `MASTER_REFERENCE`, `IMPLEMENTATION_CHECKLIST/PHASES/RECOMMENDATION/STATUS/SUMMARY`, `TOMORROW_GAMEPLAN` — the last was a May 20 day-plan whose Steps 1/2/3/5/6 all shipped; only its Phase F hardening survived into Section A below).
+- **Superseded planning/implementation docs:** archived under `_legacy/docs_web_era/` + `_legacy/docs_debug_history/` (2026-06 cleanup — `DEPLOYMENT_CHECKLIST`, `MASTER_REFERENCE`, `IMPLEMENTATION_CHECKLIST/PHASES/RECOMMENDATION/STATUS/SUMMARY`, `TOMORROW_GAMEPLAN` — the last was a May 20 day-plan whose Steps 1/2/3/5/6 all shipped; only its Phase F hardening survived into Section A below). **Session 18 (2026-06-22) doc consolidation** archived `MOBILE_ARCHITECTURE_PLAN`, `FINAL_REQUIREMENTS`, `GHOST_SUBSCRIBER_VISIBILITY`, `QUICK_START`, `README_UPDATES`, `SETUP_GUIDE`, `PRODUCTION_MIGRATION_GUIDE` to `_legacy/docs_web_era/`, and merged `DESIGN_DECISIONS_EXPLAINED` + `PERFORMANCE_CALCULATION_AUDIT` + `PORTFOLIO_CLEANUP_PLAN` → `docs/PERFORMANCE_AND_SNAPSHOTS.md`.
 
 ---
 

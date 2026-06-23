@@ -1,5 +1,28 @@
 # Architecture Changelog
 
+## June 22, 2026 — Pricing-split correction + docs consolidation
+
+### Revenue split now reflects the Small Business Program rate
+Earlier entries in this changelog (and several docs) quote the original split of
+**30% store / $5.40 influencer / $0.90 platform**. The shipped model uses Apple/Google's
+**Small Business Program** rate: per $9 sub, **store 15% = $1.35**, **influencer $6.50**,
+**platform $1.15** (constants in `models.py::AdminSubscription`). Payouts are also now
+transaction-driven with renewal rows, refund clawback, and 1099/W-9 holds (Session 16).
+The older numbers are left in place below as historical record — this entry is the
+correction.
+
+### Documentation consolidation (Session 18)
+Archived 7 superseded web/planning-era docs to `_legacy/docs_web_era/`
+(`MOBILE_ARCHITECTURE_PLAN`, `FINAL_REQUIREMENTS`, `GHOST_SUBSCRIBER_VISIBILITY`,
+`QUICK_START`, `README_UPDATES`, `SETUP_GUIDE`, `PRODUCTION_MIGRATION_GUIDE`). Merged the
+three snapshot/performance design docs (`DESIGN_DECISIONS_EXPLAINED`,
+`PERFORMANCE_CALCULATION_AUDIT`, `PORTFOLIO_CLEANUP_PLAN`) into
+`docs/PERFORMANCE_AND_SNAPSHOTS.md`. Rewrote `README.md` as an accurate front door and
+fixed the iOS bundle ID (`com.apestogether.ApesTogether`) in `CURRENT_ARCHITECTURE.md`
+and `ENV_VARIABLES.md`.
+
+---
+
 ## May 9, 2026 (evening) — Phantom Chart-Drop Bug: Snapshot Timing Inconsistency
 
 ### Symptom
@@ -169,4 +192,4 @@ Creates: `device_token`, `in_app_purchase`, `push_notification_log`, `xero_payou
 | Phase 4: Integration | Week 11-12 | Pending |
 | Phase 5: Launch | Week 13-14 | Pending |
 
-See `IMPLEMENTATION_PHASES.md` for detailed timeline.
+See `LAUNCH_TODO.md` for current status (the old `IMPLEMENTATION_PHASES.md` is archived under `_legacy/docs_web_era/`).

@@ -1,10 +1,34 @@
 # 💰 Xero Integration for Influencer Payouts
 ## Apple/Google IAP → Xero Accounting → Influencer Checks
 
-**Document Version**: 1.0  
+**Document Version**: 2.0 (updated 2026-06-22)  
 **Created**: January 21, 2026  
 
 ---
+
+> ## ⚠️ CURRENT MODEL — read this first (the design below is partly historical)
+>
+> The numbers and `AdminSubscription` code samples further down describe the **original
+> Jan-2026 design** (30% store / $5.40 influencer / $0.90 platform, count×rate payouts).
+> The **shipped** model differs:
+>
+> - **$9.00/sub** → store fee **15% = $1.35** (Small Business rate), **influencer $6.50**,
+>   **platform $1.15**. Constants live in `models.py::AdminSubscription`.
+> - Payouts are **transaction-driven** — booked per verified purchase **and per renewal**
+>   (`iap_webhooks._record_renewal`), summed from non-refunded `InAppPurchase` rows
+>   (annual-aware), **not** `active_count × rate`.
+> - **Refunds/chargebacks** reverse via idempotent Xero credit notes
+>   (`xero_service.reverse_refunded_purchase[s]`) + a carry-forward **clawback** against
+>   the next month (`mobile_api._compute_creator_clawback`).
+> - **Gifted/bonus subscribers** (formerly "ghost") = `AdminSubscription.bonus_subscriber_count`;
+>   the company pays the creator $6.50/sub directly (no store fee, no platform cut).
+> - **1099/W-9:** creators past $600/yr need a W-9 on file or the payout is **held**
+>   (`GET /api/mobile/admin/tax/1099-readiness`, `POST /api/mobile/admin/tax/w9/retry-sync`).
+> - **Monthly cron** `/api/cron/monthly-payouts` generates the prior month's records and
+>   syncs them to Xero as **ACCPAY bills** (account `6010`); it never auto-marks paid.
+>
+> Reconnect URL: `https://apestogether.ai/api/mobile/admin/xero/connect`. See
+> `docs/XERO_W9_DEPLOY_CHECKLIST.md` and `LAUNCH_TODO.md` (Session 16) for current detail.
 
 ## Revenue Flow Overview
 

@@ -1,5 +1,12 @@
 # Environment Variables Reference
 
+> **Heads-up (2026-06):** the **authoritative current** env reference is the
+> *OAuth ID Token Verification* + *Mobile App Backend* sections below (Firebase, Apple/Google
+> IAP, JWT, `STRICT_OAUTH_VERIFICATION`, `GOOGLE_ANDROID_CLIENT_ID`, `APPLE_BUNDLE_ID`, Xero).
+> The legacy **Stripe**, **Twilio SMS**, **NewsAPI**, and **agent VPS / Controller** variables
+> below are from the web/agent-planning era and are **not used** by the shipped mobile app —
+> kept only for historical reference.
+
 ## Current Status
 
 ### ✅ Already Configured
@@ -48,7 +55,7 @@ FIREBASE_CREDENTIALS_PATH=/path/to/firebase-service-account.json
 ```bash
 # App Store Connect shared secret
 APPLE_SHARED_SECRET=...  # From App Store Connect
-APPLE_BUNDLE_ID=com.apestogether.app
+APPLE_BUNDLE_ID=com.apestogether.ApesTogether  # iOS bundle (see authoritative OAuth section below; NOT com.apestogether.app)
 ```
 
 **Setup Steps**:
@@ -90,7 +97,7 @@ flag for safe rollout.
   with `serverClientId = GOOGLE_WEB_CLIENT_ID`. The ID token's `aud` is that
   Web Client ID.
 - **iOS only** for Apple: native `AuthenticationServices` framework. The
-  token's `aud` is the iOS app's bundle ID = `com.apestogether.app`.
+  token's `aud` is the iOS app's bundle ID = `com.apestogether.ApesTogether`.
 - **iOS does NOT have Google Sign-In** (see
   `ios/ApesTogetherApp/Services/AuthenticationManager.swift`). Therefore
   `GOOGLE_IOS_CLIENT_ID` is **not required today**.
