@@ -25,6 +25,87 @@ This file is the **only** task tracker. Everything else is reference (no tasks t
 
 ---
 
+## 🎯 MASTER PRE-LAUNCH TASK LIST (rebuilt Session 18, 2026-06-22)
+
+The authoritative, deduplicated checklist of **everything** required for public launch — consolidated from this file *and* every `docs/*.md` (PLAYBOOK, CONTENT, OUTREACH, ASO, PLAY_STORE_LISTING_GUIDE, PRICING, IAP_WEBHOOK_SETUP, XERO_W9_DEPLOY_CHECKLIST, PER_CREATOR_SUBSCRIPTION_SLOTS, bot_agent_*). Detail/history for each item lives in the dated sections below and in the referenced docs. Status reflects sessions 1–18.
+
+### 0. 🚦 Critical path (do roughly in this order)
+1. [ ] **Run both Supabase migrations** — `2026_06_14_subscription_slot.sql` + `2026_06_17_payout_integrity.sql` (full SQL: §"Migration SQL to paste" below). Gates the already-deployed slot + payout code.
+2. [x] **Payout-integrity + monthly-cron + 1099/W-9 code PUSHED** — commits `e630f13` + `1c9eaa5` on `origin/master` (verified Session 18; no uncommitted money-file changes).
+3. [x] **Slot 2–20 store products CREATED** — 19 iOS subscription groups (monthly+annual) + 38 Play products (USER, Session 18).
+4. [ ] **Verify Apple ASSN V2** via a real sandbox subscription (no test-button in ASC). Google RTDN already [x] verified (Session 18).
+5. [ ] **Ship updated builds** — iOS Build 41 archive + Android rebuild (carry slots, CTA copy, store-cancel, recent-trades-15, trade icons).
+6. [ ] **App Links / AASA live** — deploy + on-device verify Android `assetlinks.json` (SHA-256s written); replace iOS `apple-app-site-association` `TEAM_ID` placeholder + verify both return 200.
+7. [ ] **E2E money tests** — paid subscribe → validate → Xero bill → 1099; cancel-path (iOS StoreKit + Android license tester); W-9 hold/release. Both platforms.
+8. [ ] **Generate real store assets** → fill both listings → **submit for review**.
+9. [!] **Attorney privacy policy** + ToS + disclaimers (external blocker — start now).
+10. [ ] **Google Play 14-day Closed-Testing gate** (wall-clock; first confirm the Family Apps LLC *org* account is even subject to it, then start ASAP).
+
+### 1. 🔒 Security & Backend
+- [ ] **NEW — Full pre-launch security audit (owed; never done).** Dedicated pass for: **SQL/ORM injection** (raw `text()` / `jsonb_set` / any f-string SQL in `mobile_api.py`, `admin_cash_tracking.py`, audit endpoints), **IDOR/authorization** on every `/api/mobile/*` resource (portfolio, subscription, W-9, device tokens), **webhook signature verification** (Apple JWS pin + Google RTDN), secrets handling, and **rate-limiting/abuse**. *(Already done: OAuth ID-token signature verification = `enforce`; admin-route 2FA sweep — see §A. The injection/IDOR/rate-limit sweep itself is NOT done.)*
+- [ ] **NEW — Rate-limit / abuse controls** on `/auth/token`, `/feed`, trade execution, and any new public API.
+- [ ] Load-test `/api/mobile/feed` at 100 concurrent users (§A).
+- [x] OAuth ID-token verification hardened + verified live; admin-route auth sweep complete; dead admin stubs deleted.
+
+### 2. 🤖 Automated-input API & Bot-research adequacy
+- [ ] **NEW — Inbound trading API for external algos / AI models (owed).** The product explicitly invites "Algorithms and AI bots" — scope an **authenticated per-user API** (API keys/OAuth, POST buy/sell + add-holdings, validation, rate limits, risk/abuse controls, public docs). Decide **v1 vs. fast-follow**. *(Distinct from the internal bot system and from the AI-model research below.)*
+- [~] **#2 Per-sector data adequacy incl. real estate & healthcare (owed write-up).** Assess whether AlphaVantage NEWS_SENTIMENT (topic-based) + TOP_GAINERS_LOSERS + Finnhub social/analyst/insider give bots enough signal in thin sectors; recommend extra data services for gaps. *(Current bot research = AV + Finnhub + yfinance per `docs/bot_agent_architecture.md`. USER correctly recalls never seeing the output — it was never produced.)*
+- [ ] **#3 External AI stock-picking model API research (owed write-up).** Evaluate feeding bots an LLM/signal API vs. the rules engine; scope providers, cost, latency, integration into `bot_data_hub.py` / `bot_strategies.py`.
+- [ ] **#1 Bot creation/batch rules verification** — trades stay in assigned sector; research method + `max_cash_deployed` wired (`bot_executor.py`/`bot_strategies.py`/`bot_data_hub.py`).
+
+### 3. 🍎 iOS app + App Store
+- [ ] iOS **Build 41 archive** (ships slots + CTA + store-cancel + recent-trades-15 + trade icons).
+- [ ] Listing (`docs/ASO_STRATEGY.md`): Title `ApesTogether: AI Stock Trader`, Subtitle `Follow Verified Strategies`, Keywords (+ es-MX loc), Promo text, Description.
+- [ ] 6 screenshots @6.9" (replace AI mockups), app icon; app-preview video optional.
+- [ ] Age rating **17+**, Privacy nutrition labels, Export-compliance answers.
+- [ ] In-App Events drafted; review-prompt after follow + 3rd session.
+- [ ] Visual-verify charts every period; verify pending-trade render on device.
+- [ ] **Submit for review.**
+- [x] FCM push, Apple/Google sign-in, billing verified on-device (§C).
+
+### 4. 🤖 Android app + Play
+- [ ] Android **rebuild** (slots + CTA + recent-trades-15 + trade icons + pending render).
+- [ ] LegalText port + Settings linkouts status check.
+- [ ] Listing per `docs/PLAY_STORE_LISTING_GUIDE.md`: title/short/full desc, feature graphic, 8 screenshots, content rating (Reference/Educational, **not** gambling), Data safety (matches privacy policy), **Financial features = "Personal investment research and management" — NOT "Stock trading"/brokerage**, target audience **18+**, privacy-policy URL 200, reviewer login.
+- [ ] Subscriptions **Active** + **Small Business Program (15%) enrolled**; payments/bank/tax profile complete.
+- [ ] **14-day Closed Testing** (≥12 opted-in testers) → Production rollout **@20%** → ramp.
+- [x] Slot 2–20 products created (Session 18); RTDN verified; on-device sign-in/billing/deep-link verified.
+
+### 5. 🎨 Shared store assets & review prep
+- [ ] Generate **app icon**, **feature graphic (1024×500)**, **8 screenshots** (Gemini prompts in `docs/ASO_STRATEGY.md`; no text in icon).
+- [ ] Create **reviewer demo account(s)** (`reviewer@apestogether.ai`) with followed traders, for Apple + Google reviewers.
+- [ ] **Brand-spelling sweep** — "ApesTogether" (fused) everywhere: iOS/Android strings, push sender label, share-sheet, landing, emails, social display names.
+- [ ] **UGC pre-submission scrub** — review all trader display names + shared content (one bad string rejects the whole app).
+
+### 6. ⚖️ Legal / Compliance
+- [!] Privacy policy final — **blocked on attorney**.
+- [ ] ToS final (reconcile `ATTermsOfService03APR2026.docx` ↔ `/legal/terms-of-service.md`).
+- [ ] Investment-disclaimers audit (`LAUNCH_PLAYBOOK §11` — never imply guaranteed returns; "informational/educational only").
+- [ ] Per-store disclaimer: "We do not offer real brokerage services. All trades are virtual using real market data."
+
+### 7. 🌐 Website / Landing
+- [ ] Refresh landing screenshot (old pricing); OG-image test (opengraph.xyz); live waitlist counter.
+- [x] Hero/nav CTAs, waitlist segmentation, trust bar, © 2026, real screenshot.
+
+### 8. 📣 Marketing / Launch execution  *(deferred until Android is "fairly bug-free", then run `docs/LAUNCH_PLAYBOOK.md`)*
+- [ ] **Now:** register + lock social handles (X `@ApesTogetherApp`, TikTok/IG `@apestogether`, LinkedIn, YouTube, Reddit) + UTM bio links.
+- [ ] Press kit (screenshots, bio, one-pager) — playbook Day 16.
+- [ ] Content calendar X/TikTok/LinkedIn/Reddit (`docs/LAUNCH_CONTENT.md`); influencer + journalist outreach incl. WSJ exclusive (`docs/LAUNCH_OUTREACH.md`); email sequences; $2-bill stunt (launch week); stand up KPI tracker.
+
+### 9. 🛠 Ops / Data / Infra
+- [ ] AlphaVantage News/Movers/Prices `no_calls` — verify after next bot wave; cold-start ping cron `*/4 → /api/health` (status unclear); verify weekly drift-cron fires.
+- [ ] After first monthly close: confirm Xero revenue post + payout sync; confirm ghost/bonus-subscriber tracking matches month-end payouts.
+- [x] Xero reconnected; `ADMIN_API_KEY` + `ADMIN_TOTP_SECRET` confirmed; `GOOGLE_PLAY_CREDENTIALS_JSON` set (on-device billing worked).
+
+### 10. 🧹 Post-launch cleanup (non-blocking)
+- [ ] Delete stray iOS Firebase app + resolve Android SHA-1 duplicate warning.
+- [ ] `DELETE` 33 orphan uppercase `stock_transaction` rows.
+- [ ] CI/security hardening (branch protection, SHA-pin Actions, OIDC, Dependabot/CodeQL, git-history secret scan).
+- [ ] Consolidate the two `SQLAlchemy(app)` instances; remove the legacy OAuth decode shim.
+- [ ] Email deliverability (`notifications@` → spam) diagnosis; later tighten DMARC → `p=reject`.
+
+---
+
 ## ▶ RESUME HERE — Sunday (AI tokens reset)
 
 **Last worked: Session 11, 2026-06-04. Committed `7a21b67` (8 files, +254/−95).** Stopped because AI tokens ran low.
@@ -70,7 +151,7 @@ Cohesive cluster opened after a code audit of the cancel / trial / billing path 
 
 - [x] **In-app cancel is now a SINGLE store-routed action — REWORKED (Session 14, client; uncommitted).** The row button is relabeled **“Manage”** and opens ONLY the store’s own subscription screen — iOS `SubscriptionManager.openManageSubscriptions()` (StoreKit 2 in-app sheet); Android deep-links `https://play.google.com/store/account/subscriptions?package=<pkg>`. **Removed the local `/unsubscribe` fake-cancel entirely** (no more DB `status='canceled'` flip, no premature access/payout removal): the store is the single source of truth, matching Netflix/Spotify/etc. Alerts reworded to non-destructive (“Canceling there stops future billing; you keep access until the period ends”). The app reflects the real cancel/expire/refund state via the ASSN V2 + RTDN webhooks (next item) on next resume — so there is **no scenario where the app says “canceled” while the store keeps billing**. `mobile_api.py:607 /unsubscribe` is now unused by mobile (left in place, harmless). *(Original finding: in-app “Cancel” only marked our DB canceled and never took the user to the store → charge-after-cancel + App Store rejection risk.)*
 
-- [~] **Per-creator subscription SLOTS — CODE BUILT (Session 15), store-console config pending.** Root problem found while answering “with multiple subs, which one is the user canceling on the Manage page?”: the app used **one shared product for every creator**, so the stores (one active sub per group/product, products must be pre-approved) physically **blocked a 2nd concurrent creator-sub** (Android `ITEM_ALREADY_OWNED`; iOS would crossgrade within the group) and showed **no creator** on the Manage page. Fix = **Twitch-style bounded slot pool**: 20 generic, same-price products (**Slot A..T**), each its **own iOS subscription group** (so they’re independently cancelable); the backend maps **slot→creator per-user** via new `MobileSubscription.slot`. New `subscription_slots.py` (Slot 1 = the existing product IDs) + `GET /subscriptions/slot-for-creator` (returns lowest free slot, or `already_subscribed` / `max_reached`); `/purchase/validate` derives the slot from the **authoritative** `product_id`; `/subscriptions` returns `slot_label`. Clients resolve the slot product **before** purchase (iOS `SubscriptionManager.subscribe`; Android **both** `PortfolioDetail` + `Leaderboard` flows + new `BillingService.queryProduct`), show a **“Subscription A” chip** per row, and the **Manage dialog names the exact store entry** to cancel. **One free trial per user, lifetime** = intro offer ONLY on Slot 1 (the first sub always lands in Slot 1; stores refuse a 2nd group-1 trial forever, even after slot reuse — zero app logic). S2S webhooks already match by store token, so **slot reuse is safe**. Android built+installed on Pixel; backend `py_compile` OK. **REMAINING (config, user):** (1) run `scripts/migrations/2026_06_14_subscription_slot.sql` in Supabase; (2) create Slots 2–20 — App Store Connect: 19 new subscription **groups**, monthly+annual, **no** trial; Play: 38 products, no trial — all same price as Slot 1 (click-by-click in `docs/PER_CREATOR_SUBSCRIPTION_SLOTS.md`); (3) iOS archive picks up the client side. **Then on-device test: subscribe to 2 creators → 2 independent store entries + correct A/B labels + cancel-one-keep-other.** *(Design + constraints: uniform pricing required; max 20 concurrent/user.)*
+- [~] **Per-creator subscription SLOTS — CODE BUILT (Session 15), store products CREATED by USER (Session 18); migration + app builds + on-device test pending.** Root problem found while answering “with multiple subs, which one is the user canceling on the Manage page?”: the app used **one shared product for every creator**, so the stores (one active sub per group/product, products must be pre-approved) physically **blocked a 2nd concurrent creator-sub** (Android `ITEM_ALREADY_OWNED`; iOS would crossgrade within the group) and showed **no creator** on the Manage page. Fix = **Twitch-style bounded slot pool**: 20 generic, same-price products (**Slot A..T**), each its **own iOS subscription group** (so they’re independently cancelable); the backend maps **slot→creator per-user** via new `MobileSubscription.slot`. New `subscription_slots.py` (Slot 1 = the existing product IDs) + `GET /subscriptions/slot-for-creator` (returns lowest free slot, or `already_subscribed` / `max_reached`); `/purchase/validate` derives the slot from the **authoritative** `product_id`; `/subscriptions` returns `slot_label`. Clients resolve the slot product **before** purchase (iOS `SubscriptionManager.subscribe`; Android **both** `PortfolioDetail` + `Leaderboard` flows + new `BillingService.queryProduct`), show a **“Subscription A” chip** per row, and the **Manage dialog names the exact store entry** to cancel. **One free trial per user, lifetime** = intro offer ONLY on Slot 1 (the first sub always lands in Slot 1; stores refuse a 2nd group-1 trial forever, even after slot reuse — zero app logic). S2S webhooks already match by store token, so **slot reuse is safe**. Android built+installed on Pixel; backend `py_compile` OK. **REMAINING (config, user):** (1) run `scripts/migrations/2026_06_14_subscription_slot.sql` in Supabase; (2) create Slots 2–20 — ✅ **DONE (Session 18, USER)** — 19 iOS subscription **groups** (monthly+annual) + 38 Play products created, all same price as Slot 1 (`docs/PER_CREATOR_SUBSCRIPTION_SLOTS.md`); (3) iOS archive + Android rebuild pick up the client side. **Then on-device test: subscribe to 2 creators → 2 independent store entries + correct A/B labels + cancel-one-keep-other.** *(Design + constraints: uniform pricing required; max 20 concurrent/user.)*
 
 - [~] **Server-to-server subscription notifications — CODE BUILT (Session 14), external config pending.** New `iap_webhooks.py` + two public routes: `POST /api/mobile/webhooks/apple/notifications` (verifies Apple’s `x5c`-signed JWS, decodes the notification + nested `signedTransactionInfo`, updates the matching InAppPurchase/MobileSubscription by `originalTransactionId`) and `POST /api/mobile/webhooks/google/rtdn` (decodes the Pub/Sub message, re-fetches authoritative state via `validate_google_purchase`, updates by `purchaseToken`). Handlers only UPDATE existing rows (never create); refund/revoke → `expired`. Both files compile. **Full step-by-step config guide: `docs/IAP_WEBHOOK_SETUP.md`.** **REMAINING (config, user):** Apple — set the ASSN V2 URL in App Store Connect (prod **and** sandbox) and pin Apple’s root via `APPLE_ROOT_CA_G3_PEM` or `certs/AppleRootCA-G3.cer` (else it falls back to chain-structure + leaf-signature verification with a logged warning). Google — create a Pub/Sub topic, grant the Play system service account Publisher, set it in Play Console → Monetization setup, add a push subscription POSTing to the RTDN URL. Then test via App Store Connect “Request a Test Notification” + Play Console “Send test notification”. *(Original gap: backend only learned of renew/cancel/expire/refund when the client next called `POST /purchase/validate`.)*
 
@@ -337,6 +418,12 @@ At the end of each session, the assistant should:
 ---
 
 ## Last updated
+
+**Session 18 (2026-06-22) — master pre-launch list rebuilt + slots store-config done + push verified:**
+- Rebuilt the **MASTER PRE-LAUNCH TASK LIST** (top of file) from this file + every `docs/*.md`. Added the items the USER flagged as missing: **full security audit (SQL injection / IDOR / rate-limiting)** and an **inbound trading API for external algos/AI models**, and surfaced bot-research **#1/#2/#3** — confirming their write-ups were **never produced** (USER correctly recalled never seeing the output).
+- **Slot 2–20 store products CREATED by USER** — 19 iOS groups + 38 Play products; slots item updated below.
+- **Verified pushed:** Session 16 payout-integrity + 1099/W-9 code (`e630f13`) and the monthly-payout cron (`1c9eaa5`) are on `origin/master`; no uncommitted money-file changes.
+- **Still gating launch:** run the two Supabase migrations; Apple ASSN sandbox test; ship iOS Build 41 + Android rebuild; E2E money tests; store assets + submit; attorney privacy policy.
 
 **Session 16 — payout integrity + 1099/W-9 ops (code; uncommitted, tested):**
 - **Track 1 (money integrity):** fixed three payout bugs — (1) renewals now book a new `InAppPurchase` row each period (`_record_renewal`), the keystone fix; (2) transaction-driven, annual-aware monthly payouts (no more count×rate); (3) idempotent refund/chargeback credit notes + sweep endpoint + carry-forward clawback. New unique index `uq_payout_user_period`; migration `scripts/migrations/2026_06_17_payout_integrity.sql`.
