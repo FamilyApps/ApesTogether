@@ -149,7 +149,7 @@ build machines and different stores.
 - Vercel does **not** build or host the Android app.
 
 ### 4C. iOS app (requires a Mac + Xcode → App Store Connect)
-- **Source-of-truth in THIS repo:** `ios/ApesTogetherApp/` (SwiftUI). Bundle ID `com.apestogether.app`.
+- **Source-of-truth in THIS repo:** `ios/ApesTogetherApp/` (SwiftUI). Bundle ID `com.apestogether.ApesTogether` (verified 2026-06-22 in `project.pbxproj` Debug+Release + the bundled `GoogleService-Info.plist`; an earlier note here said `com.apestogether.app`, which is WRONG -- that string is the *Android* `applicationId`. See section 8).
   Setup steps in `ios/README.md`.
 - **CANNOT be built on this Windows machine.** Per `ios/README.md`, the `ios/` folder must be moved to a
   **Mac**, opened in **Xcode 15+**, and built there. No CI/fastlane is configured — it's a manual Xcode flow.
@@ -256,6 +256,87 @@ build machines and different stores.
 
 There are many other open items (legal, ASO, ops audits) throughout `LAUNCH_TODO.md` — those are not part
 of the current Android-launch thread but remain on the list.
+
+---
+
+## 8. Google Cloud / Firebase / Google Sign-In / SHA keys -- definitive map (Session 18, 2026-06-22)
+
+> Written so nobody re-runs the "two Google accounts / duplicate apps / which SHA goes where" rabbit
+> hole again. **Everything below was verified from source files + a live production probe.** Bottom line:
+> the setup is INTENTIONAL and WORKING -- there is no harmful duplication to "fix".
+
+### 8A. Three separate Google projects, three different jobs
+
+| Project (console name) | id / number | Owner login | Job | Google Sign-In? |
+|---|---|---|---|---|
+| **Firebase** | `apestogether-2c749` / `#1096138595577` | (Firebase console acct) | FCM push + the bundled config files (`google-services.json`, `GoogleService-Info.plist`) | **No** (not Firebase Auth) |
+| **"Apes Together"** | `#654567882865` | `bobford00@gmail.com` | **Google Sign-In project of record** -- owns the Web + Android OAuth clients | **Yes** |
+| **"Apes Together Play API"** | `apestogether-play-api` | `fordutilityapps@gmail.com` | Play Developer API service account (`GOOGLE_PLAY_CREDENTIALS_JSON`) + RTDN Pub/Sub topic `play-rtdn` | No ("Google Auth Platform not configured" here is CORRECT) |
+
+The "two accounts" (`bobford00` vs `fordutilityapps`) split is an ownership-hygiene quirk, **not a bug** --
+Sign-In is verified by our own backend (8B), so it works across projects/accounts. Consolidating ownership
+someday is nice-to-have, NOT a launch blocker.
+
+### 8B. How Google Sign-In actually flows (why cross-project is fine)
+
+Android **Credential Manager** (`serverClientId = GOOGLE_WEB_CLIENT_ID`) -> Google returns an ID token whose
+`aud` = that Web client id -> app POSTs it to **`/api/mobile/auth/token`** -> backend
+`mobile_api._verify_google_id_token` verifies signature + `aud` against Vercel **`GOOGLE_ANDROID_CLIENT_ID`**
+(set to that same Web client id). **This is custom backend verification, NOT Firebase Auth** -- which is why
+`google-services.json` has `oauth_client: 0` and that's fine. iOS uses **Apple Sign-In only** (no Google), so
+`GoogleService-Info.plist` having no `CLIENT_ID` / `REVERSED_CLIENT_ID` is CORRECT, not broken.
+
+### 8C. Apps registered in Firebase project `apestogether-2c749`
+
+| App | Bundle / package | Firebase appId | Status |
+|---|---|---|---|
+| Android | `com.apestogether.app` | `1:1096138595577:android:...` | live (FCM) |
+| **iOS (correct, shipping)** | `com.apestogether.ApesTogether` | `1:1096138595577:ios:ef605a913d1d7aa3b75628` | live -- matches `project.pbxproj` (Debug+Release) AND the bundled plist |
+| iOS (STRAY -- mistake) | `com.apestogether.app` | `1:1096138595577:ios:7f2b...` | **safe to delete** (see 8G) -- wrong bundle, nothing ships with it |
+
+### 8D. Signing certs / fingerprints -- which goes where (do NOT confuse SHA-1 vs SHA-256)
+
+Two unrelated uses: **Google Sign-In uses SHA-1** registered as Android OAuth clients in project
+**`#654567882865`**; **Android App Links `autoVerify` uses SHA-256** in `public/.well-known/assetlinks.json`.
+
+| Cert | SHA-1 (Sign-In, proj `#654567882865`) | SHA-256 (App Links, assetlinks.json) | Source / notes |
+|---|---|---|---|
+| **Play app-signing key** (production) | `8F:A7:83:2D...` -- **the one that made Sign-In work on the Play build** | `0A:3A:A0:...:1C:CA` (slot 2 in assetlinks) | Play Console -> Protected with Play -> Manage Play app signing |
+| **Upload key** | `49:2E...` (only for a sideloaded release APK) | `64:47:B5:...:2B:57` (slot 1 in assetlinks) | same page |
+| **Debug keystore** (`~/.android/debug.keystore`) | `29:56:AA:...:CC:1B` | (not needed) | debug builds only |
+
+The Play-distributed build is signed by Play, so the **Play app-signing SHA-1 `8F:A7...`** is what matters
+for production Sign-In. It is **already registered** in `#654567882865`; Sign-In VERIFIED on a Pixel 8a
+(2026-06-09).
+
+### 8E. Auth-related Vercel env vars (state CONFIRMED Session 18)
+
+| Var | Value / state | How confirmed |
+|---|---|---|
+| `GOOGLE_ANDROID_CLIENT_ID` | `654567882865-4skl...` (the Web client id) -- marked *Sensitive* | proven correct: on-device Sign-In succeeds (a wrong `aud` would 401) |
+| `STRICT_OAUTH_VERIFICATION` | `enforce` -- marked *Sensitive* | **live probe 2026-06-22:** a forged-but-well-formed Google token to `/api/mobile/auth/token` returned `401 invalid_google_token` (strict path), not `400 email_required_for_new_user` (legacy decode path) |
+| `APPLE_BUNDLE_ID` | `com.apestogether.ApesTogether` | present in Vercel |
+| `GOOGLE_WEB_CLIENT_ID` | same `654567882865-4skl...` | `android/secrets.properties` (gitignored), injected into `BuildConfig` |
+
+If Sign-In ever breaks: first check `STRICT_OAUTH_VERIFICATION` is still a truthy spelling
+(`1/true/on/enforce/yes` -- a typo like `enforced` reads as OFF) and that `GOOGLE_ANDROID_CLIENT_ID` still
+equals the Web client id.
+
+### 8F. The Firebase "duplicate OAuth client" warning -- EXPECTED; do NOT "fix" by deleting
+
+Firebase flags *"Another project contains an OAuth 2.0 client that uses this same SHA-1 + package"* for
+`(debug SHA-1 29:56..., com.apestogether.app)`. That's because project `#654567882865` legitimately owns
+that Android client (it's the Sign-In project). **Do NOT delete the client in `#654567882865` -- it IS the
+working Sign-In client; deleting it breaks Google Sign-In.** Firebase here is push-only and FCM needs no
+SHA-1, so the warning has zero functional impact.
+
+### 8G. Optional cosmetic cleanups (NOT launch blockers)
+
+1. **Delete the stray iOS Firebase app** (`com.apestogether.app`, appId `...7f2b...`) -- keep the correct
+   one (`com.apestogether.ApesTogether`, `...ef605...`). Nothing ships with the stray.
+2. *(Optional)* **remove the debug SHA-1 (`29:56...`) from the Firebase Android app** to silence the 8F
+   warning. FCM doesn't need it and Sign-In is unaffected (it lives in `#654567882865`, not Firebase).
+   `google-services.json` has `oauth_client: 0`, so re-downloading it after is optional (no behavior change).
 </CodeContent>
 <EmptyFile>false</EmptyFile>
 </invoke>
