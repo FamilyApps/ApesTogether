@@ -69,6 +69,10 @@ struct LeaderboardEntry: Codable, Identifiable {
     // (or is this creator). Drives "View Portfolio"-only rendering. Optional
     // for backward-compat with anonymous/legacy responses.
     let isSubscribed: Bool?
+    // W7: false when the creator turned off "Allow New Subscribers". The row
+    // still appears; clients swap the Subscribe CTA for explanatory copy.
+    // Optional/defaults-to-accepting for legacy responses.
+    let acceptsNewSubscribers: Bool?
     
     var id: Int { user.id }
 }
@@ -98,6 +102,10 @@ struct PortfolioResponse: Codable {
     let subscriptionId: Int?
     let subscriptionPrice: Double
     let subscriberCount: Int
+    // W7: false when this creator isn't accepting new subscribers. Clients
+    // replace the Subscribe CTA with explanatory copy (existing subscribers
+    // and the owner are unaffected). Optional for legacy responses.
+    let acceptsNewSubscribers: Bool?
     let holdings: [Holding]?
     let recentTrades: [Trade]?
     let previewMessage: String?

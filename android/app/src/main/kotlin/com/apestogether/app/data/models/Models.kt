@@ -89,6 +89,10 @@ data class LeaderboardEntry(
     // (or is this creator). Drives "View Portfolio"-only rendering on the
     // leaderboard card. Defaults false for anonymous/legacy responses.
     @SerialName("is_subscribed") val isSubscribed: Boolean = false,
+    // W7: false when the creator turned off "Allow New Subscribers". The row
+    // still appears; clients swap the Subscribe CTA for explanatory copy.
+    // Optional/defaults-to-accepting for legacy responses.
+    @SerialName("accepts_new_subscribers") val acceptsNewSubscribers: Boolean? = null,
 )
 
 @Serializable
@@ -115,6 +119,10 @@ data class PortfolioResponse(
     @SerialName("subscription_id") val subscriptionId: Int? = null,
     @SerialName("subscription_price") val subscriptionPrice: Double,
     @SerialName("subscriber_count") val subscriberCount: Int,
+    // W7: false when this creator isn't accepting new subscribers. Clients
+    // replace the Subscribe CTA with explanatory copy (existing subscribers
+    // and the owner are unaffected). Optional for legacy responses.
+    @SerialName("accepts_new_subscribers") val acceptsNewSubscribers: Boolean? = null,
     val holdings: List<Holding>? = null,
     @SerialName("recent_trades") val recentTrades: List<Trade>? = null,
     @SerialName("preview_message") val previewMessage: String? = null,

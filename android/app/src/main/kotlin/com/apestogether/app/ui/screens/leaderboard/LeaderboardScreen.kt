@@ -70,6 +70,7 @@ import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -854,6 +855,17 @@ private fun ExpandedDetail(
                         style = tightTextStyle(12.sp),
                     )
                 }
+            } else if (entry.acceptsNewSubscribers == false) {
+                // W7: creator paused new subscriptions — explain instead of
+                // offering a Subscribe CTA (they still rank on the leaderboard).
+                Text(
+                    text = "Not accepting new subscribers right now",
+                    color = TextMuted,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                    style = tightTextStyle(12.sp),
+                )
             } else {
                 CompactPlanToggle(
                     selected = selectedPlan,

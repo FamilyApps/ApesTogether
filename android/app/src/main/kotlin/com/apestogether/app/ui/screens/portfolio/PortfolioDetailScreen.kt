@@ -66,6 +66,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -324,20 +325,36 @@ private fun PortfolioBody(
                     // chart so the conversion CTA is visible above-the-fold on
                     // both iPhone 17 Pro and Pixel 7 (matches iOS layout).
                     if (!portfolio.isOwner && !portfolio.isSubscribed) {
+                        // W7: when the creator isn't accepting new subscribers,
+                        // swap the plan toggle + Subscribe CTA for explanatory
+                        // copy (Share stays). Purchases are blocked server-side.
+                        val accepting = portfolio.acceptsNewSubscribers != false
                         Column(
                             modifier = Modifier.padding(horizontal = 16.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            CompactPlanToggle(
-                                selected = selectedPlan,
-                                onSelect = viewModel::setPlan,
-                            )
+                            if (accepting) {
+                                CompactPlanToggle(
+                                    selected = selectedPlan,
+                                    onSelect = viewModel::setPlan,
+                                )
+                            } else {
+                                Text(
+                                    text = "This trader isn't accepting new subscribers right now.",
+                                    color = TextMuted,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                )
+                            }
                             SubscribeAndShareRow(
                                 slug = portfolio.owner.portfolioSlug ?: "",
                                 period = period,
                                 selectedPlan = selectedPlan,
                                 subscriptionPrice = portfolio.subscriptionPrice,
                                 subscribeState = subscribeState,
+                                showSubscribe = accepting,
                                 onSubscribe = {
                                     activity?.let {
                                         viewModel.subscribe(
@@ -349,10 +366,12 @@ private fun PortfolioBody(
                                     }
                                 },
                             )
-                            SubscribeStatusBanner(
-                                state = subscribeState,
-                                onDismiss = viewModel::clearSubscribeState,
-                            )
+                            if (accepting) {
+                                SubscribeStatusBanner(
+                                    state = subscribeState,
+                                    onDismiss = viewModel::clearSubscribeState,
+                                )
+                            }
                         }
                     }
 
@@ -434,6 +453,7 @@ private fun PortfolioBody(
                             BlurredHoldingsTeaser(
                                 ownerName = portfolio.owner.publicName,
                                 previewMessage = portfolio.previewMessage,
+                                acceptsNewSubscribers = portfolio.acceptsNewSubscribers != false,
                                 onSubscribe = {
                                     activity?.let {
                                         viewModel.subscribe(
@@ -743,6 +763,9 @@ private fun SubscribeAndShareRow(
     subscribeState: SubscribeUiState,
     onSubscribe: () -> Unit,
     modifier: Modifier = Modifier,
+    // W7: hide the Subscribe button (Share-only) when the creator isn't
+    // accepting new subscribers. The notice copy is rendered by the caller.
+    showSubscribe: Boolean = true,
 ) {
     val context = LocalContext.current
     val processing = subscribeState is SubscribeUiState.Processing
@@ -755,6 +778,7 @@ private fun SubscribeAndShareRow(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        if (showSubscribe) {
         Button(
             onClick = onSubscribe,
             enabled = !processing,
@@ -792,6 +816,7 @@ private fun SubscribeAndShareRow(
                 )
             }
         }
+        }
 
         OutlinedButton(
             onClick = {
@@ -804,7 +829,7 @@ private fun SubscribeAndShareRow(
                     Intent.createChooser(intent, "Share portfolio"),
                 )
             },
-            modifier = Modifier.height(48.dp),
+            modifier = (if (showSubscribe) Modifier else Modifier.weight(1f)).height(48.dp),
             shape = RoundedCornerShape(12.dp),
             border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
             colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
@@ -1212,6 +1237,9 @@ private fun BlurredHoldingsTeaser(
     previewMessage: String?,
     onSubscribe: () -> Unit,
     modifier: Modifier = Modifier,
+    // W7: hide the Subscribe button + show "not accepting" copy when the
+    // creator has paused new subscriptions.
+    acceptsNewSubscribers: Boolean = true,
 ) {
     Column(
         modifier = modifier
@@ -1231,16 +1259,20 @@ private fun BlurredHoldingsTeaser(
             fontWeight = FontWeight.Bold,
         )
         Text(
-            text = previewMessage ?: "Subscribe to see exactly what they're trading and get instant alerts.",
+            text = if (!acceptsNewSubscribers)
+                "$ownerName isn't accepting new subscribers right now."
+            else previewMessage ?: "Subscribe to see exactly what they're trading and get instant alerts.",
             color = TextSecondary,
             fontSize = 13.sp,
         )
-        Button(
-            onClick = onSubscribe,
-            colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
-            shape = RoundedCornerShape(12.dp),
-        ) {
-            Text("Subscribe", color = Color.White, fontWeight = FontWeight.Bold)
+        if (acceptsNewSubscribers) {
+            Button(
+                onClick = onSubscribe,
+                colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Text("Subscribe", color = Color.White, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }

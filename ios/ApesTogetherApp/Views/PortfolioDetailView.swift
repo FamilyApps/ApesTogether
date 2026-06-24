@@ -85,10 +85,24 @@ struct PortfolioDetailView: View {
                         // the stats grid + sector allocation.
                         if !portfolio.isOwner && !portfolio.isSubscribed {
                             VStack(spacing: 10) {
-                                // Compact plan toggle
-                                CompactPlanToggle(subscriptionManager: subscriptionManager)
+                                // W7: when the creator isn't accepting new
+                                // subscribers, swap the plan toggle + Subscribe
+                                // CTA for explanatory copy (Share stays). The
+                                // purchase is blocked server-side regardless.
+                                if portfolio.acceptsNewSubscribers == false {
+                                    Text("This trader isn't accepting new subscribers right now.")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundColor(.textMuted)
+                                        .multilineTextAlignment(.center)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 8)
+                                } else {
+                                    // Compact plan toggle
+                                    CompactPlanToggle(subscriptionManager: subscriptionManager)
+                                }
                                 
                                 HStack(spacing: 10) {
+                                    if portfolio.acceptsNewSubscribers != false {
                                     Button {
                                         Task {
                         await subscriptionManager.subscribe(
@@ -113,6 +127,7 @@ struct PortfolioDetailView: View {
                                         .cornerRadius(12)
                                     }
                                     .disabled(subscriptionManager.isProcessing)
+                                    }
                                     
                                     ShareLink(
                                         item: URL(string: "https://apestogether.ai/p/\(portfolio.owner.portfolioSlug ?? slug)?period=\(viewModel.selectedPeriod)")!,

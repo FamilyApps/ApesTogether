@@ -736,6 +736,15 @@ struct LeaderboardCard: View {
                     .foregroundColor(.primaryAccent)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 4)
+                } else if entry.acceptsNewSubscribers == false {
+                    // W7: creator paused new subscriptions — explain instead of
+                    // offering a Subscribe CTA (they still rank on the leaderboard).
+                    Text("Not accepting new subscribers right now")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.textMuted)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
                 } else {
                     // Compact plan toggle
                     CompactPlanToggle(subscriptionManager: subscriptionManager)
