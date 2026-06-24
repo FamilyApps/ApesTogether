@@ -543,7 +543,23 @@ def validate_purchase():
     
     if platform not in ['apple', 'google']:
         return jsonify({'error': 'invalid_platform'}), 400
-    
+
+    # W7: if the creator turned OFF "Allow New Subscribers", block only
+    # brand-new subscriptions here (server-authoritative). Existing
+    # subscribers' renewals/updates still validate — the store auto-renews
+    # until the subscriber cancels, and we never revoke a paying subscriber.
+    from models import User as _User, MobileSubscription as _MobSub
+    _creator = _User.query.get(subscribed_to_id)
+    if not _creator:
+        return jsonify({'error': 'creator_not_found'}), 404
+    if not _get_accepts_new_subscribers(_creator):
+        from datetime import datetime as _dt
+        _existing = _MobSub.query.filter_by(
+            subscriber_id=g.user_id, subscribed_to_id=subscribed_to_id
+        ).all()
+        if not any(_subscription_occupies_slot(s, _dt.utcnow()) for s in _existing):
+            return jsonify({'success': False, 'error': 'not_accepting_subscribers'}), 403
+
     receipt_data = data.get('receipt_data')
     purchase_token = data.get('purchase_token')
     product_id = data.get('product_id')  # client hint; used for pricing/accounting
@@ -674,6 +690,22 @@ def _subscription_occupies_slot(sub, now):
     return False
 
 
+def _get_accepts_new_subscribers(user) -> bool:
+    """Whether this creator is currently accepting NEW subscribers (W7).
+
+    Stored in User.extra_data (JSON), default True (no migration needed). OFF
+    blocks NEW purchases only — existing subscribers keep access until they
+    cancel/expire, and the creator still appears on the leaderboard and their
+    public portfolio stays viewable. Surfaced as 'Allow New Subscribers' in the
+    app's Settings."""
+    if not user:
+        return True
+    try:
+        return bool((user.extra_data or {}).get('accepts_new_subscribers', True))
+    except Exception:
+        return True
+
+
 @mobile_api.route('/subscriptions/slot-for-creator', methods=['GET'])
 @require_auth
 def slot_for_creator():
@@ -695,7 +727,7 @@ def slot_for_creator():
       {error:"max_reached", max_slots}                 (cap hit)
     """
     from datetime import datetime
-    from models import MobileSubscription
+    from models import MobileSubscription, User
     from subscription_slots import (
         MAX_SUBSCRIPTION_SLOTS, monthly_product_id, annual_product_id, slot_label,
     )
@@ -708,6 +740,14 @@ def slot_for_creator():
 
     try:
         now = datetime.utcnow()
+        # W7: a creator can stop accepting NEW subscribers. Block the purchase
+        # flow here so clients show "not accepting" copy instead of a Subscribe
+        # CTA (existing subscribers are unaffected — see /purchase/validate).
+        creator = User.query.get(subscribed_to_id)
+        if not creator:
+            return jsonify({'error': 'creator_not_found'}), 404
+        if not _get_accepts_new_subscribers(creator):
+            return jsonify({'error': 'not_accepting_subscribers'})
         subs = MobileSubscription.query.filter_by(subscriber_id=g.user_id).all()
 
         # Already subscribed to THIS creator (live entitlement)? Don't let them
@@ -1065,7 +1105,11 @@ def get_portfolio(slug):
             # POST/DELETE /subscriptions/<id>/scale without first making
             # a round-trip to /subscriptions to look it up.
             'subscription_id': subscription.id if subscription else None,
-            'subscription_price': 9.00
+            'subscription_price': 9.00,
+            # W7: when False, clients replace the Subscribe CTA with
+            # "not accepting new subscriptions" copy. Existing subscribers
+            # (is_subscribed) keep full access regardless.
+            'accepts_new_subscribers': _get_accepts_new_subscribers(owner)
         }
         
         # Get subscriber count (real + gifted)
@@ -2025,7 +2069,10 @@ def get_leaderboard():
                 'last_trade_date': last_trade_date,
                 # Per-viewer: true if the signed-in viewer already follows this
                 # creator (or is this creator). Clients hide the Subscribe CTA.
-                'is_subscribed': (user_id == viewer_id) or (user_id in subscribed_ids)
+                'is_subscribed': (user_id == viewer_id) or (user_id in subscribed_ids),
+                # W7: clients show "not accepting new subscriptions" instead of
+                # the Subscribe CTA when this is False (the user still ranks here).
+                'accepts_new_subscribers': _get_accepts_new_subscribers(user)
             })
         
         # Sort by performance descending, then re-rank
@@ -2240,6 +2287,7 @@ def get_portfolio_preferences():
         return jsonify({'error': 'user_not_found'}), 404
     return jsonify({
         'prefer_fractional': _get_prefer_fractional(user),
+        'accepts_new_subscribers': _get_accepts_new_subscribers(user),
     })
 
 
@@ -2263,6 +2311,8 @@ def update_portfolio_preferences():
     extra = dict(user.extra_data or {})
     if 'prefer_fractional' in data:
         extra['prefer_fractional'] = bool(data['prefer_fractional'])
+    if 'accepts_new_subscribers' in data:
+        extra['accepts_new_subscribers'] = bool(data['accepts_new_subscribers'])
 
     user.extra_data = extra
     # SQLAlchemy doesn't always detect in-place JSON mutations; force the
@@ -2277,6 +2327,7 @@ def update_portfolio_preferences():
     return jsonify({
         'success': True,
         'prefer_fractional': _get_prefer_fractional(user),
+        'accepts_new_subscribers': _get_accepts_new_subscribers(user),
     })
 
 
@@ -3470,7 +3521,7 @@ def vote_on_poll():
 
 @mobile_api.route('/portfolio/trade', methods=['POST'])
 @require_auth
-@rate_limit(20)
+@rate_limit(60)
 def execute_trade():
     """
     Execute a buy or sell trade.

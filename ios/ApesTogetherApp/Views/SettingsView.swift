@@ -5,7 +5,11 @@ struct SettingsView: View {
     @Environment(\.dismiss) var dismiss
     @State private var showingSignOutAlert = false
     @State private var showingDeleteAlert = false
-    @State private var allowSubscribers = true
+    // W7: "Allow New Subscribers". Loaded from /settings/portfolio-preferences
+    // on appear; persists back via PUT. OFF blocks NEW subscriptions only —
+    // existing subscribers keep access and the profile stays on the leaderboard.
+    @State private var acceptsNewSubscribers = true
+    @State private var acceptsNewSubscribersLoaded = false
     @State private var showTOS = false
     @State private var showPrivacy = false
     @State private var showFAQ = false
@@ -91,12 +95,24 @@ struct SettingsView: View {
                                     Image(systemName: "person.2.fill")
                                         .foregroundColor(.primaryAccent)
                                         .frame(width: 24)
-                                    Text("Allow Subscribers")
-                                        .foregroundColor(.textPrimary)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Allow New Subscribers")
+                                            .foregroundColor(.textPrimary)
+                                        Text("When off, you still appear on the leaderboard but no one new can subscribe")
+                                            .font(.caption2)
+                                            .foregroundColor(.textMuted)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
                                     Spacer()
-                                    Toggle("", isOn: $allowSubscribers)
+                                    Toggle("", isOn: $acceptsNewSubscribers)
                                         .toggleStyle(SwitchToggleStyle(tint: Color.primaryAccent))
                                         .labelsHidden()
+                                        .disabled(!acceptsNewSubscribersLoaded)
+                                        .onChange(of: acceptsNewSubscribers) { newValue in
+                                            // Skip the initial set when load fires
+                                            guard acceptsNewSubscribersLoaded else { return }
+                                            Task { await saveAcceptsNewSubscribers(newValue) }
+                                        }
                                 }
                                 .padding()
 
@@ -275,7 +291,7 @@ struct SettingsView: View {
                     .environmentObject(authManager)
             }
             .task {
-                await loadPreferFractional()
+                await loadPreferences()
             }
         }
     }
@@ -293,19 +309,22 @@ struct SettingsView: View {
     // Load on settings appear so the toggle reflects the server state.
     // The `preferFractionalLoaded` flag gates the .onChange handler so
     // SwiftUI's initial state set doesn't trigger an unnecessary PUT.
-    private func loadPreferFractional() async {
+    private func loadPreferences() async {
         do {
             let prefs = try await APIService.shared.getPortfolioPreferences()
             await MainActor.run {
                 preferFractional = prefs.preferFractional
                 preferFractionalLoaded = true
+                acceptsNewSubscribers = prefs.acceptsNewSubscribers ?? true
+                acceptsNewSubscribersLoaded = true
             }
         } catch {
-            // Failure isn't critical — toggle stays at default (true) but
-            // disabled so the user knows it didn't load. Log for debug.
+            // Failure isn't critical — toggles stay at default (true) but
+            // disabled so the user knows they didn't load. Log for debug.
             print("Failed to load portfolio preferences: \(error)")
             await MainActor.run {
                 preferFractionalLoaded = true
+                acceptsNewSubscribersLoaded = true
             }
         }
     }
@@ -318,6 +337,18 @@ struct SettingsView: View {
             print("Failed to update portfolio preferences: \(error)")
             await MainActor.run {
                 preferFractional = !newValue
+            }
+        }
+    }
+
+    private func saveAcceptsNewSubscribers(_ newValue: Bool) async {
+        do {
+            _ = try await APIService.shared.updatePortfolioPreferences(acceptsNewSubscribers: newValue)
+        } catch {
+            // Roll back on failure so the toggle matches the server.
+            print("Failed to update Allow New Subscribers: \(error)")
+            await MainActor.run {
+                acceptsNewSubscribers = !newValue
             }
         }
     }

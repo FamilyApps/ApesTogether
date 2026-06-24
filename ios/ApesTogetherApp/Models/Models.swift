@@ -454,6 +454,9 @@ struct SetScaleResponse: Codable {
 /// exposes only prefer_fractional but designed to grow.
 struct PortfolioPreferencesResponse: Codable {
     let preferFractional: Bool
+    // W7: whether this creator is accepting NEW subscribers (default true).
+    // Optional so older backends / partial payloads still decode.
+    let acceptsNewSubscribers: Bool?
     // success is only set on the PUT response; optional so the GET
     // response decodes cleanly too.
     let success: Bool?

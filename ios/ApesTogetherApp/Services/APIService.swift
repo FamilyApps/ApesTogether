@@ -163,10 +163,18 @@ class APIService {
         return try await get("/settings/portfolio-preferences", authenticated: true)
     }
 
-    /// Update the current user's portfolio display preferences (e.g.,
-    /// toggle prefer_fractional for the scaled view).
-    func updatePortfolioPreferences(preferFractional: Bool) async throws -> PortfolioPreferencesResponse {
-        let body: [String: Any] = ["prefer_fractional": preferFractional]
+    /// Update the current user's portfolio preferences. All fields optional —
+    /// only the ones passed are changed (e.g. prefer_fractional for the scaled
+    /// view, or accepts_new_subscribers for the W7 "Allow New Subscribers" toggle).
+    func updatePortfolioPreferences(preferFractional: Bool? = nil,
+                                    acceptsNewSubscribers: Bool? = nil) async throws -> PortfolioPreferencesResponse {
+        var body: [String: Any] = [:]
+        if let preferFractional = preferFractional {
+            body["prefer_fractional"] = preferFractional
+        }
+        if let acceptsNewSubscribers = acceptsNewSubscribers {
+            body["accepts_new_subscribers"] = acceptsNewSubscribers
+        }
         return try await put("/settings/portfolio-preferences", body: body)
     }
     

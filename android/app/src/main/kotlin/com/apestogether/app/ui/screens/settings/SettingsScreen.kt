@@ -95,8 +95,8 @@ import javax.inject.Inject
  *  - **Account** — read-only email + username.
  *  - **Your Portfolio Link** — personal `apestogether.ai/p/<slug>` URL
  *    with a Copy button that flips to "Copied!" for 2 seconds.
- *  - **Preferences** — "Allow Subscribers" toggle (frontend-only for v1;
- *    matches iOS which doesn't yet round-trip this to the backend).
+ *  - **Preferences** — "Allow New Subscribers" toggle (W7; persists to
+ *    /settings/portfolio-preferences) + "Show Fractional Shares".
  *  - **Payments** — Payment History (TODO) + Tax Info (TODO; iOS opens a
  *    W-9 sheet which is deferred to v1.1).
  *  - **Help & Legal** — FAQ (TODO), Terms of Service + Privacy Policy
@@ -117,9 +117,10 @@ fun SettingsScreen(
     val user by viewModel.currentUser.collectAsState()
     val preferFractional by viewModel.preferFractional.collectAsState()
     val preferFractionalLoaded by viewModel.preferFractionalLoaded.collectAsState()
+    val acceptsNewSubscribers by viewModel.acceptsNewSubscribers.collectAsState()
+    val acceptsNewSubscribersLoaded by viewModel.acceptsNewSubscribersLoaded.collectAsState()
     val context = LocalContext.current
 
-    var allowSubscribers by remember { mutableStateOf(true) }
     var showSignOutConfirm by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showTaxInfo by remember { mutableStateOf(false) }
@@ -203,11 +204,16 @@ fun SettingsScreen(
 
             // ── Preferences ──
             SettingsSection(title = "Preferences") {
-                ToggleRow(
+                // W7: persists to /settings/portfolio-preferences. OFF blocks
+                // NEW subscriptions only — existing subscribers keep access and
+                // the user stays on the leaderboard.
+                ToggleRowWithSubtitle(
                     icon = Icons.Default.People,
-                    label = "Allow Subscribers",
-                    checked = allowSubscribers,
-                    onChange = { allowSubscribers = it },
+                    label = "Allow New Subscribers",
+                    subtitle = "When off, you still appear on the leaderboard but no one new can subscribe",
+                    checked = acceptsNewSubscribers,
+                    enabled = acceptsNewSubscribersLoaded,
+                    onChange = { viewModel.setAcceptsNewSubscribers(it) },
                 )
                 Divider()
                 // Phase D: persists to /settings/portfolio-preferences and
@@ -590,13 +596,27 @@ class SettingsViewModel @Inject constructor(
     private val _preferFractionalLoaded = MutableStateFlow(false)
     val preferFractionalLoaded: StateFlow<Boolean> = _preferFractionalLoaded.asStateFlow()
 
+    // ── W7: "Allow New Subscribers" ──────────────────────────────────
+    // Default true matches the server-side default in
+    // `_get_accepts_new_subscribers`. OFF blocks NEW subscriptions only;
+    // existing subscribers keep access and the user stays on the leaderboard.
+    private val _acceptsNewSubscribers = MutableStateFlow(true)
+    val acceptsNewSubscribers: StateFlow<Boolean> = _acceptsNewSubscribers.asStateFlow()
+
+    private val _acceptsNewSubscribersLoaded = MutableStateFlow(false)
+    val acceptsNewSubscribersLoaded: StateFlow<Boolean> = _acceptsNewSubscribersLoaded.asStateFlow()
+
     init {
         viewModelScope.launch {
             runCatching { apiService.getPortfolioPreferences() }
-                .onSuccess { _preferFractional.value = it.preferFractional }
-            // Always flip the loaded flag — even on failure — so the
-            // toggle becomes interactive (with the default value).
+                .onSuccess {
+                    _preferFractional.value = it.preferFractional
+                    _acceptsNewSubscribers.value = it.acceptsNewSubscribers ?: true
+                }
+            // Always flip the loaded flags — even on failure — so the
+            // toggles become interactive (with their default values).
             _preferFractionalLoaded.value = true
+            _acceptsNewSubscribersLoaded.value = true
         }
     }
 
@@ -613,6 +633,21 @@ class SettingsViewModel @Inject constructor(
             }.onFailure {
                 // Roll back on network/server error.
                 _preferFractional.value = previous
+            }
+        }
+    }
+
+    /** Persist the W7 "Allow New Subscribers" toggle (optimistic + rollback). */
+    fun setAcceptsNewSubscribers(value: Boolean) {
+        val previous = _acceptsNewSubscribers.value
+        _acceptsNewSubscribers.value = value
+        viewModelScope.launch {
+            runCatching {
+                apiService.updatePortfolioPreferences(
+                    UpdatePortfolioPreferencesRequest(acceptsNewSubscribers = value)
+                )
+            }.onFailure {
+                _acceptsNewSubscribers.value = previous
             }
         }
     }

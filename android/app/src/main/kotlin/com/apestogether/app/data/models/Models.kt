@@ -505,6 +505,8 @@ data class SetScaleResponse(
 @Serializable
 data class PortfolioPreferencesResponse(
     @SerialName("prefer_fractional") val preferFractional: Boolean,
+    // W7: whether this creator is accepting NEW subscribers (default true).
+    @SerialName("accepts_new_subscribers") val acceptsNewSubscribers: Boolean? = null,
     val success: Boolean? = null,
 )
 
@@ -513,6 +515,7 @@ data class PortfolioPreferencesResponse(
 @Serializable
 data class UpdatePortfolioPreferencesRequest(
     @SerialName("prefer_fractional") val preferFractional: Boolean? = null,
+    @SerialName("accepts_new_subscribers") val acceptsNewSubscribers: Boolean? = null,
 )
 
 // ── Tax info / W-9 (in-app collection; full TIN stored only in Xero) ───────

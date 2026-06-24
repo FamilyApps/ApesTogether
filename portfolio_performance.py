@@ -3,12 +3,12 @@ Portfolio performance calculation using Modified Dietz method and market benchma
 """
 import requests
 import os
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from zoneinfo import ZoneInfo
 import logging
 from typing import Dict, List
 from models import PortfolioSnapshot, MarketData, Stock, Transaction, User, db
-from sqlalchemy import func, and_, or_
+from sqlalchemy import func, and_, or_, text, bindparam
 try:
     from timezone_utils import get_market_timezone, is_market_hours
 except ImportError:
@@ -40,6 +40,135 @@ def get_market_date():
 # Cache for stock prices (90-second caching like existing system)
 stock_price_cache = {}
 cache_duration = 90
+
+# ── Shared price cache + tiered TTL (W9, see docs/PRICE_CACHE_AND_SCALING.md) ──
+# The in-memory `stock_price_cache` above lives inside ONE serverless instance,
+# so under concurrency each instance re-fetches every ticker and multiplies
+# AlphaVantage calls. The helpers below add a SHARED Postgres layer (table
+# `stock_price_cache`) that every instance reads/writes, turning the in-memory
+# dict into a fast per-instance L1 in front of a shared L2. They also implement
+# a TIERED TTL: actively-traded ("hot") tickers refresh on a shorter interval
+# than the rest, so AI traders polling hot names get fresher prices without
+# refreshing the whole universe that fast.
+#
+# All shared-cache ops run on a SEPARATE engine connection (not the request's
+# ORM session) so they never commit/rollback a caller's in-flight transaction,
+# and every op is defensive: if the table is missing (pre-migration) or the DB
+# errors, we silently fall back to in-memory-only behavior.
+PRICE_CACHE_TTL_DEFAULT = int(os.environ.get('PRICE_CACHE_TTL', '90'))      # seconds (general)
+PRICE_CACHE_TTL_HOT = int(os.environ.get('PRICE_CACHE_TTL_HOT', '30'))      # seconds (hot set)
+_HOT_WINDOW_MIN = int(os.environ.get('PRICE_CACHE_HOT_WINDOW_MIN', '15'))   # "recently traded" window
+_HOT_REFRESH_SECONDS = 60                                                   # recompute hot set at most this often
+_hot_tickers_cache = {'tickers': set(), 'computed_at': None}
+
+
+def _get_hot_tickers():
+    """Set of 'hot' tickers that refresh on PRICE_CACHE_TTL_HOT: any in the
+    optional env list PRICE_CACHE_HOT_TICKERS plus tickers traded in the last
+    _HOT_WINDOW_MIN minutes. Cached in-process for _HOT_REFRESH_SECONDS and fully
+    defensive (DB error -> env list only)."""
+    now = datetime.now()
+    computed = _hot_tickers_cache.get('computed_at')
+    if computed and (now - computed).total_seconds() < _HOT_REFRESH_SECONDS:
+        return _hot_tickers_cache['tickers']
+    hot = {t.strip().upper() for t in os.environ.get('PRICE_CACHE_HOT_TICKERS', '').split(',') if t.strip()}
+    try:
+        cutoff = datetime.utcnow() - timedelta(minutes=_HOT_WINDOW_MIN)
+        with db.engine.connect() as conn:
+            rows = conn.execute(
+                text("SELECT DISTINCT ticker FROM stock_transaction WHERE timestamp > :cut"),
+                {'cut': cutoff},
+            ).fetchall()
+        for r in rows:
+            if r[0]:
+                hot.add(str(r[0]).upper())
+    except Exception as e:
+        logger.debug(f"hot-ticker query failed (env list only): {e}")
+    _hot_tickers_cache['tickers'] = hot
+    _hot_tickers_cache['computed_at'] = now
+    return hot
+
+
+def _ttl_for(ticker_upper):
+    """Market-hours cache TTL for a ticker: shorter for hot tickers."""
+    try:
+        if ticker_upper in _get_hot_tickers():
+            return PRICE_CACHE_TTL_HOT
+    except Exception:
+        pass
+    return PRICE_CACHE_TTL_DEFAULT
+
+
+def _cache_entry_fresh(entry, current_time, is_mkt_hours, most_recent_close_date, ttl):
+    """Shared freshness rule for both the in-memory (L1) and Postgres (L2) caches.
+    Market hours: fresh if younger than `ttl` seconds. After hours/weekends:
+    fresh if the cached value is from the most recent market close or later."""
+    if not entry:
+        return False
+    ts = entry.get('timestamp')
+    if not ts:
+        return False
+    if getattr(ts, 'tzinfo', None) is not None:
+        ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
+    if is_mkt_hours:
+        return (current_time - ts).total_seconds() < ttl
+    return ts.date() >= most_recent_close_date
+
+
+def _shared_cache_get(ticker_upper):
+    """Read {'price', 'timestamp'} for one ticker from the shared Postgres cache,
+    or None. Separate engine connection; never touches the ORM session."""
+    try:
+        with db.engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT price, updated_at FROM stock_price_cache WHERE ticker = :t"),
+                {'t': ticker_upper},
+            ).first()
+        if row and row[0] is not None:
+            return {'price': float(row[0]), 'timestamp': row[1]}
+    except Exception:
+        pass
+    return None
+
+
+def _shared_cache_get_many(tickers):
+    """Batched read of the shared cache: {ticker: {'price','timestamp'}}."""
+    if not tickers:
+        return {}
+    try:
+        stmt = text(
+            "SELECT ticker, price, updated_at FROM stock_price_cache WHERE ticker IN :ts"
+        ).bindparams(bindparam('ts', expanding=True))
+        with db.engine.connect() as conn:
+            rows = conn.execute(stmt, {'ts': list(tickers)}).fetchall()
+        return {
+            str(r[0]).upper(): {'price': float(r[1]), 'timestamp': r[2]}
+            for r in rows if r[1] is not None
+        }
+    except Exception:
+        return {}
+
+
+def _shared_cache_set_many(prices):
+    """Upsert {ticker: price} into the shared Postgres cache in one statement.
+    Defensive and isolated from the ORM session (separate connection)."""
+    if not prices:
+        return
+    try:
+        ts = datetime.utcnow()
+        params = [{'t': k, 'p': float(v), 'ts': ts} for k, v in prices.items()]
+        with db.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO stock_price_cache (ticker, price, updated_at) "
+                    "VALUES (:t, :p, :ts) "
+                    "ON CONFLICT (ticker) DO UPDATE SET price = excluded.price, "
+                    "updated_at = excluded.updated_at"
+                ),
+                params,
+            )
+    except Exception as e:
+        logger.debug(f"shared price-cache write skipped: {e}")
 
 
 def _to_av_symbol(ticker: str) -> str:
@@ -102,26 +231,28 @@ class PortfolioPerformanceCalculator:
         uncached_tickers = []
         result = {}
         
+        # L1 (per-instance memory) first, then ONE batched read of the shared L2
+        # (Postgres) for the misses. Tiered TTL is applied per ticker.
+        l1_miss = []
         for ticker in tickers:
             ticker_upper = ticker.upper()
-            if ticker_upper in stock_price_cache:
-                cached_data = stock_price_cache[ticker_upper]
-                cache_time = cached_data.get('timestamp')
-                
-                if cache_time:
-                    if is_market_hours:
-                        # Market hours: require fresh cache (90 seconds)
-                        if (current_time - cache_time).total_seconds() < cache_duration:
-                            result[ticker_upper] = cached_data['price']
-                            continue
-                    else:
-                        # After hours/weekends: only use cache if from most recent market close
-                        cache_date = cache_time.date() if hasattr(cache_time, 'date') else cache_time.astimezone(MARKET_TZ).date()
-                        if cache_date >= most_recent_close_date:
-                            result[ticker_upper] = cached_data['price']
-                            continue
-            
-            uncached_tickers.append(ticker_upper)
+            ttl = _ttl_for(ticker_upper)
+            l1 = stock_price_cache.get(ticker_upper)
+            if _cache_entry_fresh(l1, current_time, is_market_hours, most_recent_close_date, ttl):
+                result[ticker_upper] = l1['price']
+            else:
+                l1_miss.append(ticker_upper)
+
+        if l1_miss:
+            l2_map = _shared_cache_get_many(l1_miss)
+            for ticker_upper in l1_miss:
+                ttl = _ttl_for(ticker_upper)
+                l2 = l2_map.get(ticker_upper)
+                if _cache_entry_fresh(l2, current_time, is_market_hours, most_recent_close_date, ttl):
+                    stock_price_cache[ticker_upper] = l2  # promote to L1
+                    result[ticker_upper] = l2['price']
+                else:
+                    uncached_tickers.append(ticker_upper)
         
         # If all cached, return early
         if not uncached_tickers:
@@ -152,6 +283,7 @@ class PortfolioPerformanceCalculator:
                 # Parse bulk quotes response
                 if 'data' in data and data['data']:
                     prices_extracted = 0
+                    _chunk_fetched = {}
                     for quote in data['data']:
                         # Map AV's hyphen form back to our internal dot form so the
                         # result/cache key matches what the caller asked for (BRK-B -> BRK.B).
@@ -163,6 +295,7 @@ class PortfolioPerformanceCalculator:
                             price = float(price_str)
                             if price > 0:
                                 stock_price_cache[ticker] = {'price': price, 'timestamp': current_time}
+                                _chunk_fetched[ticker] = price
                                 result[ticker] = price
                                 prices_extracted += 1
                             else:
@@ -170,6 +303,9 @@ class PortfolioPerformanceCalculator:
                         except (ValueError, TypeError):
                             logger.warning(f"Invalid price for {ticker}: {price_str}")
                     
+                    # Write the freshly-fetched chunk to the shared cache in one
+                    # statement so other instances reuse it (W9).
+                    _shared_cache_set_many(_chunk_fetched)
                     logger.info(f"✅ Bulk Quotes API: Fetched {len(chunk)} tickers, extracted {prices_extracted} valid prices")
                     
                     # Log bulk API call
@@ -245,25 +381,18 @@ class PortfolioPerformanceCalculator:
             days_since_friday = (market_tz_time.weekday() - 4) % 7
             most_recent_close_date = (market_tz_time - timedelta(days=days_since_friday)).date()
         
-        # Check cache first
-        if ticker_upper in stock_price_cache:
-            cached_data = stock_price_cache[ticker_upper]
-            cache_time = cached_data.get('timestamp')
-            
-            if cache_time:
-                if is_market_hours:
-                    # During market hours: require fresh cache (90 seconds)
-                    if (current_time - cache_time).total_seconds() < cache_duration:
-                        logger.debug(f"Cache hit (market hours): {ticker_symbol} = ${cached_data['price']}")
-                        return {'price': cached_data['price']}
-                else:
-                    # After hours/weekends: only use cache if from most recent market close
-                    cache_date = cache_time.date() if hasattr(cache_time, 'date') else cache_time.astimezone(MARKET_TZ).date()
-                    if cache_date >= most_recent_close_date:
-                        logger.debug(f"Cache hit (closing price from {cache_date}): {ticker_symbol} = ${cached_data['price']}")
-                        return {'price': cached_data['price']}
-                    else:
-                        logger.debug(f"Cache stale (from {cache_date}, need {most_recent_close_date}): {ticker_symbol}")
+        # Check caches: L1 (per-instance memory) then L2 (shared Postgres), with
+        # a tiered TTL (hot tickers refresh faster). See the W9 helpers above.
+        ttl = _ttl_for(ticker_upper)
+        l1 = stock_price_cache.get(ticker_upper)
+        if _cache_entry_fresh(l1, current_time, is_market_hours, most_recent_close_date, ttl):
+            logger.debug(f"Cache hit (L1): {ticker_symbol} = ${l1['price']}")
+            return {'price': l1['price']}
+        l2 = _shared_cache_get(ticker_upper)
+        if _cache_entry_fresh(l2, current_time, is_market_hours, most_recent_close_date, ttl):
+            stock_price_cache[ticker_upper] = l2  # promote to L1
+            logger.debug(f"Cache hit (L2 shared): {ticker_symbol} = ${l2['price']}")
+            return {'price': l2['price']}
         
         try:
             api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
@@ -327,6 +456,7 @@ class PortfolioPerformanceCalculator:
             if 'Global Quote' in data and '05. price' in data['Global Quote']:
                 price = float(data['Global Quote']['05. price'])
                 stock_price_cache[ticker_upper] = {'price': price, 'timestamp': current_time}
+                _shared_cache_set_many({ticker_upper: price})
                 
                 # Enhanced logging for debugging stale data
                 logger.info(f"✅ Alpha Vantage API: {ticker_symbol} = ${price} at {current_time.strftime('%H:%M:%S')}")
