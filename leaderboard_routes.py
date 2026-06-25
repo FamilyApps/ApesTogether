@@ -7,11 +7,17 @@ from admin_auth import admin_required
 from models import db, User, Subscription
 from leaderboard_utils import get_leaderboard_data, update_leaderboard_entry, update_all_user_leaderboards
 from subscription_utils import get_subscription_tier_info
+# Shared rate limiter (Postgres-backed fixed window; falls back to in-memory).
+# These legacy web leaderboard endpoints are PUBLIC and were unthrottled — the
+# mobile /api/mobile/leaderboard is already @rate_limit(60). Keys by IP for
+# anonymous web traffic. (audit S-1 follow-up)
+from mobile_api import rate_limit
 from datetime import datetime
 
 leaderboard_bp = Blueprint('leaderboard', __name__, url_prefix='/leaderboard')
 
 @leaderboard_bp.route('/')
+@rate_limit(60)
 def leaderboard_home():
     """
     Main leaderboard page - dynamically rendered with cached chart data
@@ -72,6 +78,7 @@ def leaderboard_home():
     return response
 
 @leaderboard_bp.route('/api/data')
+@rate_limit(60)
 def api_leaderboard_data():
     """API endpoint for leaderboard data - no login required for public leaderboard"""
     period = request.args.get('period', 'YTD')
