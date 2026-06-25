@@ -50,11 +50,29 @@ A developer or AI agent registers as a creator, gets an API key, and drives a pu
 
 ### Validation & risk controls
 - Reuse existing trade validation (valid ticker, sufficient cash/shares, market-hours → pending queue).
-- **Abuse caps:** max orders/min (ties to audit **S-1** — needs the shared-store rate-limiter, not the current in-memory one), max tickers, min order size; block obvious wash/ping-pong patterns that game the leaderboard.
+- **Abuse caps:** max orders/min, max tickers, min order size; block obvious wash/ping-pong patterns that game the leaderboard. The shared-store rate-limiter this depends on is **now shipped** (audit **S-1 RESOLVED**, Session 19 W1) — see the design below.
 - **Idempotency-Key** header so a retrying bot can't double-submit.
 - **Market-data redistribution:** returning live prices/positions to third parties may exceed AlphaVantage/Finnhub license terms — confirm before exposing price fields, or restrict to the creator's own portfolio data (which they generated). **(Legal check required.)**
 
-### Effort: **~Medium.** Reuses internal trade logic; net-new = API-key model, scopes, docs, the shared rate-limiter (S-1), and a developer settings screen.
+### Rate-limiting & quotas (UC-A) — concrete design
+The foundation already exists and is live: `rate_limit(max_requests, per_seconds)` + the Postgres fixed-window counter `_rate_limit_db_hit` (table `mobile_rate_limit`, keyed `client_key + window_start`) in `mobile_api.py`, correct across serverless instances with an in-memory fallback. UC-A needs five deltas on top of it:
+
+1. **Key by owning `user_id`, not by API key or IP.** On auth, resolve the key → set `g.user_id` to the owner (reuse the existing pattern). Meter on `user:{user_id}` so a creator **cannot multiply their quota by minting extra keys**. (The decorator already prefers `g.user_id` when set, so this mostly falls out for free.)
+2. **Separate read vs. write buckets, stacked per-minute + per-day.** Reads are cheap, order-writes are not. Stack two decorators using the existing arbitrary-window support (the daily window prunes automatically — `_rate_limit_db_hit` already deletes windows >1 day):
+   - Reads (`GET /portfolio|positions|fills|orders/{id}`): per-minute burst only.
+   - Writes (`POST/DELETE /orders`): a per-minute burst **and** a per-day quota, sharing one bucket name across all order routes (pass an explicit `bucket='orders'` rather than the default per-function key so a bot can't fan out across endpoints to dodge the cap).
+3. **Tiered limits resolved at request time (resolves D-6).** Today's limits are static at decoration time; tiers need the cap to come from the key's plan. Add a thin `rate_limit_tiered(bucket, limits_by_tier)` variant that reads `g.api_key_tier` (set during auth) and picks the row. Proposed v1 defaults (final numbers = D-6):
+     | Tier | Reads/min | Order-writes/min | Orders/day |
+     |------|-----------|------------------|------------|
+     | Free | 60 | 20 | 1,000 |
+     | Paid/developer | 300 | 120 | 50,000 |
+   Keep a hard global safety ceiling above the paid tier regardless of plan.
+4. **Emit standard quota headers on every response** (not just 429): `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`. The current decorator only sets `Retry-After` on the 429 path; well-behaved bots self-throttle when given remaining/reset, which cuts 429 volume. (`_rate_limit_db_hit` already returns the hit count, so remaining = limit − hits is cheap to surface.)
+5. **Dedupe before metering.** Resolve the `Idempotency-Key` first; a replayed request that maps to an existing order returns the prior result and **must not** consume quota again. Order matters: idempotency check → rate meter → trade validation.
+
+**Known limitation to document for devs:** fixed-window allows up to ~2× burst across a window boundary. Acceptable for v1; if order-write abuse appears, upgrade just the `orders` bucket to a token-bucket/GCRA without touching the read paths.
+
+### Effort: **~Medium.** Reuses internal trade logic; net-new = API-key model, scopes, docs, the tiered-limit wrapper + quota headers on top of the now-shipped S-1 limiter, and a developer settings screen.
 
 ---
 
@@ -91,7 +109,7 @@ If both ship, they share one spine and reinforce each other:
 
 ## Recommendation
 
-1. **UC-A = v1 (near-launch or immediate fast-follow).** Low regulatory risk (virtual), high philosophy fit ("AI bots welcome" becomes self-serve), mostly a hardened wrapper over proven internal logic. **Hard dependency: the audit S-1 shared-store rate-limiter must land first** — a public write API without real rate-limiting is a liability.
+1. **UC-A = v1 (near-launch or immediate fast-follow).** Low regulatory risk (virtual), high philosophy fit ("AI bots welcome" becomes self-serve), mostly a hardened wrapper over proven internal logic. **Its hard dependency — the audit S-1 shared-store rate-limiter — is now SHIPPED (Session 19 W1)**, so the remaining rate-limit work is just the UC-A wrapper in "Rate-limiting & quotas" above.
 2. **UC-D = post-launch, compliance-gated.** Start the **legal review now** (it's the long pole), pick an aggregator (**SnapTrade vs. Alpaca**), and design UC-A's trade-event model to be UC-D-ready so D is additive, not a rewrite.
 3. **Do not block the store launch on either.** Both are additive platform features; ship the apps first.
 
@@ -103,7 +121,7 @@ If both ship, they share one spine and reinforce each other:
 - **D-3:** Does UC-A expose **live prices** (market-data license question) or only the creator's own portfolio state?
 - **D-4:** UC-D execution model — aggregator (SnapTrade/Alpaca) vs. bring-your-own-broker-key vs. ApesTogether-hosted bot?
 - **D-5:** Are paid API creators subject to the same store-IAP subscription economics, or a separate developer tier?
-- **D-6:** Rate-limit/quota tiers (free vs. paid API access)?
+- **D-6:** Rate-limit/quota tiers (free vs. paid API access)? *(Concrete v1 proposal now in "Rate-limiting & quotas (UC-A)" above — Free 60r/20w/min + 1k orders/day, Paid 300r/120w/min + 50k/day; confirm the numbers + the free/paid split.)*
 
 *Next step on approval: I can turn UC-A into an implementation plan (data model, the `/api/v1` blueprint, API-key issuance + the S-1 shared rate-limiter, OpenAPI spec) and/or open the UC-D legal/aggregator checklist.*
 
