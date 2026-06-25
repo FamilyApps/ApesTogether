@@ -12017,7 +12017,7 @@ def apple_app_site_association():
                 }
             ]
         }
-    }), 200, {'Content-Type': 'application/json'}
+    }), 200, {'Content-Type': 'application/json', 'Cache-Control': 'no-store'}
 
 
 # Canonical Android signing-cert SHA-256 fingerprints for Digital Asset Links.
@@ -12078,7 +12078,7 @@ def android_asset_links():
             "package_name": package_name,
             "sha256_cert_fingerprints": fingerprints
         }
-    }]), 200, {'Content-Type': 'application/json'}
+    }]), 200, {'Content-Type': 'application/json', 'Cache-Control': 'no-store'}
 
 @app.route('/p/<slug>')
 def public_portfolio_view(slug):
