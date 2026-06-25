@@ -12020,36 +12020,65 @@ def apple_app_site_association():
     }), 200, {'Content-Type': 'application/json'}
 
 
+# Canonical Android signing-cert SHA-256 fingerprints for Digital Asset Links.
+# These are PUBLIC (served openly at /.well-known/assetlinks.json) and rotate
+# essentially never, so we embed them in code as the reliable source of truth.
+# This MUST stay in sync with public/.well-known/assetlinks.json (kept for local
+# Android tooling/docs). Rationale: Vercel's includeFiles does NOT reliably bundle
+# the static file into the Python lambda, so the prior file-read fell through to
+# an empty env var and shipped EMPTY fingerprints to production — which silently
+# breaks Android App Links autoVerify. Order of precedence below:
+#   ANDROID_SHA256_FINGERPRINT env var (rotation override) -> committed file -> this constant.
+_ANDROID_CERT_FINGERPRINTS = [
+    "64:47:B5:21:9B:F5:9F:95:12:E1:5D:8C:1E:50:F8:CB:35:60:EA:61:45:A4:7D:8B:51:37:C5:44:7D:10:2B:57",
+    "0A:3A:A0:63:34:F2:64:8A:2E:93:CD:CA:B0:93:D2:23:62:43:29:CE:2F:00:8E:81:05:C7:BE:49:C2:DA:1C:CA",
+]
+
+
 @app.route('/.well-known/assetlinks.json')
 def android_asset_links():
     """Serve Digital Asset Links for Android App Links (deep links).
 
-    Source of truth is the committed file public/.well-known/assetlinks.json
-    (bundled into the deployment via vercel.json includeFiles). Falls back to
-    the ANDROID_SHA256_FINGERPRINT env var if the file is unreadable.
+    Precedence: ANDROID_SHA256_FINGERPRINT env var (for key rotation without a
+    code deploy) -> committed public/.well-known/assetlinks.json -> the embedded
+    _ANDROID_CERT_FINGERPRINTS constant. The constant guarantees we NEVER serve an
+    empty fingerprint list (which silently disables Android App Links autoVerify),
+    regardless of whether Vercel bundles the static file into the lambda.
     """
     import json
-    asset_links_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        'public', '.well-known', 'assetlinks.json'
-    )
-    try:
-        with open(asset_links_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        return jsonify(data), 200, {'Content-Type': 'application/json'}
-    except Exception as e:
-        logger.warning(f"assetlinks.json file unavailable ({e}); falling back to env var")
-        package_name = os.environ.get('ANDROID_PACKAGE_NAME', 'com.apestogether.app')
-        sha256_fingerprint = os.environ.get('ANDROID_SHA256_FINGERPRINT', '')
-        fingerprints = [fp.strip() for fp in sha256_fingerprint.split(',') if fp.strip()]
-        return jsonify([{
-            "relation": ["delegate_permission/common.handle_all_urls"],
-            "target": {
-                "namespace": "android_app",
-                "package_name": package_name,
-                "sha256_cert_fingerprints": fingerprints
-            }
-        }]), 200, {'Content-Type': 'application/json'}
+    package_name = os.environ.get('ANDROID_PACKAGE_NAME', 'com.apestogether.app')
+
+    # 1) Env-var override (comma-separated) — lets us rotate without a deploy.
+    env_fp = os.environ.get('ANDROID_SHA256_FINGERPRINT', '')
+    fingerprints = [fp.strip() for fp in env_fp.split(',') if fp.strip()]
+
+    # 2) Committed static file, if the runtime can actually read it.
+    if not fingerprints:
+        asset_links_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'public', '.well-known', 'assetlinks.json'
+        )
+        try:
+            with open(asset_links_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            file_fps = (data[0].get('target', {}).get('sha256_cert_fingerprints', [])
+                        if isinstance(data, list) and data else [])
+            fingerprints = [fp for fp in file_fps if fp]
+        except Exception as e:
+            logger.warning(f"assetlinks.json file unavailable ({e}); using embedded constant")
+
+    # 3) Embedded constant — the reliable backstop.
+    if not fingerprints:
+        fingerprints = list(_ANDROID_CERT_FINGERPRINTS)
+
+    return jsonify([{
+        "relation": ["delegate_permission/common.handle_all_urls"],
+        "target": {
+            "namespace": "android_app",
+            "package_name": package_name,
+            "sha256_cert_fingerprints": fingerprints
+        }
+    }]), 200, {'Content-Type': 'application/json'}
 
 @app.route('/p/<slug>')
 def public_portfolio_view(slug):
