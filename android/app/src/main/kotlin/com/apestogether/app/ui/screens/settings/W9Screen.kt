@@ -277,7 +277,7 @@ private fun ClassificationDropdown(selected: String, onSelect: (String) -> Unit)
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier.fillMaxWidth().menuAnchor(),
         )
-        androidx.compose.material3.ExposedDropdownMenu(
+        ExposedDropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
         ) {
