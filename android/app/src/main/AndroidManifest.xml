@@ -57,6 +57,18 @@
             </intent-filter>
         </service>
 
+        <!-- FileProvider: shares the rendered portfolio-performance card PNG
+             (cache/shared_images) with the system share sheet. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- FCM notification channel + small icon defaults. -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_icon"

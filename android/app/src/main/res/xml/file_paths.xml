@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Exposes the cache/shared_images dir to the system share sheet via the
+     app's FileProvider authority (see AndroidManifest). Used to share the
+     rendered portfolio-performance card PNG. -->
+<paths>
+    <cache-path name="shared_images" path="shared_images/" />
+</paths>

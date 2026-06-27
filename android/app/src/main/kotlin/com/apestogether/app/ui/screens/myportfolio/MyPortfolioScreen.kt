@@ -18,11 +18,16 @@ import androidx.compose.material.icons.filled.AttachMoney
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -30,16 +35,19 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
+import com.apestogether.app.data.api.ApiService
 import com.apestogether.app.data.auth.AuthRepository
 import com.apestogether.app.ui.screens.portfolio.PortfolioDetailScreen
+import com.apestogether.app.ui.share.ShareCard
+import com.apestogether.app.ui.share.ShareCardData
 import com.apestogether.app.ui.theme.AppBackground
 import com.apestogether.app.ui.theme.PrimaryAccent
 import com.apestogether.app.ui.theme.TextPrimary
 import com.apestogether.app.ui.theme.TextSecondary
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -47,9 +55,10 @@ import javax.inject.Inject
  * UI is just [PortfolioDetailScreen] for the current user's slug, with two
  * additions on top:
  *
- *  - "Share Performance" button below the chart (uses Android's standard
- *    [Intent.ACTION_SEND] chooser; iOS uses ShareCardGenerator to render an
- *    image, which is deferred to v1.1).
+ *  - "Share Performance" button below the chart: renders a branded
+ *    performance card to a PNG via [ShareCard] and opens the system share
+ *    sheet (image + follow link), matching iOS `ShareCardGenerator`. Falls
+ *    back to a plain link share if the data fetch fails.
  *  - Empty state for users without a `portfolio_slug` yet, telling them to
  *    add stocks. The "Add Your Stocks" CTA navigates to [AddStocksScreen]
  *    via the [onOpenAddStocks] callback supplied by [MainTabsScreen].
@@ -86,29 +95,42 @@ fun MyPortfolioScreen(
                 )
             }
 
-            ShareMyPerformanceButton(slug = slug)
+            ShareMyPerformanceButton(slug = slug, viewModel = viewModel)
         }
     }
 }
 
 @Composable
-private fun ShareMyPerformanceButton(slug: String) {
+private fun ShareMyPerformanceButton(slug: String, viewModel: MyPortfolioViewModel) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var sharing by remember { mutableStateOf(false) }
     Button(
         onClick = {
-            val url = "https://apestogether.ai/p/$slug"
-            val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(
-                    Intent.EXTRA_TEXT,
-                    "Check out my portfolio on ApesTogether! 🦍📈\n$url",
-                )
+            if (sharing) return@Button
+            sharing = true
+            scope.launch {
+                val data = viewModel.buildShareData(slug)
+                if (data != null) {
+                    // Renders the branded performance card to a PNG and opens
+                    // the share sheet (image + follow link). Mirrors iOS.
+                    runCatching { ShareCard.sharePortfolioPerformance(context, data) }
+                } else {
+                    // Fallback to a plain link share if the data fetch failed.
+                    val url = "https://apestogether.ai/p/$slug"
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(
+                            Intent.EXTRA_TEXT,
+                            "Check out my portfolio on ApesTogether! 🦍📈\n$url",
+                        )
+                    }
+                    runCatching {
+                        context.startActivity(Intent.createChooser(intent, "Share my portfolio"))
+                    }
+                }
+                sharing = false
             }
-            ContextCompat.startActivity(
-                context,
-                Intent.createChooser(intent, "Share my portfolio"),
-                null,
-            )
         },
         modifier = Modifier
             .fillMaxWidth()
@@ -117,14 +139,24 @@ private fun ShareMyPerformanceButton(slug: String) {
         shape = RoundedCornerShape(10.dp),
         colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
     ) {
-        Icon(Icons.Default.Share, null, tint = Color.White, modifier = Modifier.size(14.dp))
-        Spacer(Modifier.width(6.dp))
-        Text(
-            "Share Performance",
-            color = Color.White,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
-        )
+        if (sharing) {
+            CircularProgressIndicator(
+                color = Color.White,
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("Preparing…", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        } else {
+            Icon(Icons.Default.Share, null, tint = Color.White, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(
+                "Share Performance",
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
     }
 }
 
@@ -170,6 +202,27 @@ private fun EmptyMyPortfolio(
 @HiltViewModel
 class MyPortfolioViewModel @Inject constructor(
     authRepository: AuthRepository,
+    private val apiService: ApiService,
 ) : ViewModel() {
     val currentUser = authRepository.currentUser
+
+    /**
+     * Fetch the data needed to render the portfolio-performance share card.
+     * Returns null if the portfolio fetch fails (the caller then falls back to
+     * a plain link share).
+     */
+    suspend fun buildShareData(slug: String, period: String = "1W"): ShareCardData? {
+        val portfolio = runCatching { apiService.getPortfolio(slug) }.getOrNull() ?: return null
+        val chart = runCatching { apiService.getPortfolioChart(slug, period) }.getOrNull()
+        return ShareCardData(
+            username = portfolio.owner.publicName,
+            portfolioReturn = chart?.portfolioReturn ?: 0.0,
+            sp500Return = chart?.sp500Return ?: 0.0,
+            chartValues = chart?.chartData?.mapNotNull { it.portfolio } ?: emptyList(),
+            holdingsCount = portfolio.holdings?.size ?: 0,
+            subscriberCount = portfolio.subscriberCount,
+            period = period,
+            slug = slug,
+        )
+    }
 }
