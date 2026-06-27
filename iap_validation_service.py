@@ -1,5 +1,5 @@
 """
-In-App Purchase Validation Service for Apes Together Mobile App
+In-App Purchase Validation Service for ApesTogether Mobile App
 Handles Apple App Store and Google Play receipt verification
 
 Setup required:

@@ -762,33 +762,41 @@ keyword capacity by the number of locales.
       $9/mo, `com.apestogether.subscription.annual` $69/yr; 7-day free trial)
 - [ ] Pricing: $9.00/mo, $69.00/yr — Small Business Program enrolled
 
-### Domain / verification (both stores)
-- [ ] `public/.well-known/apple-app-site-association` — `TEAM_ID`
-      placeholder replaced with real Apple Team ID
-- [ ] `public/.well-known/assetlinks.json` — both `REPLACE_WITH_*`
-      placeholders replaced with the production signing cert + Play App
-      Signing cert SHA-256 fingerprints
-- [ ] Verify both files return HTTP 200 with `Content-Type: application/json`
-      from `https://apestogether.ai/.well-known/*`
+### Domain / verification (both stores) — DONE (backend, 2026-06-24)
+- [x] `public/.well-known/apple-app-site-association` — real Apple Team ID
+      `M8R8YVW472` in `appID M8R8YVW472.com.apestogether.ApesTogether` (no
+      placeholder); `paths: ["/p/*"]`.
+- [x] `public/.well-known/assetlinks.json` — both production + Play App
+      Signing cert SHA-256 fingerprints present (no `REPLACE_WITH_*`).
+- [x] Both files verified serving HTTP 200 from
+      `https://apestogether.ai/.well-known/*` (LAUNCH_TODO §0.6; embedded
+      code-constant backstop + `Cache-Control: no-store`).
+- [ ] **On-device only:** `adb shell pm get-app-links com.apestogether.app`
+      after installing a build signed with the matching Play key (autoVerify).
 
-### Brand-spelling sweep (in-app + marketing)
+### Brand-spelling sweep (in-app + marketing) — DONE (Session 20, confirmed clean)
 Decision: switched from "Apes Together" (spaced) to "ApesTogether" (fused).
-The audit needs to confirm no in-app strings or marketing artifacts use
-the spaced form except where legally required (LLC name "Family Apps LLC",
-existing trademark filings).
+**Sweep result: ALL user-facing surfaces already use the fused form.** The
+only spaced occurrences were internal dev tooling + code comments/docstrings
+(`bot_agent.py` CLI banner, `scripts/seed_copytrade_bots.py`, module
+docstrings in `mobile_api.py`/`push_notification_service.py`/
+`iap_validation_service.py`, two Android `.kt` comments, two icon `.xml`
+comments) — all fused in Session 20. `git grep "Apes Together"` across code
+now returns zero. LLC name "Family Apps LLC" intentionally unchanged.
 
-- [ ] iOS strings (`ios/ApesTogetherApp/Theme.swift`,
-      `WelcomeCarouselView.swift`, `SettingsView.swift` About / FAQ section,
-      `ApesTogetherApp.swift` app target name)
-- [ ] Android strings (`android/app/src/main/res/values/strings.xml`,
-      compose theme/title strings)
-- [ ] Push-notification sender label (FCM `app_name` + APNs default sender
-      shown in `push_notification_service.py`)
-- [ ] Share-sheet text (`PortfolioShareCardView.swift`)
-- [ ] Marketing site (`apestogether.ai` landing page hero / footer)
-- [ ] Social media bios (X, TikTok, IG) — already use `@ApesTogetherApp` /
-      `@apestogether`, just verify display names
-- [ ] Email templates (waitlist, welcome, beta invite)
+- [x] iOS strings — fused: `Theme.swift:246`, share-sheet text in
+      `MyPortfolioView.swift` + `PortfolioDetailView.swift`,
+      `PortfolioShareCardView.swift:56/250`, `SettingsView.swift:462` FAQ,
+      `LegalText.swift`, `W9FormView.swift`. App target `ApesTogetherApp`.
+- [x] Android strings — `strings.xml:3` `app_name` = `ApesTogether`.
+- [x] Push-notification service — only a docstring carried the spaced form
+      (no user-visible sender string); fused Session 20.
+- [x] Share-sheet text — `PortfolioShareCardView.swift` fused.
+- [x] Marketing site — `templates/landing.html` fused throughout (title,
+      og:title, hero, FAQ, footer).
+- [x] Social media bios — already `@ApesTogetherApp` / `@apestogether`.
+- [ ] Email templates (waitlist, welcome, beta invite) — verify when the
+      templates are finalized (no spaced form found in current code).
 
 ### Post-launch monitoring
 - [ ] Set up keyword rank tracking (AppTweak / AppFigures / SensorTower)

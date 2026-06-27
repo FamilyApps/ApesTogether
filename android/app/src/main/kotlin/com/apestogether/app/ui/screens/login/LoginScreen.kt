@@ -61,7 +61,7 @@ import javax.inject.Inject
  *
  * Uses Google Sign-In via the Credential Manager API (the modern
  * replacement for GoogleSignIn). The acquired ID token is exchanged for an
- * Apes Together API token by [AuthRepository.signInWithGoogle].
+ * ApesTogether API token by [AuthRepository.signInWithGoogle].
  */
 @Composable
 fun LoginScreen(onSignedIn: () -> Unit) {

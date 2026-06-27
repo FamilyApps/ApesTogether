@@ -95,7 +95,7 @@ def create_bot(label, industry, strategy_desc):
 
 
 def main():
-    print("[*] Seeding Copy-Trading Bots for Apes Together")
+    print("[*] Seeding Copy-Trading Bots for ApesTogether")
     print(f"   API: {API_BASE}")
     
     created = []

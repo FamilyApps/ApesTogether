@@ -1,5 +1,5 @@
 """
-Mobile API Endpoints for Apes Together iOS/Android Apps
+Mobile API Endpoints for ApesTogether iOS/Android Apps
 Phase 1 - Backend Preparation
 
 Endpoints:

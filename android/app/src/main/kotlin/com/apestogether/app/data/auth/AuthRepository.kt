@@ -30,7 +30,7 @@ import javax.inject.Singleton
  * Responsibilities:
  *  - Drives Google Sign-In via the Credential Manager API (the modern
  *    replacement for the deprecated GoogleSignIn library).
- *  - Exchanges the Google id_token for an Apes Together API token via
+ *  - Exchanges the Google id_token for an ApesTogether API token via
  *    POST /auth/token (provider="google").
  *  - Persists the token in [TokenStore] (encrypted).
  *  - Re-registers the device's FCM token after sign-in so push notifications

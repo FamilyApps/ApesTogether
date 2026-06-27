@@ -1,5 +1,5 @@
 """
-Bot Agent Orchestrator v2 for Apes Together
+Bot Agent Orchestrator v2 for ApesTogether
 =============================================
 Intelligent autonomous trading agents that do real market research,
 apply parameterized strategies, and make informed buy/sell decisions.
@@ -500,7 +500,7 @@ def cmd_status(args):
     stats = get_dashboard_stats()
 
     print(f"\n  {'='*45}")
-    print(f"  🦍 Apes Together — Bot Agent Dashboard")
+    print(f"  🦍 ApesTogether — Bot Agent Dashboard")
     print(f"  {'='*45}")
     print(f"  Total Users:       {stats.get('total_users', '?')}")
     print(f"  Human Users:       {stats.get('human_users', '?')}")
@@ -598,7 +598,7 @@ def _get_bot_holdings_from_api(user_id):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='🦍 Apes Together — Bot Agent Orchestrator v2',
+        description='🦍 ApesTogether — Bot Agent Orchestrator v2',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -687,7 +687,7 @@ Examples:
         print("   Set it: $env:CRON_SECRET='your_key_here'  (PowerShell)")
         sys.exit(1)
 
-    print(f"\n🦍 Apes Together Bot Agent v2")
+    print(f"\n🦍 ApesTogether Bot Agent v2")
     print(f"   Command: {args.command}")
 
     args.func(args)

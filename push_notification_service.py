@@ -1,5 +1,5 @@
 """
-Push Notification Service for Apes Together Mobile App
+Push Notification Service for ApesTogether Mobile App
 Uses Firebase Cloud Messaging (FCM) for both iOS and Android
 
 Setup required:
