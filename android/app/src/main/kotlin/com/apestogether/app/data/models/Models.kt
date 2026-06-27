@@ -370,7 +370,11 @@ data class TradeRequest(
 @Serializable
 data class TradeResponse(
     val success: Boolean,
+    // Set true by the backend when the trade is submitted outside market hours
+    // and queued to settle at the next open (mirrors iOS `response.pending`).
+    val pending: Boolean? = null,
     val trade: TradeDetail? = null,
+    val message: String? = null,
     val error: String? = null,
 )
 
@@ -378,8 +382,11 @@ data class TradeResponse(
 data class TradeDetail(
     val ticker: String,
     val quantity: Double,
-    val price: Double,
+    // Null on a pending (after-hours) trade — it settles at the next open price.
+    val price: Double? = null,
     val type: String,
+    @SerialName("pending_id") val pendingId: Int? = null,
+    val status: String? = null,
 )
 
 @Serializable

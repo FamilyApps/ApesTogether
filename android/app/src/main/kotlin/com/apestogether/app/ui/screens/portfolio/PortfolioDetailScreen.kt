@@ -85,6 +85,7 @@ import com.apestogether.app.data.models.PortfolioScale
 import com.apestogether.app.data.models.PurchaseValidationRequest
 import com.apestogether.app.data.models.SetScaleRequest
 import com.apestogether.app.data.models.Trade
+import com.apestogether.app.data.models.TradeRequest
 import com.apestogether.app.ui.components.CompactPlanToggle
 import com.apestogether.app.ui.components.PerformanceChartCard
 import com.apestogether.app.ui.components.SubscribeStatusBanner
@@ -105,12 +106,19 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import retrofit2.HttpException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import javax.inject.Inject
 import kotlin.math.absoluteValue
+import kotlin.math.floor
 
 /**
  * Portfolio detail screen. Direct port of iOS [PortfolioDetailView].
@@ -222,6 +230,14 @@ fun PortfolioDetailScreen(
     }
 }
 
+/** Configuration for an open [TradeSheet]; null when no sheet is showing. */
+private data class TradeSheetConfig(
+    val ticker: String,
+    val type: TradeType,
+    val tickerEditable: Boolean,
+    val heldQuantity: Double,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PortfolioBody(
@@ -245,6 +261,10 @@ private fun PortfolioBody(
     var scaleAmountInput by remember { mutableStateOf("") }
     var scaleErrorText by remember { mutableStateOf<String?>(null) }
     val scaleSaving by viewModel.scaleSaving.collectAsState()
+
+    // ── Owner Buy/Sell (TradeSheet) state ────────────────────────────────
+    var tradeSheet by remember { mutableStateOf<TradeSheetConfig?>(null) }
+    var showSellPicker by remember { mutableStateOf(false) }
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -393,6 +413,15 @@ private fun PortfolioBody(
 
                     if (portfolio.isOwner) {
                         OwnerBuySellRow(
+                            onBuy = {
+                                tradeSheet = TradeSheetConfig(
+                                    ticker = "",
+                                    type = TradeType.BUY,
+                                    tickerEditable = true,
+                                    heldQuantity = 0.0,
+                                )
+                            },
+                            onSell = { showSellPicker = true },
                             modifier = Modifier.padding(horizontal = 16.dp),
                         )
                     }
@@ -428,7 +457,16 @@ private fun PortfolioBody(
                                 holdings = holdings,
                                 cashBalance = portfolio.cashBalance,
                                 portfolioValue = portfolio.portfolioValue,
-                                showSwipeHint = portfolio.isOwner,
+                                onHoldingTap = if (portfolio.isOwner) {
+                                    { h ->
+                                        tradeSheet = TradeSheetConfig(
+                                            ticker = h.ticker,
+                                            type = TradeType.BUY,
+                                            tickerEditable = false,
+                                            heldQuantity = h.quantity,
+                                        )
+                                    }
+                                } else null,
                                 modifier = Modifier.padding(horizontal = 16.dp),
                             )
 
@@ -514,6 +552,39 @@ private fun PortfolioBody(
                     },
                 )
             },
+        )
+    }
+
+    // ── Owner Buy/Sell sheets ────────────────────────────────────────────
+    // Overlay (outside the scroll Box) so dismiss-by-scrim works. The sell
+    // picker reads the loaded holdings; selecting one opens the TradeSheet in
+    // SELL mode for that ticker.
+    val tradeHoldings = (state as? PortfolioState.Loaded)?.portfolio?.holdings ?: emptyList()
+    if (showSellPicker) {
+        SellPickerSheet(
+            holdings = tradeHoldings,
+            onSelect = { h ->
+                showSellPicker = false
+                tradeSheet = TradeSheetConfig(
+                    ticker = h.ticker,
+                    type = TradeType.SELL,
+                    tickerEditable = false,
+                    heldQuantity = h.quantity,
+                )
+            },
+            onDismiss = { showSellPicker = false },
+        )
+    }
+    tradeSheet?.let { cfg ->
+        TradeSheet(
+            initialTicker = cfg.ticker,
+            initialType = cfg.type,
+            tickerEditable = cfg.tickerEditable,
+            heldQuantity = cfg.heldQuantity,
+            onFetchPrice = { viewModel.fetchStockPrice(it) },
+            onSubmit = { ticker, qty, type -> viewModel.submitTrade(ticker, qty, type) },
+            onDismiss = { tradeSheet = null },
+            onTraded = { viewModel.load(slug) },
         )
     }
 }
@@ -862,15 +933,17 @@ private fun ShareIconButton(slug: String, period: String) {
 }
 
 @Composable
-private fun OwnerBuySellRow(modifier: Modifier = Modifier) {
-    // Buy / Sell are TODOs (require TradeSheet UI). Buttons render so users
-    // see they exist, but tapping is a no-op for now.
+private fun OwnerBuySellRow(
+    onBuy: () -> Unit,
+    onSell: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Button(
-            onClick = {},
+            onClick = onBuy,
             modifier = Modifier.weight(1f).height(52.dp),
             shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Gains),
@@ -881,7 +954,7 @@ private fun OwnerBuySellRow(modifier: Modifier = Modifier) {
         }
 
         OutlinedButton(
-            onClick = {},
+            onClick = onSell,
             modifier = Modifier.weight(1f).height(52.dp),
             shape = RoundedCornerShape(12.dp),
             border = BorderStroke(1.dp, Losses.copy(alpha = 0.3f)),
@@ -906,7 +979,7 @@ private fun HoldingsSection(
     holdings: List<Holding>,
     cashBalance: Double?,
     portfolioValue: Double?,
-    showSwipeHint: Boolean,
+    onHoldingTap: ((Holding) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     // Phase B: render the cash line as the last row when cash > 0. The
@@ -921,6 +994,10 @@ private fun HoldingsSection(
             Spacer(Modifier.weight(1f))
             Text("${holdings.size} stocks", color = TextMuted, fontSize = 11.sp)
         }
+        if (onHoldingTap != null) {
+            Spacer(Modifier.height(2.dp))
+            Text("Tap a holding to buy or sell", color = TextMuted, fontSize = 11.sp)
+        }
         Spacer(Modifier.height(10.dp))
 
         Column(
@@ -931,7 +1008,11 @@ private fun HoldingsSection(
                 .border(0.5.dp, CardBorder, RoundedCornerShape(16.dp)),
         ) {
             holdings.forEachIndexed { idx, h ->
-                HoldingRow(holding = h, portfolioValue = portfolioValue)
+                HoldingRow(
+                    holding = h,
+                    portfolioValue = portfolioValue,
+                    onTap = onHoldingTap?.let { cb -> { cb(h) } },
+                )
                 if (idx < holdings.size - 1 || showCash) {
                     Box(
                         modifier = Modifier
@@ -952,10 +1033,15 @@ private fun HoldingsSection(
 }
 
 @Composable
-private fun HoldingRow(holding: Holding, portfolioValue: Double? = null) {
+private fun HoldingRow(
+    holding: Holding,
+    portfolioValue: Double? = null,
+    onTap: (() -> Unit)? = null,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (onTap != null) Modifier.clickable { onTap() } else Modifier)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1485,6 +1571,71 @@ class PortfolioDetailViewModel @Inject constructor(
 
     fun setPlan(plan: SubscriptionPlan) {
         _selectedPlan.value = plan
+    }
+
+    // ── Owner Buy/Sell (TradeSheet) ──────────────────────────────────────
+    /**
+     * Fetch the live market price for [ticker] (display/estimate only — the
+     * authoritative execution price is set server-side by /portfolio/trade).
+     * Returns null on any failure or a non-positive price.
+     */
+    suspend fun fetchStockPrice(ticker: String): Double? =
+        runCatching { apiService.getStockPrice(ticker.trim().uppercase()).price }
+            .getOrNull()
+            ?.takeIf { it > 0 }
+
+    /**
+     * Submit a buy/sell trade. The caller (TradeSheet) reloads the portfolio on
+     * success. Errors are mapped to friendly text from the backend's `error`
+     * code (non-2xx responses carry `{error, available?}`).
+     */
+    suspend fun submitTrade(ticker: String, qty: Double, type: TradeType): TradeOutcome {
+        val body = TradeRequest(
+            ticker = ticker.trim().uppercase(),
+            quantity = qty,
+            price = 0.0, // ignored by the backend; price is authoritative server-side
+            type = if (type == TradeType.BUY) "buy" else "sell",
+        )
+        return runCatching { apiService.executeTrade(body) }.fold(
+            onSuccess = { resp ->
+                if (resp.success) TradeOutcome.Success(pending = resp.pending == true)
+                else TradeOutcome.Error(mapTradeError(resp.error, null))
+            },
+            onFailure = { e ->
+                val (code, available) = parseErrorBody(
+                    (e as? HttpException)?.response()?.errorBody()?.string()
+                )
+                TradeOutcome.Error(mapTradeError(code, available))
+            },
+        )
+    }
+
+    /** Pull `{error, available?}` out of a non-2xx JSON error body. */
+    private fun parseErrorBody(rawBody: String?): Pair<String?, Double?> {
+        if (rawBody.isNullOrBlank()) return null to null
+        val obj = runCatching { Json.parseToJsonElement(rawBody).jsonObject }.getOrNull()
+            ?: return null to null
+        val code = obj["error"]?.jsonPrimitive?.contentOrNull
+        val available = obj["available"]?.jsonPrimitive?.doubleOrNull
+        return code to available
+    }
+
+    private fun mapTradeError(code: String?, available: Double?): String = when (code) {
+        "insufficient_shares" -> {
+            val have = available?.let {
+                if (it == floor(it)) it.toLong().toString() else "%.4f".format(it)
+            } ?: "fewer"
+            "You only have $have shares."
+        }
+        "too_many_holdings" -> "You've reached the maximum number of holdings."
+        "order_too_large" -> "That order exceeds the maximum order value."
+        "quantity_too_large" -> "That quantity is too large."
+        "price_unavailable" -> "Live price unavailable right now. Try again shortly."
+        "positive_quantity_required" -> "Enter a quantity greater than zero."
+        "ticker_required", "invalid_ticker" -> "Enter a valid ticker symbol."
+        "type_must_be_buy_or_sell" -> "Choose Buy or Sell."
+        null -> "Trade failed. Please try again."
+        else -> code.replace('_', ' ').replaceFirstChar { it.uppercase() }
     }
 
     /** Reset the subscribe error/success banner. */
