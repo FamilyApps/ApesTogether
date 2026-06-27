@@ -57,7 +57,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.Alignment
@@ -2009,6 +2013,9 @@ private fun SetScaleDialog(
                 },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                // Display digits grouped with commas ("25000" -> "25,000") while
+                // the stored value stays digit-only, so parsing is unaffected.
+                visualTransformation = ThousandsSeparatorVisualTransformation(),
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = AppBackground,
                     unfocusedContainerColor = AppBackground,
@@ -2060,5 +2067,45 @@ private fun SetScaleDialog(
                 }
             }
         }
+    }
+}
+
+/**
+ * Groups a digit-only string into thousands with commas for display
+ * (e.g. "25000" -> "25,000"). The underlying OutlinedTextField value remains
+ * digit-only; only the rendered text is transformed, and the [OffsetMapping]
+ * keeps the cursor correct as commas are inserted/removed.
+ */
+private class ThousandsSeparatorVisualTransformation : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        val digits = text.text
+        val formatted = if (digits.isEmpty()) {
+            ""
+        } else {
+            digits.reversed().chunked(3).joinToString(",").reversed()
+        }
+        val mapping = object : OffsetMapping {
+            override fun originalToTransformed(offset: Int): Int {
+                if (offset <= 0) return 0
+                var seenDigits = 0
+                for (idx in formatted.indices) {
+                    if (formatted[idx] != ',') {
+                        seenDigits++
+                        if (seenDigits == offset) return idx + 1
+                    }
+                }
+                return formatted.length
+            }
+
+            override fun transformedToOriginal(offset: Int): Int {
+                val clamped = offset.coerceIn(0, formatted.length)
+                var digitsSeen = 0
+                for (idx in 0 until clamped) {
+                    if (formatted[idx] != ',') digitsSeen++
+                }
+                return digitsSeen
+            }
+        }
+        return TransformedText(AnnotatedString(formatted), mapping)
     }
 }

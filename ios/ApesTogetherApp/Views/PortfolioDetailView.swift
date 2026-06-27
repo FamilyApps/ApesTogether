@@ -1494,6 +1494,24 @@ struct SetScaleSheet: View {
 
     @FocusState private var inputFocused: Bool
 
+    // Renders the digit-only `amount` with thousands separators (e.g.
+    // "25000" -> "25,000") for readability. The binding below stores only
+    // digits, so the comma-stripping parse in the Apply button is unaffected.
+    private static let groupingFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.maximumFractionDigits = 0
+        f.usesGroupingSeparator = true
+        f.groupingSeparator = ","
+        return f
+    }()
+
+    private static func grouped(_ digits: String) -> String {
+        let clean = digits.filter(\.isNumber)
+        guard let n = Int(clean) else { return "" }
+        return groupingFormatter.string(from: NSNumber(value: n)) ?? clean
+    }
+
     var body: some View {
         NavigationView {
             ZStack {
@@ -1540,7 +1558,10 @@ struct SetScaleSheet: View {
                         Text("$")
                             .font(.system(size: 28, weight: .bold))
                             .foregroundColor(.textSecondary)
-                        TextField("0", text: $amount)
+                        TextField("0", text: Binding(
+                            get: { Self.grouped(amount) },
+                            set: { amount = $0.filter(\.isNumber) }
+                        ))
                             .keyboardType(.numberPad)
                             .font(.system(size: 32, weight: .bold))
                             .foregroundColor(.textPrimary)
