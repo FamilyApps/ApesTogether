@@ -326,13 +326,15 @@ def compute_signal_components(stock_data, profile):
     admin Recent Trades 'Source' column.
 
     Component names: 'rsi', 'macd', 'news', 'social', 'volume', 'insider',
-    'analyst', 'trend', 'mover'. Missing/unavailable signals contribute 0.
+    'analyst', 'trend', 'mover', 'earnings', 'rates'. Missing/unavailable
+    signals contribute 0.
     """
     weights = dict(profile['indicator_weights'])  # copy so we can adjust
     strategy = profile['strategy']
     components = {
         'rsi': 0.0, 'macd': 0.0, 'news': 0.0, 'social': 0.0,
         'volume': 0.0, 'insider': 0.0, 'analyst': 0.0, 'trend': 0.0, 'mover': 0.0,
+        'earnings': 0.0, 'rates': 0.0,
     }
 
     # ── Redistribute weight from data legs that have NO data for this ticker ──
@@ -527,6 +529,37 @@ def compute_signal_components(stock_data, profile):
         components['mover'] = 0.08  # Small bonus for momentum chasers
     elif mover == 'top_loser' and strategy == 'value':
         components['mover'] = 0.05  # Small bonus for contrarians
+
+    # ── Earnings Proximity (AlphaVantage EARNINGS_CALENDAR, flat addend) ──
+    # The 'earnings' archetype previously had NO earnings-date input — it could
+    # not actually time a print. days_to_earnings is the calendar distance to the
+    # next report (0 = today). Pre-earnings drift is favorable a few days to ~2
+    # weeks out; initiating right before the binary print is penalized. Modeled
+    # as a strategy-targeted flat addend (like the mover bonus) so it needs no
+    # change to the per-bot indicator_weights schema (existing bots keep their 7
+    # stored weights). None = no scheduled report within the horizon → no signal.
+    days_to_earnings = stock_data.get('days_to_earnings')
+    if days_to_earnings is not None and strategy in ('earnings', 'news_reactor'):
+        if 4 <= days_to_earnings <= 12:
+            components['earnings'] = 0.14   # pre-earnings drift sweet spot
+        elif 2 <= days_to_earnings < 4:
+            components['earnings'] = 0.04   # getting close — mild
+        elif days_to_earnings < 2:
+            components['earnings'] = -0.12  # too close to the binary print — avoid
+
+    # ── Interest-Rate Regime (AlphaVantage TREASURY_YIELD, flat addend) ──
+    # REIT prices move inversely to the 10Y: falling yields = tailwind, rising =
+    # headwind. This is the Real-Estate signal that was entirely missing. Scoped
+    # to the Real Estate sector (the clean, defensible case) and to the
+    # rate-aware archetypes so it refines rather than dominates.
+    yield_trend = stock_data.get('yield_trend')
+    sector = stock_data.get('sector', '')
+    if (yield_trend and sector == 'Real Estate'
+            and strategy in ('dividend_growth', 'sector_rotation', 'value', 'balanced', 'swing')):
+        if yield_trend == 'falling':
+            components['rates'] = 0.10   # rate tailwind for REITs
+        elif yield_trend == 'rising':
+            components['rates'] = -0.10  # rate headwind for REITs
 
     return components
 

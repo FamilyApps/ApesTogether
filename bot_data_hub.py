@@ -971,6 +971,134 @@ def fetch_top_movers():
         return {'gainers': [], 'losers': [], 'most_active': []}
 
 
+# ── AlphaVantage Earnings Calendar (market-wide, 1 call) ─────────────────────
+
+def fetch_earnings_calendar(horizon='3month'):
+    """
+    Fetch upcoming earnings report dates for the WHOLE market from AlphaVantage
+    EARNINGS_CALENDAR. ONE API call (CSV response) covers every symbol, so this
+    is cheap enough to run live every wave.
+
+    Returns {ticker: days_until_earnings} for symbols reporting within `horizon`
+    (today=0, tomorrow=1, ...). The 'earnings' archetype previously had NO
+    earnings-date input at all — it proxied via news/analyst — so a pre-earnings
+    bot could never actually time the print. This is that missing input.
+
+    Failure (no key, rate-limit JSON instead of CSV, network) degrades to {} and
+    callers treat earnings proximity as unknown.
+    """
+    if not ALPHA_VANTAGE_KEY:
+        return {}
+
+    import csv as _csv
+    import io as _io
+
+    result = {}
+    t0 = time.time()
+    try:
+        url = (f"https://www.alphavantage.co/query?function=EARNINGS_CALENDAR"
+               f"&horizon={horizon}&apikey={ALPHA_VANTAGE_KEY}")
+        resp = requests.get(url, timeout=20)
+        elapsed_ms = int((time.time() - t0) * 1000)
+        text = resp.text if resp.status_code == 200 else ''
+
+        # Success is a CSV body; an error / rate-limit comes back as JSON ('{...}').
+        if not text or text.lstrip().startswith('{'):
+            _log_av_api_call('EARNINGS_CALENDAR', 'MARKET',
+                             'rate_limited' if text else 'error', elapsed_ms)
+            if text:
+                logger.warning(f"EARNINGS_CALENDAR returned non-CSV: {text[:160]}")
+            return {}
+
+        today = datetime.utcnow().date()
+        reader = _csv.DictReader(_io.StringIO(text))
+        for row in reader:
+            sym = (row.get('symbol') or '').upper().strip()
+            rep = (row.get('reportDate') or '').strip()
+            if not sym or not rep:
+                continue
+            try:
+                rep_date = datetime.strptime(rep, '%Y-%m-%d').date()
+            except ValueError:
+                continue
+            days = (rep_date - today).days
+            if days < 0:
+                continue  # already reported
+            # Keep the NEAREST upcoming report per symbol.
+            if sym not in result or days < result[sym]:
+                result[sym] = days
+
+        _log_av_api_call('EARNINGS_CALENDAR', 'MARKET',
+                         'success' if result else 'error', elapsed_ms)
+    except Exception as e:
+        logger.warning(f"Earnings calendar fetch failed: {e}")
+
+    logger.info(f"Earnings calendar: {len(result)} symbols with upcoming reports")
+    return result
+
+
+# ── AlphaVantage 10-Year Treasury Yield (macro, 1 call) ──────────────────────
+
+def fetch_treasury_yield(maturity='10year'):
+    """
+    Fetch the 10-year Treasury yield series from AlphaVantage TREASURY_YIELD and
+    derive a current level + short-term trend. ONE API call.
+
+    Returns {'ten_year_yield': float, 'yield_trend': 'rising'|'falling'|'flat',
+             'yield_change_bps': float} or {} on failure.
+
+    Rate-sensitive names (REITs especially, also utilities / high-dividend
+    stocks) move inversely to the 10Y: falling yields = tailwind, rising =
+    headwind. This is the Real-Estate signal that was entirely missing — REIT
+    prices are driven by rates, which the bots could not see before.
+    """
+    if not ALPHA_VANTAGE_KEY:
+        return {}
+
+    t0 = time.time()
+    try:
+        url = (f"https://www.alphavantage.co/query?function=TREASURY_YIELD"
+               f"&interval=daily&maturity={maturity}&apikey={ALPHA_VANTAGE_KEY}")
+        resp = requests.get(url, timeout=15)
+        elapsed_ms = int((time.time() - t0) * 1000)
+        data = resp.json() if resp.status_code == 200 else {}
+        points = data.get('data') or []
+
+        # Newest first. Values are strings; missing days come back as '.'.
+        vals = []
+        for p in points:
+            try:
+                vals.append(float(p.get('value')))
+            except (TypeError, ValueError):
+                continue
+            if len(vals) >= 10:
+                break
+
+        if not vals:
+            _log_av_api_call('TREASURY_YIELD', maturity, 'error', elapsed_ms)
+            return {}
+
+        latest = vals[0]
+        ref = vals[min(5, len(vals) - 1)]  # ~5 trading days ago
+        change_bps = round((latest - ref) * 100, 1)  # percentage-points → bps
+        if change_bps > 8:
+            trend = 'rising'
+        elif change_bps < -8:
+            trend = 'falling'
+        else:
+            trend = 'flat'
+
+        _log_av_api_call('TREASURY_YIELD', maturity, 'success', elapsed_ms)
+        return {
+            'ten_year_yield': round(latest, 3),
+            'yield_trend': trend,
+            'yield_change_bps': change_bps,
+        }
+    except Exception as e:
+        logger.warning(f"Treasury yield fetch failed: {e}")
+        return {}
+
+
 # ── Finnhub Health Probe (for admin dashboard) ──────────────────────────────
 #
 # The admin "Market Research Data Sources" card needs to know whether each
@@ -1306,6 +1434,8 @@ class MarketDataHub:
         self.analysts = {}        # {ticker: {analyst_action, ...}}
         self.insiders = {}        # {ticker: {insider_net, ...}}
         self.top_movers = {}      # {gainers: [...], losers: [...]}
+        self.earnings_calendar = {}  # {ticker: days_until_earnings} (AV, market-wide)
+        self.macro = {}           # {ten_year_yield, yield_trend, yield_change_bps} (AV)
         self.last_refresh = None
         self.data_quality = {     # Track what succeeded
             'prices': False,      # 100-day OHLCV history (cache or live)
@@ -1316,6 +1446,8 @@ class MarketDataHub:
             'analysts': False,
             'insiders': False,
             'movers': False,
+            'earnings': False,    # AV EARNINGS_CALENDAR (upcoming report dates)
+            'macro': False,       # AV TREASURY_YIELD (10Y level + trend)
         }
 
     def refresh(self, include_extras=True):
@@ -1433,6 +1565,22 @@ class MarketDataHub:
             except Exception as e:
                 logger.warning(f"Analyst/insider phase failed: {e}")
 
+            # Phase 8: Earnings calendar (AlphaVantage — 1 market-wide call).
+            # Feeds the 'earnings' archetype's pre-earnings timing.
+            try:
+                self.earnings_calendar = fetch_earnings_calendar()
+                self.data_quality['earnings'] = len(self.earnings_calendar) > 0
+            except Exception as e:
+                logger.warning(f"Earnings calendar phase failed: {e}")
+
+            # Phase 9: Macro — 10Y Treasury yield (AlphaVantage — 1 call).
+            # Feeds the Real-Estate rates signal that was previously missing.
+            try:
+                self.macro = fetch_treasury_yield()
+                self.data_quality['macro'] = bool(self.macro)
+            except Exception as e:
+                logger.warning(f"Treasury yield phase failed: {e}")
+
         self.last_refresh = datetime.utcnow()
         elapsed = time.time() - start
         logger.info(f"=== Refresh complete in {elapsed:.1f}s — {len(self.indicators)} tickers with indicators ===")
@@ -1495,6 +1643,16 @@ class MarketDataHub:
         else:
             data['mover_status'] = 'normal'
 
+        # Merge earnings proximity (AV EARNINGS_CALENDAR). None = unknown/none
+        # scheduled within the horizon — scoring treats None as 'no signal'.
+        data['days_to_earnings'] = self.earnings_calendar.get(ticker)
+
+        # Merge macro rates context (AV TREASURY_YIELD). Same value for every
+        # ticker this wave; scoring only applies it to rate-sensitive sectors.
+        if self.macro:
+            data['ten_year_yield'] = self.macro.get('ten_year_yield')
+            data['yield_trend'] = self.macro.get('yield_trend')
+
         return data
 
     def get_sector_tickers(self, sector):
@@ -1522,6 +1680,9 @@ class MarketDataHub:
             'tickers_with_analyst': len(self.analysts),
             'tickers_with_insider': len(self.insiders),
             'top_gainers': len(self.top_movers.get('gainers', [])),
+            'tickers_with_earnings': len(self.earnings_calendar),
+            'ten_year_yield': self.macro.get('ten_year_yield') if self.macro else None,
+            'yield_trend': self.macro.get('yield_trend') if self.macro else None,
             'last_refresh': self.last_refresh.isoformat() if self.last_refresh else None,
             'data_quality': self.data_quality,
         }

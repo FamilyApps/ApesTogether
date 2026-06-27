@@ -8920,6 +8920,30 @@ def bot_cron_health():
                 'calls_24h': len(mover_calls), 'successes': mover_ok,
                 'status': 'active' if mover_ok > 0 else ('error' if len(mover_calls) > 0 else 'no_calls'),
             })
+
+            # AlphaVantage earnings calendar (pre-earnings timing for bots)
+            earn_calls = AlphaVantageAPILog.query.filter(
+                AlphaVantageAPILog.endpoint == 'EARNINGS_CALENDAR',
+                AlphaVantageAPILog.timestamp >= cutoff
+            ).all()
+            earn_ok = sum(1 for c in earn_calls if c.response_status == 'success')
+            data_sources.append({
+                'name': 'AlphaVantage Earnings Calendar', 'type': 'earnings_calendar',
+                'calls_24h': len(earn_calls), 'successes': earn_ok,
+                'status': 'active' if earn_ok > 0 else ('error' if len(earn_calls) > 0 else 'no_calls'),
+            })
+
+            # AlphaVantage 10Y Treasury yield (REIT rates signal)
+            tsy_calls = AlphaVantageAPILog.query.filter(
+                AlphaVantageAPILog.endpoint == 'TREASURY_YIELD',
+                AlphaVantageAPILog.timestamp >= cutoff
+            ).all()
+            tsy_ok = sum(1 for c in tsy_calls if c.response_status == 'success')
+            data_sources.append({
+                'name': 'AlphaVantage Treasury 10Y', 'type': 'treasury',
+                'calls_24h': len(tsy_calls), 'successes': tsy_ok,
+                'status': 'active' if tsy_ok > 0 else ('error' if len(tsy_calls) > 0 else 'no_calls'),
+            })
             
             # AlphaVantage price fallback
             price_calls = AlphaVantageAPILog.query.filter(
@@ -9048,6 +9072,8 @@ def bot_cron_health():
                 'analyst': ('analyst',),
                 'social': ('social',),
                 'finnhub': ('insider', 'analyst', 'social'),  # combined fallback row
+                'earnings_calendar': ('earnings',),
+                'treasury': ('rates',),
             }
             for src in data_sources:
                 tags = source_tags.get(src.get('type'))
