@@ -96,6 +96,10 @@ fun MyPortfolioScreen(
             }
 
             ShareMyPerformanceButton(slug = slug, viewModel = viewModel)
+
+            // Inline "Quick Poll" card (mirrors iOS MyPortfolioView). Renders
+            // nothing when there's no active poll.
+            FeaturePoll()
         }
     }
 }
