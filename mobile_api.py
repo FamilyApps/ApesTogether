@@ -8944,6 +8944,21 @@ def bot_cron_health():
                 'calls_24h': len(tsy_calls), 'successes': tsy_ok,
                 'status': 'active' if tsy_ok > 0 else ('error' if len(tsy_calls) > 0 else 'no_calls'),
             })
+
+            # AlphaVantage OVERVIEW fundamentals (weekly cron; valuation/dividend/
+            # analyst-target signals). Refreshed weekly, so the 24h window is
+            # usually 0 calls — 'idle' there is healthy, not an error.
+            ov_calls = AlphaVantageAPILog.query.filter(
+                AlphaVantageAPILog.endpoint == 'OVERVIEW',
+                AlphaVantageAPILog.timestamp >= cutoff
+            ).all()
+            ov_ok = sum(1 for c in ov_calls if c.response_status == 'success')
+            data_sources.append({
+                'name': 'AlphaVantage Fundamentals (OVERVIEW)', 'type': 'fundamentals',
+                'calls_24h': len(ov_calls), 'successes': ov_ok,
+                'status': 'active' if ov_ok > 0 else 'idle',
+                'note': 'Weekly refresh — 0 calls/24h is normal between runs',
+            })
             
             # AlphaVantage price fallback
             price_calls = AlphaVantageAPILog.query.filter(
@@ -9074,6 +9089,11 @@ def bot_cron_health():
                 'finnhub': ('insider', 'analyst', 'social'),  # combined fallback row
                 'earnings_calendar': ('earnings',),
                 'treasury': ('rates',),
+                # OVERVIEW feeds valuation + dividend, and revives the analyst leg
+                # via target-price upside. 'analyst' may overlap the Finnhub row
+                # when Finnhub premium is active; on the free tier analyst-tagged
+                # trades come from OVERVIEW, so attributing it here is the honest call.
+                'fundamentals': ('valuation', 'dividend', 'analyst'),
             }
             for src in data_sources:
                 tags = source_tags.get(src.get('type'))

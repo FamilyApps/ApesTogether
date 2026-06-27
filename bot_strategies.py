@@ -326,15 +326,15 @@ def compute_signal_components(stock_data, profile):
     admin Recent Trades 'Source' column.
 
     Component names: 'rsi', 'macd', 'news', 'social', 'volume', 'insider',
-    'analyst', 'trend', 'mover', 'earnings', 'rates'. Missing/unavailable
-    signals contribute 0.
+    'analyst', 'trend', 'mover', 'earnings', 'rates', 'valuation', 'dividend'.
+    Missing/unavailable signals contribute 0.
     """
     weights = dict(profile['indicator_weights'])  # copy so we can adjust
     strategy = profile['strategy']
     components = {
         'rsi': 0.0, 'macd': 0.0, 'news': 0.0, 'social': 0.0,
         'volume': 0.0, 'insider': 0.0, 'analyst': 0.0, 'trend': 0.0, 'mover': 0.0,
-        'earnings': 0.0, 'rates': 0.0,
+        'earnings': 0.0, 'rates': 0.0, 'valuation': 0.0, 'dividend': 0.0,
     }
 
     # ── Redistribute weight from data legs that have NO data for this ticker ──
@@ -363,7 +363,14 @@ def compute_signal_components(stock_data, profile):
         dead_keys.append('social_buzz')
     if stock_data.get('article_count', 0) == 0:
         dead_keys.append('news_sentiment')
-    if 'insider_buys' not in stock_data and stock_data.get('analyst_action', 'none') == 'none':
+    # The 'insider' weight is only dead when there's NO insider AND no analyst
+    # data of EITHER kind. AV OVERVIEW's analyst target price (Layer B) is real
+    # analyst data, so its presence keeps this leg live even on the free Finnhub
+    # tier where analyst_action is always 'none' — this is what revives the leg.
+    has_analyst_target = stock_data.get('analyst_target_upside') is not None
+    if ('insider_buys' not in stock_data
+            and stock_data.get('analyst_action', 'none') == 'none'
+            and not has_analyst_target):
         dead_keys.append('insider')
 
     orphan = sum(weights.get(k, 0.0) for k in dead_keys)
@@ -490,6 +497,24 @@ def compute_signal_components(stock_data, profile):
         analyst_signal = -0.3
     else:
         analyst_signal = 0.0
+
+    # Analyst target-price upside (AV OVERVIEW, Layer B). REAL analyst data that
+    # revives this leg on the free Finnhub tier (no analyst_action there).
+    # upside = (target - price) / price, computed in the hub. Combined with any
+    # Finnhub upgrade/downgrade and clamped to [-1, 1].
+    upside = stock_data.get('analyst_target_upside')
+    if upside is not None:
+        if upside >= 0.25:
+            target_signal = 0.9
+        elif upside >= 0.10:
+            target_signal = 0.5
+        elif upside >= 0.0:
+            target_signal = 0.15
+        elif upside >= -0.10:
+            target_signal = -0.3
+        else:
+            target_signal = -0.7
+        analyst_signal = max(-1.0, min(1.0, analyst_signal + target_signal))
     components['analyst'] = weights.get('insider', 0) * analyst_signal
 
     # ── Price Trend Signal ──
@@ -560,6 +585,40 @@ def compute_signal_components(stock_data, profile):
             components['rates'] = 0.10   # rate tailwind for REITs
         elif yield_trend == 'rising':
             components['rates'] = -0.10  # rate headwind for REITs
+
+    # ── Valuation (AV OVERVIEW P/E + PEG, flat addend) ──
+    # Value-leaning archetypes reward cheap multiples; growth / momentum /
+    # social ignore it. PEG refines the raw P/E for growth-adjusted cheapness.
+    # Capped at ±0.15 so it refines rather than dominates the composite.
+    pe = stock_data.get('pe_ratio')
+    peg = stock_data.get('peg_ratio')
+    if (pe is not None and pe > 0
+            and strategy in ('value', 'swing', 'balanced', 'dividend_growth', 'sector_rotation')):
+        val = 0.0
+        if pe < 12:
+            val = 0.10
+        elif pe < 20:
+            val = 0.04
+        elif pe > 40:
+            val = -0.08
+        if peg is not None and peg > 0:
+            if peg < 1.0:
+                val += 0.05
+            elif peg > 2.5:
+                val -= 0.05
+        components['valuation'] = max(-0.15, min(0.15, val))
+
+    # ── Dividend Yield (AV OVERVIEW, flat addend) ──
+    # Income archetypes reward yield. dividend_yield_fund is a fraction
+    # (0.025 = 2.5%). Capped so a fat yield nudges but never dominates.
+    div_yield = stock_data.get('dividend_yield_fund')
+    if div_yield is not None and strategy in ('dividend_growth', 'value', 'balanced'):
+        if div_yield >= 0.04:
+            components['dividend'] = 0.10
+        elif div_yield >= 0.02:
+            components['dividend'] = 0.05
+        elif div_yield > 0:
+            components['dividend'] = 0.02
 
     return components
 

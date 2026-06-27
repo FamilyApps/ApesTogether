@@ -66,6 +66,18 @@
     {
       "path": "/api/cron/refresh-daily-bars?part=2&of=2",
       "schedule": "32 22 * * 1-5"
+    },
+    {
+      "path": "/api/cron/refresh-fundamentals?part=1&of=3",
+      "schedule": "0 23 * * 0"
+    },
+    {
+      "path": "/api/cron/refresh-fundamentals?part=2&of=3",
+      "schedule": "2 23 * * 0"
+    },
+    {
+      "path": "/api/cron/refresh-fundamentals?part=3&of=3",
+      "schedule": "4 23 * * 0"
     }
   ]
 }

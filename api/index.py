@@ -10882,6 +10882,190 @@ def get_cached_daily_bars_cron():
         }), 500
 
 
+@app.route('/api/cron/refresh-fundamentals', methods=['GET', 'POST'])
+def refresh_fundamentals_cron():
+    """
+    Populate the `stock_fundamentals` cache from AlphaVantage OVERVIEW for the
+    bot universe (Bot Layer B).
+
+    OVERVIEW costs ONE AV call per ticker, so this is the expensive refresh. It
+    runs WEEKLY (vercel.json) rather than per-wave because fundamentals (P/E,
+    dividend yield, analyst target, beta) only move on quarterly earnings and
+    periodic analyst revisions. ~130 tickers at ~140 calls/min paces to ~1 min,
+    so `part`/`of` splitting (same as refresh-daily-bars) keeps each invocation
+    well under Vercel's 60s maxDuration and the 150/min AV cap.
+
+    Trade waves read from the resulting table via _load_fundamentals (direct DB
+    in Flask, HTTP via /api/cron/get-fundamentals from GitHub Actions).
+    """
+    try:
+        auth_error = verify_cron_request()
+        if auth_error:
+            return auth_error
+
+        from bot_data_hub import (
+            get_all_tickers, fetch_overviews_concurrent, ALPHA_VANTAGE_KEY,
+            flush_av_logs,
+        )
+        from models import db, StockFundamentals
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        if not ALPHA_VANTAGE_KEY:
+            return jsonify({
+                'success': False,
+                'error': 'no_av_key',
+                'message': 'ALPHA_VANTAGE_API_KEY env var is not set'
+            }), 200
+
+        # Universe split so each invocation's per-minute AV burst stays under cap.
+        try:
+            part = int(request.args.get('part', 1))
+            of = int(request.args.get('of', 1))
+        except (TypeError, ValueError):
+            part, of = 1, 1
+        of = max(of, 1)
+        part = min(max(part, 1), of)
+
+        all_tickers = sorted(get_all_tickers())
+        tickers = all_tickers[part - 1::of]
+        logger.info(
+            f"refresh-fundamentals: part {part}/{of} — fetching {len(tickers)} "
+            f"of {len(all_tickers)} tickers from AlphaVantage OVERVIEW"
+        )
+        started = datetime.utcnow()
+
+        fundamentals = fetch_overviews_concurrent(tickers, max_workers=4)
+        fetched_ms = int((datetime.utcnow() - started).total_seconds() * 1000)
+
+        upserted = 0
+        failed_tickers = []
+        for ticker, f in fundamentals.items():
+            try:
+                row = dict(f)
+                row['ticker'] = ticker
+                row['fetched_at'] = datetime.utcnow()
+                stmt = pg_insert(StockFundamentals.__table__).values([row])
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=['ticker'],
+                    set_={
+                        'pe_ratio': stmt.excluded.pe_ratio,
+                        'peg_ratio': stmt.excluded.peg_ratio,
+                        'price_to_book': stmt.excluded.price_to_book,
+                        'eps': stmt.excluded.eps,
+                        'dividend_yield': stmt.excluded.dividend_yield,
+                        'beta': stmt.excluded.beta,
+                        'analyst_target_price': stmt.excluded.analyst_target_price,
+                        'market_cap': stmt.excluded.market_cap,
+                        'sector': stmt.excluded.sector,
+                        'name': stmt.excluded.name,
+                        'fetched_at': stmt.excluded.fetched_at,
+                    }
+                )
+                db.session.execute(stmt)
+                upserted += 1
+            except Exception as e:
+                logger.warning(f"refresh-fundamentals upsert failed for {ticker}: {e}")
+                failed_tickers.append(ticker)
+
+        db.session.commit()
+        try:
+            flush_av_logs()
+        except Exception as flush_err:
+            logger.warning(f"flush_av_logs failed (non-fatal): {flush_err}")
+
+        elapsed_s = (datetime.utcnow() - started).total_seconds()
+        not_returned = [t for t in tickers if t not in fundamentals]
+        return jsonify({
+            'success': True,
+            'part': part,
+            'of': of,
+            'tickers_in_universe': len(all_tickers),
+            'tickers_total': len(tickers),
+            'tickers_fetched': len(fundamentals),
+            'tickers_missing_from_av': not_returned[:25],
+            'tickers_missing_count': len(not_returned),
+            'tickers_upsert_failed': failed_tickers,
+            'rows_upserted': upserted,
+            'fetch_ms': fetched_ms,
+            'total_elapsed_s': round(elapsed_s, 1),
+        })
+    except Exception as e:
+        logger.error(f"refresh-fundamentals cron error: {e}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc(),
+        }), 500
+
+
+@app.route('/api/cron/get-fundamentals', methods=['GET'])
+def get_fundamentals_cron():
+    """
+    Return cached fundamentals from the `stock_fundamentals` table.
+
+    Used by `bot_agent.py` running on GitHub Actions (no DB access in CI). Mirrors
+    /api/cron/get-cached-daily-bars. Auth: same verify_cron_request().
+
+    Query params:
+      - tickers (optional, comma-separated): default = full bot universe.
+
+    Response: {success, fetched_at, tickers_returned, fundamentals: {ticker: {...}}}
+    where each value matches the _load_fundamentals dict shape.
+    """
+    try:
+        auth_error = verify_cron_request()
+        if auth_error:
+            return auth_error
+
+        from bot_data_hub import get_all_tickers
+        from models import StockFundamentals
+
+        tickers_param = request.args.get('tickers', '').strip()
+        if tickers_param:
+            tickers = [t.strip().upper() for t in tickers_param.split(',') if t.strip()]
+        else:
+            tickers = get_all_tickers()
+
+        if not tickers:
+            return jsonify({'success': False, 'error': 'no_tickers'}), 400
+
+        rows = StockFundamentals.query.filter(
+            StockFundamentals.ticker.in_(tickers)
+        ).all()
+
+        fundamentals = {}
+        for r in rows:
+            fundamentals[r.ticker] = {
+                'pe_ratio': r.pe_ratio,
+                'peg_ratio': r.peg_ratio,
+                'price_to_book': r.price_to_book,
+                'eps': r.eps,
+                'dividend_yield': r.dividend_yield,
+                'beta': r.beta,
+                'analyst_target_price': r.analyst_target_price,
+                'market_cap': r.market_cap,
+                'sector': r.sector,
+                'name': r.name,
+            }
+
+        return jsonify({
+            'success': True,
+            'fetched_at': datetime.utcnow().isoformat() + 'Z',
+            'tickers_requested': len(tickers),
+            'tickers_returned': len(fundamentals),
+            'fundamentals': fundamentals,
+        })
+    except Exception as e:
+        logger.error(f"get-fundamentals error: {e}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc(),
+        }), 500
+
+
 @app.route('/api/cron/bot-trade-wave', methods=['GET', 'POST'])
 def bot_trade_wave_cron():
     """

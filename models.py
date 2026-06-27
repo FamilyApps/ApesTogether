@@ -1128,6 +1128,48 @@ class DailyPriceBar(db.Model):
         return f"<DailyPriceBar {self.ticker} {self.date} close=${self.close}>"
 
 
+class StockFundamentals(db.Model):
+    """Cached per-ticker fundamentals from AlphaVantage OVERVIEW. One row per ticker.
+
+    Fundamentals change slowly (quarterly earnings, analyst revisions), so this
+    is refreshed weekly by /api/cron/refresh-fundamentals rather than every wave.
+    OVERVIEW costs one AV call PER ticker — too expensive per-wave, but trivial
+    weekly. Trade waves read from here (DB in Flask, HTTP in GitHub Actions) and
+    feed valuation / dividend / analyst-target-upside signals.
+
+    This is what revives the 'analyst' signal leg: the free Finnhub tier returns
+    no analyst data, so the leg was dead and its weight redistributed. OVERVIEW's
+    AnalystTargetPrice is real analyst data, restoring that leg.
+    """
+    __tablename__ = 'stock_fundamentals'
+
+    id = db.Column(db.Integer, primary_key=True)
+    ticker = db.Column(db.String(20), nullable=False, unique=True, index=True)
+
+    # Valuation
+    pe_ratio = db.Column(db.Float, nullable=True)        # trailing P/E
+    peg_ratio = db.Column(db.Float, nullable=True)       # P/E-to-growth
+    price_to_book = db.Column(db.Float, nullable=True)
+    eps = db.Column(db.Float, nullable=True)             # diluted EPS TTM
+
+    # Income / risk
+    dividend_yield = db.Column(db.Float, nullable=True)  # fraction, e.g. 0.025 = 2.5%
+    beta = db.Column(db.Float, nullable=True)
+
+    # Analyst
+    analyst_target_price = db.Column(db.Float, nullable=True)
+
+    # Context / descriptive (AV's own sector string, may differ from our UNIVERSE bucket)
+    market_cap = db.Column(db.Float, nullable=True)
+    sector = db.Column(db.String(80), nullable=True)
+    name = db.Column(db.String(160), nullable=True)
+
+    fetched_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+    def __repr__(self):
+        return f"<StockFundamentals {self.ticker} pe={self.pe_ratio} target=${self.analyst_target_price}>"
+
+
 class BotWaveLog(db.Model):
     """Per-wave execution log for diagnostics.
 

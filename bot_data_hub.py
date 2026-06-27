@@ -1099,6 +1099,198 @@ def fetch_treasury_yield(maturity='10year'):
         return {}
 
 
+# ── AlphaVantage Company Overview / Fundamentals (Layer B) ───────────────────
+#
+# OVERVIEW returns valuation, dividend, beta and analyst-target fields for ONE
+# ticker per call. That's too expensive to run per-wave (one call/ticker), so a
+# weekly cron (/api/cron/refresh-fundamentals) populates the stock_fundamentals
+# table and trade waves read from the cache. These fetchers are used only by the
+# cron; the read path is _load_fundamentals(...) below.
+
+def _av_float(raw):
+    """Parse an AlphaVantage numeric string. AV uses 'None', '-', '' for missing."""
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s or s.lower() in ('none', 'nan', '-'):
+        return None
+    try:
+        return float(s)
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_overview_single(ticker):
+    """Fetch fundamentals for one ticker from AlphaVantage OVERVIEW.
+
+    Returns (ticker, dict) on success or (ticker, None) on failure. The dict
+    keys match the stock_fundamentals columns. Caller paces the calls.
+    """
+    t0 = time.time()
+    try:
+        url = (f"https://www.alphavantage.co/query?function=OVERVIEW"
+               f"&symbol={ticker}&apikey={ALPHA_VANTAGE_KEY}")
+        resp = requests.get(url, timeout=15)
+        elapsed_ms = int((time.time() - t0) * 1000)
+        data = resp.json() if resp.status_code == 200 else {}
+
+        # OVERVIEW returns {} for an unknown symbol, or a {"Note"/"Information"}
+        # rate-limit envelope. A valid response always carries 'Symbol'.
+        if not data or 'Symbol' not in data:
+            note = data.get('Note') or data.get('Information') if isinstance(data, dict) else None
+            status = 'rate_limited' if (note and 'limit' in str(note).lower()) else 'error'
+            _log_av_api_call('OVERVIEW', ticker, status, elapsed_ms)
+            if note:
+                logger.warning(f"OVERVIEW {ticker}: {note}")
+            return (ticker, None)
+
+        _log_av_api_call('OVERVIEW', ticker, 'success', elapsed_ms)
+        fundamentals = {
+            'pe_ratio': _av_float(data.get('PERatio')),
+            'peg_ratio': _av_float(data.get('PEGRatio')),
+            'price_to_book': _av_float(data.get('PriceToBookRatio')),
+            'eps': _av_float(data.get('EPS')),
+            'dividend_yield': _av_float(data.get('DividendYield')),
+            'beta': _av_float(data.get('Beta')),
+            'analyst_target_price': _av_float(data.get('AnalystTargetPrice')),
+            'market_cap': _av_float(data.get('MarketCapitalization')),
+            'sector': (data.get('Sector') or '').strip()[:80] or None,
+            'name': (data.get('Name') or '').strip()[:160] or None,
+        }
+        return (ticker, fundamentals)
+    except Exception as e:
+        elapsed_ms = int((time.time() - t0) * 1000)
+        _log_av_api_call('OVERVIEW', ticker, 'error', elapsed_ms)
+        logger.warning(f"OVERVIEW {ticker} failed: {e}")
+        return (ticker, None)
+
+
+def fetch_overviews_concurrent(tickers, max_workers=4):
+    """Fetch OVERVIEW fundamentals for `tickers` with bounded, rate-paced concurrency.
+
+    Mirrors fetch_av_daily_bars_concurrent: submissions are paced one every
+    _AV_MIN_INTERVAL_S so steady-state stays ~140 calls/min (under the 150/min
+    premium cap). Used by /api/cron/refresh-fundamentals.
+
+    Returns {ticker: fundamentals_dict}.
+    """
+    if not ALPHA_VANTAGE_KEY:
+        logger.error("No ALPHA_VANTAGE_API_KEY set — cannot fetch fundamentals")
+        return {}
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    result = {}
+    n = len(tickers)
+    logger.info(f"OVERVIEW concurrent fetch: {n} tickers, workers={max_workers}")
+    start = time.time()
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = []
+        for ticker in tickers:
+            futures.append(executor.submit(fetch_overview_single, ticker))
+            time.sleep(_AV_MIN_INTERVAL_S)  # pace global submission rate
+
+        for fut in as_completed(futures):
+            try:
+                ticker, fundamentals = fut.result()
+                if fundamentals is not None:
+                    result[ticker] = fundamentals
+            except Exception as e:
+                logger.warning(f"Fundamentals worker exception: {e}")
+
+    elapsed = time.time() - start
+    logger.info(f"OVERVIEW concurrent fetch: {len(result)}/{n} ok in {elapsed:.1f}s")
+    return result
+
+
+def _load_fundamentals_via_http(tickers):
+    """Fetch stock_fundamentals cache via HTTP from the Vercel-hosted app.
+
+    Used when running inside GitHub Actions (no DB credentials in CI). Mirrors
+    _load_cached_daily_bars_via_http. Returns {ticker: fundamentals_dict}; any
+    failure (no secret, HTTP error, parse error) degrades to {} and the bots
+    simply trade without fundamentals that wave.
+    """
+    cron_secret = os.environ.get('CRON_SECRET', '')
+    if not cron_secret:
+        logger.info("No CRON_SECRET in env — skipping fundamentals HTTP fetch")
+        return {}
+
+    base_url = os.environ.get('APP_BASE_URL', 'https://apestogether.ai').rstrip('/')
+    url = f"{base_url}/api/cron/get-fundamentals"
+    headers = {'X-Cron-Secret': cron_secret}
+    params = {'tickers': ','.join(tickers)} if tickers else {}
+
+    t0 = time.time()
+    try:
+        resp = requests.get(url, params=params, headers=headers, timeout=20)
+    except Exception as e:
+        logger.warning(f"Fundamentals HTTP fetch failed: {e}")
+        return {}
+
+    elapsed_ms = int((time.time() - t0) * 1000)
+    if resp.status_code != 200:
+        logger.warning(f"Fundamentals HTTP fetch returned HTTP {resp.status_code} ({elapsed_ms} ms)")
+        return {}
+
+    try:
+        data = resp.json()
+    except Exception as e:
+        logger.warning(f"Fundamentals HTTP response not JSON: {e}")
+        return {}
+
+    if not data.get('success'):
+        logger.warning(f"Fundamentals HTTP fetch reported failure: {data.get('error')}")
+        return {}
+
+    result = data.get('fundamentals') or {}
+    logger.info(f"Fundamentals cache hit (via HTTP): {len(result)}/{len(tickers)} tickers in {elapsed_ms} ms")
+    return result
+
+
+def _load_fundamentals(tickers):
+    """Load fundamentals from the stock_fundamentals cache.
+
+    Returns {ticker: fundamentals_dict}. Two access paths, identical to
+    _load_cached_daily_bars:
+      1. Direct DB query — inside the Flask app (Vercel serverless).
+      2. HTTP fetch from /api/cron/get-fundamentals — from GitHub Actions.
+
+    Never raises; missing table / no app context / CI all degrade to {} (or the
+    HTTP path) so the bots keep trading without fundamentals if unavailable.
+    """
+    if os.environ.get('GITHUB_ACTIONS') == 'true':
+        return _load_fundamentals_via_http(tickers)
+
+    try:
+        from models import StockFundamentals
+    except ImportError:
+        return _load_fundamentals_via_http(tickers)
+
+    try:
+        rows = StockFundamentals.query.filter(StockFundamentals.ticker.in_(tickers)).all()
+    except Exception as e:
+        logger.info(f"StockFundamentals direct-DB query unavailable ({e}); trying HTTP fallback")
+        return _load_fundamentals_via_http(tickers)
+
+    result = {}
+    for r in rows:
+        result[r.ticker] = {
+            'pe_ratio': r.pe_ratio,
+            'peg_ratio': r.peg_ratio,
+            'price_to_book': r.price_to_book,
+            'eps': r.eps,
+            'dividend_yield': r.dividend_yield,
+            'beta': r.beta,
+            'analyst_target_price': r.analyst_target_price,
+            'market_cap': r.market_cap,
+            'sector': r.sector,
+            'name': r.name,
+        }
+    return result
+
+
 # ── Finnhub Health Probe (for admin dashboard) ──────────────────────────────
 #
 # The admin "Market Research Data Sources" card needs to know whether each
@@ -1436,6 +1628,7 @@ class MarketDataHub:
         self.top_movers = {}      # {gainers: [...], losers: [...]}
         self.earnings_calendar = {}  # {ticker: days_until_earnings} (AV, market-wide)
         self.macro = {}           # {ten_year_yield, yield_trend, yield_change_bps} (AV)
+        self.fundamentals = {}    # {ticker: {pe_ratio, dividend_yield, analyst_target_price, beta, ...}} (AV OVERVIEW cache)
         self.last_refresh = None
         self.data_quality = {     # Track what succeeded
             'prices': False,      # 100-day OHLCV history (cache or live)
@@ -1448,6 +1641,7 @@ class MarketDataHub:
             'movers': False,
             'earnings': False,    # AV EARNINGS_CALENDAR (upcoming report dates)
             'macro': False,       # AV TREASURY_YIELD (10Y level + trend)
+            'fundamentals': False,  # AV OVERVIEW cache (P/E, div yield, analyst target, beta)
         }
 
     def refresh(self, include_extras=True):
@@ -1530,6 +1724,16 @@ class MarketDataHub:
             if t in self.indicators:
                 self.indicators[t]['price'] = q['price']
                 self.indicators[t]['volume'] = q.get('volume', self.indicators[t].get('volume', 0))
+
+        # Phase 3c: Fundamentals cache read (CORE path — cheap DB/HTTP read, not
+        # a live AV call). Loaded every wave so valuation / dividend /
+        # analyst-target signals apply regardless of include_extras. Populated
+        # weekly by /api/cron/refresh-fundamentals; degrades to {} if absent.
+        try:
+            self.fundamentals = _load_fundamentals(tickers)
+            self.data_quality['fundamentals'] = len(self.fundamentals) > 0
+        except Exception as e:
+            logger.warning(f"Fundamentals load failed (non-fatal): {e}")
 
         if include_extras:
             # Phase 4: News sentiment (AlphaVantage)
@@ -1653,6 +1857,21 @@ class MarketDataHub:
             data['ten_year_yield'] = self.macro.get('ten_year_yield')
             data['yield_trend'] = self.macro.get('yield_trend')
 
+        # Merge per-ticker fundamentals (AV OVERVIEW cache). Feeds valuation /
+        # dividend / analyst-target-upside signals. Compute analyst upside here
+        # (needs current price) so scoring just reads a ratio.
+        fund = self.fundamentals.get(ticker)
+        if fund:
+            data['pe_ratio'] = fund.get('pe_ratio')
+            data['peg_ratio'] = fund.get('peg_ratio')
+            data['dividend_yield_fund'] = fund.get('dividend_yield')
+            data['beta'] = fund.get('beta')
+            data['analyst_target_price'] = fund.get('analyst_target_price')
+            target = fund.get('analyst_target_price')
+            price = data.get('price')
+            if target and price and price > 0:
+                data['analyst_target_upside'] = (target - price) / price
+
         return data
 
     def get_sector_tickers(self, sector):
@@ -1683,6 +1902,7 @@ class MarketDataHub:
             'tickers_with_earnings': len(self.earnings_calendar),
             'ten_year_yield': self.macro.get('ten_year_yield') if self.macro else None,
             'yield_trend': self.macro.get('yield_trend') if self.macro else None,
+            'tickers_with_fundamentals': len(self.fundamentals),
             'last_refresh': self.last_refresh.isoformat() if self.last_refresh else None,
             'data_quality': self.data_quality,
         }
