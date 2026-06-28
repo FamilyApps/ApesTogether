@@ -636,11 +636,83 @@ class SubscriptionsViewModel: ObservableObject {
     
     func loadAll() async {
         isLoading = true
+        #if DEBUG
+        // App Store screenshot frame: launch with `-screenshotMode` to render a
+        // self-consistent, aspirational Earnings card instead of hitting the API.
+        // Compiled out of release builds entirely.
+        if ProcessInfo.processInfo.arguments.contains("-screenshotMode") {
+            applyScreenshotFixture()
+            isLoading = false
+            return
+        }
+        #endif
         await loadSubscriptions()
         await loadPayouts()
         await loadNotifications()
         isLoading = false
     }
+
+    #if DEBUG
+    /// Seeds the Subscriptions tab with an aspirational earnings fixture for the
+    /// App Store "earnings" screenshot. Numbers are internally consistent:
+    /// 499 subscribers x $6.50/mo = $3,243.50 estimated, W-9 on file, and three
+    /// prior months of paid history. DEBUG-only; never shipped to production.
+    private func applyScreenshotFixture() {
+        let perSub = 6.50
+        let currentSubs = 499
+        let cal = Calendar.current
+        let now = Date()
+
+        let monthFmt = DateFormatter()
+        monthFmt.dateFormat = "MMM yyyy"
+        let dayFmt = DateFormatter()
+        dayFmt.dateFormat = "yyyy-MM-dd"
+
+        func monthsAgo(_ n: Int) -> Date { cal.date(byAdding: .month, value: -n, to: now) ?? now }
+
+        // Prior closed months, newest first, trending up to the current estimate.
+        let pastSubs = [487, 461, 433]
+        let history: [PayoutHistoryItem] = pastSubs.enumerated().map { idx, subs in
+            let d = monthsAgo(idx + 1)
+            return PayoutHistoryItem(
+                id: idx + 1,
+                periodStart: dayFmt.string(from: d),
+                periodEnd: dayFmt.string(from: d),
+                periodLabel: monthFmt.string(from: d),
+                subscriberCount: subs,
+                amount: Double(subs) * perSub,
+                paymentStatus: "paid",
+                paidAt: dayFmt.string(from: d)
+            )
+        }
+
+        // Next upcoming 15th, mirroring the backend's payout schedule.
+        let comps = cal.dateComponents([.year, .month, .day], from: now)
+        let nextPayoutDate: Date = {
+            if (comps.day ?? 1) < 15 {
+                return cal.date(from: DateComponents(year: comps.year, month: comps.month, day: 15)) ?? now
+            }
+            let nextMonth = cal.date(byAdding: .month, value: 1, to: now) ?? now
+            let nc = cal.dateComponents([.year, .month], from: nextMonth)
+            return cal.date(from: DateComponents(year: nc.year, month: nc.month, day: 15)) ?? now
+        }()
+
+        subscriberCount = currentSubs
+        payouts = PayoutSummaryResponse(
+            subscriberCount: currentSubs,
+            bonusSubscriberCount: 0,
+            estimatedCurrentPayout: Double(currentSubs) * perSub,
+            perSubscriberPayout: perSub,
+            lifetimePaid: history.reduce(0) { $0 + $1.amount },
+            nextPayoutDate: dayFmt.string(from: nextPayoutDate),
+            currency: "USD",
+            w9Required: false,
+            w9OnFile: true,
+            heldPayoutTotal: 0,
+            history: history
+        )
+    }
+    #endif
 
     func loadPayouts() async {
         do {

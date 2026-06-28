@@ -63,6 +63,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.viewModelScope
+import com.apestogether.app.BuildConfig
 import com.apestogether.app.data.api.ApiService
 import com.apestogether.app.data.models.NotificationItem
 import com.apestogether.app.data.models.PayoutHistoryItem
@@ -85,6 +86,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
@@ -874,6 +876,20 @@ class SubscriptionsViewModel @Inject constructor(
      */
     fun refresh(manual: Boolean = false) {
         viewModelScope.launch {
+            // Play Store screenshot frame: flip SHOW_SCREENSHOT_FIXTURE in a DEBUG
+            // build to render a self-consistent, aspirational Earnings card instead
+            // of hitting the API. Gated by BuildConfig.DEBUG so release is unaffected.
+            if (BuildConfig.DEBUG && SHOW_SCREENSHOT_FIXTURE) {
+                _state.value = SubsState.Loaded(
+                    subscriptions = emptyList(),
+                    subscribers = emptyList(),
+                    subscriberCount = 499,
+                    notifications = emptyList(),
+                    payouts = screenshotPayoutFixture(),
+                )
+                if (manual) _isRefreshing.value = false
+                return@launch
+            }
             val hadData = _state.value is SubsState.Loaded
             when {
                 manual -> _isRefreshing.value = true
@@ -927,4 +943,58 @@ class SubscriptionsViewModel @Inject constructor(
         }
     }
 
+    companion object {
+        // Flip to true in a DEBUG build to render an aspirational Earnings card
+        // for the Play Store screenshot, then revert. Ignored in release builds
+        // (gated by BuildConfig.DEBUG at the call site).
+        private val SHOW_SCREENSHOT_FIXTURE = false
+
+        /**
+         * Self-consistent aspirational earnings fixture for the Play Store
+         * screenshot: 499 subscribers x $6.50/mo = $3,243.50 estimated, W-9 on
+         * file, and three prior months of paid history trending up to today.
+         */
+        private fun screenshotPayoutFixture(): PayoutSummaryResponse {
+            val perSub = 6.50
+            val currentSubs = 499
+            val monthFmt = SimpleDateFormat("MMM yyyy", Locale.US)
+            val dayFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+
+            val pastSubs = listOf(487, 461, 433)
+            val history = pastSubs.mapIndexed { idx, subs ->
+                val c = Calendar.getInstance().apply { add(Calendar.MONTH, -(idx + 1)) }
+                val d = c.time
+                PayoutHistoryItem(
+                    id = idx + 1,
+                    periodStart = dayFmt.format(d),
+                    periodEnd = dayFmt.format(d),
+                    periodLabel = monthFmt.format(d),
+                    subscriberCount = subs,
+                    amount = subs * perSub,
+                    paymentStatus = "paid",
+                    paidAt = dayFmt.format(d),
+                )
+            }
+
+            // Next upcoming 15th, mirroring the backend's payout schedule.
+            val next = Calendar.getInstance().apply {
+                if (get(Calendar.DAY_OF_MONTH) >= 15) add(Calendar.MONTH, 1)
+                set(Calendar.DAY_OF_MONTH, 15)
+            }
+
+            return PayoutSummaryResponse(
+                subscriberCount = currentSubs,
+                bonusSubscriberCount = 0,
+                estimatedCurrentPayout = currentSubs * perSub,
+                perSubscriberPayout = perSub,
+                lifetimePaid = history.sumOf { it.amount },
+                nextPayoutDate = dayFmt.format(next.time),
+                currency = "USD",
+                w9Required = false,
+                w9OnFile = true,
+                heldPayoutTotal = 0.0,
+                history = history,
+            )
+        }
+    }
 }
