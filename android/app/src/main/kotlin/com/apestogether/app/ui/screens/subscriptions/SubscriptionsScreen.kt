@@ -22,6 +22,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Notifications
@@ -61,6 +65,8 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.viewModelScope
 import com.apestogether.app.data.api.ApiService
 import com.apestogether.app.data.models.NotificationItem
+import com.apestogether.app.data.models.PayoutHistoryItem
+import com.apestogether.app.data.models.PayoutSummaryResponse
 import com.apestogether.app.data.models.Subscriber
 import com.apestogether.app.data.models.SubscriptionMade
 import com.apestogether.app.ui.theme.AppBackground
@@ -77,6 +83,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -101,6 +108,7 @@ import javax.inject.Inject
 fun SubscriptionsScreen(
     modifier: Modifier = Modifier,
     onOpenPortfolio: (String) -> Unit,
+    onOpenW9: () -> Unit = {},
 ) {
     val viewModel: SubscriptionsViewModel = hiltViewModel()
     val state by viewModel.state.collectAsState()
@@ -146,7 +154,11 @@ fun SubscriptionsScreen(
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(24.dp),
                 ) {
-                    SubscribersSection(s.subscribers, s.subscriberCount)
+                    SubscribersSection(
+                        count = s.subscriberCount,
+                        payouts = s.payouts,
+                        onOpenW9 = onOpenW9,
+                    )
 
                     SubscriptionsSection(
                         subscriptions = s.subscriptions,
@@ -212,8 +224,9 @@ fun SubscriptionsScreen(
 
 @Composable
 private fun SubscribersSection(
-    subscribers: List<Subscriber>,
     count: Int,
+    payouts: PayoutSummaryResponse?,
+    onOpenW9: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -222,50 +235,160 @@ private fun SubscribersSection(
             Text("$count", color = PrimaryAccent, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         }
 
-        if (subscribers.isEmpty()) {
+        val hasEarnings = payouts != null &&
+            ((payouts.subscriberCount + payouts.bonusSubscriberCount) > 0 || payouts.history.isNotEmpty())
+        if (payouts != null && hasEarnings) {
+            EarningsCard(payouts, onOpenW9)
+            if (payouts.history.isNotEmpty()) {
+                PaymentHistorySection(payouts.history)
+            }
+        } else {
             EmptyCard(
                 icon = Icons.Default.PersonAdd,
                 title = "No subscribers yet",
-                body = "Share your portfolio to attract subscribers",
+                body = "Share your portfolio to start earning",
             )
-        } else {
-            CardColumn {
-                subscribers.forEachIndexed { idx, sub ->
-                    SubscriberRow(sub)
-                    if (idx < subscribers.size - 1) AccentRowDivider()
+        }
+    }
+}
+
+@Composable
+private fun EarningsCard(p: PayoutSummaryResponse, onOpenW9: () -> Unit) {
+    val warnAmber = Color(0xFFF59E0B)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(CardBackground)
+            .border(0.5.dp, CardBorder, RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Estimated this month", color = TextSecondary, fontSize = 12.sp)
+            Text(
+                formatCurrencyWhole(p.estimatedCurrentPayout),
+                color = PrimaryAccent,
+                fontSize = 32.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                "${p.subscriberCount} subscriber${if (p.subscriberCount == 1) "" else "s"} \u00D7 " +
+                    "${formatCurrency(p.perSubscriberPayout)}/mo. Estimated before taxes; actual amounts vary.",
+                color = TextMuted,
+                fontSize = 11.sp,
+            )
+        }
+
+        Box(Modifier.fillMaxWidth().height(0.5.dp).background(CardBorder))
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(Icons.Default.CalendarMonth, null, tint = PrimaryAccent, modifier = Modifier.size(16.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Next payout", color = TextMuted, fontSize = 11.sp)
+                Text(
+                    formatPayoutDate(p.nextPayoutDate),
+                    color = TextPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            Text("Paid monthly by check", color = TextMuted, fontSize = 11.sp)
+        }
+
+        if (p.w9Required) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(warnAmber.copy(alpha = 0.12f))
+                    .clickable { onOpenW9() }
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(Icons.Default.Warning, null, tint = warnAmber, modifier = Modifier.size(20.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Complete your W-9 to get paid",
+                        color = TextPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        if (p.heldPayoutTotal > 0)
+                            "${formatCurrency(p.heldPayoutTotal)} is on hold until we receive it."
+                        else
+                            "Required before we can send your first check.",
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                    )
                 }
+                Icon(Icons.Default.ChevronRight, null, tint = TextMuted, modifier = Modifier.size(18.dp))
+            }
+        } else if (p.w9OnFile) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(Icons.Default.CheckCircle, null, tint = Gains, modifier = Modifier.size(16.dp))
+                Text(
+                    "W-9 on file \u2014 you're all set to be paid.",
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun SubscriberRow(sub: Subscriber) {
-    Row(
+private fun PaymentHistorySection(items: List<PayoutHistoryItem>) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Payment history", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        CardColumn {
+            items.forEachIndexed { idx, item ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.weight(1f)) {
+                        Text(item.periodLabel, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text(
+                            "${item.subscriberCount} subscriber${if (item.subscriberCount == 1) "" else "s"}",
+                            color = TextMuted,
+                            fontSize = 11.sp,
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(formatCurrency(item.amount), color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        PayoutStatusBadge(item.paymentStatus)
+                    }
+                }
+                if (idx < items.size - 1) AccentRowDivider()
+            }
+        }
+    }
+}
+
+@Composable
+private fun PayoutStatusBadge(status: String) {
+    val (label, color) = when (status) {
+        "paid" -> "Paid" to Gains
+        "held" -> "On hold" to Color(0xFFF59E0B)
+        else -> "Pending" to TextMuted
+    }
+    Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .clip(CircleShape)
+            .background(color.copy(alpha = 0.15f))
+            .padding(horizontal = 8.dp, vertical = 3.dp),
     ) {
-        Icon(
-            imageVector = Icons.Default.AccountCircle,
-            contentDescription = null,
-            tint = PrimaryAccent,
-            modifier = Modifier.size(28.dp),
-        )
-        Spacer(Modifier.width(10.dp))
-        Text(
-            text = sub.subscriber?.publicName ?: "User",
-            color = TextPrimary,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(1f),
-        )
-        Text(
-            text = "Since ${formatShortDate(sub.createdAt)}",
-            color = TextMuted,
-            fontSize = 11.sp,
-        )
+        Text(label, color = color, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -615,6 +738,27 @@ private fun formatShortDate(iso: String): String {
     return SimpleDateFormat("MMM d", Locale.US).format(parsed)
 }
 
+private fun formatCurrency(value: Double): String =
+    NumberFormat.getCurrencyInstance(Locale.US).apply {
+        minimumFractionDigits = 2
+        maximumFractionDigits = 2
+    }.format(value)
+
+private fun formatCurrencyWhole(value: Double): String =
+    NumberFormat.getCurrencyInstance(Locale.US).apply {
+        maximumFractionDigits = 0
+    }.format(value)
+
+private fun formatPayoutDate(iso: String?): String {
+    if (iso == null) return "\u2014"
+    val parsed = runCatching {
+        SimpleDateFormat("yyyy-MM-dd", Locale.US)
+            .apply { timeZone = TimeZone.getTimeZone("UTC") }
+            .parse(iso)
+    }.getOrNull() ?: return iso
+    return SimpleDateFormat("MMM d", Locale.US).format(parsed)
+}
+
 private fun formatRelativeDate(iso: String): String {
     val parsed = parseIso(iso) ?: return iso
     val now = System.currentTimeMillis()
@@ -695,6 +839,7 @@ sealed interface SubsState {
         val subscribers: List<Subscriber>,
         val subscriberCount: Int,
         val notifications: List<NotificationItem>,
+        val payouts: PayoutSummaryResponse?,
     ) : SubsState
 
     data class Error(val message: String) : SubsState
@@ -737,6 +882,7 @@ class SubscriptionsViewModel @Inject constructor(
             }
             val subsResult = runCatching { apiService.getSubscriptions() }
             val notifResult = runCatching { apiService.getNotificationHistory(limit = 30, offset = 0) }
+            val payoutResult = runCatching { apiService.getPayouts() }
             val resp = subsResult.getOrNull()
             if (resp == null) {
                 // Only surface a full-screen error on the very first load; a
@@ -752,6 +898,7 @@ class SubscriptionsViewModel @Inject constructor(
                 subscribers = resp.subscribers,
                 subscriberCount = resp.subscriberCount,
                 notifications = notifResult.getOrNull()?.notifications ?: emptyList(),
+                payouts = payoutResult.getOrNull(),
             )
             if (manual) _isRefreshing.value = false
         }

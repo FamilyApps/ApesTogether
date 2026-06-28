@@ -255,6 +255,36 @@ struct SubscriptionsResponse: Codable {
     let subscriberCount: Int
 }
 
+// MARK: - Creator earnings (GET /payouts)
+
+/// Creator-facing earnings summary that powers the Earnings card on the
+/// Subscriptions tab. All forward-looking figures are estimates until a period
+/// closes and a payout record is generated. Decoded with `.convertFromSnakeCase`.
+struct PayoutSummaryResponse: Codable {
+    let subscriberCount: Int
+    let bonusSubscriberCount: Int
+    let estimatedCurrentPayout: Double
+    let perSubscriberPayout: Double
+    let lifetimePaid: Double
+    let nextPayoutDate: String?
+    let currency: String?
+    let w9Required: Bool
+    let w9OnFile: Bool
+    let heldPayoutTotal: Double
+    let history: [PayoutHistoryItem]
+}
+
+struct PayoutHistoryItem: Codable, Identifiable {
+    let id: Int
+    let periodStart: String
+    let periodEnd: String
+    let periodLabel: String
+    let subscriberCount: Int
+    let amount: Double
+    let paymentStatus: String       // 'pending' | 'paid' | 'held'
+    let paidAt: String?
+}
+
 /// Response from /subscriptions/slot-for-creator. On success `slot` + the
 /// product IDs are set; on a 409 `error` is "max_reached" or "already_subscribed".
 struct SubscriptionSlotResponse: Codable {

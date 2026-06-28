@@ -20,6 +20,11 @@ sealed class Screen(val route: String) {
     // Pushed
     data object Settings : Screen("settings")
 
+    // Pushed (no args). In-app W-9 collection (iOS `TaxInfoView`). Reached from
+    // the Earnings card's "Complete your W-9 to get paid" CTA on the
+    // Subscriptions tab — a creator must have a W-9 on file before payout.
+    data object W9 : Screen("w9")
+
     // Pushed with arg
     data object PortfolioDetail : Screen("portfolio/{slug}") {
         fun route(slug: String) = "portfolio/$slug"

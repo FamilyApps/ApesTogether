@@ -6,6 +6,7 @@ struct SubscriptionsView: View {
     @StateObject private var viewModel = SubscriptionsViewModel()
     @EnvironmentObject var subscriptionManager: SubscriptionManager
     @State private var showSettings = false
+    @State private var showW9 = false
     @Environment(\.scenePhase) private var scenePhase
 
     /// Clear the app icon badge and the system-level delivered notifications
@@ -53,6 +54,7 @@ struct SubscriptionsView: View {
             }
             .appNavBar(showSettings: $showSettings)
             .sheet(isPresented: $showSettings) { SettingsView() }
+            .sheet(isPresented: $showW9) { TaxInfoView() }
             .alert("Manage Subscription", isPresented: $viewModel.showCancelConfirm) {
                 Button("Not Now", role: .cancel) {}
                 Button("Manage") {
@@ -111,7 +113,13 @@ struct SubscriptionsView: View {
                     .foregroundColor(.primaryAccent)
             }
             
-            if viewModel.subscribers.isEmpty {
+            if let payouts = viewModel.payouts,
+               (payouts.subscriberCount + payouts.bonusSubscriberCount) > 0 || !payouts.history.isEmpty {
+                earningsCard(payouts)
+                if !payouts.history.isEmpty {
+                    paymentHistorySection(payouts.history)
+                }
+            } else {
                 HStack {
                     Image(systemName: "person.badge.plus")
                         .foregroundColor(.primaryAccent.opacity(0.6))
@@ -120,7 +128,7 @@ struct SubscriptionsView: View {
                         Text("No subscribers yet")
                             .font(.subheadline.weight(.medium))
                             .foregroundColor(.textPrimary)
-                        Text("Share your portfolio to attract subscribers")
+                        Text("Share your portfolio to start earning")
                             .font(.caption)
                             .foregroundColor(.textSecondary)
                     }
@@ -128,32 +136,170 @@ struct SubscriptionsView: View {
                 }
                 .padding()
                 .cardStyle(padding: 0)
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(viewModel.subscribers) { sub in
-                        HStack {
-                            Image(systemName: "person.circle.fill")
-                                .foregroundColor(.primaryAccent)
-                                .font(.title3)
-                            Text(sub.subscriber?.publicName ?? "User")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundColor(.textPrimary)
-                            Spacer()
-                            Text("Since \(formatShortDate(sub.createdAt))")
-                                .font(.caption)
-                                .foregroundColor(.textMuted)
-                        }
-                        .padding()
-                        if sub.id != viewModel.subscribers.last?.id {
-                            AccentDivider()
-                        }
-                    }
-                }
-                .cardStyle(padding: 0)
             }
         }
     }
     
+    // MARK: Earnings card
+
+    private func earningsCard(_ p: PayoutSummaryResponse) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Estimated this month")
+                    .font(.caption)
+                    .foregroundColor(.textSecondary)
+                Text(currencyWhole(p.estimatedCurrentPayout))
+                    .font(.system(size: 34, weight: .bold))
+                    .foregroundColor(.primaryAccent)
+                Text("\(p.subscriberCount) subscriber\(p.subscriberCount == 1 ? "" : "s") \u{00D7} \(currency(p.perSubscriberPayout))/mo. Estimated before taxes; actual amounts vary.")
+                    .font(.caption2)
+                    .foregroundColor(.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Divider().background(Color.cardBorder)
+
+            HStack(spacing: 10) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 14))
+                    .foregroundColor(.primaryAccent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Next payout")
+                        .font(.caption2)
+                        .foregroundColor(.textMuted)
+                    Text(formatPayoutDate(p.nextPayoutDate))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.textPrimary)
+                }
+                Spacer()
+                Text("Paid monthly by check")
+                    .font(.caption2)
+                    .foregroundColor(.textMuted)
+            }
+
+            if p.w9Required {
+                Button { showW9 = true } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Complete your W-9 to get paid")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(.textPrimary)
+                            Text(p.heldPayoutTotal > 0
+                                 ? "\(currency(p.heldPayoutTotal)) is on hold until we receive it."
+                                 : "Required before we can send your first check.")
+                                .font(.caption2)
+                                .foregroundColor(.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundColor(.textMuted)
+                    }
+                    .padding(12)
+                    .background(Color.orange.opacity(0.12))
+                    .cornerRadius(10)
+                }
+            } else if p.w9OnFile {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundColor(.gains)
+                    Text("W-9 on file \u{2014} you're all set to be paid.")
+                        .font(.caption)
+                        .foregroundColor(.textSecondary)
+                    Spacer()
+                }
+            }
+        }
+        .padding()
+        .cardStyle(padding: 0)
+    }
+
+    // MARK: Payment history
+
+    private func paymentHistorySection(_ items: [PayoutHistoryItem]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Payment history")
+                .font(.caption.weight(.semibold))
+                .foregroundColor(.textSecondary)
+            VStack(spacing: 0) {
+                ForEach(items) { item in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.periodLabel)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundColor(.textPrimary)
+                            Text("\(item.subscriberCount) subscriber\(item.subscriberCount == 1 ? "" : "s")")
+                                .font(.caption2)
+                                .foregroundColor(.textMuted)
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text(currency(item.amount))
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(.textPrimary)
+                            payoutStatusBadge(item.paymentStatus)
+                        }
+                    }
+                    .padding()
+                    if item.id != items.last?.id {
+                        AccentDivider()
+                    }
+                }
+            }
+            .cardStyle(padding: 0)
+        }
+    }
+
+    private func payoutStatusBadge(_ status: String) -> some View {
+        let (label, color): (String, Color) = {
+            switch status {
+            case "paid": return ("Paid", .gains)
+            case "held": return ("On hold", .orange)
+            default: return ("Pending", .textMuted)
+            }
+        }()
+        return Text(label)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundColor(color)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.15))
+            .clipShape(Capsule())
+    }
+
+    // MARK: Earnings formatting
+
+    private func currency(_ value: Double) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencyCode = "USD"
+        f.maximumFractionDigits = 2
+        f.minimumFractionDigits = 2
+        return f.string(from: NSNumber(value: value)) ?? String(format: "$%.2f", value)
+    }
+
+    private func currencyWhole(_ value: Double) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencyCode = "USD"
+        f.maximumFractionDigits = 0
+        return f.string(from: NSNumber(value: value)) ?? String(format: "$%.0f", value)
+    }
+
+    private func formatPayoutDate(_ iso: String?) -> String {
+        guard let iso = iso else { return "\u{2014}" }
+        let inFmt = DateFormatter()
+        inFmt.dateFormat = "yyyy-MM-dd"
+        inFmt.timeZone = TimeZone(identifier: "UTC")
+        guard let date = inFmt.date(from: iso) else { return iso }
+        let outFmt = DateFormatter()
+        outFmt.dateFormat = "MMM d"
+        return outFmt.string(from: date)
+    }
+
     // MARK: - Subscriptions Section
     
     private var subscriptionsSection: some View {
@@ -486,12 +632,22 @@ class SubscriptionsViewModel: ObservableObject {
     // The store slot label ("A".."T") of the subscription the user tapped
     // "Manage" on, so the confirm alert can name the exact store entry to cancel.
     @Published var managingSlotLabel: String?
+    @Published var payouts: PayoutSummaryResponse?
     
     func loadAll() async {
         isLoading = true
         await loadSubscriptions()
+        await loadPayouts()
         await loadNotifications()
         isLoading = false
+    }
+
+    func loadPayouts() async {
+        do {
+            payouts = try await APIService.shared.getPayouts()
+        } catch {
+            // Non-critical — the Subscriptions tab still works without earnings.
+        }
     }
     
     func loadSubscriptions() async {

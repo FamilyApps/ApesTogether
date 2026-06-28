@@ -571,6 +571,35 @@ data class W9SubmitResponse(
     val message: String? = null,
 )
 
+// ── Creator earnings (GET /payouts) ───────────────────────────────────────
+
+@Serializable
+data class PayoutSummaryResponse(
+    @SerialName("subscriber_count") val subscriberCount: Int = 0,
+    @SerialName("bonus_subscriber_count") val bonusSubscriberCount: Int = 0,
+    @SerialName("estimated_current_payout") val estimatedCurrentPayout: Double = 0.0,
+    @SerialName("per_subscriber_payout") val perSubscriberPayout: Double = 0.0,
+    @SerialName("lifetime_paid") val lifetimePaid: Double = 0.0,
+    @SerialName("next_payout_date") val nextPayoutDate: String? = null,
+    val currency: String? = null,
+    @SerialName("w9_required") val w9Required: Boolean = false,
+    @SerialName("w9_on_file") val w9OnFile: Boolean = false,
+    @SerialName("held_payout_total") val heldPayoutTotal: Double = 0.0,
+    val history: List<PayoutHistoryItem> = emptyList(),
+)
+
+@Serializable
+data class PayoutHistoryItem(
+    val id: Int,
+    @SerialName("period_start") val periodStart: String,
+    @SerialName("period_end") val periodEnd: String,
+    @SerialName("period_label") val periodLabel: String,
+    @SerialName("subscriber_count") val subscriberCount: Int,
+    val amount: Double,
+    @SerialName("payment_status") val paymentStatus: String,  // pending | paid | held
+    @SerialName("paid_at") val paidAt: String? = null,
+)
+
 // ── Empty response (for endpoints that just return {success: true}) ───────
 
 @Serializable

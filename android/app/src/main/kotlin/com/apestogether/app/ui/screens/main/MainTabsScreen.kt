@@ -64,6 +64,7 @@ fun MainTabsScreen(
     onOpenPortfolio: (String) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenAddStocks: () -> Unit,
+    onOpenW9: () -> Unit,
     onSignedOut: () -> Unit,
 ) {
     var selectedTab by remember { mutableStateOf(0) }
@@ -138,6 +139,7 @@ fun MainTabsScreen(
             3 -> SubscriptionsScreen(
                 modifier = Modifier.padding(padding),
                 onOpenPortfolio = onOpenPortfolio,
+                onOpenW9 = onOpenW9,
             )
         }
     }

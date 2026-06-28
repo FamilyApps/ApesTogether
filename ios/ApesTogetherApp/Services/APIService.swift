@@ -87,6 +87,12 @@ class APIService {
         return try await get("/subscriptions")
     }
 
+    /// Creator earnings summary (estimate, next payout, W-9 status, history)
+    /// for the Earnings card on the Subscriptions tab.
+    func getPayouts() async throws -> PayoutSummaryResponse {
+        return try await get("/payouts")
+    }
+
     /// Resolve which generic store "slot" product to purchase to subscribe to
     /// [subscribedToId]. The backend maps slots to creators per-user (the store
     /// only knows about "Subscription A/B/..."). Returns the slot's product IDs,

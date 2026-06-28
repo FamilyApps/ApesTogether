@@ -16,6 +16,7 @@ import com.apestogether.app.data.models.PortfolioPreferencesResponse
 import com.apestogether.app.data.models.PortfolioResponse
 import com.apestogether.app.data.models.PurchaseValidationRequest
 import com.apestogether.app.data.models.PurchaseValidationResponse
+import com.apestogether.app.data.models.PayoutSummaryResponse
 import com.apestogether.app.data.models.SetScaleRequest
 import com.apestogether.app.data.models.SetScaleResponse
 import com.apestogether.app.data.models.UpdatePortfolioPreferencesRequest
@@ -107,6 +108,10 @@ interface ApiService {
     // ── Subscriptions / IAP ──────────────────────────────────────────────
     @GET("subscriptions")
     suspend fun getSubscriptions(): SubscriptionsResponse
+
+    /** Creator earnings summary (estimate, next payout, W-9 status, history). */
+    @GET("payouts")
+    suspend fun getPayouts(): PayoutSummaryResponse
 
     /**
      * Resolve which generic store "slot" product to purchase to subscribe to

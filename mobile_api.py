@@ -839,6 +839,94 @@ def tax_w9_status():
     })
 
 
+@mobile_api.route('/payouts', methods=['GET'])
+@require_auth
+def creator_payouts():
+    """Creator-facing earnings summary for the signed-in user.
+
+    Powers the in-app "Earnings" card on the Subscriptions tab: an estimate of
+    the in-progress month (current active subscribers x the per-sub creator
+    share), the next payout date, W-9 status (so the client can prompt the user
+    to complete it before they can be paid), and the full payout history (which
+    reflects the 'paid' status set when a check is cut / reconciled in Xero).
+
+    All amounts are estimates until a period closes and a XeroPayoutRecord is
+    generated; the client labels them accordingly.
+    """
+    from models import (TaxpayerProfile, XeroPayoutRecord, MobileSubscription,
+                        AdminSubscription)
+
+    uid = g.user_id
+
+    # Current active real subscribers (matches the payable definition used by
+    # the payout pipeline) + any company-gifted subs.
+    real_subs = MobileSubscription.query.filter_by(
+        subscribed_to_id=uid, status='active'
+    ).count()
+    admin = AdminSubscription.query.filter_by(portfolio_user_id=uid).first()
+    bonus_subs = (admin.bonus_subscriber_count or 0) if admin else 0
+
+    # Authoritative economics via the same model calc the pipeline uses, so the
+    # estimate can never drift from the real revenue split.
+    est = XeroPayoutRecord(
+        portfolio_user_id=uid, period_start=date.today(), period_end=date.today(),
+        real_subscriber_count=real_subs, bonus_subscriber_count=bonus_subs,
+    )
+    est.calculate_totals()
+
+    # W-9 status — the creator can't actually be paid until this is on file.
+    profile = TaxpayerProfile.query.filter_by(user_id=uid).first()
+    on_file = bool(profile and profile.has_tin_on_file)
+    w9_required = _user_is_payout_eligible(uid) and not on_file
+    held = XeroPayoutRecord.query.filter_by(
+        portfolio_user_id=uid, payment_status='held'
+    ).all()
+
+    # Past payouts, newest first. payment_status flips to 'paid' (with paid_at)
+    # when the check is written / reconciled in Xero.
+    records = XeroPayoutRecord.query.filter_by(
+        portfolio_user_id=uid
+    ).order_by(XeroPayoutRecord.period_start.desc()).all()
+    history = [{
+        'id': r.id,
+        'period_start': r.period_start.isoformat(),
+        'period_end': r.period_end.isoformat(),
+        'period_label': r.period_start.strftime('%b %Y'),
+        'subscriber_count': r.total_subscriber_count,
+        'amount': round(r.total_payout, 2),
+        'payment_status': r.payment_status,
+        'paid_at': r.paid_at.isoformat() if r.paid_at else None,
+    } for r in records]
+
+    # Payouts go out on the 15th, after the prior month closes. Show the next
+    # upcoming 15th as a friendly "next payout" target.
+    today = date.today()
+    if today.day < 15:
+        next_payout = today.replace(day=15)
+    elif today.month == 12:
+        next_payout = date(today.year + 1, 1, 15)
+    else:
+        next_payout = date(today.year, today.month + 1, 15)
+
+    lifetime_paid = round(
+        sum(r['amount'] for r in history if r['payment_status'] == 'paid'), 2
+    )
+
+    return jsonify({
+        'subscriber_count': real_subs,
+        'bonus_subscriber_count': bonus_subs,
+        'estimated_current_payout': round(est.total_payout, 2),
+        'per_subscriber_payout': AdminSubscription.INFLUENCER_PAYOUT_PER_SUB,
+        'lifetime_paid': lifetime_paid,
+        'next_payout_date': next_payout.isoformat(),
+        'currency': 'USD',
+        'w9_required': w9_required,
+        'w9_on_file': on_file,
+        'held_payout_total': round(sum(h.total_payout for h in held), 2),
+        'history': history,
+    })
+
+
 @mobile_api.route('/tax/w9', methods=['POST'])
 @require_auth
 @with_db_retry

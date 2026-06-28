@@ -5,6 +5,7 @@ import com.apestogether.app.ui.screens.main.MainTabsScreen
 import com.apestogether.app.ui.screens.onboarding.AddStocksScreen
 import com.apestogether.app.ui.screens.portfolio.PortfolioDetailScreen
 import com.apestogether.app.ui.screens.settings.SettingsScreen
+import com.apestogether.app.ui.screens.settings.TaxInfoScreen
 import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.navigation.NavHostController
@@ -58,6 +59,9 @@ fun RootNavGraph(
                 onOpenAddStocks = {
                     navController.navigate(Screen.AddStocks.route)
                 },
+                onOpenW9 = {
+                    navController.navigate(Screen.W9.route)
+                },
                 onSignedOut = {
                     navController.navigate(Screen.Login.route) {
                         popUpTo("main") { inclusive = true }
@@ -88,6 +92,10 @@ fun RootNavGraph(
                     }
                 },
             )
+        }
+
+        composable(Screen.W9.route) {
+            TaxInfoScreen(onClose = { navController.popBackStack() })
         }
 
         composable(Screen.AddStocks.route) {
