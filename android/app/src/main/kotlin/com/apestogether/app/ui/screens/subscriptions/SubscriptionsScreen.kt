@@ -883,7 +883,7 @@ class SubscriptionsViewModel @Inject constructor(
                 _state.value = SubsState.Loaded(
                     subscriptions = emptyList(),
                     subscribers = emptyList(),
-                    subscriberCount = 499,
+                    subscriberCount = 467,
                     notifications = emptyList(),
                     payouts = screenshotPayoutFixture(),
                 )
@@ -951,16 +951,16 @@ class SubscriptionsViewModel @Inject constructor(
 
         /**
          * Self-consistent aspirational earnings fixture for the Play Store
-         * screenshot: 499 subscribers x $6.50/mo = $3,243.50 estimated, W-9 on
+         * screenshot: 467 subscribers x $6.50/mo = $3,035.50 estimated, W-9 on
          * file, and three prior months of paid history trending up to today.
          */
         private fun screenshotPayoutFixture(): PayoutSummaryResponse {
             val perSub = 6.50
-            val currentSubs = 499
+            val currentSubs = 467
             val monthFmt = SimpleDateFormat("MMM yyyy", Locale.US)
             val dayFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
 
-            val pastSubs = listOf(487, 461, 433)
+            val pastSubs = listOf(451, 427, 401)
             val history = pastSubs.mapIndexed { idx, subs ->
                 val c = Calendar.getInstance().apply { add(Calendar.MONTH, -(idx + 1)) }
                 val d = c.time

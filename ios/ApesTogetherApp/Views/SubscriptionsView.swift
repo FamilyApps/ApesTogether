@@ -655,11 +655,11 @@ class SubscriptionsViewModel: ObservableObject {
     #if DEBUG
     /// Seeds the Subscriptions tab with an aspirational earnings fixture for the
     /// App Store "earnings" screenshot. Numbers are internally consistent:
-    /// 499 subscribers x $6.50/mo = $3,243.50 estimated, W-9 on file, and three
+    /// 467 subscribers x $6.50/mo = $3,035.50 estimated, W-9 on file, and three
     /// prior months of paid history. DEBUG-only; never shipped to production.
     private func applyScreenshotFixture() {
         let perSub = 6.50
-        let currentSubs = 499
+        let currentSubs = 467
         let cal = Calendar.current
         let now = Date()
 
@@ -671,7 +671,7 @@ class SubscriptionsViewModel: ObservableObject {
         func monthsAgo(_ n: Int) -> Date { cal.date(byAdding: .month, value: -n, to: now) ?? now }
 
         // Prior closed months, newest first, trending up to the current estimate.
-        let pastSubs = [487, 461, 433]
+        let pastSubs = [451, 427, 401]
         let history: [PayoutHistoryItem] = pastSubs.enumerated().map { idx, subs in
             let d = monthsAgo(idx + 1)
             return PayoutHistoryItem(
