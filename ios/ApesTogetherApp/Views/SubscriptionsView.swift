@@ -641,7 +641,7 @@ class SubscriptionsViewModel: ObservableObject {
         // Earnings card instead of hitting the API. Enabled by the hardcoded
         // flag below OR by passing `-screenshotMode` as a launch argument.
         // Whole block is compiled out of release builds.
-        let forceScreenshotMode = true   // TODO: set back to false after capturing screenshots
+        let forceScreenshotMode = false  // Set true to re-capture App Store screenshots
         let launchArgScreenshotMode = ProcessInfo.processInfo.arguments.contains("-screenshotMode")
         if forceScreenshotMode || launchArgScreenshotMode {
             print("[ScreenshotMode] ON — applying aspirational earnings fixture (467 subscribers)")
