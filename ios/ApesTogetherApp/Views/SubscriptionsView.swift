@@ -637,10 +637,14 @@ class SubscriptionsViewModel: ObservableObject {
     func loadAll() async {
         isLoading = true
         #if DEBUG
-        // App Store screenshot frame: launch with `-screenshotMode` to render a
-        // self-consistent, aspirational Earnings card instead of hitting the API.
-        // Compiled out of release builds entirely.
-        if ProcessInfo.processInfo.arguments.contains("-screenshotMode") {
+        // App Store screenshot frame: render a self-consistent, aspirational
+        // Earnings card instead of hitting the API. Enabled by the hardcoded
+        // flag below OR by passing `-screenshotMode` as a launch argument.
+        // Whole block is compiled out of release builds.
+        let forceScreenshotMode = true   // TODO: set back to false after capturing screenshots
+        let launchArgScreenshotMode = ProcessInfo.processInfo.arguments.contains("-screenshotMode")
+        if forceScreenshotMode || launchArgScreenshotMode {
+            print("[ScreenshotMode] ON — applying aspirational earnings fixture (467 subscribers)")
             applyScreenshotFixture()
             isLoading = false
             return
