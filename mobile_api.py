@@ -4354,14 +4354,23 @@ def bot_scale_holdings():
     """
     Scale all holdings and cash values for a bot user by a multiplier.
     Used to scale bot portfolio values (privacy multiplier) so they don't perfectly mirror source accounts.
-    
+
+    Scales, atomically, for the target user:
+      - live Stock quantities and user cash tracking (cash_proceeds, max_cash_deployed)
+      - ALL historical portfolio_snapshot + portfolio_snapshot_intraday rows
+    so the entire value/capital series stays at ONE scale. Because value and
+    capital are multiplied by the same factor, every percentage return is left
+    mathematically unchanged — this prevents the step discontinuity / return
+    spike that occurs when only the live values are scaled (see apex1575).
+
     Request body:
     {
         "user_id": 123,
         "multiplier": 1.37
     }
     """
-    from models import db, User, Stock
+    from models import db, User, Stock, PortfolioSnapshot, PortfolioSnapshotIntraday, UserPortfolioChartCache
+    from sqlalchemy import func
     
     data = request.get_json()
     if not data:
@@ -4404,7 +4413,35 @@ def bot_scale_holdings():
             user.extra_data = {}
         existing_multiplier = float(user.extra_data.get('trade_multiplier', 1.0))
         user.extra_data = {**user.extra_data, 'trade_multiplier': round(existing_multiplier * multiplier, 6)}
-        
+
+        # ── Scale historical snapshots to the SAME multiplier ──
+        # Without this, live holdings/capital jump to the new scale while past
+        # snapshots stay at the old scale, producing a step discontinuity at the
+        # scaling date (and a residual Modified-Dietz spike whenever the book is
+        # up/down, since Δvalue != Δcapital at that single point). Multiplying
+        # BOTH value and capital columns by the same factor across every
+        # historical row keeps the whole series at one scale and leaves every
+        # percentage return unchanged.
+        daily_scaled = PortfolioSnapshot.query.filter_by(user_id=user_id).update({
+            PortfolioSnapshot.total_value: func.coalesce(PortfolioSnapshot.total_value, 0) * multiplier,
+            PortfolioSnapshot.stock_value: func.coalesce(PortfolioSnapshot.stock_value, 0) * multiplier,
+            PortfolioSnapshot.cash_proceeds: func.coalesce(PortfolioSnapshot.cash_proceeds, 0) * multiplier,
+            PortfolioSnapshot.max_cash_deployed: func.coalesce(PortfolioSnapshot.max_cash_deployed, 0) * multiplier,
+            PortfolioSnapshot.cash_flow: func.coalesce(PortfolioSnapshot.cash_flow, 0) * multiplier,
+        }, synchronize_session=False)
+
+        intraday_scaled = PortfolioSnapshotIntraday.query.filter_by(user_id=user_id).update({
+            PortfolioSnapshotIntraday.total_value: func.coalesce(PortfolioSnapshotIntraday.total_value, 0) * multiplier,
+            PortfolioSnapshotIntraday.stock_value: func.coalesce(PortfolioSnapshotIntraday.stock_value, 0) * multiplier,
+            PortfolioSnapshotIntraday.cash_proceeds: func.coalesce(PortfolioSnapshotIntraday.cash_proceeds, 0) * multiplier,
+            PortfolioSnapshotIntraday.max_cash_deployed: func.coalesce(PortfolioSnapshotIntraday.max_cash_deployed, 0) * multiplier,
+        }, synchronize_session=False)
+
+        # Invalidate cached charts for this user so leaderboard sparklines and the
+        # web dashboard regenerate from the rescaled snapshots. (The mobile
+        # portfolio-detail chart is computed live and needs no invalidation.)
+        caches_cleared = UserPortfolioChartCache.query.filter_by(user_id=user_id).delete(synchronize_session=False)
+
         db.session.commit()
         
         return jsonify({
@@ -4414,6 +4451,9 @@ def bot_scale_holdings():
             'stocks_scaled': len(scaled_stocks),
             'cash_proceeds': {'old': old_cash, 'new': user.cash_proceeds},
             'max_cash_deployed': {'old': old_deployed, 'new': user.max_cash_deployed},
+            'daily_snapshots_scaled': daily_scaled,
+            'intraday_snapshots_scaled': intraday_scaled,
+            'chart_caches_cleared': caches_cleared,
             'stocks': scaled_stocks
         })
         

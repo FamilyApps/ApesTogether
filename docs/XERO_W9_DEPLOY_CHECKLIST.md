@@ -36,6 +36,19 @@ accounting work. Check items off as you go.
 - [ ] Sanity check on each: a creator with a subscriber sees the W-9 form; a user
       with no subscribers sees "No tax info needed yet".
 
+## D2. Before public launch — REMOVE test overrides (CRITICAL)
+
+- [ ] **Delete the `W9_TEST_EMAILS` env var on Vercel** (then redeploy). It was set
+      during testing so an owner/admin account (e.g. `bobford00`) — normally never
+      payout-eligible — could open and submit the in-app W-9 form. Left set in
+      production it makes those accounts appear payout-eligible for the W-9 gate.
+      Read at `mobile_api.py` `_user_is_payout_eligible` / `W9_TEST_EMAILS`.
+      **Status 2026-07-01: still SET on purpose — keep until the W-9→Xero flow is
+      fully confirmed with `bobford00`, then remove before launch.**
+- [ ] (Optional) Clean up the test W-9 data the override created: delete the
+      `taxpayer_profile` row for the test account and clear/blank its Xero contact
+      `TaxNumber`, so no bogus TIN lingers in Xero.
+
 ---
 
 ## E. Monthly accounting run (operational, recurring)
