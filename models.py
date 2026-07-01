@@ -4,6 +4,7 @@ Database models for the stock portfolio application.
 from flask_login import UserMixin
 from datetime import datetime
 from flask_sqlalchemy import SQLAlchemy
+from crypto_utils import EncryptedString
 
 # Initialize SQLAlchemy without binding to app yet
 db = SQLAlchemy()
@@ -1050,18 +1051,20 @@ class TaxpayerProfile(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), unique=True, nullable=False)
 
     # W-9 identity (non-sensitive parts retained for display/support)
-    legal_name = db.Column(db.String(200), nullable=True)         # W-9 Line 1 (name)
-    business_name = db.Column(db.String(200), nullable=True)      # W-9 Line 2 (optional DBA/entity)
+    # Encrypted-at-rest (EncryptedString -> TEXT). See crypto_utils.py; opt-in
+    # via TAX_ENCRYPTION_KEY. Plaintext passthrough when the key is unset.
+    legal_name = db.Column(EncryptedString, nullable=True)        # W-9 Line 1 (name)
+    business_name = db.Column(EncryptedString, nullable=True)     # W-9 Line 2 (optional DBA/entity)
     tax_classification = db.Column(db.String(40), nullable=True)  # individual_sole_prop, c_corp, s_corp, partnership, trust, llc_c, llc_s, llc_p
     tin_type = db.Column(db.String(10), nullable=True)            # 'ssn' or 'ein'
-    tin_last4 = db.Column(db.String(4), nullable=True)            # last 4 only — full TIN lives in Xero
+    tin_last4 = db.Column(EncryptedString, nullable=True)         # last 4 only — full TIN lives in Xero
 
-    # Mailing address (also pushed to the Xero contact)
-    address_line1 = db.Column(db.String(200), nullable=True)
-    address_line2 = db.Column(db.String(200), nullable=True)
-    city = db.Column(db.String(100), nullable=True)
+    # Mailing address (also pushed to the Xero contact) — encrypted at rest
+    address_line1 = db.Column(EncryptedString, nullable=True)
+    address_line2 = db.Column(EncryptedString, nullable=True)
+    city = db.Column(EncryptedString, nullable=True)
     state = db.Column(db.String(50), nullable=True)
-    postal_code = db.Column(db.String(20), nullable=True)
+    postal_code = db.Column(EncryptedString, nullable=True)
     country = db.Column(db.String(2), default='US')
 
     # Submission status

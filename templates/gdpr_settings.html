@@ -30,15 +30,20 @@
                 
                 <div class="alert alert-info">
                     <i class="fas fa-info-circle me-2"></i>
-                    <strong>Grace Period:</strong> After deletion, you have 30 days to cancel by logging in again. 
-                    After 30 days, all data will be permanently deleted and cannot be recovered.
+                    <strong>Grace Period:</strong> Your account is hidden immediately and permanently deleted after 30 days.
+                    To restore it within those 30 days, email <strong>support@apestogether.ai</strong> (logging in will not restore it).
+                </div>
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    <strong>Cancel billing separately:</strong> Deleting your account does <strong>not</strong> cancel any paid
+                    subscriptions. To stop billing, cancel them in the <strong>App Store</strong> (iOS) or <strong>Google Play</strong> (Android).
                 </div>
                 
                 <hr>
                 
                 <h5>Delete My Account</h5>
                 <p class="text-muted">
-                    This action marks your account for deletion. You can cancel within 30 days by logging in.
+                    This action marks your account for deletion. To restore it within 30 days, contact support@apestogether.ai.
                 </p>
                 
                 <form method="POST" action="{{ url_for('delete_account') }}" onsubmit="return confirmDeletion()">
@@ -75,9 +80,11 @@ function confirmDeletion() {
         'Are you absolutely sure you want to delete your account?\n\n' +
         'This will:\n' +
         '• Remove all your portfolio data\n' +
-        '• Cancel any active subscriptions\n' +
         '• Make your shared portfolio links inaccessible\n\n' +
-        'You have 30 days to cancel by logging in again.'
+        'IMPORTANT: This does NOT cancel your paid subscriptions. To stop billing, ' +
+        'cancel them in the App Store (iOS) or Google Play (Android).\n\n' +
+        'You have 30 days to restore your account by emailing support@apestogether.ai ' +
+        '(logging in will not restore it).'
     );
 }
 </script>

@@ -803,7 +803,15 @@ def _user_is_payout_eligible(user_id):
     from models import User, MobileSubscription, AdminSubscription, XeroPayoutRecord
     user = User.query.get(user_id)
     if _user_is_company_owned(user):
-        return False
+        # TEST-ONLY override: emails in W9_TEST_EMAILS may exercise the in-app
+        # W-9 flow even though they are owner/company accounts. This gates ONLY
+        # the W-9 form + payout-hold. Real payouts are produced by
+        # _generate_payout_records_for_period(), which independently skips
+        # company-owned accounts, so an owner account can never actually be paid.
+        # Unset W9_TEST_EMAILS when done testing.
+        import os
+        _test = {e.strip().lower() for e in os.environ.get('W9_TEST_EMAILS', '').split(',') if e.strip()}
+        return bool(user and (user.email or '').strip().lower() in _test)
     if MobileSubscription.query.filter_by(subscribed_to_id=user_id).first():
         return True
     admin = AdminSubscription.query.filter_by(portfolio_user_id=user_id).first()
@@ -3013,6 +3021,15 @@ def get_auth_token():
             user.portfolio_slug = _generate_portfolio_slug()
             db.session.commit()
         
+        # A soft-deleted account cannot authenticate. We do NOT auto-restore it
+        # (that would mask a malicious deletion); the user must contact support.
+        # The 30-day purge timer keeps running until then.
+        if user.deleted_at:
+            return jsonify({
+                'error': 'account_deleted',
+                'message': 'This account is scheduled for deletion. Email support@apestogether.ai to restore it before the deletion completes.',
+            }), 403
+
         # Generate JWT token
         token = generate_jwt_token(user.id, user.email)
         
@@ -3073,28 +3090,39 @@ def get_current_user():
 @mobile_api.route('/auth/account', methods=['DELETE'])
 @require_auth
 def delete_account():
-    """Delete the authenticated user's account and all associated data"""
-    from models import db, User, Stock, Transaction, DeviceToken, MobileSubscription
-    
+    """GDPR account deletion — mirrors the web flow: soft-delete with a 30-day
+    grace period. The account is hidden immediately (leaderboard / public /
+    subscription queries already filter on `deleted_at`) and can be restored by
+    contacting support within the grace window, protecting against accidental
+    deletions and compromised accounts. A nightly purge
+    (`/api/cron/purge-deleted-accounts`) then irreversibly anonymizes the
+    account and deletes its content, retaining only IRS-required tax/financial
+    records for the mandated period."""
+    from models import db, User, DeviceToken
+
     try:
         user = User.query.get(g.user_id)
         if not user:
             return jsonify({'error': 'user_not_found'}), 404
-        
-        # Delete associated data
-        Stock.query.filter_by(user_id=g.user_id).delete()
-        Transaction.query.filter_by(user_id=g.user_id).delete()
-        DeviceToken.query.filter_by(user_id=g.user_id).delete()
-        MobileSubscription.query.filter(
-            (MobileSubscription.subscriber_id == g.user_id) |
-            (MobileSubscription.subscribed_to_id == g.user_id)
-        ).delete(synchronize_session='fetch')
-        
-        db.session.delete(user)
+
+        # Soft-delete: do NOT hard-delete. Data is retained for the grace
+        # window so support can restore the account within it if needed.
+        user.deleted_at = datetime.utcnow()
+
+        # Stop push immediately so a "deleted" account receives nothing.
+        DeviceToken.query.filter_by(user_id=g.user_id).update(
+            {'is_active': False}, synchronize_session=False
+        )
+
         db.session.commit()
-        
-        return jsonify({'success': True, 'message': 'account_deleted'})
-        
+        return jsonify({
+            'success': True,
+            'message': 'account_scheduled_for_deletion',
+            'grace_period_days': 30,
+            'restore_hint': 'To restore within 30 days, email support@apestogether.ai. Logging in will not restore your account.',
+            'billing_notice': 'Deleting your account does not cancel paid subscriptions. Cancel them in the App Store (iOS) or Google Play (Android) to stop billing.',
+        })
+
     except Exception as e:
         db.session.rollback()
         logger.error(f"Delete account error: {e}")

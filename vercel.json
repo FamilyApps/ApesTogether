@@ -48,6 +48,10 @@
       "schedule": "0 2 * * *"
     },
     {
+      "path": "/api/cron/purge-deleted-accounts",
+      "schedule": "0 5 * * *"
+    },
+    {
       "path": "/api/cron/monthly-payouts",
       "schedule": "0 9 3 * *"
     },

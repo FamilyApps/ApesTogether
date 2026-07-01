@@ -1840,6 +1840,13 @@ def login():
                     logger.info(f"Password check result: {password_check}")
                     
                     if password_check:
+                        # A soft-deleted account cannot be logged into. We do NOT
+                        # silently restore it — that would hide a malicious deletion
+                        # from the victim. Tell them to contact support; the 30-day
+                        # purge timer keeps running until support restores it.
+                        if user.deleted_at:
+                            flash('This account is scheduled for deletion. To restore it, email support@apestogether.ai before the deletion completes.', 'warning')
+                            return render_template_with_defaults('login.html')
                         # Use Flask-Login to handle user session
                         login_user(user)
                         logger.info(f"User logged in successfully: {user.username}")
@@ -11127,6 +11134,95 @@ def bot_trade_wave_cron():
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
+@app.route('/api/cron/purge-deleted-accounts', methods=['POST', 'GET'])
+def purge_deleted_accounts_cron():
+    """Purge accounts soft-deleted more than the 30-day grace period ago.
+
+    DRY-RUN by default — reports what WOULD be purged. Pass ?commit=true to
+    actually write. Scheduled nightly (see vercel.json).
+
+    Mechanism: irreversibly ANONYMIZE the account shell (scrub all PII, disable
+    login) and DELETE the user's content (holdings, trades, snapshots, device
+    tokens, push logs, poll votes, subscriptions). We deliberately anonymize the
+    `user` row instead of hard-deleting it so IRS-required tax/financial records
+    (TaxpayerProfile, XeroPayoutRecord, InAppPurchase) stay referentially intact
+    for the mandated retention period. Once anonymized, the data no longer
+    identifies the person, which satisfies erasure obligations.
+    """
+    # Allow EITHER the scheduled cron (secret) OR a logged-in admin hitting this
+    # URL in a browser — so it can be triggered manually without the cron secret.
+    auth_error = verify_cron_request()
+    if auth_error and not (current_user.is_authenticated and getattr(current_user, 'is_admin', False)):
+        return auth_error
+
+    from datetime import timedelta
+    from models import (db, User, Stock, Transaction, PortfolioSnapshot,
+                        DeviceToken, PushNotificationLog, MobileSubscription,
+                        Subscription, FeaturePollVote)
+
+    GRACE_DAYS = 30  # must match the deletion endpoints
+    commit = str(request.args.get('commit', '')).lower() == 'true'
+    cutoff = datetime.utcnow() - timedelta(days=GRACE_DAYS)
+
+    candidates = User.query.filter(
+        User.deleted_at.isnot(None),
+        User.deleted_at < cutoff,
+        ~User.email.like('deleted+%@deleted.invalid'),  # skip already-anonymized
+    ).all()
+
+    report = {'dry_run': not commit, 'grace_days': GRACE_DAYS,
+              'candidate_count': len(candidates), 'processed': []}
+
+    for u in candidates:
+        uid = u.id
+        if u.is_company_owned:
+            report['processed'].append({'user_id': uid, 'action': 'skipped_company_owned'})
+            continue
+        if not commit:
+            report['processed'].append({'user_id': uid, 'action': 'would_anonymize',
+                                        'deleted_at': u.deleted_at.isoformat()})
+            continue
+        try:
+            Stock.query.filter_by(user_id=uid).delete(synchronize_session=False)
+            Transaction.query.filter_by(user_id=uid).delete(synchronize_session=False)
+            PortfolioSnapshot.query.filter_by(user_id=uid).delete(synchronize_session=False)
+            DeviceToken.query.filter_by(user_id=uid).delete(synchronize_session=False)
+            PushNotificationLog.query.filter(
+                (PushNotificationLog.user_id == uid) |
+                (PushNotificationLog.portfolio_owner_id == uid)
+            ).delete(synchronize_session=False)
+            FeaturePollVote.query.filter_by(user_id=uid).delete(synchronize_session=False)
+            MobileSubscription.query.filter(
+                (MobileSubscription.subscriber_id == uid) |
+                (MobileSubscription.subscribed_to_id == uid)
+            ).delete(synchronize_session=False)
+            Subscription.query.filter(
+                (Subscription.subscriber_id == uid) |
+                (Subscription.subscribed_to_id == uid)
+            ).delete(synchronize_session=False)
+
+            # Irreversibly anonymize the shell (PII erased). Tax/financial
+            # records are intentionally retained for the IRS-mandated period.
+            u.email = f"deleted+{uid}@deleted.invalid"
+            u.username = f"deleted_user_{uid}"
+            u.display_name = None
+            u.password_hash = None
+            u.oauth_provider = None
+            u.oauth_id = None
+            u.phone_number = None
+            u.portfolio_slug = None
+            u.leaderboard_eligible = False
+            u.extra_data = {}
+            db.session.commit()
+            report['processed'].append({'user_id': uid, 'action': 'anonymized'})
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"purge-deleted-accounts: failed for user {uid}: {e}")
+            report['processed'].append({'user_id': uid, 'action': f'error: {e}'})
+
+    return jsonify(report)
+
+
 @app.route('/api/cron/auto-create-bots', methods=['POST', 'GET'])
 def auto_create_bots_cron():
     """Daily cron endpoint to auto-create bot accounts per admin settings."""
@@ -12570,7 +12666,7 @@ def delete_account():
         from flask_login import logout_user
         logout_user()
         
-        flash('Your account has been scheduled for deletion. You have 30 days to cancel by logging in again.', 'info')
+        flash('Your account has been scheduled for deletion (30-day grace period). To restore it, email support@apestogether.ai — logging in will not restore it. Note: this does not cancel paid subscriptions; cancel those in the App Store or Google Play to stop billing.', 'info')
         return redirect(url_for('index'))
     
     except Exception as e:

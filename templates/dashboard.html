@@ -321,7 +321,8 @@
                         <h5 class="mb-2 text-danger"><i class="fas fa-user-shield me-2"></i>Account & Privacy</h5>
                         <p class="text-muted mb-0">
                             Delete your account and all associated data. You have the right to request deletion of your personal data under GDPR.
-                            <strong>30-day grace period</strong> - you can cancel deletion by logging in again within 30 days.
+                            <strong>30-day grace period</strong> - to restore within 30 days, contact support@apestogether.ai (logging in will not restore it).
+                            Deleting your account does not cancel paid subscriptions - cancel those in the App Store or Google Play to stop billing.
                         </p>
                     </div>
                     <div class="col-md-4 text-end">
@@ -979,7 +980,8 @@ function confirmAccountDeletion() {
         '• Portfolio holdings and transaction history\n' +
         '• Performance data and snapshots\n' +
         '• All associated data\n\n' +
-        '✓ 30-day grace period - You can cancel by logging in again within 30 days.\n\n' +
+        '30-day grace period - to restore, email support@apestogether.ai (logging in will not restore it).\n\n' +
+        'IMPORTANT: This does NOT cancel paid subscriptions. Cancel those in the App Store (iOS) or Google Play (Android) to stop billing.\n\n' +
         'Are you absolutely sure?'
     );
     
@@ -988,7 +990,7 @@ function confirmAccountDeletion() {
     // Double confirmation
     const doubleConfirm = confirm(
         'This is your last chance!\n\n' +
-        'Type will be scheduled for deletion. You have 30 days to cancel.\n\n' +
+        'Your account will be scheduled for deletion. You have 30 days to restore it via support@apestogether.ai.\n\n' +
         'Click OK to proceed with account deletion.'
     );
     
