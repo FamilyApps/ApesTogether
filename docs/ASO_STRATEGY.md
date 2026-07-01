@@ -495,23 +495,26 @@ All event copy must include the educational disclaimer.
 
 | # | Caption (≤8 words, baked-in keywords bolded) | Subtext below | Real screen |
 |---|---|---|---|
-| 1 | **AI traders. Verified picks.** | Every trade tracked the moment it's made. | `LeaderboardView.swift` |
+| 1 | **The best AI and human traders.** | Every trade tracked the moment it's made. | `LeaderboardView.swift` |
 | 2 | **Real-time alerts. Every move.** | Push notifications when traders trade. | Lock-screen mockup with FCM-style trade alert |
 | 3 | **Tracked vs. S&P 500.** | Every period. Every portfolio. No spin. | `PortfolioDetailView.swift` performance chart |
 | 4 | **Filter by sector or cap.** | Find traders who match your interest. | `LeaderboardView.swift` with Filters sheet |
 | 5 | **Scale any portfolio.** | Adjust to fit your size. Frozen at apply. | Phase D scale modal in `PortfolioDetailView.swift` |
-| 6 | **Traders keep 85%.** | The highest creator share in the category. | Mocked Earnings Dashboard (no live screen — see note) |
+| 6 | **Traders keep 85%.** | The highest creator share in the industry. | Real earnings card — `SubscriptionsView.swift` (Screenshot Mode fixture) |
 
-> **Real-screen note for #6**: There is no shipping earnings dashboard
-> today. `SettingsView.swift:144-147` has a "Payment History" stub with
-> a TODO. The closest real screens are `EarnNudgeView.swift` and the
-> `WelcomeCarouselView.swift` page 2 ("Get paid to share your trades").
-> The screenshot is allowed to be a designed mockup as long as it doesn't
-> materially misrepresent functionality — which it doesn't, because the
-> earnings system IS implemented end-to-end (Xero / W-9 / monthly check)
-> per `XERO_PAYOUT_INTEGRATION.md`.
+> **Real-screen note for #6 (updated 2026-06-30):** #6 is now a REAL
+> shipping screen — the Earnings card in the Subscriptions tab
+> (`SubscriptionsView.swift`). In **Screenshot Mode** (a hardcoded flag
+> gated behind `#if DEBUG`, never shipped in release) it renders an
+> aspirational but self-consistent fixture (467 subscribers, ~$3,036/mo,
+> payout history). Capture it on the simulator and run it through the
+> same wrapper template as frames 1–5 — no mocked prompt needed. The
+> figures are illustrative and hedged on-frame ("*See terms and
+> conditions") and in-screen ("before taxes, actual amounts vary"); the
+> Xero / W-9 / monthly-check payout flow is real per
+> `XERO_PAYOUT_INTEGRATION.md`.
 
-Footer disclaimer on every screenshot (11pt, `rgba(255,255,255,0.45)`):
+Footer disclaimer (11pt, `rgba(255,255,255,0.45)`) — on screenshot #1 only (decision 2026-06-30; extend to more frames if a reviewer requests it):
 ```
 For educational purposes only. All trades on the platform are virtual using real market data.
 ```
@@ -591,11 +594,12 @@ Make the device take ~70% of vertical real estate so the text has air.
 
 | # | `[CAPTION]` | `[SUBCAPTION]` | Real screenshot you provide |
 |---|---|---|---|
-| 1 | AI traders. Verified picks. | Every trade tracked the moment it's made. | Leaderboard tab (any sort, ideally `1W` selected) |
+| 1 | The best AI and human traders. | Every trade tracked the moment it's made. | Leaderboard tab (any sort, ideally `1W` selected) |
 | 2 | Real-time alerts. Every move. | Push notifications when traders trade. | iPhone lock screen with a real trade-alert push from your test device |
 | 3 | Tracked vs. S&P 500. | Every period. Every portfolio. No spin. | Portfolio detail with the performance chart visible |
 | 4 | Filter by sector or cap. | Find traders who match your interest. | Leaderboard with the Filters bottom-sheet open |
 | 5 | Scale any portfolio. | Adjust to fit your size. Frozen at apply. | Phase D Adjust Portfolio Size modal |
+| 6 | Traders keep 85%. | The highest creator share in the industry. | Real earnings card (SubscriptionsView Screenshot Mode fixture) |
 | 7 (Play) | Dark mode by default. | Built for traders who actually use it. | Android home tab / Compose `ContentView` |
 | 8 (Play) | Push alerts on every device. | iOS + Android, 24/7. | Android notification shade with a real trade alert |
 
@@ -605,32 +609,22 @@ Make the device take ~70% of vertical real estate so the text has air.
 > alert via the admin "Test Push" button in `/admin-panel` →
 > System Health → Test Push Notification.
 
-### Screenshot 6 — Creator share (no live screen yet)
+### Screenshot 6 — Creator earnings (real shipping screen as of 2026-06-30)
 
-There's no shipping earnings dashboard (`SettingsView.swift:144-147`
-"Payment History" is a TODO stub). Use this description-only prompt for
-this single frame. Per `LAUNCH_PLAYBOOK.md` review of marketing artifacts,
-this isn't materially misrepresenting functionality — the Xero / W-9 /
-monthly-check earnings flow IS real (`XERO_PAYOUT_INTEGRATION.md`), the
-UI just hasn't been built yet.
+No longer a mocked frame. The Earnings card in the Subscriptions tab
+(`SubscriptionsView.swift`) is a real screen; in **Screenshot Mode** it
+renders an aspirational, self-consistent fixture (467 subscribers,
+~$3,036/mo, payout history). Capture it on the simulator and run it
+through the **same wrapper template as frames 1–5** — no mocked prompt
+needed. Fill in:
 
-```
-Polished App Store screenshot, 1290x2796 px. Dark navy gradient background
-(#0B0F19 to #16213E). iPhone 16 Pro mockup showing a mocked-up "Creator
-Dashboard" screen: header "Subscriber earnings", a centered prominent
-number "147 followers" with a green up-arrow and small caption "+12 this
-month", then three stat cards in a row: "$ this month: $866.48",
-"Lifetime: $3,214", "Next payout: 15th". A subtle list below shows three
-recent payment rows: "Apr 15 — $812.10 — Paid", "Mar 15 — $755.40 — Paid",
-"Feb 15 — $698.20 — Paid". Tiny "85% creator share" badge near the top.
-Match the dark theme of the rest of the ApesTogether app (background
-#0A0F0D, accent #00D9A5).
-At the top of the screenshot in bold white: "Traders keep 85%." Subtext in
-medium gray: "The highest creator share in the category." Bottom disclaimer
-(11pt): "For educational purposes only. All trades on the platform are
-virtual using real market data." Modern, encouraging, creator-economy
-aesthetic.
-```
+- `[CAPTION]` = `Traders keep 85%.`
+- `[SUBCAPTION]` = `The highest creator share in the industry.`
+
+The figures are illustrative and hedged on-frame ("*See terms and
+conditions") and in-screen ("before taxes, actual amounts vary"); the
+underlying Xero / W-9 / monthly-check payout flow is real
+(`XERO_PAYOUT_INTEGRATION.md`).
 
 ### Play Store feature graphic (1024 × 500 px) — uses real leaderboard screenshot
 
