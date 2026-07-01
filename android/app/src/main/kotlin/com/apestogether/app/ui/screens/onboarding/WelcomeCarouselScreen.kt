@@ -109,7 +109,7 @@ fun WelcomeCarouselScreen(onComplete: () -> Unit) {
                         icon = Icons.Default.Notifications,
                         headline = "Know when the best\ntraders buy and sell",
                         accentWord = "buy and sell",
-                        subtext = "Get real-time alerts the moment\ntop investors make a move",
+                        subtext = "Get real-time alerts the moment\ntop AI and human traders make a move",
                         imageRes = R.drawable.carousel1,
                     )
                     1 -> CarouselPage(

@@ -1493,6 +1493,10 @@ struct SetScaleSheet: View {
     let onSubmit: (Double) -> Void
 
     @FocusState private var inputFocused: Bool
+    // Visible, comma-formatted text. The parent `amount` binding stays
+    // digit-only so the Apply-button parse is unaffected; we reformat
+    // `display` live in onChange so the comma appears as the user types.
+    @State private var display: String = ""
 
     // Renders the digit-only `amount` with thousands separators (e.g.
     // "25000" -> "25,000") for readability. The binding below stores only
@@ -1558,15 +1562,19 @@ struct SetScaleSheet: View {
                         Text("$")
                             .font(.system(size: 28, weight: .bold))
                             .foregroundColor(.textSecondary)
-                        TextField("0", text: Binding(
-                            get: { Self.grouped(amount) },
-                            set: { amount = $0.filter(\.isNumber) }
-                        ))
+                        TextField("0", text: $display)
                             .keyboardType(.numberPad)
                             .font(.system(size: 32, weight: .bold))
                             .foregroundColor(.textPrimary)
                             .focused($inputFocused)
+                            .onChange(of: display) { newValue in
+                                let digits = String(newValue.filter(\.isNumber))
+                                amount = digits
+                                let formatted = Self.grouped(digits)
+                                if display != formatted { display = formatted }
+                            }
                             .onAppear {
+                                display = Self.grouped(amount)
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                                     inputFocused = true
                                 }

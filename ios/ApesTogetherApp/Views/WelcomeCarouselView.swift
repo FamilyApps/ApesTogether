@@ -32,7 +32,7 @@ struct WelcomeCarouselView: View {
                     CarouselPage(
                         icon: "bell.badge.fill",
                         headline: "Know when the best\ntraders buy and sell",
-                        subtext: "Get real-time alerts the moment\ntop investors make a move",
+                        subtext: "Get real-time alerts the moment\ntop AI and human traders make a move",
                         accentWord: "buy and sell",
                         imageName: "Carousel1"
                     )
