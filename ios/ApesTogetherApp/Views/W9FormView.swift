@@ -62,7 +62,7 @@ struct TaxInfoView: View {
                     Text("TIN ending in •••\(last4)")
                         .font(.subheadline).foregroundColor(.textSecondary)
                 }
-                Text("Your payouts are cleared for payment. We never store your full SSN/EIN — it's held only by our accounting partner (Xero) for 1099 reporting.")
+                Text("Your payouts are cleared for payment. Your tax details are securely handled by Xero, our accounting provider.")
                     .font(.caption).foregroundColor(.textSecondary)
                     .multilineTextAlignment(.center).padding(.horizontal)
             }
@@ -93,8 +93,21 @@ struct TaxInfoView: View {
                 if viewModel.heldPayoutTotal > 0 {
                     bannerView
                 }
-                Text("We need your W-9 before we can pay you — the IRS requires it for creator payouts. Your full TIN is sent securely to our accounting partner (Xero) and is never stored on ApesTogether's servers.")
+                Text("We need your W-9 before we can pay you — the IRS requires it for creator payouts.")
                     .font(.footnote).foregroundColor(.textSecondary)
+
+                HStack(spacing: 12) {
+                    Image("PoweredByXero")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 40)
+                    Text("Your tax details are securely handled by Xero, our accounting provider.")
+                        .font(.caption).foregroundColor(.textSecondary)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.primaryAccent.opacity(0.06))
+                .cornerRadius(10)
 
                 group("Legal name (as on your tax return)") {
                     field("Full legal name", text: $viewModel.legalName)
@@ -119,10 +132,29 @@ struct TaxInfoView: View {
                     field("Street address", text: $viewModel.addressLine1)
                     field("Apt / suite (optional)", text: $viewModel.addressLine2)
                     field("City", text: $viewModel.city)
-                    HStack {
-                        field("State", text: $viewModel.state)
-                        field("ZIP", text: $viewModel.postalCode, keyboard: .numbersAndPunctuation)
+                    HStack(spacing: 12) {
+                        Picker("State", selection: $viewModel.state) {
+                            Text("State").tag("")
+                            ForEach(W9ViewModel.usStates, id: \.self) { Text($0).tag($0) }
+                        }
+                        .pickerStyle(.menu)
+                        .tint(.primaryAccent)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(Color.cardBackground)
+                        .cornerRadius(10)
+
+                        field("ZIP", text: $viewModel.postalCode, keyboard: .numberPad)
                     }
+                    HStack {
+                        Text("Country").foregroundColor(.textSecondary)
+                        Spacer()
+                        Text("United States").foregroundColor(.textPrimary)
+                    }
+                    .font(.callout)
+                    .padding(12)
+                    .background(Color.cardBackground)
+                    .cornerRadius(10)
                 }
 
                 Toggle(isOn: $viewModel.certified) {
@@ -132,6 +164,24 @@ struct TaxInfoView: View {
 
                 if let err = viewModel.error {
                     Text(err).font(.caption).foregroundColor(.red)
+                }
+
+                if viewModel.showAddressOverride, let warn = viewModel.addressWarning {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(warn).font(.caption).foregroundColor(.orange)
+                        Button {
+                            Task { await viewModel.submit(skipAddressCheck: true) }
+                        } label: {
+                            Text("Submit anyway")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(.primaryAccent)
+                        }
+                        .disabled(viewModel.isSubmitting)
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.orange.opacity(0.12))
+                    .cornerRadius(10)
                 }
 
                 Button {
@@ -195,6 +245,16 @@ class W9ViewModel: ObservableObject {
         ("llc_p", "LLC (taxed as partnership)"),
     ]
 
+    // USPS 2-letter codes (50 states + DC + U.S. territories) — the W-9 is for
+    // U.S. persons only, so the State field is a fixed picker of these.
+    static let usStates: [String] = [
+        "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID",
+        "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS",
+        "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK",
+        "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV",
+        "WI", "WY", "DC", "PR", "VI", "GU", "AS", "MP",
+    ]
+
     @Published var isLoading = true
     @Published var isSubmitting = false
     @Published var onFile = false
@@ -202,6 +262,10 @@ class W9ViewModel: ObservableObject {
     @Published var tinLast4: String?
     @Published var heldPayoutTotal: Double = 0
     @Published var error: String?
+    // USPS couldn't confirm the address — show the reason + a "Submit anyway"
+    // override (backend is fail-open; this lets a real user past a false negative).
+    @Published var addressWarning: String?
+    @Published var showAddressOverride = false
 
     // Form fields
     @Published var legalName = ""
@@ -218,8 +282,10 @@ class W9ViewModel: ObservableObject {
 
     var canSubmit: Bool {
         let digits = tin.filter(\.isNumber)
+        let zipOk = postalCode.range(of: #"^\d{5}(-\d{4})?$"#, options: .regularExpression) != nil
         return !legalName.isEmpty && digits.count == 9 && certified
-            && !addressLine1.isEmpty && !city.isEmpty && !state.isEmpty && !postalCode.isEmpty
+            && !addressLine1.isEmpty && !city.isEmpty
+            && Self.usStates.contains(state) && zipOk
     }
 
     func loadStatus() async {
@@ -236,10 +302,10 @@ class W9ViewModel: ObservableObject {
         }
     }
 
-    func submit() async {
+    func submit(skipAddressCheck: Bool = false) async {
         guard canSubmit else { return }
         isSubmitting = true; error = nil; defer { isSubmitting = false }
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "legal_name": legalName,
             "business_name": businessName,
             "tax_classification": taxClassification,
@@ -253,8 +319,10 @@ class W9ViewModel: ObservableObject {
             "country": "US",
             "certified": true,
         ]
+        if skipAddressCheck { body["skip_address_check"] = true }
         do {
             let resp = try await APIService.shared.submitW9(body)
+            addressWarning = nil; showAddressOverride = false
             if resp.onFile {
                 onFile = true
                 tinLast4 = resp.tinLast4
@@ -262,6 +330,11 @@ class W9ViewModel: ObservableObject {
                 error = resp.message ?? "Saved, but syncing is still pending. We'll retry automatically."
                 onFile = false
             }
+        } catch let APIError.requestFailed(code, message, _) where code == "address_not_deliverable" {
+            addressWarning = message ?? "USPS couldn't confirm this address. Please double-check it."
+            showAddressOverride = true
+        } catch let APIError.requestFailed(_, message, _) {
+            self.error = message ?? "Submission failed. Please check your details and try again."
         } catch {
             self.error = "Submission failed. Please check your details and try again."
         }

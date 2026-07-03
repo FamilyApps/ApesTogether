@@ -100,3 +100,49 @@ tested via `tests/test_payout_integrity.py`). Tasks are tracked only in
 
 > **Migration:** run `scripts/migrations/2026_06_17_payout_integrity.sql` (adds
 > `in_app_purchase.payout_reversed_at` + the unique index) before deploying this work.
+
+---
+
+## G. Address validation — USPS intentionally NOT used
+
+**Decision (2026-07-03): we are NOT wiring up USPS address validation.** The USPS
+Address API goes paid on **July 12, 2026** (requires a signed license agreement +
+tier-based fees, transitioning to the "Enhanced Addresses API"). For our very low
+mailing volume it isn't worth a license/fee, so we rely on lighter safeguards.
+
+**What actually guards address quality (no external service, no cost):**
+
+- **Client-side:** the in-app W-9 form enforces a valid US state (dropdown) and a
+  ZIP matching `^\d{5}(-\d{4})?$`, plus required street/city.
+- **Server-side:** the same format + valid-US-state + ZIP checks are enforced in
+  `tax_w9_submit`.
+- **Human review:** the month-end check-run email (section H) lists every payee's
+  mailing address and flags missing ones, so bad addresses are caught before a
+  check is mailed.
+
+**Dormant code left in place (harmless, no action needed):**
+
+- `services/address_validation.py` and the USPS call in `tax_w9_submit` are
+  **fail-open**: with `USPS_CLIENT_ID` / `USPS_CLIENT_SECRET` **unset** the USPS
+  lookup is a no-op and submission proceeds on the format checks above. Leave the
+  vars unset.
+- The mobile "Submit anyway" override (`skip_address_check`) only appears if the
+  server returns `address_not_deliverable`, which can't happen while USPS is
+  unconfigured — so it stays dormant.
+- If USPS (or an alternative) is ever adopted later, just set the two env vars and
+  it activates; no code change required.
+
+## H. Month-end check-run report email
+
+The monthly payout cron now emails a "check run" (payee name + mailing address +
+amount + real/gift sub counts) to **bobford00@gmail.com** so mailing checks never
+depends on remembering to run a report. Uses the existing SendGrid sender.
+
+- [ ] **Test delivery/format now:** `GET /api/mobile/admin/tax/payout-check-run?sample=1`
+      (admin 2FA) emails a fabricated SAMPLE report (3 payees incl. a business and
+      a missing-address warning row). Confirm it lands at bobford00@gmail.com.
+- [ ] **Real current data:** `?email=1` instead of `?sample=1`. NOTE: this is
+      currently EMPTY — the only subscribed creator is a company bot, which is
+      `is_company_owned` and generates no payout, so it's excluded by design.
+- Automatic send fires at the end of `run_monthly_payout_pipeline` (the 3rd-of-month
+  cron), best-effort so it never blocks the payout run.

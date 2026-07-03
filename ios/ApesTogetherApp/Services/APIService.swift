@@ -325,6 +325,14 @@ class APIService {
         }
         
         guard (200...299).contains(httpResponse.statusCode) else {
+            // Surface the server's structured error body {error, message} so the
+            // UI can show the specific reason (e.g. USPS address_not_deliverable).
+            if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                throw APIError.requestFailed(
+                    code: obj["error"] as? String,
+                    message: obj["message"] as? String,
+                    statusCode: httpResponse.statusCode)
+            }
             throw APIError.serverError(httpResponse.statusCode)
         }
         
@@ -399,6 +407,7 @@ enum APIError: LocalizedError, Equatable {
     case invalidResponse
     case unauthorized
     case serverError(Int)
+    case requestFailed(code: String?, message: String?, statusCode: Int)
     
     var errorDescription: String? {
         switch self {
@@ -410,6 +419,8 @@ enum APIError: LocalizedError, Equatable {
             return "Session expired. Please sign in again."
         case .serverError(let code):
             return "Server error (\(code))"
+        case .requestFailed(_, let message, let statusCode):
+            return message ?? "Request failed (\(statusCode))"
         }
     }
 }

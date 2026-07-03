@@ -1,5 +1,6 @@
 package com.apestogether.app.ui.screens.settings
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,6 +32,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -41,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -49,6 +52,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.apestogether.app.data.api.ApiService
+import com.apestogether.app.R
 import com.apestogether.app.data.models.W9Request
 import com.apestogether.app.ui.theme.AppBackground
 import com.apestogether.app.ui.theme.CardBackground
@@ -59,6 +63,7 @@ import com.apestogether.app.ui.theme.TextMuted
 import com.apestogether.app.ui.theme.TextPrimary
 import com.apestogether.app.ui.theme.TextSecondary
 import dagger.hilt.android.lifecycle.HiltViewModel
+import retrofit2.HttpException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -83,6 +88,16 @@ val W9_CLASSIFICATIONS: List<Pair<String, String>> = listOf(
     "llc_c" to "LLC (taxed as C corp)",
     "llc_s" to "LLC (taxed as S corp)",
     "llc_p" to "LLC (taxed as partnership)",
+)
+
+// USPS 2-letter codes (50 states + DC + U.S. territories) — the W-9 is for
+// U.S. persons only, so the State field is a fixed dropdown of these.
+val US_STATES: List<String> = listOf(
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID",
+    "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS",
+    "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK",
+    "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV",
+    "WI", "WY", "DC", "PR", "VI", "GU", "AS", "MP",
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -113,8 +128,9 @@ fun TaxInfoScreen(onClose: () -> Unit) {
     }
 
     val tinDigits = tin.filter { it.isDigit() }
+    val zipOk = Regex("^\\d{5}(-\\d{4})?$").matches(zip.trim())
     val canSubmit = legalName.isNotBlank() && tinDigits.length == 9 && certified &&
-        addr1.isNotBlank() && city.isNotBlank() && state.isNotBlank() && zip.isNotBlank()
+        addr1.isNotBlank() && city.isNotBlank() && US_STATES.contains(state) && zipOk
 
     Scaffold(
         topBar = {
@@ -146,7 +162,7 @@ fun TaxInfoScreen(onClose: () -> Unit) {
                 Text("W-9 on File", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 ui.tinLast4?.let { Text("TIN ending in •••$it", color = TextSecondary, fontSize = 14.sp) }
                 Text(
-                    "Your payouts are cleared for payment. We never store your full SSN/EIN — it's held only by our accounting partner (Xero) for 1099 reporting.",
+                    "Your payouts are cleared for payment. Your tax details are securely handled by Xero, our accounting provider.",
                     color = TextSecondary, fontSize = 12.sp,
                 )
             }
@@ -180,9 +196,20 @@ fun TaxInfoScreen(onClose: () -> Unit) {
                     )
                 }
                 Text(
-                    "We need your W-9 before we can pay you — the IRS requires it for creator payouts. Your full TIN is sent securely to our accounting partner (Xero) and is never stored on ApesTogether's servers.",
+                    "We need your W-9 before we can pay you — the IRS requires it for creator payouts.",
                     color = TextSecondary, fontSize = 13.sp,
                 )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Image(
+                        painter = painterResource(R.drawable.powered_by_xero),
+                        contentDescription = "Powered by Xero",
+                        modifier = Modifier.height(40.dp),
+                    )
+                    Text(
+                        "Your tax details are securely handled by Xero, our accounting provider.",
+                        color = TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(start = 12.dp),
+                    )
+                }
 
                 W9Field("Full legal name (as on your tax return)", legalName) { legalName = it }
                 W9Field("Business name (optional)", businessName) { businessName = it }
@@ -213,8 +240,16 @@ fun TaxInfoScreen(onClose: () -> Unit) {
                 W9Field("Apt / suite (optional)", addr2) { addr2 = it }
                 W9Field("City", city) { city = it }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Column(Modifier.weight(1f)) { W9Field("State", state) { state = it } }
+                    Column(Modifier.weight(1f)) { StateDropdown(selected = state) { state = it } }
                     Column(Modifier.weight(1f)) { W9Field("ZIP", zip, KeyboardType.Number) { zip = it } }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Country", color = TextSecondary, fontSize = 13.sp)
+                    Spacer(Modifier.weight(1f))
+                    Text("United States", color = TextPrimary, fontSize = 13.sp)
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -227,26 +262,30 @@ fun TaxInfoScreen(onClose: () -> Unit) {
                 }
 
                 ui.error?.let { Text(it, color = Losses, fontSize = 12.sp) }
+                if (ui.showOverride) {
+                    ui.addressWarning?.let { Text(it, color = TextPrimary, fontSize = 12.sp) }
+                }
+
+                val buildRequest = { skip: Boolean ->
+                    W9Request(
+                        legalName = legalName.trim(),
+                        businessName = businessName.trim().ifBlank { null },
+                        taxClassification = classification,
+                        tinType = tinType,
+                        tin = tinDigits,
+                        addressLine1 = addr1.trim(),
+                        addressLine2 = addr2.trim().ifBlank { null },
+                        city = city.trim(),
+                        state = state.trim(),
+                        postalCode = zip.trim(),
+                        country = "US",
+                        certified = true,
+                        skipAddressCheck = if (skip) true else null,
+                    )
+                }
 
                 Button(
-                    onClick = {
-                        viewModel.submit(
-                            W9Request(
-                                legalName = legalName.trim(),
-                                businessName = businessName.trim().ifBlank { null },
-                                taxClassification = classification,
-                                tinType = tinType,
-                                tin = tinDigits,
-                                addressLine1 = addr1.trim(),
-                                addressLine2 = addr2.trim().ifBlank { null },
-                                city = city.trim(),
-                                state = state.trim(),
-                                postalCode = zip.trim(),
-                                country = "US",
-                                certified = true,
-                            )
-                        )
-                    },
+                    onClick = { viewModel.submit(buildRequest(false)) },
                     enabled = canSubmit && !ui.submitting,
                     colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent, contentColor = AppBackground),
                     modifier = Modifier.fillMaxWidth(),
@@ -256,6 +295,16 @@ fun TaxInfoScreen(onClose: () -> Unit) {
                         Spacer(Modifier.height(0.dp))
                     }
                     Text(if (ui.submitting) "Submitting…" else "Submit W-9", fontWeight = FontWeight.SemiBold)
+                }
+
+                if (ui.showOverride) {
+                    TextButton(
+                        onClick = { viewModel.submit(buildRequest(true)) },
+                        enabled = !ui.submitting,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Submit anyway", color = PrimaryAccent, fontWeight = FontWeight.SemiBold)
+                    }
                 }
 
                 Spacer(Modifier.height(24.dp))
@@ -285,6 +334,30 @@ private fun ClassificationDropdown(selected: String, onSelect: (String) -> Unit)
                 DropdownMenuItem(
                     text = { Text(text) },
                     onClick = { onSelect(value); expanded = false },
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun StateDropdown(selected: String, onSelect: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = selected,
+            onValueChange = {},
+            readOnly = true,
+            placeholder = { Text("State", color = TextMuted, fontSize = 13.sp) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier.fillMaxWidth().menuAnchor(),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            US_STATES.forEach { code ->
+                DropdownMenuItem(
+                    text = { Text(code) },
+                    onClick = { onSelect(code); expanded = false },
                 )
             }
         }
@@ -322,6 +395,10 @@ class W9ViewModel @Inject constructor(
         val heldPayoutTotal: Double = 0.0,
         val legalNamePrefill: String? = null,
         val error: String? = null,
+        // USPS couldn't confirm the address — show the reason + a "Submit anyway"
+        // override (backend is fail-open; lets a real user past a false negative).
+        val addressWarning: String? = null,
+        val showOverride: Boolean = false,
     )
 
     private val _ui = MutableStateFlow(UiState())
@@ -352,20 +429,40 @@ class W9ViewModel @Inject constructor(
             runCatching { apiService.submitW9(request) }
                 .onSuccess { resp ->
                     _ui.value = if (resp.onFile) {
-                        _ui.value.copy(submitting = false, onFile = true, tinLast4 = resp.tinLast4)
+                        _ui.value.copy(submitting = false, onFile = true, tinLast4 = resp.tinLast4,
+                            addressWarning = null, showOverride = false)
                     } else {
                         _ui.value.copy(
-                            submitting = false,
+                            submitting = false, addressWarning = null, showOverride = false,
                             error = resp.message ?: "Saved, but syncing is still pending. We'll retry automatically.",
                         )
                     }
                 }
-                .onFailure {
-                    _ui.value = _ui.value.copy(
-                        submitting = false,
-                        error = "Submission failed. Please check your details and try again.",
-                    )
+                .onFailure { e ->
+                    val (code, message) = parseError(e)
+                    _ui.value = if (code == "address_not_deliverable") {
+                        _ui.value.copy(
+                            submitting = false,
+                            showOverride = true,
+                            addressWarning = message ?: "USPS couldn't confirm this address. Please double-check it.",
+                        )
+                    } else {
+                        _ui.value.copy(
+                            submitting = false,
+                            error = message ?: "Submission failed. Please check your details and try again.",
+                        )
+                    }
                 }
         }
     }
+
+    /** Extract (error_code, message) from a Retrofit HTTP error body, if present. */
+    private fun parseError(e: Throwable): Pair<String?, String?> =
+        runCatching {
+            val body = (e as? HttpException)?.response()?.errorBody()?.string().orEmpty()
+            val json = org.json.JSONObject(body)
+            val code = if (json.has("error")) json.getString("error") else null
+            val message = if (json.has("message")) json.getString("message") else null
+            code to message
+        }.getOrDefault(null to null)
 }

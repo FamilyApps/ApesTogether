@@ -560,6 +560,9 @@ data class W9Request(
     @SerialName("postal_code") val postalCode: String,
     val country: String = "US",
     val certified: Boolean,
+    // When true, bypass the USPS deliverability check (user chose "Submit anyway"
+    // after a false-negative address verdict). Null omits it from the payload.
+    @SerialName("skip_address_check") val skipAddressCheck: Boolean? = null,
 )
 
 @Serializable

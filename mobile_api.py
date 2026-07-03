@@ -787,6 +787,18 @@ _TAX_CLASSIFICATIONS = {
     'llc_c', 'llc_s', 'llc_p',
 }
 
+# USPS state/territory codes accepted on the W-9. A W-9 is for U.S. persons
+# only (non-U.S. payees use a W-8), so we enforce a valid U.S. state/territory:
+# the 50 states, DC, and the 5 U.S. territories (whose residents are U.S.
+# persons for 1099 purposes).
+_US_STATES = {
+    'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID',
+    'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS',
+    'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK',
+    'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV',
+    'WI', 'WY', 'DC', 'PR', 'VI', 'GU', 'AS', 'MP',
+}
+
 
 def _user_is_company_owned(user) -> bool:
     """True for accounts that never receive real payouts: company bots
@@ -957,9 +969,11 @@ def tax_w9_submit():
     certified = bool(data.get('certified'))
 
     address_line1 = (data.get('address_line1') or '').strip()
+    address_line2 = (data.get('address_line2') or '').strip() or None
     city = (data.get('city') or '').strip()
-    state = (data.get('state') or '').strip()
+    state = (data.get('state') or '').strip().upper()
     postal_code = (data.get('postal_code') or '').strip()
+    country = (data.get('country') or 'US').strip().upper()[:2]
 
     errors = {}
     if not legal_name:
@@ -970,12 +984,65 @@ def tax_w9_submit():
         errors['tin_type'] = 'invalid'
     if len(tin_digits) != 9:
         errors['tin'] = 'must_be_9_digits'
-    if not (address_line1 and city and state and postal_code):
-        errors['address'] = 'incomplete'
+    # W-9 is for U.S. persons only — enforce a complete, valid U.S. address so a
+    # 1099 can actually be filed and the check mailed (non-U.S. payees use W-8).
+    if country != 'US':
+        errors['country'] = 'must_be_us'
+    if not address_line1:
+        errors['address_line1'] = 'required'
+    if not city:
+        errors['city'] = 'required'
+    if state not in _US_STATES:
+        errors['state'] = 'invalid_us_state'
+    if not re.match(r'^\d{5}(-\d{4})?$', postal_code):
+        errors['postal_code'] = 'invalid_zip'
     if not certified:
         errors['certified'] = 'required'
     if errors:
         return jsonify({'error': 'validation_failed', 'fields': errors}), 400
+
+    # Real deliverability check via USPS Addresses API. Fail-open: this only
+    # blocks on a DEFINITIVE "undeliverable" verdict, never on missing config or
+    # an API hiccup (format + state + ZIP regex are already enforced above).
+    # The client can override a false negative by resubmitting with
+    # skip_address_check=true (e.g. brand-new construction USPS hasn't indexed).
+    from services import address_validation
+    skip_addr = str(data.get('skip_address_check') or '').lower() in ('1', 'true', 'yes')
+    if not skip_addr:
+        av = address_validation.validate_us_address(
+            street=address_line1, city=city, state=state,
+            zip5=postal_code, secondary=address_line2,
+        )
+        if av['status'] == 'undeliverable':
+            msg = av.get('message') or 'USPS could not confirm this address.'
+            std = av.get('standardized') or {}
+            if std.get('line1'):
+                bits = [std['line1']]
+                if std.get('line2'):
+                    bits.append(std['line2'])
+                zc = std.get('postal_code') or ''
+                if std.get('zip4'):
+                    zc = f"{zc}-{std['zip4']}"
+                loc = ' '.join(p for p in [std.get('city'), std.get('state'), zc] if p)
+                if loc:
+                    bits.append(loc)
+                msg = f"{msg} Did you mean: {', '.join(bits)}?"
+            return jsonify({
+                'error': 'address_not_deliverable',
+                'message': msg,
+                'suggested': av.get('standardized'),
+            }), 400
+        # Adopt USPS's standardized form when confirmed — cleaner for mailing
+        # checks and for the 1099 address of record.
+        std = av.get('standardized') if av['status'] == 'deliverable' else None
+        if std:
+            address_line1 = std.get('line1') or address_line1
+            address_line2 = std.get('line2') or address_line2
+            city = std.get('city') or city
+            state = std.get('state') or state
+            zc = std.get('postal_code') or postal_code
+            z4 = std.get('zip4')
+            postal_code = f'{zc}-{z4}' if (zc and z4) else zc
 
     user = User.query.get(g.user_id)
     if not user:
@@ -993,11 +1060,11 @@ def tax_w9_submit():
     profile.tin_type = tin_type
     profile.tin_last4 = tin_digits[-4:]
     profile.address_line1 = address_line1
-    profile.address_line2 = (data.get('address_line2') or '').strip() or None
+    profile.address_line2 = address_line2
     profile.city = city
     profile.state = state
     profile.postal_code = postal_code
-    profile.country = ((data.get('country') or 'US').strip().upper()[:2]) or 'US'
+    profile.country = country
     profile.certified = True
     profile.certified_at = now
     profile.submitted_at = now
@@ -8342,10 +8409,16 @@ def run_monthly_payout_pipeline(year=None, month=None):
     xero_sync = xero_service.sync_payout_records_to_xero(
         period_start=period_start, period_end=period_end)
 
+    # Email the operator the month-end check run (payee name + mailing address +
+    # amount + real/gift sub counts) so mailing checks never depends on
+    # remembering to run a report. Best-effort — never blocks the payout run.
+    check_run_email = _email_payout_check_run_report(year, month)
+
     return {
         'period': f'{period_start} to {period_end}',
         'generation': generation,
         'xero_sync': xero_sync,
+        'check_run_email': check_run_email,
     }
 
 
@@ -8812,6 +8885,273 @@ def tax_1099_readiness():
         'creators': creators,
         'action_required': [c for c in creators if c['category'] == 'action_required'],
     })
+
+
+def _build_payout_check_run(year=None, month=None):
+    """Build the month-end "check run": who to pay, where to mail it, how much.
+
+    Returns a JSON-serializable dict with one entry per payable (pending, i.e.
+    non-held / non-paid) creator for the period, joined to their W-9 mailing
+    address and real/gift subscriber counts. Held records (no W-9 on file) are
+    excluded — they aren't payable yet. Defaults to the PRIOR calendar month,
+    matching the monthly payout cron.
+
+    Shared by GET /admin/tax/payout-check-run and the emailed month-end report.
+    """
+    from models import User, XeroPayoutRecord, TaxpayerProfile
+    from calendar import monthrange
+    from datetime import timedelta
+
+    if year is None or month is None:
+        now = datetime.utcnow()
+        prev = date(now.year, now.month, 1) - timedelta(days=1)
+        year = year or prev.year
+        month = month or prev.month
+
+    period_start = date(year, month, 1)
+    period_end = date(year, month, monthrange(year, month)[1])
+    period_label = period_start.strftime('%b %Y')
+
+    records = XeroPayoutRecord.query.filter_by(
+        period_start=period_start, period_end=period_end,
+        payment_status='pending',
+    ).all()
+
+    checks = []
+    total = 0.0
+    missing_address = 0
+    for r in records:
+        amount = round(r.total_payout, 2)
+        if amount <= 0:
+            continue
+        user = User.query.get(r.portfolio_user_id)
+        if not user or _user_is_company_owned(user):
+            continue
+        profile = TaxpayerProfile.query.filter_by(user_id=r.portfolio_user_id).first()
+        has_addr = bool(profile and profile.address_line1 and profile.city
+                        and profile.state and profile.postal_code)
+        if not has_addr:
+            missing_address += 1
+        checks.append({
+            'user_id': r.portfolio_user_id,
+            'username': user.username,
+            'payee_name': (profile.legal_name if (profile and profile.legal_name) else user.username),
+            'business_name': (profile.business_name if profile else None),
+            'address': ({
+                'line1': profile.address_line1,
+                'line2': profile.address_line2,
+                'city': profile.city,
+                'state': profile.state,
+                'postal_code': profile.postal_code,
+                'country': profile.country or 'US',
+            } if profile else None),
+            'address_complete': has_addr,
+            'real_subs': r.real_subscriber_count or 0,
+            'gift_subs': r.bonus_subscriber_count or 0,
+            'amount': amount,
+            'payment_status': r.payment_status,
+            'xero_invoice_id': r.xero_invoice_id,
+            'xero_reference': f'Payout-{user.username}-{period_label}',
+        })
+        total += amount
+
+    checks.sort(key=lambda c: c['amount'], reverse=True)
+    return {
+        'period': f'{period_start} to {period_end}',
+        'period_label': period_label,
+        'period_year': year,
+        'period_month': month,
+        'check_count': len(checks),
+        'total_amount': round(total, 2),
+        'missing_address_count': missing_address,
+        'checks': checks,
+    }
+
+
+def _format_check_run_email(report):
+    """Build (subject, text_body, html_body) for the month-end check-run report."""
+    label = report['period_label']
+    checks = report['checks']
+    subject = (f"Creator payout check run — {label} "
+               f"({report['check_count']} checks, ${report['total_amount']:,.2f})")
+
+    def _addr_text(c):
+        a = c.get('address') or {}
+        if not c.get('address_complete'):
+            return 'ADDRESS MISSING — do not mail'
+        line2 = f" {a.get('line2')}" if a.get('line2') else ''
+        return f"{a.get('line1')}{line2}, {a.get('city')}, {a.get('state')} {a.get('postal_code')}"
+
+    lines = [
+        f"Month-end creator payout check run for {label}.",
+        f"{report['check_count']} check(s) to mail | total ${report['total_amount']:,.2f}",
+    ]
+    if report['missing_address_count']:
+        lines.append(f"WARNING: {report['missing_address_count']} payee(s) missing a mailing "
+                     f"address — do NOT mail until resolved.")
+    lines.append("")
+    for c in checks:
+        name = c['payee_name']
+        if c.get('business_name'):
+            name += f" (DBA {c['business_name']})"
+        lines.append(f"${c['amount']:,.2f}  —  {name}")
+        lines.append(f"    {_addr_text(c)}")
+        lines.append(f"    subs: {c['real_subs']} real + {c['gift_subs']} gift  |  ref: {c['xero_reference']}")
+        lines.append("")
+    lines.append("Cut/mail these checks, then mark the matching bills paid in Xero (Bills to pay).")
+    text_body = "\n".join(lines)
+
+    rows = ""
+    for c in checks:
+        addr_html = _addr_text(c)
+        if not c.get('address_complete'):
+            addr_html = f"<span style='color:#c00;font-weight:600'>{addr_html}</span>"
+        name = c['payee_name']
+        if c.get('business_name'):
+            name += f"<br><span style='color:#888;font-size:12px'>DBA {c['business_name']}</span>"
+        rows += (
+            "<tr>"
+            f"<td style='padding:8px;border-bottom:1px solid #eee;font-weight:600'>${c['amount']:,.2f}</td>"
+            f"<td style='padding:8px;border-bottom:1px solid #eee'>{name}</td>"
+            f"<td style='padding:8px;border-bottom:1px solid #eee'>{addr_html}</td>"
+            f"<td style='padding:8px;border-bottom:1px solid #eee;text-align:center'>{c['real_subs']}</td>"
+            f"<td style='padding:8px;border-bottom:1px solid #eee;text-align:center'>{c['gift_subs']}</td>"
+            "</tr>"
+        )
+    warn = ""
+    if report['missing_address_count']:
+        warn = (f"<p style='color:#c00;font-weight:600'>WARNING: {report['missing_address_count']} "
+                f"payee(s) missing a mailing address — do NOT mail until resolved.</p>")
+    html_body = (
+        "<div style='font-family:sans-serif;max-width:720px;margin:0 auto;padding:24px'>"
+        f"<h2 style='margin:0 0 8px'>Creator payout check run — {label}</h2>"
+        f"<p style='color:#555'>{report['check_count']} check(s) to mail · total "
+        f"<strong>${report['total_amount']:,.2f}</strong></p>"
+        f"{warn}"
+        "<table style='width:100%;border-collapse:collapse;font-size:14px'>"
+        "<tr style='text-align:left;color:#888'>"
+        "<th style='padding:8px'>Amount</th><th style='padding:8px'>Payee</th>"
+        "<th style='padding:8px'>Mailing address</th>"
+        "<th style='padding:8px'>Real</th><th style='padding:8px'>Gift</th></tr>"
+        f"{rows}"
+        "</table>"
+        "<p style='margin:20px 0 0;color:#888;font-size:13px'>Cut/mail these checks, then mark the "
+        "matching bills paid in Xero (Bills to pay).</p>"
+        "<p style='color:#888;font-size:12px'>— ApesTogether</p>"
+        "</div>"
+    )
+    return subject, text_body, html_body
+
+
+CHECK_RUN_REPORT_EMAIL = 'bobford00@gmail.com'
+
+
+def _sample_check_run_report():
+    """A fabricated check-run report for TESTING the email (formatting + delivery)
+    without needing real payable creators. Includes a business payee and one
+    payee missing an address so the warning path is exercised too."""
+    from datetime import timedelta
+
+    now = datetime.utcnow()
+    prev = date(now.year, now.month, 1) - timedelta(days=1)
+    label = prev.strftime('%b %Y')
+    period_start = date(prev.year, prev.month, 1)
+    checks = [
+        {'user_id': 0, 'username': 'sampletrader', 'payee_name': 'Jane Q. Sample',
+         'business_name': None,
+         'address': {'line1': '123 MAIN ST', 'line2': None, 'city': 'AUSTIN',
+                     'state': 'TX', 'postal_code': '78701-1234', 'country': 'US'},
+         'address_complete': True, 'real_subs': 12, 'gift_subs': 3, 'amount': 36.00,
+         'payment_status': 'pending', 'xero_invoice_id': None,
+         'xero_reference': f'Payout-sampletrader-{label}'},
+        {'user_id': 0, 'username': 'apecoach', 'payee_name': 'Chris Coach',
+         'business_name': 'ApeCoach LLC',
+         'address': {'line1': '9 FINANCE BLVD', 'line2': 'STE 400', 'city': 'NEW YORK',
+                     'state': 'NY', 'postal_code': '10005', 'country': 'US'},
+         'address_complete': True, 'real_subs': 5, 'gift_subs': 0, 'amount': 15.00,
+         'payment_status': 'pending', 'xero_invoice_id': None,
+         'xero_reference': f'Payout-apecoach-{label}'},
+        {'user_id': 0, 'username': 'noaddr', 'payee_name': 'Pat NoAddress',
+         'business_name': None, 'address': None, 'address_complete': False,
+         'real_subs': 2, 'gift_subs': 1, 'amount': 6.00, 'payment_status': 'pending',
+         'xero_invoice_id': None, 'xero_reference': f'Payout-noaddr-{label}'},
+    ]
+    return {
+        'period': f'{period_start} to {prev}',
+        'period_label': f'{label} (SAMPLE)',
+        'period_year': prev.year,
+        'period_month': prev.month,
+        'check_count': len(checks),
+        'total_amount': round(sum(c['amount'] for c in checks), 2),
+        'missing_address_count': 1,
+        'checks': checks,
+    }
+
+
+def _email_payout_check_run_report(year=None, month=None, to_email=CHECK_RUN_REPORT_EMAIL, sample=False):
+    """Build and email the month-end check-run report. Best-effort: never raises.
+
+    Set sample=True to email a fabricated report (for testing delivery/format).
+    """
+    try:
+        from services.notification_utils import send_email
+        report = _sample_check_run_report() if sample else _build_payout_check_run(year, month)
+        subject, text_body, html_body = _format_check_run_email(report)
+        if sample:
+            subject = '[TEST] ' + subject
+        result = send_email(to_email, subject, text_body, html_body=html_body, bcc=False)
+        logger.info(f"[check-run email] {report['period_label']}: {report['check_count']} checks, "
+                    f"${report['total_amount']:.2f} -> {to_email}: {result.get('status')}")
+        return {
+            'email': result.get('status'),
+            'period': report['period'],
+            'check_count': report['check_count'],
+            'total_amount': report['total_amount'],
+            'missing_address_count': report['missing_address_count'],
+        }
+    except Exception as e:
+        logger.error(f"[check-run email] failed: {e}")
+        return {'email': 'failed', 'error': str(e)}
+
+
+@mobile_api.route('/admin/tax/payout-check-run', methods=['GET'])
+@require_admin_2fa
+@with_db_retry
+def tax_payout_check_run():
+    """Month-end "check run": who to pay, where to mail it, and how much.
+
+    One-glance list (name + mailing address + amount + real/gift sub counts) for
+    cutting/mailing checks without opening each Xero contact. Held (no-W-9)
+    records are excluded — they appear in /admin/tax/1099-readiness instead.
+
+    Query params:
+      ?year=2026&month=6  — period (defaults to the PRIOR month, like the cron).
+      ?email=1            — also email the report to the operator address.
+      ?sample=1           — email a fabricated SAMPLE report (test delivery/format
+                            without real payable creators) and return it as JSON.
+    """
+    from datetime import timedelta
+
+    if request.args.get('sample') in ('1', 'true', 'yes'):
+        emailed = _email_payout_check_run_report(sample=True)
+        return jsonify({'success': True, 'sample': True, 'emailed': emailed,
+                        **_sample_check_run_report()})
+
+    now = datetime.utcnow()
+    prev = date(now.year, now.month, 1) - timedelta(days=1)
+    try:
+        year = int(request.args.get('year', prev.year))
+        month = int(request.args.get('month', prev.month))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'invalid_period'}), 400
+    if not (1 <= month <= 12):
+        return jsonify({'error': 'invalid_month'}), 400
+
+    report = _build_payout_check_run(year, month)
+    emailed = None
+    if request.args.get('email') in ('1', 'true', 'yes'):
+        emailed = _email_payout_check_run_report(year, month)
+    return jsonify({'success': True, 'emailed': emailed, **report})
 
 
 @mobile_api.route('/admin/tax/w9/retry-sync', methods=['POST'])
