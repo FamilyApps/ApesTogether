@@ -38,13 +38,11 @@ accounting work. Check items off as you go.
 
 ## D2. Before public launch — REMOVE test overrides (CRITICAL)
 
-- [ ] **Delete the `W9_TEST_EMAILS` env var on Vercel** (then redeploy). It was set
-      during testing so an owner/admin account (e.g. `bobford00`) — normally never
-      payout-eligible — could open and submit the in-app W-9 form. Left set in
-      production it makes those accounts appear payout-eligible for the W-9 gate.
+- [x] **`W9_TEST_EMAILS` env var DELETED on Vercel (USER-confirmed 2026-07-03).** It was
+      set during testing so an owner/admin account (e.g. `bobford00`) — normally never
+      payout-eligible — could open and submit the in-app W-9 form. Now removed, so those
+      accounts no longer appear payout-eligible for the W-9 gate.
       Read at `mobile_api.py` `_user_is_payout_eligible` / `W9_TEST_EMAILS`.
-      **Status 2026-07-01: still SET on purpose — keep until the W-9→Xero flow is
-      fully confirmed with `bobford00`, then remove before launch.**
 - [ ] (Optional) Clean up the test W-9 data the override created: delete the
       `taxpayer_profile` row for the test account and clear/blank its Xero contact
       `TaxNumber`, so no bogus TIN lingers in Xero.
@@ -138,11 +136,29 @@ The monthly payout cron now emails a "check run" (payee name + mailing address +
 amount + real/gift sub counts) to **bobford00@gmail.com** so mailing checks never
 depends on remembering to run a report. Uses the existing SendGrid sender.
 
-- [ ] **Test delivery/format now:** `GET /api/mobile/admin/tax/payout-check-run?sample=1`
-      (admin 2FA) emails a fabricated SAMPLE report (3 payees incl. a business and
-      a missing-address warning row). Confirm it lands at bobford00@gmail.com.
+- [x] **Delivery/format VERIFIED (2026-07-03).** `GET /api/mobile/admin/tax/payout-check-run?sample=1`
+      (admin 2FA) emailed a fabricated SAMPLE report (3 payees incl. a business and
+      a missing-address warning row) → `email: sent`, landed at bobford00@gmail.com.
 - [ ] **Real current data:** `?email=1` instead of `?sample=1`. NOTE: this is
       currently EMPTY — the only subscribed creator is a company bot, which is
       `is_company_owned` and generates no payout, so it's excluded by design.
-- Automatic send fires at the end of `run_monthly_payout_pipeline` (the 3rd-of-month
-  cron), best-effort so it never blocks the payout run.
+- Automatic send fires at the end of `run_monthly_payout_pipeline`, driven by the
+  `/api/cron/monthly-payouts` cron scheduled **`0 9 3 * *` = 09:00 UTC on the 3rd of
+  each month** (`vercel.json`). Best-effort so it never blocks the payout run.
+
+## I. 1099-NEC filing (once a year, ~January)
+
+**Direction (decided 2026-07-03):** Xero **tracks + generates** the 1099-NEC report
+from the payout bills we post to account **`6010`**, but **Xero does NOT transmit to
+the IRS itself.** At year end we choose one of:
+
+- **(a) E-file via a Xero App Store partner** — Track1099/Avalara, Tax1099, TaxBandits,
+  1099SmartFile, or Yearli. Per-form fee; files with the **IRS + applicable states**
+  and e-delivers recipient copies. **Recommended** (cheap at our volume, least manual).
+- **(b) Export the Xero 1099 report as CSV and file ourselves.** The IRS only *requires*
+  e-file at **10+** total information returns; under 10 we may paper-file.
+
+The 1099 report is available on the **Early** plan. Deadline: **Jan 31** (IRS filing +
+recipient copies). Year-round prep already feeds this: W-9 collection gate, the
+`GET /api/mobile/admin/tax/1099-readiness` dashboard ($600 / missing-TIN buckets),
+and the `6010` payout bills. **Nothing to build** — this is an operational January task.

@@ -738,6 +738,16 @@ keyword capacity by the number of locales.
 - [ ] App preview video (optional v1) — 30 sec, portrait
 - [ ] Age rating set to **17+** (Frequent/Intense Mature/Suggestive Themes
       because financial topics — NOT gambling)
+- [ ] **Minimum age 18+ (per the Terms of Service eligibility policy — attorney
+      finalizing exact ToS wording).** Users must be 18+ with capacity to contract
+      (binding arbitration, class-action waiver, independent-contractor/W-9 payout
+      terms). Reflect this in BOTH stores:
+      - **Apple:** select the highest available age band (18+ if offered in App
+        Store Connect, otherwise 17+) — Apple has no under-18 gate below this.
+      - **Google:** Target audience = **18+ only** (already specified in
+        `PLAY_STORE_LISTING_GUIDE.md` §2.3/appendix).
+      - **Description (both stores):** include the line
+        **"You must be 18 or older to use ApesTogether."**
 - [ ] In-App Events drafted for launch week
 - [ ] Review prompt configured to fire after follow + 3rd session
 

@@ -20,15 +20,47 @@ param(
   [string]$OutputDir   = "$env:USERPROFILE\Downloads\AppStore_Screenshots_v2",
   [string]$FrameFile   = "",
   [string]$CaptionFont = "",
-  [string]$BodyFont    = ""
+  [string]$BodyFont    = "",
+  [int]$CaptionSize    = 90,    # headline px (large + bold reads well at thumbnail size)
+  [int]$SubtitleSize   = 46,    # subtitle px (~half the headline for clear hierarchy)
+  [int]$CaptionTop     = 150    # fixed Y for the headline's first line -> same on all 6
 )
 Add-Type -AssemblyName System.Drawing
+# Compiled chroma-key: transparent where the pixel is magenta-dominant
+# (green deficit = min(R,B)-G). Removes anti-aliased screen/notch edges that a
+# rectangular color key leaves as a pink fringe, while keeping grays / titanium
+# frame (R~=G~=B => deficit ~0). Also returns the SOLID magenta screen bbox.
+Add-Type -TypeDefinition @"
+using System;
+public static class ChromaKey {
+  public static int[] Apply(byte[] buf, int stride, int W, int H){
+    int minX=W, minY=H, maxX=0, maxY=0;
+    for(int y=0;y<H;y++){
+      int row=y*stride;
+      for(int x=0;x<W;x++){
+        int i=row+x*4;
+        int b=buf[i], g=buf[i+1], r=buf[i+2];
+        int mn = r<b ? r : b;
+        int deficit = mn-g;
+        if(deficit>40 && r>60 && b>60){
+          buf[i+3]=0;
+          if(deficit>120 && r>150 && b>150){
+            if(x<minX)minX=x; if(x>maxX)maxX=x;
+            if(y<minY)minY=y; if(y>maxY)maxY=y;
+          }
+        }
+      }
+    }
+    return new int[]{minX,minY,maxX,maxY};
+  }
+}
+"@
 
 $W=1290; $H=2796
 $colTop=[Drawing.Color]::FromArgb(11,15,25)
 $colBottom=[Drawing.Color]::FromArgb(22,33,62)
 $colGray=[Drawing.Color]::FromArgb(156,163,175)
-$colDisc=[Drawing.Color]::FromArgb(115,255,255,255)
+$colDisc=[Drawing.Color]::FromArgb(175,255,255,255)   # brighter so the fine-print stays legible
 
 $frames=@(
   @{file="01_leaderboard.png"; cap="The best AI and human traders."; sub="Every trade tracked the moment it's made."; disc="For educational purposes only. All trades on the platform are virtual using real market data."},
@@ -52,8 +84,8 @@ $bodyFamily = Get-Family $BodyFont    "Segoe UI"
 # A custom OTF is usually already the desired weight -> render Regular; the
 # built-in fallback needs an explicit Bold for the caption.
 $capStyle = if($CaptionFont -and (Test-Path $CaptionFont)){[Drawing.FontStyle]::Regular}else{[Drawing.FontStyle]::Bold}
-$capFont  = New-Object Drawing.Font($capFamily,74,$capStyle,[Drawing.GraphicsUnit]::Pixel)
-$subFont  = New-Object Drawing.Font($bodyFamily,40,[Drawing.FontStyle]::Regular,[Drawing.GraphicsUnit]::Pixel)
+$capFont  = New-Object Drawing.Font($capFamily,$CaptionSize,$capStyle,[Drawing.GraphicsUnit]::Pixel)
+$subFont  = New-Object Drawing.Font($bodyFamily,$SubtitleSize,[Drawing.FontStyle]::Regular,[Drawing.GraphicsUnit]::Pixel)
 $discFont = New-Object Drawing.Font($bodyFamily,26,[Drawing.FontStyle]::Regular,[Drawing.GraphicsUnit]::Pixel)
 $phFont   = New-Object Drawing.Font($bodyFamily,40,[Drawing.FontStyle]::Regular,[Drawing.GraphicsUnit]::Pixel)
 $whiteBrush=New-Object Drawing.SolidBrush([Drawing.Color]::White)
@@ -81,6 +113,29 @@ function Get-WrappedLines($g,$text,$font,$maxW){
   if($cur -ne ""){[void]$lines.Add($cur)}
   return $lines
 }
+function Get-BalancedLines($g,$text,$font,$maxW){
+  # Headline wrapping: 1 line if it fits, else the 2-line split that minimizes the
+  # widest line, with a bias toward breaking right after a sentence period so
+  # e.g. "Real-time alerts. Every move." -> "Real-time alerts." / "Every move."
+  $lines=New-Object System.Collections.ArrayList
+  if([string]::IsNullOrWhiteSpace($text)){return $lines}
+  $words=@($text -split ' ')
+  if($words.Count -eq 1 -or $g.MeasureString($text,$font).Width -le $maxW){
+    [void]$lines.Add($text); return $lines
+  }
+  $best=1; $bestCost=[double]::MaxValue
+  for($k=1;$k -lt $words.Count;$k++){
+    $l1=($words[0..($k-1)] -join ' '); $l2=($words[$k..($words.Count-1)] -join ' ')
+    $cost=[Math]::Max($g.MeasureString($l1,$font).Width,$g.MeasureString($l2,$font).Width)
+    if($words[$k-1].EndsWith('.') -or $words[$k-1].EndsWith(':')){ $cost -= 45 }
+    if($cost -lt $bestCost){ $bestCost=$cost; $best=$k }
+  }
+  $l1=($words[0..($best-1)] -join ' '); $l2=($words[$best..($words.Count-1)] -join ' ')
+  if(($g.MeasureString($l1,$font).Width -gt $maxW) -or ($g.MeasureString($l2,$font).Width -gt $maxW)){
+    return (Get-WrappedLines $g $text $font $maxW)   # very long -> fall back to greedy (3+ lines)
+  }
+  [void]$lines.Add($l1); [void]$lines.Add($l2); return $lines
+}
 function Draw-CenteredLines($g,$lines,$font,$brush,[single]$startY,[single]$lineH){
   $y=$startY
   foreach($ln in $lines){
@@ -90,23 +145,46 @@ function Draw-CenteredLines($g,$lines,$font,$brush,[single]$startY,[single]$line
   return $y
 }
 function Draw-Header($g,$cap,$sub,[single]$deviceTop){
-  $capLines=Get-WrappedLines $g $cap $capFont 1100
-  $subLines=Get-WrappedLines $g $sub $subFont 1100
-  $capLH=$capFont.GetHeight($g)*1.02
-  $subLH=$subFont.GetHeight($g)*1.15
-  $gap=16
+  # TOP-anchored at a fixed Y ($CaptionTop) so the headline sits at the SAME
+  # position on all 6 screenshots -> a consistent, professional gallery. Only the
+  # words change frame-to-frame; size / weight / placement stay identical.
+  # Narrower caption wrap (980) encourages balanced 2-line breaks on long headlines.
+  $capLines=Get-BalancedLines $g $cap $capFont 980
+  $subLines=Get-WrappedLines $g $sub $subFont 1050
+  $capLH=$capFont.GetHeight($g)*1.06
+  $subLH=$subFont.GetHeight($g)*1.20
+  $gap=[single]($capLH*0.30)
   $blockH=($capLines.Count*$capLH)+$gap+($subLines.Count*$subLH)
-  $blockTop=$deviceTop-56-$blockH
-  if($blockTop -lt 60){$blockTop=60}
-  $afterCap=Draw-CenteredLines $g $capLines $capFont $whiteBrush $blockTop $capLH
+  $top=[single]$CaptionTop
+  $maxTop=$deviceTop-48-$blockH            # never let the header touch the phone
+  if($top -gt $maxTop){$top=[Math]::Max([single]48,$maxTop)}
+  $afterCap=Draw-CenteredLines $g $capLines $capFont $whiteBrush $top $capLH
   Draw-CenteredLines $g $subLines $subFont $grayBrush ($afterCap+$gap) $subLH | Out-Null
 }
-function Draw-Disclaimer($g,$disc){
+function Draw-Disclaimer($g,$disc,[single]$deviceBottom){
   if([string]::IsNullOrWhiteSpace($disc)){return}
-  $lines=Get-WrappedLines $g $disc $discFont 1130
-  $lh=$discFont.GetHeight($g)*1.25
-  $start=$H-72-($lines.Count*$lh)
-  Draw-CenteredLines $g $lines $discFont $discBrush $start $lh | Out-Null
+  $maxW=1130; $bottomMargin=56; $gapAbove=56   # gapAbove clears the phone's bottom bezel
+  # Shrink-to-fit so the disclaimer always lands in the navy band BELOW the device.
+  # Larger base size (32px) for legibility; balanced wrap avoids orphan words like "data."
+  for($fs=32; $fs -ge 26; $fs--){
+    $f=New-Object Drawing.Font($bodyFamily,$fs,[Drawing.FontStyle]::Regular,[Drawing.GraphicsUnit]::Pixel)
+    $lines=Get-BalancedLines $g $disc $f $maxW
+    $lh=$f.GetHeight($g)*1.28
+    $top=$H-$bottomMargin-($lines.Count*$lh)
+    if($top -ge ($deviceBottom+$gapAbove)){
+      Draw-CenteredLines $g $lines $f $discBrush $top $lh | Out-Null
+      $f.Dispose(); return
+    }
+    $f.Dispose()
+  }
+  # Even at the smallest size it collides with the device -> draw just below it and warn.
+  $f=New-Object Drawing.Font($bodyFamily,26,[Drawing.FontStyle]::Regular,[Drawing.GraphicsUnit]::Pixel)
+  $lines=Get-BalancedLines $g $disc $f $maxW
+  $lh=$f.GetHeight($g)*1.28
+  $short=[int]((($deviceBottom+$gapAbove)+($lines.Count*$lh)+$bottomMargin)-$H)
+  Write-Host ("WARNING: disclaimer doesn't fit below the phone (short by ~$short px). Regenerate frame.png with the phone ~$short px higher (or slightly smaller) for clean spacing.")
+  Draw-CenteredLines $g $lines $f $discBrush ($deviceBottom+$gapAbove) $lh | Out-Null
+  $f.Dispose()
 }
 function Fill-Gradient($g){
   $rect=New-Object Drawing.Rectangle(0,0,$W,$H)
@@ -126,22 +204,14 @@ if(Test-Path $FrameFile){
   $gg=[Drawing.Graphics]::FromImage($baseFrame)
   $gg.InterpolationMode=[Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
   $gg.DrawImage($src,0,0,$W,$H); $gg.Dispose(); $src.Dispose()
-  $bd=$baseFrame.LockBits((New-Object Drawing.Rectangle(0,0,$W,$H)),[Drawing.Imaging.ImageLockMode]::ReadOnly,[Drawing.Imaging.PixelFormat]::Format32bppArgb)
+  $bd=$baseFrame.LockBits((New-Object Drawing.Rectangle(0,0,$W,$H)),[Drawing.Imaging.ImageLockMode]::ReadWrite,[Drawing.Imaging.PixelFormat]::Format32bppArgb)
   $stride=$bd.Stride
   $buf=New-Object byte[] ($stride*$H)
   [Runtime.InteropServices.Marshal]::Copy($bd.Scan0,$buf,0,$buf.Length)
+  $box=[ChromaKey]::Apply($buf,$stride,$W,$H)          # keys magenta -> transparent + finds screen bbox
+  $minX=$box[0];$minY=$box[1];$maxX=$box[2];$maxY=$box[3]
+  [Runtime.InteropServices.Marshal]::Copy($buf,0,$bd.Scan0,$buf.Length)
   $baseFrame.UnlockBits($bd)
-  $minX=$W;$minY=$H;$maxX=0;$maxY=0;$step=2
-  for($y=0;$y -lt $H;$y+=$step){
-    $row=$y*$stride
-    for($x=0;$x -lt $W;$x+=$step){
-      $i=$row+$x*4
-      if($buf[$i+2] -gt 165 -and $buf[$i+1] -lt 105 -and $buf[$i] -gt 165){
-        if($x -lt $minX){$minX=$x}; if($x -gt $maxX){$maxX=$x}
-        if($y -lt $minY){$minY=$y}; if($y -gt $maxY){$maxY=$y}
-      }
-    }
-  }
   if($maxX -gt $minX -and $maxY -gt $minY){
     $bx=$minX;$by=$minY;$bw=$maxX-$minX;$bh=$maxY-$minY
     Write-Host "Base frame in use. Detected screen region: x=$bx y=$by w=$bw h=$bh"
@@ -150,8 +220,7 @@ if(Test-Path $FrameFile){
     $baseFrame.Dispose(); $baseFrame=$null
   }
 }
-$ia=New-Object Drawing.Imaging.ImageAttributes
-$ia.SetColorKey([Drawing.Color]::FromArgb(140,0,140),[Drawing.Color]::FromArgb(255,130,255),[Drawing.Imaging.ColorAdjustType]::Default)
+# (magenta removal is now baked into $baseFrame's alpha by the chroma pass above)
 
 # ---------- drawn-frame geometry (fallback) ----------
 $bezel=20; $fbTop=690; $fbH=1836
@@ -177,15 +246,18 @@ foreach($f in $frames){
 
   if($baseFrame){
     if($shot){
-      $ratio=[math]::Max($bw/$shot.Width,$bh/$shot.Height)   # cover
+      $pad=8                                                 # bleed under the keyed fringe ring so no gap shows
+      $cx=$bx-$pad; $cy=$by-$pad; $cw=$bw+2*$pad; $ch=$bh+2*$pad
+      $ratio=[math]::Max($cw/$shot.Width,$ch/$shot.Height)   # cover (padded)
       $dw=[int]($shot.Width*$ratio); $dh=[int]($shot.Height*$ratio)
-      $dx=$bx+[int](($bw-$dw)/2); $dy=$by+[int](($bh-$dh)/2)
-      $g.SetClip((New-Object Drawing.Rectangle($bx,$by,$bw,$bh)))
+      $dx=$cx+[int](($cw-$dw)/2); $dy=$cy+[int](($ch-$dh)/2)
+      $g.SetClip((New-Object Drawing.Rectangle($cx,$cy,$cw,$ch)))
       $g.DrawImage($shot,$dx,$dy,$dw,$dh)
       $g.ResetClip()
     }
-    $g.DrawImage($baseFrame,(New-Object Drawing.Rectangle(0,0,$W,$H)),0,0,$W,$H,[Drawing.GraphicsUnit]::Pixel,$ia)
+    $g.DrawImage($baseFrame,0,0,$W,$H)
     Draw-Header $g $f.cap $f.sub $by
+    $deviceBottom=$by+$bh
   } else {
     for($s=12;$s -ge 2;$s-=5){
       $a=[int](60/$s)
@@ -214,9 +286,10 @@ foreach($f in $frames){
     }
     $g.ResetClip()
     Draw-Header $g $f.cap $f.sub $fbTop
+    $deviceBottom=$fbTop+$fbH
   }
 
-  Draw-Disclaimer $g $f.disc
+  Draw-Disclaimer $g $f.disc $deviceBottom
   if($shot){ $shot.Dispose() }
   $bmp.Save((Join-Path $OutputDir $f.file),[Drawing.Imaging.ImageFormat]::Png)
   $g.Dispose(); $bmp.Dispose()
