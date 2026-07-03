@@ -15,6 +15,13 @@
 #
 # USAGE
 #   powershell -NoProfile -ExecutionPolicy Bypass -File compose_appstore_screenshots_v2.ps1
+#
+#   Android (Google Play) variant — reuse the SAME iOS captures behind an Android
+#   (Pixel) frame, swapping the iOS status bar + Dynamic Island for a synthetic
+#   Android status bar (left clock; right signal/wifi/battery):
+#     ... -FrameFile "$env:USERPROFILE\Downloads\pixel_frame.png" -AndroidStatusBar `
+#         -OutputDir "$env:USERPROFILE\Downloads\Play_Screenshots"
+#   -AndroidStatusBar auto-uses a 2:1 canvas (Play caps screenshots at 2:1).
 param(
   [string]$InputDir    = "$env:USERPROFILE\Downloads\raw_screenshots",
   [string]$OutputDir   = "$env:USERPROFILE\Downloads\AppStore_Screenshots_v2",
@@ -23,7 +30,10 @@ param(
   [string]$BodyFont    = "",
   [int]$CaptionSize    = 90,    # headline px (large + bold reads well at thumbnail size)
   [int]$SubtitleSize   = 46,    # subtitle px (~half the headline for clear hierarchy)
-  [int]$CaptionTop     = 150    # fixed Y for the headline's first line -> same on all 6
+  [int]$CaptionTop     = 150,   # fixed Y for the headline's first line -> same on all 6
+  [int]$CanvasW        = 1290,  # output width  (Apple 6.9" = 1290x2796)
+  [int]$CanvasH        = 2796,  # output height (auto -> 2*W under -AndroidStatusBar for Play's 2:1 cap)
+  [switch]$AndroidStatusBar     # overpaint iOS status bar + notch with an Android status bar (Google Play)
 )
 Add-Type -AssemblyName System.Drawing
 # Compiled chroma-key: transparent where the pixel is magenta-dominant
@@ -56,7 +66,10 @@ public static class ChromaKey {
 }
 "@
 
-$W=1290; $H=2796
+# Canvas. Apple 6.9" = 1290x2796 (2.167:1). Google Play caps screenshots at 2:1, so
+# -AndroidStatusBar auto-drops the height to 2*width unless -CanvasH is passed.
+if($AndroidStatusBar -and -not $PSBoundParameters.ContainsKey('CanvasH')){ $CanvasH = $CanvasW*2 }
+$W=$CanvasW; $H=$CanvasH
 $colTop=[Drawing.Color]::FromArgb(11,15,25)
 $colBottom=[Drawing.Color]::FromArgb(22,33,62)
 $colGray=[Drawing.Color]::FromArgb(156,163,175)
@@ -192,6 +205,77 @@ function Fill-Gradient($g){
   $g.FillRectangle($grad,$rect)
 }
 
+# ---------- Android status-bar swap (Google Play) ----------
+# Overpaints the iOS status bar + Dynamic Island at the top of a raw iPhone capture
+# with a synthetic Android status bar (left clock; right signal / wifi / battery),
+# so the same captures read as Android behind the Pixel frame. The strip background
+# is sampled from the screenshot's top corners so it blends with the app header.
+function Draw-AndroidStatusBar($g,[int]$w,[int]$stripH,[Drawing.Color]$fg,[Drawing.FontFamily]$fam){
+  $brush=New-Object Drawing.SolidBrush($fg)
+  $pad=[int][math]::Round($w*0.055)
+  # clock (left)
+  $clockPx=[int][math]::Round($stripH*0.34)
+  $cf=New-Object Drawing.Font($fam,$clockPx,[Drawing.FontStyle]::Bold,[Drawing.GraphicsUnit]::Pixel)
+  $txt="9:41"; $tsz=$g.MeasureString($txt,$cf)
+  $g.DrawString($txt,$cf,$brush,[single]$pad,[single](($stripH-$tsz.Height)/2)); $cf.Dispose()
+  # right-side icons: battery, then wifi, then signal (laid out right -> left)
+  $iconH=[int][math]::Round($stripH*0.30)
+  $iy=[int](($stripH-$iconH)/2)
+  $gap=[int]($iconH*0.55)
+  $stroke=[single]([math]::Max(2.0,$iconH*0.11))
+  $pen=New-Object Drawing.Pen($fg,$stroke)
+  $x=$w-$pad
+  # battery (outline + nub + 70% fill)
+  $batW=[int]($iconH*1.95); $nubW=[int]($iconH*0.14)
+  $x=$x-$nubW-$batW
+  $g.DrawRectangle($pen,$x,$iy,$batW,$iconH)
+  $nubH=[int]($iconH*0.42)
+  $g.FillRectangle($brush,$x+$batW,$iy+[int](($iconH-$nubH)/2),$nubW,$nubH)
+  $inset=[int][math]::Max(2,$iconH*0.18)
+  $fillW=[int](($batW-2*$inset)*0.7)
+  $g.FillRectangle($brush,$x+$inset,$iy+$inset,$fillW,$iconH-2*$inset)
+  # wifi (concentric arcs + dot)
+  $x=$x-$gap
+  $wifiW=[int]($iconH*1.25)
+  $cxw=$x-[int]($wifiW/2)
+  $baseY=$iy+$iconH
+  $wpen=New-Object Drawing.Pen($fg,[single]([math]::Max(2.0,$iconH*0.12)))
+  for($r=[int]($iconH*0.92); $r -ge [int]($iconH*0.30); $r=$r-[int]($iconH*0.32)){
+    $g.DrawArc($wpen,$cxw-$r,$baseY-$r,2*$r,2*$r,225,90)
+  }
+  $dot=[int]($iconH*0.16)
+  $g.FillEllipse($brush,$cxw-[int]($dot/2),$baseY-$dot,$dot,$dot); $wpen.Dispose()
+  $x=$x-$wifiW-$gap
+  # signal (4 ascending bars)
+  $bw=[int]($iconH*0.22); $bgap=[int]([math]::Max(2,$iconH*0.12))
+  $sx=$x-(4*$bw+3*$bgap)
+  for($i=0;$i -lt 4;$i++){
+    $bh=[int]($iconH*(0.42+0.19*$i))
+    $g.FillRectangle($brush,$sx+$i*($bw+$bgap),$iy+$iconH-$bh,$bw,$bh)
+  }
+  $pen.Dispose(); $brush.Dispose()
+}
+function Androidize-Shot([Drawing.Image]$shot,[Drawing.FontFamily]$fam){
+  $w=$shot.Width; $h=$shot.Height
+  $bmp=New-Object Drawing.Bitmap($w,$h)
+  $g=[Drawing.Graphics]::FromImage($bmp)
+  $g.SmoothingMode=[Drawing.Drawing2D.SmoothingMode]::AntiAlias
+  $g.PixelOffsetMode=[Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+  $g.TextRenderingHint=[Drawing.Text.TextRenderingHint]::AntiAlias
+  $g.DrawImage($shot,0,0,$w,$h)
+  # sample the status-bar background from the top corners (skip the notch center)
+  $c1=$bmp.GetPixel([int]($w*0.04),4)
+  $c2=$bmp.GetPixel($w-[int]($w*0.04)-1,4)
+  $bg=[Drawing.Color]::FromArgb(255,[int](($c1.R+$c2.R)/2),[int](($c1.G+$c2.G)/2),[int](($c1.B+$c2.B)/2))
+  $stripH=[int][math]::Round($h*0.052)
+  $g.FillRectangle((New-Object Drawing.SolidBrush($bg)),0,0,$w,$stripH)
+  $lum=0.299*$bg.R+0.587*$bg.G+0.114*$bg.B
+  $fg=if($lum -lt 140){[Drawing.Color]::White}else{[Drawing.Color]::FromArgb(20,20,20)}
+  Draw-AndroidStatusBar $g $w $stripH $fg $fam
+  $g.Dispose()
+  return $bmp
+}
+
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 New-Item -ItemType Directory -Force -Path $InputDir  | Out-Null
 
@@ -242,7 +326,11 @@ foreach($f in $frames){
   Fill-Gradient $g
   $imgPath=Join-Path $InputDir $f.file
   $shot=$null
-  if(Test-Path $imgPath){ $shot=[Drawing.Image]::FromFile($imgPath) }
+  if(Test-Path $imgPath){
+    $shotRaw=[Drawing.Image]::FromFile($imgPath)
+    if($AndroidStatusBar){ $shot=Androidize-Shot $shotRaw $bodyFamily; $shotRaw.Dispose() }
+    else{ $shot=$shotRaw }
+  }
 
   if($baseFrame){
     if($shot){

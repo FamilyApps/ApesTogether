@@ -162,3 +162,22 @@ The 1099 report is available on the **Early** plan. Deadline: **Jan 31** (IRS fi
 recipient copies). Year-round prep already feeds this: W-9 collection gate, the
 `GET /api/mobile/admin/tax/1099-readiness` dashboard ($600 / missing-TIN buckets),
 and the `6010` payout bills. **Nothing to build** — this is an operational January task.
+
+### Decision point — OCTOBER (lead time for the January deadline)
+
+Pick path (a) or (b) in **October** so nothing is rushed in January:
+
+- **Path (a) — Xero e-file partner (e.g. Track1099):** no IRS pre-registration needed
+  (the partner is the transmitter). Can be connected close to the deadline; the October
+  task is just to **pick + connect the app** in the Xero App Store. **Recommended.**
+- **Path (b) — self-file via the free IRS IRIS Taxpayer Portal:** requires an **IRIS
+  Transmitter Control Code (TCC)**, which takes **up to 45 calendar days** to process
+  (sometimes ~48 hrs, but don't count on it) — so **apply by ~October / early November**.
+  IRIS does **not** file state returns or mail recipient copies for you (you handle
+  CF/SF + recipient copies yourself). The legacy **FIRE** system **retires end of
+  Dec 2026**, so IRIS is the path for TY2026 (filed Jan 2027) onward. IRIS TCCs start
+  with `D`; apply at irs.gov → "IRIS application for TCC".
+
+**Trigger:** if we'll issue **10+** 1099-NECs, e-file is **mandatory** (partner or IRIS
+TCC); under 10 we *may* paper-file (no TCC). Use the `1099-readiness` dashboard in
+December to count who crossed $600 and decide.
