@@ -71,12 +71,12 @@ The authoritative, deduplicated checklist of **everything** required for public 
 - [ ] LegalText port + Settings linkouts status check.
 - [ ] Listing per `docs/PLAY_STORE_LISTING_GUIDE.md`: title/short/full desc, feature graphic, 8 screenshots, content rating (Reference/Educational, **not** gambling), Data safety (matches privacy policy), **Financial features = "Personal investment research and management" — NOT "Stock trading"/brokerage**, target audience **18+**, privacy-policy URL 200, reviewer login.
 - [ ] Subscriptions **Active** + **Small Business Program (15%) enrolled**; payments/bank/tax profile complete.
-- [ ] **14-day Closed Testing** (≥12 opted-in testers) → Production rollout **@20%** → ramp.
+- [~] **14-day Closed Testing** (≥12 opted-in testers) → Production rollout **@20%** → ramp. **Session 22 (2026-07-06):** signed release **AAB built + uploaded** to *Closed testing – Alpha* (`versionCode 2` — bumped from 1, which a prior internal-testing upload had already claimed; `versionName 1.0`, target SDK 35). Play App Signing **confirmed enrolled** (upload key `apestogether-upload` = assetlinks cert A; Google's app-signing key = cert B). **Next: add ≥12 testers + start rollout — the 14-day clock begins at first rollout.**
 - [x] Slot 2–20 products created (Session 18); RTDN verified; on-device sign-in/billing/deep-link verified.
 
 ### 5. 🎨 Shared store assets & review prep
 - [ ] Generate **app icon**, **feature graphic (1024×500)**, **8 screenshots** (Gemini prompts in `docs/ASO_STRATEGY.md`; no text in icon).
-- [~] **Android screenshots — generator ready (Session 22, 2026-07-03).** Reuse the iOS captures behind an Android frame: `compose_appstore_screenshots_v2.ps1 -FrameFile pixel_frame.png -AndroidStatusBar -OutputDir …\Play_Screenshots` — the new `-AndroidStatusBar` mode overpaints the iOS status bar + Dynamic Island with a synthetic Android status bar (clock/wifi/battery) and auto-uses a **2:1 canvas** (Play caps aspect at 2:1). Generated a first pass to `~/Downloads/Play_Screenshots`. **Note:** these are iOS UI behind a Pixel frame — fine for a first listing given the near-identical custom UI, but **recapture the 6 screens on the real Pixel 8a** before/soon after launch for full Play-policy fidelity. Still need the **1024×500 feature graphic** (Play-only).
+- [~] **Android screenshots — generator ready (Session 22, 2026-07-03).** Reuse the iOS captures behind an Android frame: `compose_appstore_screenshots_v2.ps1 -FrameFile pixel_frame.png -AndroidStatusBar -OutputDir …\Play_Screenshots` — the new `-AndroidStatusBar` mode overpaints the iOS status bar + Dynamic Island with a synthetic Android status bar (clock/wifi/battery) and auto-uses a **2:1 canvas** (Play caps aspect at 2:1). Generated a first pass to `~/Downloads/Play_Screenshots`. **Note:** these are iOS UI behind a Pixel frame — fine for a first listing given the near-identical custom UI, but **recapture the 6 screens on the real Pixel 8a** before/soon after launch for full Play-policy fidelity — **Pixel 8A now in hand (2026-07-06); native capture unblocked.** Still need the **1024×500 feature graphic** (Play-only).
 - [ ] Create **reviewer demo account(s)** (`reviewer@apestogether.ai`) with followed traders, for Apple + Google reviewers.
 - [ ] **Brand-spelling sweep** — "ApesTogether" (fused) everywhere: iOS/Android strings, push sender label, share-sheet, landing, emails, social display names.
 - [ ] **UGC pre-submission scrub** — review all trader display names + shared content (one bad string rejects the whole app).
@@ -142,6 +142,23 @@ Tracked here so nothing is dropped; checked off as resolved. Detail/answers land
 - **iOS App Store screenshots ready** (6 @ 1290×2796).
 
 **Still open (unchanged):** ship builds (iOS Build 41 on Mac + Android **release AAB** — needs `keystore.properties` on the build machine); E2E money tests; Play listing + 14-day closed test; attorney privacy policy.
+
+---
+
+## 🚀 Session 22 (2026-07-06) — Android release AAB built + uploaded; both device-pins cleared
+
+**Devices back in hand** — USER has the **MacBook** (iOS / App Store Connect work unblocked) and the **Pixel 8A** (native Android capture + on-device closed-test install unblocked). The two items we'd pinned are no longer blocked:
+- *Was pinned on the MacBook:* iOS screenshots upload + ASC listing metadata + iOS **Build 43** archive.
+- *Was pinned on the Pixel 8A:* native Android screenshots + installing the closed-test build on-device.
+
+**Shipped + pushed:**
+- **Android signed release AAB — BUILT + verified + uploaded to Play.** `commit 4db84bf` bumps `versionCode 1→2` (Play rejected 1 as already used by a prior internal-testing upload). Built on Windows via `android/gradlew bundleRelease` using the existing `android/keystore.properties` + `C:\Users\catal\keys\apestogether-upload.jks` (alias `apestogether-upload`). **Play App Signing confirmed enrolled** — upload-key cert = `assetlinks.json` fingerprint A (`64:47:B5…`); Google's app-signing cert = fingerprint B (`0A:3A:A0…`). AAB: `android/app/build/outputs/bundle/release/app-release.aab` (8.26 MB, `versionCode 2`, target SDK 35).
+- **Screenshot compositor `-AndroidStatusBar` mode** (`commit 27962e0`) — reuses the iOS captures behind `pixel_frame.png`, overpaints the iOS status bar + Dynamic Island with a synthetic Android status bar, auto-uses a 2:1 canvas (Play caps aspect at 2:1). First pass in `~/Downloads/Play_Screenshots`. Native Pixel captures now preferred for policy fidelity.
+- **Docs:** October **1099 filing decision** (Xero partner vs self-file via IRS **IRIS TCC — up to 45-day lead**, FIRE retires end-2026) in `docs/XERO_W9_DEPLOY_CHECKLIST.md` §I; fundamentals migration marked applied.
+
+**In progress:** walking USER through the Play Console **Closed testing – Alpha** release + the full store-listing / compliance forms (exact field values sourced from `docs/PLAY_STORE_LISTING_GUIDE.md` + `docs/ASO_STRATEGY.md`).
+
+**Still open:** add ≥12 closed testers + start the 14-day clock; complete the Play **store listing + compliance forms** (values in the guide + walkthrough); iOS **Build 43** archive + ASC listing on the Mac; E2E money tests; attorney privacy policy.
 
 ---
 
