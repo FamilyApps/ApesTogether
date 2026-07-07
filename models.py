@@ -14,6 +14,14 @@ db = SQLAlchemy()
 # profit, and they never need a W-9. Keep lowercase for case-insensitive match.
 OWNER_EMAILS = frozenset({'bobford00@gmail.com', 'fordutilityapps@gmail.com'})
 
+# App-store reviewer / QA test accounts. Functionally identical to owner
+# accounts for money purposes: they can exercise the full app (subscribe,
+# trade, follow) but never receive real creator payouts and never need a W-9,
+# so a real payment can never be triggered by a reviewer's test activity.
+# These are normal role='user' accounts (NOT bots) — no automated bot trades
+# are ever wired to them. Keep lowercase for case-insensitive match.
+REVIEW_EMAILS = frozenset({'apestogether.review@gmail.com'})
+
 
 class User(UserMixin, db.Model):
     __tablename__ = 'user'  # Explicitly set - will be quoted in PostgreSQL as "user"
@@ -73,7 +81,8 @@ class User(UserMixin, db.Model):
     @property
     def is_company_owned(self) -> bool:
         """True for accounts that never receive creator payouts: company bots
-        (role == 'agent') and the founder's own accounts (OWNER_EMAILS).
+        (role == 'agent'), the founder's own accounts (OWNER_EMAILS), and
+        app-store reviewer/QA accounts (REVIEW_EMAILS).
 
         Subscription revenue to these stays with Family Apps LLC as profit —
         the store still takes its cut, but no creator payout is owed and no
@@ -81,7 +90,7 @@ class User(UserMixin, db.Model):
         """
         if self.role == 'agent':
             return True
-        return (self.email or '').strip().lower() in OWNER_EMAILS
+        return (self.email or '').strip().lower() in OWNER_EMAILS | REVIEW_EMAILS
 
 
 class Stock(db.Model):
