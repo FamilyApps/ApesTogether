@@ -4169,6 +4169,35 @@ def bot_create_user():
         return jsonify({'error': 'create_failed'}), 500
 
 
+@mobile_api.route('/admin/prices', methods=['GET'])
+@require_admin_or_cron
+def admin_prices():
+    """Return current prices for the given tickers using the app's OWN
+    valuation source (AlphaVantage via the shared price cache).
+
+    Cron-safe helper for seeding scripts: pricing a basket here guarantees the
+    seeded cost basis matches exactly how the app values the holdings, so the
+    account starts at ~0% P/L (works after hours too -- the premium AV feed
+    returns the last close). Tickers the source can't price are simply omitted.
+
+    Query: ?tickers=AAPL,MSFT,NVDA
+    Response: {"prices": {"AAPL": 258.1, "MSFT": 502.3, ...}}
+    """
+    from portfolio_performance import PortfolioPerformanceCalculator
+
+    raw = request.args.get('tickers', '')
+    tickers = [t.strip().upper() for t in raw.split(',') if t.strip()]
+    if not tickers:
+        return jsonify({'error': 'tickers_required'}), 400
+    try:
+        calc = PortfolioPerformanceCalculator()
+        prices = calc.get_batch_stock_data(tickers)
+        return jsonify({'prices': {k: float(v) for k, v in (prices or {}).items() if v}})
+    except Exception as e:
+        logger.error(f"admin prices error: {e}")
+        return jsonify({'error': 'price_fetch_failed', 'detail': str(e)}), 500
+
+
 @mobile_api.route('/admin/bot/add-stocks', methods=['POST'])
 @require_admin_or_cron
 @with_db_retry

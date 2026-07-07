@@ -17,8 +17,10 @@ equals the exact cost basis. Because max_cash_deployed is derived from the same
 reconciles cleanly and the daily market-close cron builds correct snapshots and
 performance % from the seed point onward.
 
-To keep the starting P/L near 0%, each position's purchase_price is set to a
-near-live quote (keyless Stooq CSV). A tiny non-zero start is expected and fine.
+To keep the starting P/L near 0%, each position's purchase_price is fetched
+from the server's /admin/prices endpoint, which uses the app's OWN valuation
+source (AlphaVantage via the shared cache) -- so the seeded cost basis matches
+exactly how the app values the holdings. Works after hours too (last close).
 
 What it does (all idempotent)
 -----------------------------
@@ -26,9 +28,10 @@ What it does (all idempotent)
    creates the role='user' row (NOT a bot) if it doesn't exist. No interactive
    "Sign in with Google" is required first -- OAuth links automatically by email
    the first time the actual reviewer signs in on their device.
-2. Comps a $0 subscription to a creator (default id=14, Wolff's Flagship Fund)
-   so the reviewer sees the premium/subscribed experience. $0 platform='admin'
-   IAP -> no payment, no payout, stays out of revenue/Xero.
+2. Comps $0 subscriptions to one or more creators (default ids 14 & 13 --
+   Wolff's Flagship Fund and The Grok Portfolio) so the reviewer sees the
+   premium/subscribed experience. Each is a $0 platform='admin' IAP -> no
+   payment, no payout, stays out of revenue/Xero.
 3. Seeds a diversified starter basket via /admin/bot/add-stocks.
 
 Prerequisites
@@ -41,13 +44,11 @@ Prerequisites
 Usage
 -----
     python scripts/seed_review_account.py            # dry-run preview
-    python scripts/seed_review_account.py --commit   # provision + subscribe + seed
-    python scripts/seed_review_account.py --commit --creator-id 13   # subscribe to Grok instead
+    python scripts/seed_review_account.py --commit   # provision + subscribe (Wolff+Grok) + seed
+    python scripts/seed_review_account.py --commit --creator-ids 14   # Wolff only
 """
 import os
 import sys
-import csv
-import io
 import argparse
 
 import requests
@@ -64,7 +65,7 @@ API_BASE = os.environ.get('API_BASE_URL', 'https://apestogether.ai/api/mobile')
 CRON_SECRET = os.environ.get('CRON_SECRET')
 
 DEFAULT_EMAIL = 'apestogether.review@gmail.com'
-DEFAULT_CREATOR_ID = 14  # Wolff's Flagship Fund
+DEFAULT_CREATOR_IDS = '14,13'  # 14 = Wolff's Flagship Fund, 13 = The Grok Portfolio
 
 # A small, diversified, large-cap starter basket. Recognizable names across
 # sectors so a reviewer sees a plausible portfolio. Quantities are computed
@@ -86,25 +87,30 @@ def _headers():
     return {'Content-Type': 'application/json', 'X-Cron-Secret': CRON_SECRET}
 
 
-def fetch_price(ticker):
-    """Return a near-live price via Stooq's keyless CSV, or a fallback.
-
-    Stooq end-of-day/last close is close enough to seed a neutral starting
-    basis; the app values holdings via AlphaVantage so a small delta is normal.
+def fetch_prices(tickers):
+    """Get current prices from the server's own valuation source via
+    /admin/prices (AlphaVantage + shared cache), so the seeded cost basis
+    matches how the app values holdings. Returns {ticker: (price, source)};
+    falls back to FALLBACK_PRICES for any ticker the server can't price.
     """
-    url = f"https://stooq.com/q/l/?s={ticker.lower()}.us&f=sd2t2ohlcv&h&e=csv"
+    server = {}
     try:
-        resp = requests.get(url, timeout=15)
-        resp.raise_for_status()
-        row = next(csv.DictReader(io.StringIO(resp.text)))
-        close = row.get('Close')
-        if close and close.upper() not in ('N/D', ''):
-            price = round(float(close), 2)
-            if price > 0:
-                return price, 'stooq'
+        resp = requests.get(f"{API_BASE}/admin/prices", headers=_headers(),
+                            params={'tickers': ','.join(tickers)}, timeout=30)
+        if resp.status_code == 200:
+            server = {k.upper(): float(v) for k, v in (resp.json().get('prices') or {}).items() if v}
+        else:
+            print(f"    ! /admin/prices returned {resp.status_code}: {resp.text[:200]}")
     except Exception as e:
-        print(f"    ! quote fetch failed for {ticker}: {e}")
-    return FALLBACK_PRICES.get(ticker, 100.00), 'fallback'
+        print(f"    ! price fetch failed: {e}")
+
+    out = {}
+    for t in tickers:
+        if server.get(t, 0) > 0:
+            out[t] = (server[t], 'alphavantage')
+        else:
+            out[t] = (FALLBACK_PRICES.get(t, 100.00), 'fallback')
+    return out
 
 
 def find_user(email):
@@ -132,17 +138,21 @@ def provision(email, creator_id):
 
 
 def _build_basket(target_per_position):
-    """Fetch near-live prices and compute whole-share quantities for the basket."""
+    """Price the basket via /admin/prices and compute whole-share quantities."""
+    priced = fetch_prices(BASKET)
     stocks = []
     est_total = 0.0
     for ticker in BASKET:
-        price, src = fetch_price(ticker)
+        price, src = priced[ticker]
         qty = max(1, int(target_per_position // price))
         cost = qty * price
         est_total += cost
         print(f"  {ticker:<5} {qty:>4} @ ${price:>8.2f}  = ${cost:>10.2f}  ({src})")
         stocks.append({'ticker': ticker, 'quantity': qty, 'purchase_price': price})
     print(f"\n  Estimated capital deployed: ${est_total:,.2f}")
+    if any(src == 'fallback' for _, src in priced.values()):
+        print("  WARNING: some prices are FALLBACK (not live) -- the account may NOT start at ~0%. "
+              "Check that /admin/prices is deployed and ALPHA_VANTAGE_API_KEY is set on the server.")
     return stocks
 
 
@@ -151,8 +161,9 @@ def main():
     parser.add_argument('--email', default=DEFAULT_EMAIL, help='Review account email (default: %(default)s)')
     parser.add_argument('--target-per-position', type=float, default=5000.0,
                         help='Approx USD per position (default: %(default)s)')
-    parser.add_argument('--creator-id', type=int, default=DEFAULT_CREATOR_ID,
-                        help='Creator user_id to comp a subscription to (default: %(default)s = Wolff). 0 to skip.')
+    parser.add_argument('--creator-ids', default=DEFAULT_CREATOR_IDS,
+                        help='Comma-separated creator user_ids to comp subscriptions to '
+                             '(default: %(default)s = Wolff,Grok). Empty string to skip.')
     parser.add_argument('--commit', action='store_true',
                         help='Actually provision/subscribe/seed. Without this flag the script only previews.')
     parser.add_argument('--force', action='store_true',
@@ -163,10 +174,16 @@ def main():
         print("ERROR: CRON_SECRET not set (put it in your .env or environment).")
         sys.exit(1)
 
+    creator_ids = []
+    for part in str(args.creator_ids).split(','):
+        part = part.strip()
+        if part and part != '0':
+            creator_ids.append(int(part))
+
     # ---- Dry-run: show the plan, mutate nothing ----
     if not args.commit:
-        sub_plan = (f"comp a subscription to creator id={args.creator_id}"
-                    if args.creator_id else "skip the subscription")
+        sub_plan = (f"comp subscriptions to creator id(s) {creator_ids}"
+                    if creator_ids else "skip the subscription")
         print(f"[dry-run] Would provision {args.email} (role='user', payout-exempt) and {sub_plan}.")
         existing = find_user(args.email)
         if existing:
@@ -179,18 +196,27 @@ def main():
         print("\nDRY-RUN. Re-run with --commit to provision + subscribe + seed.")
         return
 
-    # ---- 1) Provision account + comp subscription ----
+    # ---- 1) Provision account + comp subscription(s) ----
     print(f"Provisioning review account: {args.email}")
-    prov = provision(args.email, args.creator_id)
+    # First call creates the account (and subscribes to the first creator, if any).
+    prov = provision(args.email, creator_ids[0] if creator_ids else 0)
     user = prov.get('user', {})
     user_id = user.get('id')
     print(f"  user_id={user_id} username={user.get('username')} role={user.get('role')} "
           f"created={prov.get('created')}")
-    sub = prov.get('subscription')
-    if sub:
-        print(f"  subscription -> {sub.get('creator_name')} (id={sub.get('creator_id')}): "
-              f"subscription_id={sub.get('subscription_id')} created={sub.get('created')}")
-    elif args.creator_id:
+
+    subs = []
+    if prov.get('subscription'):
+        subs.append(prov['subscription'])
+    # Remaining creators: the account already exists, so each call just comps the sub.
+    for cid in creator_ids[1:]:
+        p = provision(args.email, cid)
+        if p.get('subscription'):
+            subs.append(p['subscription'])
+    for s in subs:
+        print(f"  subscription -> {s.get('creator_name')} (id={s.get('creator_id')}): "
+              f"subscription_id={s.get('subscription_id')} created={s.get('created')}")
+    if creator_ids and not subs:
         print("  WARNING: no subscription info returned.")
 
     if (user.get('role') or 'user') != 'user':
