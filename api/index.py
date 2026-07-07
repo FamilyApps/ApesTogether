@@ -4742,6 +4742,18 @@ def privacy_policy():
     """Privacy Policy page"""
     return render_template_with_defaults('privacy_policy.html')
 
+@app.route('/delete-account')
+def delete_account_info():
+    """Public account-deletion instructions page.
+
+    Required by the Google Play / App Store data-deletion policy: a publicly
+    accessible URL (NO login) that names the app/developer, lists the steps to
+    request deletion, and specifies what data is deleted vs. retained and for
+    how long. This is informational only; the actual deletion is performed via
+    the in-app DELETE /auth/account flow, the web /settings/delete-account form,
+    or an email request to support."""
+    return render_template_with_defaults('delete_account.html')
+
 @app.route('/register', methods=['GET', 'POST'])
 @limiter.limit("5 per minute")
 def register():

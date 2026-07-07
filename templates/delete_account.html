@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block title %}Delete Your Account - ApesTogether{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-10">
+            <h1 class="mb-2">Delete Your ApesTogether Account</h1>
+            <p class="text-muted">
+                This page explains how to request deletion of your <strong>ApesTogether</strong>
+                account and associated data. ApesTogether is operated by
+                <strong>Family Apps LLC</strong>.
+            </p>
+            <p class="text-muted"><strong>Last updated:</strong> July 2026</p>
+
+            <div class="legal-content">
+                <h2>How to request account deletion</h2>
+                <p>You can request deletion of your account and personal data in any of the
+                   following ways:</p>
+
+                <h3>Option 1 &mdash; In the ApesTogether app</h3>
+                <ol>
+                    <li>Open the ApesTogether app and sign in.</li>
+                    <li>Go to your account settings (<strong>Account &amp; Privacy</strong>).</li>
+                    <li>Tap <strong>Delete My Account</strong> and confirm.</li>
+                </ol>
+
+                <h3>Option 2 &mdash; On the web</h3>
+                <ol>
+                    <li>Sign in at <a href="https://apestogether.ai">apestogether.ai</a>.</li>
+                    <li>Open <strong>Account &amp; Privacy Settings</strong>.</li>
+                    <li>Select <strong>Delete My Account</strong> and confirm.</li>
+                </ol>
+
+                <h3>Option 3 &mdash; By email</h3>
+                <p>
+                    From the email address associated with your account, email
+                    <a href="mailto:support@apestogether.ai?subject=Delete%20my%20account">support@apestogether.ai</a>
+                    with the subject &ldquo;Delete my account&rdquo; and we will process your
+                    request.
+                </p>
+
+                <h2>What happens when you request deletion</h2>
+                <ul>
+                    <li>Your account is <strong>hidden immediately</strong> (removed from
+                        leaderboards, public portfolio pages, and subscriber views) and can no
+                        longer sign in.</li>
+                    <li>After a <strong>30-day grace period</strong>, your account and data are
+                        <strong>permanently deleted / anonymized</strong>.</li>
+                    <li>To restore your account within the 30-day window, email
+                        <a href="mailto:support@apestogether.ai">support@apestogether.ai</a>.
+                        (Simply signing back in will <strong>not</strong> restore it.)</li>
+                </ul>
+
+                <h2>Data that is permanently deleted</h2>
+                <ul>
+                    <li>Profile information (name, username, email address, phone number, and
+                        sign-in / OAuth identifiers)</li>
+                    <li>Portfolio holdings and full transaction history</li>
+                    <li>Performance data and portfolio snapshots</li>
+                    <li>Subscriptions (both the creators you subscribe to and your own
+                        subscribers)</li>
+                    <li>Device tokens and push-notification history</li>
+                    <li>Feature-poll votes and other app data associated with your account</li>
+                </ul>
+
+                <h2>Data that is retained, and for how long</h2>
+                <p>
+                    U.S. tax and financial-recordkeeping laws require us to keep certain
+                    transaction records even after your account is deleted. These are retained
+                    in <strong>anonymized</strong> form &mdash; they no longer identify you
+                    personally:
+                </p>
+                <ul>
+                    <li><strong>Payment &amp; in-app purchase records, creator payout records,
+                        and tax-reporting data (e.g., W-9 / 1099 information):</strong> retained
+                        for up to <strong>7 years</strong> to comply with IRS and financial
+                        regulations.</li>
+                </ul>
+
+                <div class="alert alert-warning mt-3">
+                    <strong>Cancel billing separately:</strong> Deleting your account does
+                    <strong>not</strong> cancel any paid subscriptions. To stop being billed,
+                    cancel your subscription in the <strong>App Store</strong> (iOS) or
+                    <strong>Google Play</strong> (Android).
+                </div>
+
+                <h2>Questions</h2>
+                <p>
+                    If you need help with account deletion, contact:<br><br>
+                    Family Apps LLC<br>
+                    Email: <a href="mailto:support@apestogether.ai">support@apestogether.ai</a>
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.legal-content h2 {
+    margin-top: 2rem;
+    margin-bottom: 1rem;
+    color: #333;
+}
+
+.legal-content h3 {
+    margin-top: 1.5rem;
+    margin-bottom: 0.75rem;
+    color: #555;
+}
+
+.legal-content p, .legal-content li {
+    line-height: 1.6;
+    margin-bottom: 0.5rem;
+}
+
+.legal-content ul, .legal-content ol {
+    margin-bottom: 1rem;
+}
+</style>
+{% endblock %}
