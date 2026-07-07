@@ -353,42 +353,59 @@ State exactly: "Users can delete their account from Settings → Delete Account.
 
 ## 2.9 Financial features (CRITICAL for ApesTogether)
 
-**Dashboard → Financial features.**
+**App content → Financial features.**
 
-> This is the form Play uses to enforce the [Financial services policy](https://support.google.com/googleplay/android-developer/answer/9876821). Get this right or you get stuck in re-review hell.
+> This is the form Play uses to enforce the [Financial Services policy](https://support.google.com/googleplay/android-developer/answer/9876821). Get it right or you get stuck in re-review hell. See also Google's [declaration help page](https://support.google.com/googleplay/android-developer/answer/13849271).
 
-### Question 1: "Does your app provide any financial services or financial information?"
+> **UI NOTE (updated Jul 2026):** Google reworked this form. The old option **"Personal investment research and management"** no longer exists, and there is no standalone "portfolio management (non-brokerage)" bucket. The current list is grouped as *Banking and loans / Payments and transfers / Purchase agreements / Trading and funds / Support services / Other*. Under **Trading and funds** the only stock option is the combined **"Stock trading and portfolio management."**
 
-**Answer: Yes.**
+### What to select
 
-### Question 2: "Which of the following describe your app?"
+**Select the bottom "Other" checkbox** (the general catch-all under the *Other* heading) and describe the feature yourself. We deliberately avoid the **"Stock trading and portfolio management"** label because it reads as a brokerage; ApesTogether is **paper trading only** — no real securities, no real money invested, no custody, no advice.
 
-Check **only**:
-- ☑ "Personal investment research and management" *(THE correct fit for ApesTogether)*
+Do **NOT** select:
+- ☐ Anything under Banking and loans, Payments and transfers, Purchase agreements — N/A
+- ☐ Cryptocurrency wallet / exchange / NFT — N/A
+- ☐ Crowdfunding and chit funds / Prediction markets — N/A
+- ☐ **Stock trading and portfolio management** — implies a brokerage/managed portfolios; we're simulated + informational only
+- ☐ **Financial advice** — we explicitly do not give individualized advice
+- ☐ "My app doesn't provide any financial features" — risky *under*-declaration given the investing-themed listing + real market data
 
-Do NOT check:
-- ☐ "Personal loans" — N/A
-- ☐ "Cryptocurrency exchanges and wallets" — N/A
-- ☐ "Buy now, pay later" — N/A
-- ☐ "Cross-border money transfers" — N/A
-- ☐ "Insurance" — N/A
-- ☐ "Stock or commodities trading" — **DO NOT CHECK THIS.** Selecting "Stock or commodities trading" tells Play you're a brokerage. We're not — all trades are virtual on real market data. The compliance line at `LAUNCH_PLAYBOOK.md:243` is: "We do not offer real brokerage services. All trades are virtual using real market data." The correct category is "Personal investment research and management".
+### "Other" description (exact copy submitted)
 
-### Question 3: "Does your app charge any fees?"
+Short label:
+```
+Simulated (paper) stock-portfolio tracking & social sharing
+```
 
-**Answer: Yes — subscription fees.**
+Description:
+```
+A social, educational stock-portfolio app. Users create and track simulated "paper" portfolios using real market prices — no real securities are ever bought or sold and no real money is invested. The app does not execute trades, act as a broker, dealer, or exchange, hold or transfer user funds or securities, or provide personalized or professional financial advice. All portfolio content is informational and educational only; members can view and learn from other users' voluntarily shared paper portfolios.
+```
 
-### Question 4: "Disclosures"
+### Fees / disclosures
 
-You'll be asked to provide:
+- Fees: **Yes — content-access subscription fees** (paying to view a creator's shared paper portfolio; not an investment product or managed account).
 - Business name: **Family Apps LLC**
 - Business registration number: *(your LLC EIN — same one used in Play account verification)*
-- Country/region: United States
-- States supported: **United States only** (because subscribers and creators are limited to US tax residents per `LegalText.swift:438` FAQ "Who can use this app?")
+- Country/region: **United States**
+- States supported: **United States only** (subscribers and creators are limited to US tax residents per `LegalText.swift:438` FAQ "Who can use this app?")
 
 **Save.**
 
-> **If Play asks for additional licenses or registrations:** Personal investment research / informational platforms (which we are) typically do NOT require Investment Adviser registration because we don't provide individualized advice. Our position, per `LAUNCH_PLAYBOOK.md:235-244`, is that we are *informational and educational only*. If Play's automated review pushes back asking for an Investment Adviser license, you may need to respond with: "ApesTogether is an informational platform. All content is educational. We do not provide individualized investment advice. The platform shows public, on-platform paper-trading performance of users who voluntarily share their portfolios." (Consult your attorney before submitting any such response.)
+### Outcome (recorded Jul 7, 2026)
+
+After submitting the **"Other"** declaration with the copy above, Play responded:
+
+> "At the moment, you're not required to submit any additional documentation for the financial features your app provides. If this changes, we'll let you know."
+
+Per Google's declaration help page, mandatory license-document uploads are triggered by **personal-loan** features and by **specific countries/regions** — *not* by this declaration. No license upload was requested.
+
+> **Consistency reminders (so this holds up on review):**
+> - Keep the same framing everywhere (this form, Step 2, listing, screenshots): *informational/educational only; all trades virtual/paper on real market data; no real brokerage, custody, or advice.*
+> - Avoid marketing words like "invest your money," "brokerage," "advice," or "returns on real capital."
+> - Scope any "no real money" claim to the **portfolio/trading feature**, not the whole app (subscriptions are real charges — see the Data Safety "Purchase history" declaration).
+> - This is a regulatory framing call; confirm with counsel before relying on it. Backing position, per `LAUNCH_PLAYBOOK.md:235-244`: "ApesTogether is an informational platform. All content is educational. We do not provide individualized investment advice. The platform shows public, on-platform paper-trading performance of users who voluntarily share their portfolios."
 
 ## 2.10 Health apps
 
