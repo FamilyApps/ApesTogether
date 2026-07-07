@@ -4530,99 +4530,211 @@ def bot_scale_holdings():
         return jsonify({'error': 'scale_holdings_failed'}), 500
 
 
+def _comp_subscription(subscriber_id, subscribed_to_id):
+    """Create (or return existing) a $0 admin-comped MobileSubscription from
+    `subscriber_id` to `subscribed_to_id`.
+
+    Backed by a $0 platform='admin' InAppPurchase (price/payout/store-fee all 0)
+    so the comp never enters revenue/payout/Xero. Assigns the lowest free
+    per-creator slot so concurrent comps render as distinct "Subscription A/B/C".
+
+    Returns (subscription, created: bool). Idempotent -- if an active
+    subscription to this creator already exists it is returned with created=False.
+    """
+    from models import db, MobileSubscription, InAppPurchase
+    from subscription_slots import lowest_free_slot
+
+    existing = MobileSubscription.query.filter_by(
+        subscriber_id=subscriber_id,
+        subscribed_to_id=subscribed_to_id,
+        status='active'
+    ).first()
+    if existing:
+        return existing, False
+
+    now = datetime.utcnow()
+    # MobileSubscription.in_app_purchase_id is NOT NULL and there is no
+    # `platform` column on MobileSubscription (that lives on InAppPurchase).
+    # Admin/bot-created subscriptions have no real store purchase, so create a
+    # $0 placeholder IAP flagged platform='admin' (price/payout/fees all 0 so it
+    # stays out of revenue/Xero) and link the subscription to it.
+    iap = InAppPurchase(
+        subscriber_id=subscriber_id,
+        subscribed_to_id=subscribed_to_id,
+        platform='admin',
+        product_id='admin.bot.subscription',
+        transaction_id=f'admin-bot-{subscriber_id}-{subscribed_to_id}-{int(now.timestamp())}',
+        status='active',
+        purchase_date=now,
+        expires_date=now + timedelta(days=365),
+        price=0.0,
+        influencer_payout=0.0,
+        platform_revenue=0.0,
+        store_fee=0.0,
+    )
+    db.session.add(iap)
+    db.session.flush()  # assigns iap.id
+
+    # Assign the lowest free per-creator slot so concurrent comped subs render
+    # as distinct "Subscription A/B/C..." (mirrors the store-purchase model
+    # where each subscription occupies its own slot product).
+    _existing_subs = MobileSubscription.query.filter_by(subscriber_id=subscriber_id).all()
+    _occupied = {s.slot for s in _existing_subs if s.slot and _subscription_occupies_slot(s, now)}
+    assigned_slot = lowest_free_slot(_occupied)
+
+    sub = MobileSubscription(
+        subscriber_id=subscriber_id,
+        subscribed_to_id=subscribed_to_id,
+        in_app_purchase_id=iap.id,
+        status='active',
+        slot=assigned_slot,
+        expires_at=now + timedelta(days=365),
+        # Push defaults ON (matches MobileSubscription model default and the
+        # app's "on by default" expectation). Subscribers can opt out via
+        # PUT /notifications/settings.
+        push_notifications_enabled=True
+    )
+    db.session.add(sub)
+    db.session.commit()
+    return sub, True
+
+
 @mobile_api.route('/admin/bot/subscribe', methods=['POST'])
 @require_admin_2fa
 @with_db_retry
 def bot_subscribe():
     """
     Create a subscription from one user to another.
-    
+
     Request body:
     {
         "subscriber_id": 123,
         "subscribed_to_id": 456
     }
     """
-    from models import db, MobileSubscription, InAppPurchase
-    
+    from models import db
+
     data = request.get_json()
     if not data:
         return jsonify({'error': 'missing_request_body'}), 400
-    
+
     subscriber_id = data.get('subscriber_id')
     subscribed_to_id = data.get('subscribed_to_id')
-    
+
     if not subscriber_id or not subscribed_to_id:
         return jsonify({'error': 'subscriber_id_and_subscribed_to_id_required'}), 400
-    
+
     try:
-        # Check for existing subscription
-        existing = MobileSubscription.query.filter_by(
-            subscriber_id=subscriber_id,
-            subscribed_to_id=subscribed_to_id,
-            status='active'
-        ).first()
-        
-        if existing:
-            return jsonify({'error': 'already_subscribed', 'subscription_id': existing.id}), 409
-        
-        from datetime import timedelta
-        now = datetime.utcnow()
-        # MobileSubscription.in_app_purchase_id is NOT NULL and there is no
-        # `platform` column on MobileSubscription (that lives on InAppPurchase).
-        # Admin/bot-created subscriptions have no real store purchase, so create a
-        # $0 placeholder IAP flagged platform='admin' (price/payout/fees all 0 so it
-        # stays out of revenue/Xero) and link the subscription to it.
-        iap = InAppPurchase(
-            subscriber_id=subscriber_id,
-            subscribed_to_id=subscribed_to_id,
-            platform='admin',
-            product_id='admin.bot.subscription',
-            transaction_id=f'admin-bot-{subscriber_id}-{subscribed_to_id}-{int(now.timestamp())}',
-            status='active',
-            purchase_date=now,
-            expires_date=now + timedelta(days=365),
-            price=0.0,
-            influencer_payout=0.0,
-            platform_revenue=0.0,
-            store_fee=0.0,
-        )
-        db.session.add(iap)
-        db.session.flush()  # assigns iap.id
-
-        # Assign the lowest free per-creator slot so concurrent comped subs
-        # render as distinct "Subscription A/B/C..." (mirrors the store-purchase
-        # model where each subscription occupies its own slot product). Without
-        # this, every comped sub defaulted to NULL → backfilled to slot 1, so
-        # they all showed "Subscription A".
-        from subscription_slots import lowest_free_slot
-        _existing_subs = MobileSubscription.query.filter_by(subscriber_id=subscriber_id).all()
-        _occupied = {s.slot for s in _existing_subs if s.slot and _subscription_occupies_slot(s, now)}
-        assigned_slot = lowest_free_slot(_occupied)
-
-        sub = MobileSubscription(
-            subscriber_id=subscriber_id,
-            subscribed_to_id=subscribed_to_id,
-            in_app_purchase_id=iap.id,
-            status='active',
-            slot=assigned_slot,
-            expires_at=now + timedelta(days=365),
-            # Push defaults ON (matches MobileSubscription model default and the
-            # app's "on by default" expectation). Previously hardcoded False here,
-            # which silently suppressed trade-alert push for every comped/bot sub
-            # while email still fired. Subscribers can opt out via
-            # PUT /notifications/settings.
-            push_notifications_enabled=True
-        )
-        db.session.add(sub)
-        db.session.commit()
-        
-        return jsonify({'success': True, 'subscription_id': sub.id, 'in_app_purchase_id': iap.id})
-        
+        sub, created = _comp_subscription(subscriber_id, subscribed_to_id)
+        if not created:
+            return jsonify({'error': 'already_subscribed', 'subscription_id': sub.id}), 409
+        return jsonify({'success': True, 'subscription_id': sub.id, 'in_app_purchase_id': sub.in_app_purchase_id})
     except Exception as e:
         db.session.rollback()
         logger.error(f"Bot subscribe error: {e}")
         return jsonify({'error': 'subscribe_failed'}), 500
+
+
+@mobile_api.route('/admin/provision-review-account', methods=['POST'])
+@require_admin_or_cron
+@with_db_retry
+def provision_review_account():
+    """Idempotently provision an app-store reviewer / QA account.
+
+    Unlike /admin/bot/create-user this creates a NORMAL role='user' account
+    (NOT a bot) -- no automated bot trades are ever wired to it, and a human
+    reviewer can trade/subscribe/follow like a real user. It then comps a $0
+    subscription to a creator (default Wolff's Flagship Fund, id=14) so the
+    reviewer sees the premium/subscribed experience.
+
+    Hardened: refuses any email NOT in models.REVIEW_EMAILS, so this
+    cron-secret endpoint can never grant a real user free paid access. OAuth is
+    linked automatically on the reviewer's first "Sign in with Google" (matched
+    by email in /auth/token) -- no interactive sign-in is required to create the
+    row, so a developer whose phone auto-selects a personal Google account does
+    not have to log in as the reviewer to set it up.
+
+    Request body:
+    {
+        "email": "apestogether.review@gmail.com",   # REQUIRED; must be in REVIEW_EMAILS
+        "username": "apestogether_review",            # optional
+        "display_name": "ApesTogether Review",        # optional
+        "subscribe_to": 14                            # optional creator id; 0/null to skip
+    }
+    """
+    from models import db, User, REVIEW_EMAILS
+
+    data = request.get_json() or {}
+    email = (data.get('email') or '').strip()
+    if not email:
+        return jsonify({'error': 'email_required'}), 400
+    if email.lower() not in REVIEW_EMAILS:
+        return jsonify({
+            'error': 'not_a_review_email',
+            'message': 'email must be listed in models.REVIEW_EMAILS'
+        }), 403
+
+    username = (data.get('username') or email.split('@')[0].replace('.', '_')).strip()
+    display_name = data.get('display_name')
+    subscribe_to = data.get('subscribe_to', 14)
+
+    try:
+        user = User.query.filter_by(email=email).first()
+        created = False
+        if not user:
+            base = username
+            i = 1
+            while User.query.filter_by(username=username).first():
+                username = f"{base}{i}"
+                i += 1
+            user = User(
+                email=email,
+                username=username,
+                display_name=display_name,
+                portfolio_slug=_generate_portfolio_slug(),
+                role='user',
+                created_by='human',
+                stripe_price_id='price_1RbX0yQWUhVa3vgDB8vGzoFN',
+                subscription_price=4.00,
+            )
+            db.session.add(user)
+            db.session.commit()
+            created = True
+        elif not user.portfolio_slug:
+            user.portfolio_slug = _generate_portfolio_slug()
+            db.session.commit()
+
+        sub_info = None
+        if subscribe_to:
+            creator = User.query.get(subscribe_to)
+            if not creator:
+                return jsonify({'error': 'creator_not_found', 'subscribe_to': subscribe_to}), 404
+            if creator.id == user.id:
+                return jsonify({'error': 'cannot_subscribe_to_self'}), 400
+            sub, sub_created = _comp_subscription(user.id, creator.id)
+            sub_info = {
+                'subscription_id': sub.id,
+                'created': sub_created,
+                'creator_id': creator.id,
+                'creator_name': creator.public_name,
+            }
+
+        return jsonify({
+            'success': True,
+            'created': created,
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'role': user.role,
+                'portfolio_slug': user.portfolio_slug,
+            },
+            'subscription': sub_info,
+        })
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Provision review account error: {e}")
+        return jsonify({'error': 'provision_failed', 'detail': str(e)}), 500
 
 
 @mobile_api.route('/admin/bot/execute-trade', methods=['POST'])
