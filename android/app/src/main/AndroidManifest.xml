@@ -9,6 +9,15 @@
     <!-- FCM push notifications (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Privacy: we do NOT use the Advertising ID. The Firebase Analytics SDK
+         requests these by default; strip them via manifest merge (and disable
+         Analytics ad-ID collection below) so Data Safety can truthfully say the
+         app does not use an Advertising ID. -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID"
+        tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_ADSERVICES_AD_ID"
+        tools:node="remove" />
+
     <application
         android:name=".ApesTogetherApplication"
         android:allowBackup="false"
@@ -21,6 +30,11 @@
         android:theme="@style/Theme.ApesTogether"
         android:usesCleartextTraffic="false"
         tools:targetApi="34">
+
+        <!-- Disable Google Analytics advertising-ID (GAID) collection. -->
+        <meta-data
+            android:name="google_analytics_adid_collection_enabled"
+            android:value="false" />
 
         <activity
             android:name=".MainActivity"
