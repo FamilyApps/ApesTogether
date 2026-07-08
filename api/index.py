@@ -12670,10 +12670,22 @@ def gdpr_settings():
 def delete_account():
     """GDPR-compliant account deletion - soft delete with 30-day grace period"""
     try:
+        # Capture the user object before logout so we can notify subscribers.
+        deleted_user = current_user._get_current_object()
+
         # Soft delete - mark account as deleted
         current_user.deleted_at = datetime.utcnow()
         db.session.commit()
-        
+
+        # Notify this creator's active subscribers (push + email) that they've
+        # left and how to cancel in the store — deleting a creator does NOT
+        # cancel a subscriber's store subscription. Best-effort; never blocks.
+        try:
+            from mobile_api import _notify_subscribers_creator_deleted
+            _notify_subscribers_creator_deleted(deleted_user)
+        except Exception as notify_err:
+            logger.error(f"creator-deleted notify (web) failed: {notify_err}")
+
         # Log out user
         from flask_login import logout_user
         logout_user()

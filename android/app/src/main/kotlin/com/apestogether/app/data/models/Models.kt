@@ -274,6 +274,10 @@ data class SubscriptionMade(
     // one maps to this creator. Null for legacy rows predating the slot feature.
     val slot: Int? = null,
     @SerialName("slot_label") val slotLabel: String? = null,
+    // True when the creator deleted their account. Deleting a creator does NOT
+    // cancel the subscriber's Google Play subscription, so the Subscriptions tab
+    // shows a "has left — how to cancel" state. Defaults false for older payloads.
+    @SerialName("creator_deleted") val creatorDeleted: Boolean = false,
 )
 
 /**

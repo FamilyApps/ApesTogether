@@ -627,6 +627,11 @@ def get_subscriptions():
         subscriptions_made = []
         for sub in made_subs:
             owner = User.query.get(sub.subscribed_to_id)
+            # creator_deleted: the creator has left (soft-deleted) or been
+            # purged. The app renders a "has left — how to cancel" state in the
+            # Subscriptions tab, since deleting a creator can't cancel the
+            # subscriber's store subscription (they keep billing until they do).
+            creator_deleted = (owner is None) or (getattr(owner, 'deleted_at', None) is not None)
             subscriptions_made.append({
                 'id': sub.id,
                 'portfolio_owner': {
@@ -636,6 +641,7 @@ def get_subscriptions():
                     'portfolio_slug': owner.portfolio_slug
                 } if owner else None,
                 'status': sub.status,
+                'creator_deleted': creator_deleted,
                 'expires_at': sub.expires_at.isoformat() if sub.expires_at else None,
                 'push_notifications_enabled': sub.push_notifications_enabled,
                 # Per-creator slot so the app can show "Subscription A/B/..." and
@@ -3154,6 +3160,133 @@ def get_current_user():
         return jsonify({'error': 'failed_to_get_user'}), 500
 
 
+def _build_creator_deleted_email(creator_name, platforms):
+    """Return (plain, html) for the 'creator has left' email.
+
+    The How-to-cancel CTA is tailored to the subscriber's platform (Apple vs
+    Google) inferred from their active device tokens. If the platform is
+    unknown or the subscriber has both, we include both sets of steps.
+    """
+    ios_steps = ("On iPhone or iPad: open Settings, tap your name, tap "
+                 "Subscriptions, select ApesTogether, then Cancel Subscription.")
+    android_steps = ("On Android: open the Google Play Store, tap your profile "
+                     "icon, tap Payments & subscriptions, tap Subscriptions, "
+                     "select ApesTogether, then Cancel subscription.")
+    has_ios = 'ios' in platforms
+    has_android = 'android' in platforms
+    if has_ios and not has_android:
+        steps = [ios_steps]
+    elif has_android and not has_ios:
+        steps = [android_steps]
+    else:
+        steps = [ios_steps, android_steps]
+
+    plain = (
+        f"{creator_name} has left ApesTogether.\n\n"
+        f"Their portfolio is no longer available, so you'll stop receiving "
+        f"their trade alerts.\n\n"
+        f"Important: deleting an account does not automatically cancel the "
+        f"subscription you purchased through the app store, so to avoid any "
+        f"future charges please cancel it yourself:\n\n"
+        + "\n\n".join(f"- {s}" for s in steps)
+        + "\n\nIf you were already charged for the current period, access to "
+          "that period runs until it expires.\n\n- The ApesTogether Team"
+    )
+    steps_html = "".join(f"<li style='margin-bottom:8px'>{s}</li>" for s in steps)
+    html = (
+        f"<div style='font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;"
+        f"max-width:520px;margin:0 auto;color:#1a1a1a'>"
+        f"<h2 style='margin:0 0 12px'>{creator_name} has left ApesTogether</h2>"
+        f"<p>Their portfolio is no longer available, so you'll stop receiving "
+        f"their trade alerts.</p>"
+        f"<p><strong>Important:</strong> deleting an account does not "
+        f"automatically cancel the subscription you purchased through the app "
+        f"store. To avoid any future charges, please cancel it yourself:</p>"
+        f"<ul style='padding-left:20px'>{steps_html}</ul>"
+        f"<p style='color:#666;font-size:13px'>If you were already charged for "
+        f"the current period, access to that period runs until it expires.</p>"
+        f"<p style='color:#666;font-size:13px'>— The ApesTogether Team</p>"
+        f"</div>"
+    )
+    return plain, html
+
+
+def _notify_subscribers_creator_deleted(creator):
+    """Notify a deleted creator's active subscribers (push + email).
+
+    Deleting a creator does NOT cancel a subscriber's App Store / Google Play
+    subscription — we cannot cancel store subscriptions server-side — so the
+    subscriber will keep being billed until THEY cancel. We therefore fan out a
+    push (which deep-links to the Subscriptions tab) and an email carrying a
+    platform-specific 'How to cancel' CTA. The Subscriptions tab itself also
+    flags the subscription via the `creator_deleted` field on GET /subscriptions.
+
+    Best-effort: never raises — a notification failure must not block deletion.
+    Returns a small summary dict for logging.
+    """
+    from models import User, MobileSubscription, DeviceToken
+    summary = {'subscribers': 0, 'push_sent': 0, 'emails_sent': 0}
+    try:
+        creator_name = getattr(creator, 'public_name', None) or creator.username
+        active_subs = MobileSubscription.query.filter_by(
+            subscribed_to_id=creator.id, status='active'
+        ).all()
+        summary['subscribers'] = len(active_subs)
+        if not active_subs:
+            return summary
+
+        title = "A creator you follow has left"
+        body = (f"{creator_name} has left ApesTogether. Open the app to see how "
+                f"to cancel your subscription and stop billing.")
+
+        for sub in active_subs:
+            subscriber = User.query.get(sub.subscriber_id)
+            if not subscriber:
+                continue
+
+            tokens = DeviceToken.query.filter_by(
+                user_id=subscriber.id, is_active=True
+            ).all()
+            platforms = {(t.platform or '').lower() for t in tokens}
+
+            # Push — respect the per-subscription push preference.
+            if sub.push_notifications_enabled and tokens:
+                try:
+                    from push_notification_service import get_push_service
+                    svc = get_push_service()
+                    if svc.is_available:
+                        res = svc.send_custom_notification(
+                            device_tokens=[t.token for t in tokens],
+                            title=title,
+                            body=body,
+                            data={
+                                'type': 'creator_deleted',
+                                'creator_id': str(creator.id),
+                                'creator_name': creator_name,
+                            },
+                        )
+                        summary['push_sent'] += res.get('success_count', 0)
+                except Exception as e:
+                    logger.warning(f"creator-deleted push failed for subscriber {subscriber.id}: {e}")
+
+            # Email — always send (has billing implications).
+            if getattr(subscriber, 'email', None):
+                try:
+                    from services.notification_utils import send_email
+                    subj = f"{creator_name} has left ApesTogether"
+                    plain, html = _build_creator_deleted_email(creator_name, platforms)
+                    r = send_email(subscriber.email, subj, plain, html_body=html)
+                    if r.get('status') == 'sent':
+                        summary['emails_sent'] += 1
+                except Exception as e:
+                    logger.warning(f"creator-deleted email failed for subscriber {subscriber.id}: {e}")
+
+        logger.info(f"creator-deleted notify: creator={creator.id} {summary}")
+    except Exception as e:
+        logger.error(f"_notify_subscribers_creator_deleted error: {e}", exc_info=True)
+    return summary
+
+
 @mobile_api.route('/auth/account', methods=['DELETE'])
 @require_auth
 def delete_account():
@@ -3182,6 +3315,12 @@ def delete_account():
         )
 
         db.session.commit()
+
+        # Tell this creator's active subscribers they've left + how to cancel
+        # in the store (we can't cancel store subscriptions for them). The
+        # Subscriptions tab also flags this via GET /subscriptions.creator_deleted.
+        _notify_subscribers_creator_deleted(user)
+
         return jsonify({
             'success': True,
             'message': 'account_scheduled_for_deletion',
@@ -6375,6 +6514,54 @@ def _execute_single_bot_trade(bot, action, ticker, quantity, price, source, time
         return {'ticker': ticker, 'error': str(e)}
 
 
+def _is_email_trade_paused() -> bool:
+    """Whether Public->bot email-trade ingestion is paused (maintenance switch).
+
+    Checked at the top of bot_email_trade and bot_process_pending_trades so a
+    creator can liquidate a *personal* brokerage account without those
+    buy/sell confirmation emails being mirrored into a copytrade bot's
+    strategy (which would fan out spurious subscriber push/email and pollute
+    the strategy's transaction history / performance snapshots).
+
+    Enabled by EITHER source:
+      - env BOT_EMAIL_TRADE_PAUSED in {'1','true','yes','on'} (requires deploy)
+      - admin user's extra_data['email_trade_paused'] == True (togglable at
+        runtime via /admin/bot/email-trade-pause, no redeploy)
+
+    Read live (no in-memory cache) so a toggle propagates immediately across
+    all serverless instances. While paused the GAS parser still marks each
+    email as processed, so nothing replays when ingestion resumes.
+    """
+    env = str(os.environ.get('BOT_EMAIL_TRADE_PAUSED', '')).strip().lower()
+    if env in ('1', 'true', 'yes', 'on'):
+        return True
+    try:
+        from models import User
+        admin_email = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
+        admin = User.query.filter_by(email=admin_email).first()
+        if admin and isinstance(admin.extra_data, dict):
+            return bool(admin.extra_data.get('email_trade_paused', False))
+    except Exception as e:
+        logger.warning(f"email-trade pause check failed (defaulting to NOT paused): {e}")
+    return False
+
+
+def _set_email_trade_paused(paused: bool) -> bool:
+    """Persist the runtime email-trade pause flag on the admin user's extra_data."""
+    from models import db, User
+    from sqlalchemy.orm.attributes import flag_modified
+    admin_email = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
+    admin = User.query.filter_by(email=admin_email).first()
+    if not admin:
+        raise RuntimeError(f"admin user not found for email {admin_email}")
+    extra = dict(admin.extra_data or {})
+    extra['email_trade_paused'] = bool(paused)
+    admin.extra_data = extra
+    flag_modified(admin, 'extra_data')
+    db.session.commit()
+    return bool(paused)
+
+
 @mobile_api.route('/admin/bot/email-trade', methods=['POST'])
 @require_cron_secret
 @rate_limit(30)
@@ -6415,6 +6602,20 @@ def bot_email_trade():
     from models import db, User, Stock, PendingTrade
     from datetime import timedelta
     import uuid
+
+    # Maintenance switch: while paused, ignore inbound Public.com trade emails
+    # so a personal-brokerage liquidation isn't mirrored into a copytrade bot.
+    # Returns 200 so the GAS parser marks the email processed (no replay on
+    # resume). Toggle via /admin/bot/email-trade-pause.
+    if _is_email_trade_paused():
+        logger.info("bot_email_trade: PAUSED — ingestion skipped (maintenance switch)")
+        return jsonify({
+            'success': True,
+            'status': 'paused',
+            'trades_submitted': 0,
+            'trades_executed': 0,
+            'message': 'Email-trade ingestion is paused; trade ignored.',
+        })
 
     data = request.get_json() or {}
     bot_username = data.get('bot_username')
@@ -6652,6 +6853,20 @@ def bot_process_pending_trades():
     """
     from models import db, User, Stock, PendingTrade, Transaction
     from datetime import timedelta
+
+    # Maintenance switch (see bot_email_trade): while paused, leave pending
+    # trades untouched so a personal-brokerage liquidation isn't routed into a
+    # copytrade bot. Toggle via /admin/bot/email-trade-pause.
+    if _is_email_trade_paused():
+        logger.info("bot_process_pending_trades: PAUSED — routing skipped (maintenance switch)")
+        return jsonify({
+            'success': True,
+            'status': 'paused',
+            'routed': 0,
+            'expired': 0,
+            'still_pending': 0,
+            'message': 'Email-trade ingestion is paused; pending trades untouched.',
+        })
 
     # Tunables — feel free to tighten/loosen.
     CLUSTER_GAP_SEC = 60     # max gap between adjacent emails in same cluster
@@ -10103,6 +10318,57 @@ def bot_auto_create_settings_set():
         return jsonify({'success': True, **settings})
     except Exception as e:
         logger.error(f"Save auto-create settings error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@mobile_api.route('/admin/bot/email-trade-pause', methods=['GET'])
+@require_admin_2fa
+@with_db_retry
+def bot_email_trade_pause_get():
+    """Report — or, via ?set=, toggle — Public->bot email-trade ingestion pause.
+
+      - No query arg:      report the current state.
+      - ?set=on  (1/true/pause):  pause ingestion.
+      - ?set=off (0/false/resume): resume ingestion.
+
+    The ?set= form exists so an admin can flip the switch by just navigating to
+    the URL in a logged-in browser (require_admin_2fa accepts the admin session),
+    no POST tooling required. The POST route below stays for programmatic use.
+    """
+    set_arg = (request.args.get('set') or '').strip().lower()
+    if set_arg:
+        if set_arg in ('on', '1', 'true', 'pause', 'paused', 'yes'):
+            paused = _set_email_trade_paused(True)
+        elif set_arg in ('off', '0', 'false', 'resume', 'no'):
+            paused = _set_email_trade_paused(False)
+        else:
+            return jsonify({'error': "set must be 'on' (pause) or 'off' (resume)"}), 400
+        logger.info(f"email-trade ingestion pause toggled via GET -> paused={paused}")
+        return jsonify({'success': True, 'paused': paused})
+    return jsonify({'success': True, 'paused': _is_email_trade_paused()})
+
+
+@mobile_api.route('/admin/bot/email-trade-pause', methods=['POST'])
+@require_admin_2fa
+@with_db_retry
+def bot_email_trade_pause_set():
+    """Pause/resume Public->bot email-trade ingestion (maintenance switch).
+
+    Body: {"paused": true|false}. While paused, bot_email_trade and
+    bot_process_pending_trades no-op (return status 'paused'), so selling out a
+    personal brokerage account won't mirror those confirmation emails into a
+    copytrade strategy. The GAS parser still marks the emails processed, so
+    nothing replays when you resume. Flip back to false once the sales settle.
+    """
+    data = request.get_json() or {}
+    if 'paused' not in data:
+        return jsonify({'error': "body must include 'paused' (bool)"}), 400
+    try:
+        paused = _set_email_trade_paused(bool(data['paused']))
+        logger.info(f"email-trade ingestion pause toggled -> paused={paused}")
+        return jsonify({'success': True, 'paused': paused})
+    except Exception as e:
+        logger.error(f"Set email-trade pause error: {e}")
         return jsonify({'error': str(e)}), 500
 
 

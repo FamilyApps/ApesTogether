@@ -226,7 +226,7 @@ Follow Verified Strategies
 ### Keywords field — 100 char, comma-separated, no spaces, no plurals, no brand, no Title/Subtitle words
 
 ```
-stock,trader,pick,leaderboard,signal,alert,watchlist,dub,finelo,alinea,moomoo,sp500,gainer,wsb
+stock,trader,pick,leaderboard,sector,alert,watchlist,dub,finelo,alinea,moomoo,sp500,gainer,wsb
 ```
 - **94 chars** (verified — 6 chars headroom).
 - All keywords are **singular** — Apple auto-pluralizes (`pick` ranks for
@@ -252,6 +252,13 @@ stock,trader,pick,leaderboard,signal,alert,watchlist,dub,finelo,alinea,moomoo,sp
   finance. Wasted slot.
 - **`wsb` included** at 4 chars cost — vol 5 today / max vol 30, low
   diff, cultural alignment with the ApesTogether brand reference.
+- **`signal` REMOVED → replaced with `sector` (Session 23).** USER flagged
+  that "signal(s)" framing could invite SEC scrutiny (it reads like a paid
+  trade-signal / advisory service), so it's dropped from the visible,
+  indexed listing. Same 7-char cost; `sector` is genuinely rankable (the
+  app has sector filters). NOTE: `PRICING_ANALYSIS.md` still uses "signal
+  service" — that's private internal analysis, not store-facing copy, so
+  it's left as-is.
 
 ### Bonus keyword field — Spanish (Mexico) localization
 
@@ -280,60 +287,73 @@ Follow verified stock strategies. Every pick tracked, timestamped, and benchmark
 ### Description — 4,000 char max
 
 ```
-ApesTogether is the social-finance app where verified traders prove
-their strategies on-platform — and 85% of every subscription goes back
-to the trader.
+ApesTogether is the social-finance app where the best AI trading models
+and the best human traders compete head-to-head — every strategy proven
+on-platform, and 85% of every subscription goes back to the trader.
+Anyone can earn: no gatekeepers, no invites, no minimum following.
 
 This is informational and educational only. You make every decision.
 
 HOW IT WORKS
-• Traders publish their portfolios on-platform — every position, every
-  trade, every timestamp tracked
-• Subscribers follow the traders whose strategies they want to learn from
+• AI models and human traders publish their portfolios on-platform —
+  every position, every trade, every timestamp tracked
+• They compete on one verified leaderboard, ranked head-to-head by real
+  performance
+• Subscribers follow the traders — human or AI — whose strategies they
+  want to learn from
 • Every portfolio is benchmarked against the S&P 500 for every period:
   1D, 1W, 1M, 3M, YTD, 1Y
 • Real-time alerts the moment a trader you follow makes a move
 
 WHY VERIFIED PERFORMANCE MATTERS
-The copy-trading industry runs on screenshots and self-reported returns.
-ApesTogether is the trust layer it's missing. Every pick is tracked
-the moment it's made — no rewriting history, no cherry-picked wins.
+Traders on social media peddle screenshots and self-reported returns.
+ApesTogether is the trust layer it's missing. Every pick is tracked the
+moment it's made — no rewriting history, no cherry-picked wins. AI or
+human, everyone is held to the same receipts.
 
 WHAT YOU GET AS A SUBSCRIBER
 • Real-time push notifications on every trade by traders you follow
-• Full holdings, position sizes, and trade history on every trader
+• Full holdings, position sizes, and trade history for every trader you subscribe to
 • Side-by-side S&P 500 comparison for every portfolio, every period
 • Sector and market-cap filters to find traders who match your interest
 • Adjust Portfolio Size — scale any trader's portfolio to fit your scale
 
 WHAT YOU GET AS A TRADER
+• Open to everyone — no application and no follower minimum; perform and you earn
 • A verifiable, on-platform track record — no more screenshot promises
-• 85% of every $9/month subscription, paid monthly via check
-• AI bots welcome alongside humans on the leaderboard
+• 85% of every $9/month subscription, paid monthly
+• Human or AI — compete on the same leaderboard, judged only by results
 • Audience tools — share your portfolio link anywhere
 
 THE LEADERBOARD
-Sortable by 1D / 1W / 1M / 3M / YTD / 1Y performance. Filterable by
-sector and market cap. Every entry shows performance, sparkline,
-S&P 500 comparison, and the trader's full trade history once you follow.
+The best AI models and the best humans, ranked side by side. Sortable by
+1D / 1W / 1M / 3M / YTD / 1Y performance. Filterable by sector and market
+cap. Every entry shows performance, sector, trade frequency, and S&P 500
+comparison.
 
 PRIVACY & SAFETY
 • No real-money execution — ApesTogether is not a brokerage
 • All trades on the platform are virtual, using real market data
 • No content on this app constitutes investment advice
-• You make every decision
 • Cancel anytime through your Apple ID / Google Play subscriptions
 
 PRICING
 $9.00 / month per trader, or $69.00 / year (save 36%).
 
-ApesTogether is informational and educational. We are not a registered
-investment adviser. Past performance does not guarantee future results.
-All trades on the platform are virtual using real market data.
+ApesTogether is informational and educational. ApesTogether and the
+creators on the ApesTogether platform are not investment advisers. Past
+performance does not guarantee future results. All trades on the platform
+are virtual using real market data.
 ```
 
-Char count: ~2,200. Last paragraph is the **Apple 5.2.1 / state-securities
-required disclaimer** per `LAUNCH_PLAYBOOK.md:243` — do not drop it.
+Char count: ~2,650. Last paragraph is the **Apple 5.2.1 / state-securities
+required disclaimer** per `LAUNCH_PLAYBOOK.md:243` — do not drop it. Reworked
+(Session 23) to frame the product as a **best-AI-models vs best-humans**
+competition throughout (opening, HOW IT WORKS, leaderboard, trader benefits),
+and to make the **open-to-everyone earning model** explicit (opening line +
+the lead "WHAT YOU GET AS A TRADER" bullet) — the key differentiator that
+anyone who performs can monetize, not just a curated few. This block is the
+**iOS App Store** master; the Play version below reuses it with 2 mods.
 
 ---
 
@@ -347,12 +367,14 @@ ApesTogether: AI Stock Trader
 
 ### Short description — 80 char max
 ```
-Verified stock strategies. Every pick tracked. Traders keep 85%.
+AI vs human stock traders, ranked. Verified picks. Traders keep 85%
 ```
-- **64 chars** (16 char headroom).
-- High-density: `verified`, `stock strategies`, `tracked`, `85%`.
-- Replaces v2's "Real Traders" framing with paper-trading-correct
-  "verified strategies".
+- **67 chars** (13 char headroom). **USER choice, Session 23.**
+- High-density + on-theme: `AI`, `human`, `stock traders`, `ranked`,
+  `verified`, `85%` — leads with the AI-vs-human hook that matches the
+  title and the reworked long description.
+- Deliberately avoids "signals/strategies" advisory framing (see SEC note
+  under the keyword field).
 
 ### Full description — 4,000 char max
 
@@ -367,20 +389,19 @@ Reuse the iOS description above with the following modifications:
    paragraph) — this is where the longtails get woven in:
 
 ```
-ApesTogether is the verified stock trader leaderboard, AI stock trading
-companion, and stock signals app for retail traders who want receipts —
-real-time stock alerts, trader watchlist, S&P 500 benchmark, and verified
-performance instead of social-media hype.
+ApesTogether is the verified stock trader leaderboard for retail traders
+who want receipts — real-time stock alerts, trader watchlist, S&P 500
+benchmark, and verified AI-vs-human performance instead of social-media
+hype.
 
-ApesTogether is informational and educational. We are not a registered
-investment adviser. Past performance does not guarantee future results.
-All trades on the platform are virtual using real market data.
+ApesTogether is informational and educational. ApesTogether and the
+creators on the ApesTogether platform are not investment advisers. Past
+performance does not guarantee future results. All trades on the platform
+are virtual using real market data.
 ```
 
 Longtails this paragraph captures (Play indexes them all):
 - `stock trader leaderboard`
-- `AI stock trading`
-- `stock signals app`
 - `retail traders`
 - `real-time stock alerts`
 - `trader watchlist`
@@ -726,7 +747,7 @@ keyword capacity by the number of locales.
 - [ ] Title set to **`ApesTogether: AI Stock Trader`** (29 char)
 - [ ] Subtitle set to **`Follow Verified Strategies`** (26 char)
 - [ ] Keywords field set to:
-      `stock,trader,pick,leaderboard,signal,alert,watchlist,dub,finelo,alinea,moomoo,sp500,gainer,wsb`
+      `stock,trader,pick,leaderboard,sector,alert,watchlist,dub,finelo,alinea,moomoo,sp500,gainer,wsb`
       (94 char)
 - [ ] **Spanish (Mexico) localization keywords** field set to:
       `finance,investor,wallstreet,meme,daytrading,swing,broker,scanner,nasdaq,nyse,robinhood,etoro`

@@ -436,6 +436,10 @@ private fun SubscriptionCard(
     onCancel: () -> Unit,
     onOpenPortfolio: (String) -> Unit,
 ) {
+    if (subscription.creatorDeleted) {
+        DeletedCreatorCard(subscription = subscription, onCancel = onCancel)
+        return
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -577,6 +581,93 @@ private fun SubscriptionCard(
                     )
                     Text("Manage", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Shown when the creator has deleted their account. Their portfolio is gone, so
+ * we drop the View Portfolio / push controls and surface a billing warning + a
+ * How-to-cancel CTA. Deleting a creator does NOT cancel the subscriber's Google
+ * Play subscription — only they can, so [onCancel] opens the Play dialog.
+ */
+@Composable
+private fun DeletedCreatorCard(
+    subscription: SubscriptionMade,
+    onCancel: () -> Unit,
+) {
+    val name = subscription.portfolioOwner?.publicName ?: "This creator"
+    val warnAmber = Color(0xFFF59E0B)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(CardBackground)
+            .border(0.5.dp, warnAmber.copy(alpha = 0.4f), RoundedCornerShape(14.dp)),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Default.AccountCircle,
+                contentDescription = null,
+                tint = TextMuted,
+                modifier = Modifier.size(28.dp),
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(
+                    text = "$name has left",
+                    color = TextPrimary,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "Their portfolio is no longer available.",
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                )
+            }
+            subscription.slotLabel?.let { label ->
+                Text(
+                    text = "Trader Subscription $label",
+                    color = TextMuted,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(CardBorder.copy(alpha = 0.3f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+        }
+
+        AccentRowDivider()
+
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "You won't receive their trade alerts anymore. Deleting a creator " +
+                    "doesn't cancel your subscription, so cancel it in Google Play to stop billing.",
+                color = TextSecondary,
+                fontSize = 12.sp,
+            )
+            Button(
+                onClick = onCancel,
+                colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("How to cancel", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }

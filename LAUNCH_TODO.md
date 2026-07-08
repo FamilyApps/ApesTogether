@@ -168,6 +168,27 @@ Tracked here so nothing is dropped; checked off as resolved. Detail/answers land
 
 ---
 
+## 🔁 Session 23 (2026-07-07) — copy-trade pause switch, creator-deletion notifications, login links, deleted-creator UI, AI-vs-human store copy
+
+**Shipped (backend — needs a deploy to take effect):**
+- **Public copy-trade PAUSE SWITCH.** `_is_email_trade_paused`/`_set_email_trade_paused` (`mobile_api.py`) + early-returns in `bot_email_trade` and `bot_process_pending_trades` (both return `status:'paused'`, HTTP 200, so the GAS parser still marks each email processed and nothing replays on resume). Admin toggle at `GET/POST /api/mobile/admin/bot/email-trade-pause`; the **GET now also accepts `?set=on|off`** so an admin can flip it by simply navigating in a logged-in browser (`require_admin_2fa` accepts the admin session). Also honors env `BOT_EMAIL_TRADE_PAUSED`. **Purpose:** liquidate the personal Public.com brokerage account without mirroring those confirmation emails into Wolff's copytrade bot.
+  - **Pause ON:**  `https://apestogether.ai/api/mobile/admin/bot/email-trade-pause?set=on`
+  - **Pause OFF:** `https://apestogether.ai/api/mobile/admin/bot/email-trade-pause?set=off`
+  - **Status:**    `https://apestogether.ai/api/mobile/admin/bot/email-trade-pause` (must be logged into the admin panel `/admin` first).
+- **Creator-deletion subscriber notifications.** `_notify_subscribers_creator_deleted` fans out **push + email** to a deleted creator's active subscribers, with a **platform-specific "How to cancel" CTA** (App Store vs Google Play, inferred from each subscriber's active `DeviceToken.platform`; both if unknown). Wired into **BOTH** the mobile `DELETE /auth/account` and web `/settings/delete-account` (best-effort, never blocks deletion). `GET /subscriptions` now returns a **`creator_deleted`** flag.
+
+**Shipped (apps — ride in the pending Android `versionCode 3` rebuild + iOS Build 43):**
+- **Login-screen legal links FIXED (both apps).** "Terms of Service" / "Privacy Policy" on the login screen are now **tappable** → `apestogether.ai/terms-of-service` + `/privacy-policy` (iOS SwiftUI markdown auto-link `LoginView.swift`; Android Compose `LinkAnnotation` `LoginScreen.kt`). They were previously plain text.
+- **Subscriptions tab deleted-creator state (both apps).** New "*{creator} has left*" card (replaces View Portfolio / push controls) with a billing warning + **"How to cancel"** CTA — iOS opens the App Store manage-subscriptions sheet (`SubscriptionsView.swift`), Android opens Google Play subscriptions (`SubscriptionsScreen.kt`). Driven by the new `creator_deleted` field; models updated (iOS `SubscriptionMade.creatorDeleted`, Android `@SerialName("creator_deleted")`, both backward-compatible/default-false).
+
+**Store copy:**
+- **Full description REWORKED** (`docs/ASO_STRATEGY.md`) → framed as a **best-AI-models vs best-humans competition** throughout (opening, HOW IT WORKS, THE LEADERBOARD, trader benefits). Play closing longtail is now "verified **AI-vs-human** performance"; disclaimer broadened to "ApesTogether and the creators … are not investment advisers."
+- **Feature graphic (1024×500) — Gemini prompt drafted** (in chat this session). Still needs generating + upload.
+
+**Still open (unchanged priorities):** rebuild + upload the Android **`versionCode 3`** AAB (now carries the ad-ID fix **+** login links **+** deleted-creator UI); generate + upload the **feature graphic**; iOS **Build 43** archive + ASC listing on the Mac; add ≥12 closed testers + start the 14-day clock; E2E money tests; attorney privacy policy. **Deploy the backend** so the pause switch + creator-deletion notifications go live.
+
+---
+
 ## ▶ RESUME HERE — Sunday (AI tokens reset)
 
 **Last worked: Session 11, 2026-06-04. Committed `7a21b67` (8 files, +254/−95).** Stopped because AI tokens ran low.

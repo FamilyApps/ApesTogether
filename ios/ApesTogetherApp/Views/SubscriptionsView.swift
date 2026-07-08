@@ -506,6 +506,16 @@ struct SubscriptionCard: View {
     @ObservedObject var viewModel: SubscriptionsViewModel
     
     var body: some View {
+        Group {
+            if subscription.isCreatorDeleted {
+                deletedCreatorCard
+            } else {
+                activeCard
+            }
+        }
+    }
+
+    private var activeCard: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 Image(systemName: "person.circle.fill")
@@ -605,6 +615,77 @@ struct SubscriptionCard: View {
         .overlay(
             RoundedRectangle(cornerRadius: 14)
                 .stroke(Color.cardBorder.opacity(0.4), lineWidth: 0.5)
+        )
+    }
+
+    // Shown when the creator has deleted their account. Their portfolio is
+    // gone, so we drop the View Portfolio / notification controls and instead
+    // surface a billing warning + a How-to-cancel CTA. Deleting a creator does
+    // NOT cancel the subscriber's App Store subscription — only they can.
+    private var deletedCreatorCard: some View {
+        let name = subscription.portfolioOwner?.publicName ?? "This creator"
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                Image(systemName: "person.crop.circle.badge.xmark")
+                    .foregroundColor(.textMuted)
+                    .font(.system(size: 28))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(name) has left")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.textPrimary)
+                    Text("Their portfolio is no longer available.")
+                        .font(.system(size: 12))
+                        .foregroundColor(.textSecondary)
+                }
+                Spacer()
+                if let label = subscription.slotLabel {
+                    Text("Trader Subscription \(label)")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.textMuted)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.cardBorder.opacity(0.3))
+                        .cornerRadius(4)
+                }
+            }
+            .padding(14)
+
+            AccentDivider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("You won't receive their trade alerts anymore. Deleting a creator doesn't cancel your subscription, so cancel it in the App Store to stop billing.")
+                    .font(.system(size: 12))
+                    .foregroundColor(.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button {
+                    viewModel.managingSlotLabel = subscription.slotLabel
+                    viewModel.showCancelConfirm = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "xmark.circle")
+                            .font(.system(size: 12))
+                        Text("How to cancel")
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(Color.primaryAccent)
+                    .cornerRadius(10)
+                }
+            }
+            .padding(14)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color.cardBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.orange.opacity(0.4), lineWidth: 0.5)
         )
     }
     
@@ -759,7 +840,8 @@ class SubscriptionsViewModel: ObservableObject {
                     expiresAt: updated.expiresAt,
                     pushNotificationsEnabled: enabled,
                     slot: updated.slot,
-                    slotLabel: updated.slotLabel
+                    slotLabel: updated.slotLabel,
+                    creatorDeleted: updated.creatorDeleted
                 )
             }
         } catch {

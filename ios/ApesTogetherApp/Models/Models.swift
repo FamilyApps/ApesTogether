@@ -308,6 +308,12 @@ struct SubscriptionMade: Codable, Identifiable {
     // legacy rows created before the slot feature.
     let slot: Int?
     let slotLabel: String?
+    // True when the creator has deleted their account. Deleting a creator does
+    // NOT cancel the subscriber's store subscription, so the Subscriptions tab
+    // surfaces a "has left — how to cancel" state. Optional for backward compat.
+    let creatorDeleted: Bool?
+
+    var isCreatorDeleted: Bool { creatorDeleted ?? false }
 }
 
 struct Subscriber: Codable, Identifiable {

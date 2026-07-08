@@ -84,10 +84,12 @@ struct LoginView: View {
                 Spacer()
                     .frame(height: 60)
                 
-                // Terms
-                Text("By signing in, you agree to our Terms of Service and Privacy Policy")
+                // Terms — the bracketed spans render as tappable links (markdown)
+                // and open in Safari; tinted with the accent color for contrast.
+                Text("By signing in, you agree to our [Terms of Service](https://apestogether.ai/terms-of-service) and [Privacy Policy](https://apestogether.ai/privacy-policy)")
                     .font(.caption)
                     .foregroundColor(.textMuted)
+                    .tint(.primaryAccent)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
                     .padding(.bottom, 20)

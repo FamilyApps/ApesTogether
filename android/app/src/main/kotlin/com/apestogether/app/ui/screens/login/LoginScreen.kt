@@ -15,9 +15,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.sp
 import com.apestogether.app.R
@@ -172,9 +176,26 @@ fun LoginScreen(onSignedIn: () -> Unit) {
 
         Spacer(Modifier.height(60.dp))
 
-        // Terms — mirrors iOS bottom disclaimer.
+        // Terms — mirrors iOS bottom disclaimer. The two spans are tappable
+        // links (Compose LinkAnnotation) that open in the browser.
+        val linkStyles = TextLinkStyles(
+            style = SpanStyle(
+                color = PrimaryAccent,
+                textDecoration = TextDecoration.Underline,
+            ),
+        )
+        val termsText = buildAnnotatedString {
+            append("By signing in, you agree to our ")
+            withLink(
+                LinkAnnotation.Url("https://apestogether.ai/terms-of-service", linkStyles),
+            ) { append("Terms of Service") }
+            append(" and ")
+            withLink(
+                LinkAnnotation.Url("https://apestogether.ai/privacy-policy", linkStyles),
+            ) { append("Privacy Policy") }
+        }
         Text(
-            text = "By signing in, you agree to our Terms of Service and Privacy Policy",
+            text = termsText,
             color = TextMuted,
             fontSize = 12.sp,
             textAlign = TextAlign.Center,
