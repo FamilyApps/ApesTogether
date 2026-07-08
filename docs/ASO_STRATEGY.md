@@ -256,9 +256,11 @@ stock,trader,pick,leaderboard,sector,alert,watchlist,dub,finelo,alinea,moomoo,sp
   that "signal(s)" framing could invite SEC scrutiny (it reads like a paid
   trade-signal / advisory service), so it's dropped from the visible,
   indexed listing. Same 7-char cost; `sector` is genuinely rankable (the
-  app has sector filters). NOTE: `PRICING_ANALYSIS.md` still uses "signal
-  service" — that's private internal analysis, not store-facing copy, so
-  it's left as-is.
+  app has sector filters). `PRICING_ANALYSIS.md` was also scrubbed of
+  "signal" this session (→ "trade-alert service"), and the `stock signals`
+  / `trading signals` Tier-3 keyword targets below are abandoned for the
+  same reason. (Benign ASO-methodology uses of "ranking/keyword signal"
+  elsewhere in this doc are unrelated and left as-is.)
 
 ### Bonus keyword field — Spanish (Mexico) localization
 
@@ -443,8 +445,8 @@ Longtails this paragraph captures (Play indexes them all):
 | `stock tracker` | 5* | 20 | 22 | Description (Max Vol 45) |
 | `portfolio tracker` | 5* | 2 | 22 | **Subtitle implicit** + Description (Max Vol 37) |
 | `stock screener` | 5* | 4 | 22 | Description (Max Vol 40) |
-| `stock signals` | 5* | 0 | 22 | **Keywords** (`signal`) — Max Vol 27 |
-| `trading signals` | 5* | 0 | 22 | Description |
+| `stock signals` | 5* | 0 | 22 | DROPPED — "signals" avoided (SEC caution) |
+| `trading signals` | 5* | 0 | 22 | DROPPED — "signals" avoided (SEC caution) |
 | `stock alerts` | 5* | 7 | 22 | **Keywords** (`alert`) — Max Vol 25 |
 | `day trading` | 5* | 41 | 22 | Description (Max Vol 51) |
 

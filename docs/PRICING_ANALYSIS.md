@@ -8,7 +8,7 @@
 
 **Recommendation: Keep $9/month per trader subscription. Lower the free trial from 1 month to 7 days. Add an annual plan at $69/year (36% discount).**
 
-The aggressive 36% annual discount compensates for the manual execution friction that distinguishes Apes Together from auto-copy platforms. Your monthly price is below every comparable signal service; your annual price beats every competitor on fee drag. Here's the detailed evidence.
+The aggressive 36% annual discount compensates for the manual execution friction that distinguishes Apes Together from auto-copy platforms. Your monthly price is below every comparable trade-alert service; your annual price beats every competitor on fee drag. Here's the detailed evidence.
 
 ---
 
@@ -132,7 +132,7 @@ This is Apes Together's most significant structural disadvantage vs. auto-copy p
 - **Decision fatigue:** Each notification is a micro-decision ("should I follow this one?"). Automation removes this burden.
 - **Sell timing:** A delayed sell execution could mean catching a falling knife.
 
-**This friction means Apes Together is NOT a copy-trading platform.** It's a **real-time trade signal service** with verified performance. The correct comparison set is financial newsletters and signal services:
+**This friction means Apes Together is NOT a copy-trading platform.** It's a **real-time trade-alert service** with verified performance. The correct comparison set is financial newsletters and trade-alert services:
 
 | Service | Price | What you get |
 |---|---|---|
@@ -156,7 +156,7 @@ Against this comp set, $9/month is a bargain — and the product is superior bec
 
 ### Arguments for KEEPING $9/month:
 - **Unique value:** Real-time trade alerts from verified performers. No newsletter offers this.
-- **Cheaper than every comparable signal service:** Motley Fool ($13), Seeking Alpha ($20), TipRanks ($30).
+- **Cheaper than every comparable trade-alert service:** Motley Fool ($13), Seeking Alpha ($20), TipRanks ($30).
 - **Lower total cost than copy-trading platforms:** Dub costs $10+/month PLUS per-creator fees PLUS $3/month maintenance. eToro hides costs in spreads.
 - **No minimums, no account lock-in:** Users don't move their money to a new brokerage. Zero switching cost.
 - **Risk-free discovery:** Paper trading removes the "what if they lose my money" fear — the #1 barrier for new investors.
@@ -247,7 +247,7 @@ You mentioned traders need "reasonable compensation for their time uploading tra
 
 **Problem:** A full month free is generous but creates issues:
 1. **Delayed revenue:** Your first revenue comes in Month 2 at earliest
-2. **Low commitment signal:** Users who sign up "just to try" but never engage don't convert
+2. **Low-commitment indicator:** Users who sign up "just to try" but never engage don't convert
 3. **Competitive comparison:** Dub offers 7 days. Autopilot offers no free trial.
 4. **App Store precedent:** Most subscription apps use 3-7 day trials
 
@@ -284,7 +284,7 @@ Rationale:
 
 | Element | Current | Recommended | Rationale |
 |---------|---------|-------------|----------|
-| Monthly price | $9/month | **$9/month (keep)** | Cheaper than every signal service; below impulse threshold |
+| Monthly price | $9/month | **$9/month (keep)** | Cheaper than every trade-alert service; below impulse threshold |
 | Annual price | None | **$69/year (add)** | 36% discount, undercuts Dub ($90), compensates for manual execution friction |
 | Free trial | 1 month | **7 days** | Industry standard, faster revenue, same conversion |
 | Creator rev share | 85% | **85% (keep)** | Best in class, key recruiting advantage |
@@ -315,7 +315,7 @@ The value proposition justification: If a trader you follow beats the S&P 500 by
 
 ## 11. Key Takeaway
 
-Your $9/month is NOT too high — it's cheaper than every comparable signal service. The main risk isn't price — it's **perceived value given the manual execution friction**. Your messaging must constantly reinforce:
+Your $9/month is NOT too high — it's cheaper than every comparable trade-alert service. The main risk isn't price — it's **perceived value given the manual execution friction**. Your messaging must constantly reinforce:
 
 > "See exactly what trades top performers make, the moment they make them. Test their strategies risk-free before committing real money."
 
