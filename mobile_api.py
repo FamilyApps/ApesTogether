@@ -6529,8 +6529,9 @@ def _is_email_trade_paused() -> bool:
         runtime via /admin/bot/email-trade-pause, no redeploy)
 
     Read live (no in-memory cache) so a toggle propagates immediately across
-    all serverless instances. While paused the GAS parser still marks each
-    email as processed, so nothing replays when ingestion resumes.
+    all serverless instances. While paused, bot_email_trade records each
+    inbound Gmail message as 'skipped_paused' (ProcessedEmailTrade) so the
+    server itself never replays it on resume — independent of GAS behaviour.
     """
     env = str(os.environ.get('BOT_EMAIL_TRADE_PAUSED', '')).strip().lower()
     if env in ('1', 'true', 'yes', 'on'):
@@ -6560,6 +6561,71 @@ def _set_email_trade_paused(paused: bool) -> bool:
     flag_modified(admin, 'extra_data')
     db.session.commit()
     return bool(paused)
+
+
+def _email_already_processed(message_id):
+    """Return the existing ProcessedEmailTrade for message_id, or None.
+
+    Server-side idempotency: Gmail message IDs are stable, so a re-POST (GAS
+    retry, or the parser replaying pause-window emails after unpause) is caught
+    here and NOT re-executed. Degrades safely to None (no dedupe) if the ledger
+    table hasn't been migrated yet, rolling back the poisoned session first so
+    downstream trade processing still works.
+    """
+    if not message_id:
+        return None
+    try:
+        from models import ProcessedEmailTrade
+        return ProcessedEmailTrade.query.filter_by(message_id=message_id).first()
+    except Exception as e:
+        from models import db
+        db.session.rollback()
+        logger.warning(f"processed-email lookup failed (msg_id={message_id}): {e}")
+        return None
+
+
+def _stage_processed_email(message_id, status, subject=None, received_at=None,
+                           trades_count=0, detail=None):
+    """Add a ProcessedEmailTrade to the CURRENT session (no commit) so it lands
+    atomically with the trades the caller is about to commit. No-op without a
+    message_id (older GAS). Returns the staged row or None."""
+    if not message_id:
+        return None
+    from models import db, ProcessedEmailTrade
+    rec = ProcessedEmailTrade(
+        message_id=message_id,
+        status=status,
+        email_subject=((subject or '')[:500] or None),
+        received_at=received_at,
+        trades_count=int(trades_count or 0),
+        detail=detail,
+    )
+    db.session.add(rec)
+    return rec
+
+
+def _record_processed_email(message_id, status, subject=None, received_at=None,
+                            trades_count=0, detail=None):
+    """Stage + commit a ProcessedEmailTrade on its own (paused path, where there
+    are no trades to co-commit). Tolerant of the unique-constraint race and of
+    the ledger table not existing yet (degrades to a warning)."""
+    if not message_id:
+        return None
+    from models import db
+    from sqlalchemy.exc import IntegrityError
+    try:
+        rec = _stage_processed_email(message_id, status, subject, received_at,
+                                     trades_count, detail)
+        if rec is not None:
+            db.session.commit()
+        return rec
+    except IntegrityError:
+        db.session.rollback()  # concurrent duplicate already recorded — fine
+        return None
+    except Exception as e:
+        db.session.rollback()
+        logger.warning(f"processed-email record failed (msg_id={message_id}): {e}")
+        return None
 
 
 @mobile_api.route('/admin/bot/email-trade', methods=['POST'])
@@ -6603,20 +6669,6 @@ def bot_email_trade():
     from datetime import timedelta
     import uuid
 
-    # Maintenance switch: while paused, ignore inbound Public.com trade emails
-    # so a personal-brokerage liquidation isn't mirrored into a copytrade bot.
-    # Returns 200 so the GAS parser marks the email processed (no replay on
-    # resume). Toggle via /admin/bot/email-trade-pause.
-    if _is_email_trade_paused():
-        logger.info("bot_email_trade: PAUSED — ingestion skipped (maintenance switch)")
-        return jsonify({
-            'success': True,
-            'status': 'paused',
-            'trades_submitted': 0,
-            'trades_executed': 0,
-            'message': 'Email-trade ingestion is paused; trade ignored.',
-        })
-
     data = request.get_json() or {}
     bot_username = data.get('bot_username')
     source = data.get('source', 'public_email')
@@ -6624,18 +6676,57 @@ def bot_email_trade():
     email_subject = data.get('email_subject', '')
     email_message_id = data.get('email_message_id', '')
 
+    # Email received-at: cluster key + Transaction timestamp + skip-marker
+    # context. Falls back to wall-clock if GAS didn't send it (older GAS).
+    email_received_at = _parse_email_received_at(data.get('email_received_at'))
+    if email_received_at is None:
+        email_received_at = datetime.utcnow()
+
+    # ── Idempotency: never process the same Gmail message twice ──────────
+    # Message IDs are stable, so a re-POST — GAS retrying, or the parser
+    # replaying emails that arrived while PAUSED once ingestion resumes — is
+    # deduped here. This is the server-side guard that stops the "unpause
+    # replays the pause-window emails" bug from mirroring stale trades.
+    dup = _email_already_processed(email_message_id)
+    if dup is not None:
+        logger.info(
+            f"bot_email_trade: DUPLICATE msg_id={email_message_id} "
+            f"(already '{dup.status}' at {dup.processed_at}); skipped."
+        )
+        return jsonify({
+            'success': True,
+            'status': 'duplicate',
+            'prior_status': dup.status,
+            'trades_submitted': 0,
+            'trades_executed': 0,
+            'message': 'Email already processed; ignored (idempotent).',
+        })
+
+    # Maintenance switch: while paused, DROP the trade but RECORD the message as
+    # skipped so unpausing never replays it. Returns 200 so GAS marks it done.
+    if _is_email_trade_paused():
+        _record_processed_email(
+            email_message_id, status='skipped_paused',
+            subject=email_subject, received_at=email_received_at,
+        )
+        logger.info(
+            f"bot_email_trade: PAUSED — skipped + recorded msg_id="
+            f"{email_message_id or 'n/a'} (maintenance switch)"
+        )
+        return jsonify({
+            'success': True,
+            'status': 'paused',
+            'trades_submitted': 0,
+            'trades_executed': 0,
+            'message': 'Email-trade ingestion is paused; trade skipped and recorded.',
+        })
+
     if not bot_username:
         return jsonify({'error': 'bot_username required'}), 400
 
     raw_trades = data.get('trades', [])
     if isinstance(raw_trades, list) and len(raw_trades) > 50:
         return jsonify({'error': 'batch_too_large', 'max_trades_per_request': 50}), 400
-
-    # Email received-at: used as cluster key + Transaction timestamp. Falls
-    # back to wall-clock if GAS didn't send it (older GAS versions).
-    email_received_at = _parse_email_received_at(data.get('email_received_at'))
-    if email_received_at is None:
-        email_received_at = datetime.utcnow()
 
     # Normalise trades list (support legacy single-trade format)
     trades = list(raw_trades) if raw_trades else []
@@ -6783,8 +6874,6 @@ def bot_email_trade():
                     'holders': [h.username for h in holders],
                 })
 
-        db.session.commit()
-
         executed_count = sum(1 for r in executed_results if r.get('status') == 'executed')
         if executed_results and deferred_results:
             status = 'mixed'
@@ -6792,6 +6881,18 @@ def bot_email_trade():
             status = 'executed'
         else:
             status = 'deferred'
+
+        # Record the message as processed in the SAME transaction as the trades,
+        # so a crash can't leave trades executed without a dedupe marker (which
+        # would let a GAS re-POST double-execute).
+        _stage_processed_email(
+            email_message_id, status=status,
+            subject=email_subject, received_at=email_received_at,
+            trades_count=len(trades),
+            detail=f"batch={batch_id} executed={executed_count} deferred={len(deferred_results)}",
+        )
+
+        db.session.commit()
 
         logger.info(
             f"bot_email_trade auto: batch={batch_id} executed={executed_count} "

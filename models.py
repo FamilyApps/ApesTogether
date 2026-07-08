@@ -902,6 +902,34 @@ class QueuedEmailTrade(db.Model):
         return f"<QueuedEmailTrade {self.action} {self.quantity} {self.ticker} user={self.user_id} status={self.status}>"
 
 
+class ProcessedEmailTrade(db.Model):
+    """Idempotency ledger for inbound Public.com trade emails.
+
+    Gmail message IDs are stable across re-POSTs, so recording each handled
+    message here lets `bot_email_trade` dedupe two failure modes:
+      - GAS retrying a delivery, and
+      - the parser replaying emails that arrived while ingestion was PAUSED,
+        once it resumes (the Jul-2026 unpause-replay incident that mirrored
+        4 stale sells into Wolff's Flagship Fund).
+    While paused, messages are recorded with status='skipped_paused' so they
+    are permanently ignored on resume rather than mirrored into a bot.
+    """
+    __tablename__ = 'processed_email_trade'
+
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.String(255), unique=True, nullable=False, index=True)
+    # executed | deferred | mixed | executed_manual | skipped_paused
+    status = db.Column(db.String(30), nullable=False)
+    email_subject = db.Column(db.String(500), nullable=True)
+    received_at = db.Column(db.DateTime, nullable=True)   # email_received_at from GAS
+    processed_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    trades_count = db.Column(db.Integer, nullable=False, default=0)
+    detail = db.Column(db.Text, nullable=True)
+
+    def __repr__(self):
+        return f"<ProcessedEmailTrade {self.message_id} {self.status}>"
+
+
 class FeaturePoll(db.Model):
     """Admin-managed feature polls shown to users in the Portfolio tab."""
     __tablename__ = 'feature_poll'
