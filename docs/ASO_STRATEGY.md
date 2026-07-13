@@ -1,7 +1,7 @@
 # ApesTogether — App Store Optimization (ASO) Strategy
 
-**Version:** v3 — May 24, 2026
-**Status:** Approved by USER (May 24 chat session) — proceed to listing creation.
+**Version:** v4 — Jul 8, 2026
+**Status:** Approved by USER (Jul 8 chat session) — v4 keyword-string slate locked (Subtitle, iOS keyword field, Play short description, feature-graphic copy).
 
 ## What changed since v2
 
@@ -14,6 +14,15 @@
 | **Screenshot copy** | "Real traders." / "Real trades." | **No "Real Traders/Trades"** — this is paper trading; positioning is "verified strategies, tracked on-platform" |
 | **Cross-localization** | Not mentioned | Spanish (Mexico) bonus keyword field — doubles US-storefront keyword capacity to ~200 chars |
 | **Screenshot disclaimer** | "Not investment advice" | "All trades on the platform are virtual using real market data" — Apple-listing-required text per LAUNCH_PLAYBOOK §11 |
+
+## What changed in v4 (Jul 8, 2026)
+
+| | v3 (replaced) | v4 (current) |
+|---|---|---|
+| **Subtitle (iOS)** | Follow Verified Strategies | **`Top Picks Alerts Tracker Live`** — subtitle treated as a pure keyword string (renders as tiny, frequently-truncated text; USER has shipped keyword-string subtitles on a prior app without review pushback). Comma-free: commas count toward the 30-char cap and add nothing. |
+| **Keywords field (iOS)** | `...pick,...alert,...gainer...` (94 char) | `pick`/`alert` promoted to the Subtitle (higher-weight slot), `gainer` dropped; `portfolio` + `screener` added (95 char) |
+| **Short description (Play)** | Two conflicting variants (§Short description vs. checklist) | **Keyword string**, v4.1: `Verified stock picks, trade alerts, portfolio tracker, AI trading, leaderboard` (78 char) — `top` removed after Play Console flagged it as store-performance/ranking language; short desc is buried in "About this app"; its value is ~all search indexing |
+| **Feature graphic copy** | (not specified) | Headline + kicker locked; display-dynamics research added — see §"Feature graphic (Play)" |
 
 > **Compliance baseline (READ FIRST).** Per `LAUNCH_PLAYBOOK.md`, ALL listing copy,
 > screenshot text, and ad creative MUST:
@@ -208,17 +217,23 @@ ApesTogether: AI Stock Trader
 
 ### Subtitle — 30 char max
 ```
-Follow Verified Strategies
+Top Picks Alerts Tracker Live
 ```
-- **26 chars** ✅.
-- Pulled from `LAUNCH_PLAYBOOK.md:79` ("verified performance",
-  "follow strategies") — the playbook's own recommended phrase.
-- Adds 3 NEW tokens not in title: `follow`, `verified`, `strategies`.
-  Cross-field combining gives us "verified stock", "verified trader",
-  "follow stock trader", "ai strategies", "ai trading strategies",
-  etc.
+- **29 chars** ✅. **v4 (Jul 8, 2026):** subtitle treated as a pure keyword
+  string — it renders as very small, frequently-truncated text, so readable
+  phrasing is wasted there. Comma-free (commas count toward the cap and add
+  no indexing value). USER precedent: keyword-string subtitle shipped on a
+  prior App Store app with no review pushback.
+- 5 new tokens, none duplicating Title tokens: `top`, `picks`, `alerts`,
+  `tracker`, `live`.
+- Combos minted with Title (`ai`, `stock`, `trader`): "top picks",
+  "stock picks", "top traders", "stock alerts", "live alerts",
+  "live picks", "stock tracker" (Max Vol 45 — biggest untapped term), and
+  "portfolio tracker" via the keyword field's new `portfolio` token.
 
 #### Alternates kept on file (all ≤ 30 char)
+- `Top Picks Alerts Tracker Ranks` (30) — swaps `live` for `ranks`
+- `Follow Verified Strategies` (26) — v3 subtitle (readable value-prop style)
 - `Track Top Stock Picks` (21) — "picks" + "track" emphasis
 - `Follow Top Stock Strategies` (27) — adds "top"
 - `Verified Picks. Tracked Live.` (29) — three-anchor framing
@@ -226,14 +241,19 @@ Follow Verified Strategies
 ### Keywords field — 100 char, comma-separated, no spaces, no plurals, no brand, no Title/Subtitle words
 
 ```
-stock,trader,pick,leaderboard,sector,alert,watchlist,dub,finelo,alinea,moomoo,sp500,gainer,wsb
+stock,trader,leaderboard,sector,watchlist,dub,finelo,alinea,moomoo,sp500,wsb,portfolio,screener
 ```
-- **94 chars** (verified — 6 chars headroom).
+- **95 chars** (verified — 5 chars headroom).
+- **v4 (Jul 8, 2026) rebalance:** `pick` + `alert` PROMOTED to the Subtitle
+  (a higher-weight slot — no longer needed here); `gainer` dropped (the only
+  token with no AppTweak measurement). Added `portfolio` (mints "portfolio
+  tracker" with the Subtitle's `tracker` — diff 2 / Max Vol 37) and
+  `screener` ("stock screener" — diff 4 / Max Vol 40).
 - All keywords are **singular** — Apple auto-pluralizes (`pick` ranks for
   `picks`).
 - Skips words already indexed via Title (`apes`, `together`, `ai`, `stock`,
-  `trader`) and Subtitle (`follow`, `verified`, `strategies`) plus their
-  stems (`trade`, `tracked`, `verify`, `strategy`).
+  `trader`) and the v4 Subtitle (`top`, `pick`, `alert`, `tracker`, `live`)
+  plus their stems.
 - **Wait — `stock` and `trader` ARE in the Title.** Why repeat them?
   Apple's algorithm credits each token once across the *combined* index;
   putting them in the keyword field doesn't double-count, but lets you
@@ -292,9 +312,10 @@ Follow verified stock strategies. Every pick tracked, timestamped, and benchmark
 ApesTogether is the social-finance app where the best AI trading models
 and the best human traders compete head-to-head — every strategy proven
 on-platform, and 85% of every subscription goes back to the trader.
-Anyone can earn: no gatekeepers, no invites, no minimum following.
+Anyone who performs well can gain subscribers and earn: no gatekeepers,
+no invites, no minimum following.
 
-This is informational and educational only. You make every decision.
+This is informational and educational only and is not investment advice.
 
 HOW IT WORKS
 • AI models and human traders publish their portfolios on-platform —
@@ -343,12 +364,12 @@ PRICING
 $9.00 / month per trader, or $69.00 / year (save 36%).
 
 ApesTogether is informational and educational. ApesTogether and the
-creators on the ApesTogether platform are not investment advisers. Past
-performance does not guarantee future results. All trades on the platform
-are virtual using real market data.
+creators on the ApesTogether platform are not investment advisers and do
+not provide investment advice. Past performance does not guarantee future
+results. All trades on the platform are virtual using real market data.
 ```
 
-Char count: ~2,650. Last paragraph is the **Apple 5.2.1 / state-securities
+Char count: ~2,700. Last paragraph is the **Apple 5.2.1 / state-securities
 required disclaimer** per `LAUNCH_PLAYBOOK.md:243` — do not drop it. Reworked
 (Session 23) to frame the product as a **best-AI-models vs best-humans**
 competition throughout (opening, HOW IT WORKS, leaderboard, trader benefits),
@@ -356,6 +377,13 @@ and to make the **open-to-everyone earning model** explicit (opening line +
 the lead "WHAT YOU GET AS A TRADER" bullet) — the key differentiator that
 anyone who performs can monetize, not just a curated few. This block is the
 **iOS App Store** master; the Play version below reuses it with 2 mods.
+
+**v4.2 (Jul 10, 2026) — not-investment-advice strengthening (USER):** the
+second line now says "…and is not investment advice" outright (was "You
+make every decision"); the opening now spells out "Anyone who performs
+well can gain subscribers and earn"; the closing disclaimer adds "and do
+not provide investment advice." Applied to BOTH stores; the Play version
+was entered into Play Console 2026-07-10.
 
 ---
 
@@ -369,12 +397,34 @@ ApesTogether: AI Stock Trader
 
 ### Short description — 80 char max
 ```
-AI vs human stock traders, ranked. Verified picks. Traders keep 85%
+Verified stock picks, trade alerts, portfolio tracker, AI trading, leaderboard
 ```
-- **67 chars** (13 char headroom). **USER choice, Session 23.**
-- High-density + on-theme: `AI`, `human`, `stock traders`, `ranked`,
-  `verified`, `85%` — leads with the AI-vs-human hook that matches the
-  title and the reworked long description.
+- **78 chars.** **v4.1 (Jul 8, 2026):** Play Console's automated check
+  flagged the v4 string (`…top trader leaderboard`) with *"Should not use
+  keywords that indicate store performance or ranking"* — trigger: `top`.
+  The warning doesn't block publishing but revokes PROMOTION eligibility
+  (featuring / recommendation surfaces — the feature graphic's only
+  exposure), so `top`/`best`/`#1` are BANNED from the short description.
+  Freed chars spent re-adding `verified`; `trader` still indexes via the
+  Title, and the verbatim `stock trader leaderboard` longtail lives in the
+  full description's closing paragraph.
+- Alternate kept on file (no `verified`):
+  `Stock picks, trade alerts, portfolio tracker, AI trading, trader leaderboard` (76).
+- Supersedes BOTH earlier variants (the `AI vs human stock traders,
+  ranked…` line that previously lived here and the `Verified stock
+  strategies…` line that lingered in the checklist).
+- Rationale: in the current Play layout the short description is buried in
+  the "About this app" section (not above the fold), so its value is ~90%
+  search indexing. Play rewards verbatim phrases and cross-field repetition
+  (unlike Apple's once-only token credit), so title-token overlap is a
+  feature here, not a bug.
+- Verbatim phrases hit: `verified stock picks`, `stock picks`,
+  `trade alerts`, `portfolio tracker`, `ai trading` (gold keyword, vol 46),
+  `leaderboard`.
+- Keyword-stuffing policy defense: every term is a real, shipping feature
+  (picks feed, alerts, tracker, AI bots, leaderboard) — a feature list, not
+  a keyword list. Deliberately avoids repeating "stock" 3× (e.g. via
+  `stock alerts`) to keep the stuffed look down.
 - Deliberately avoids "signals/strategies" advisory framing (see SEC note
   under the keyword field).
 
@@ -397,10 +447,13 @@ benchmark, and verified AI-vs-human performance instead of social-media
 hype.
 
 ApesTogether is informational and educational. ApesTogether and the
-creators on the ApesTogether platform are not investment advisers. Past
-performance does not guarantee future results. All trades on the platform
-are virtual using real market data.
+creators on the ApesTogether platform are not investment advisers and do
+not provide investment advice. Past performance does not guarantee future
+results. All trades on the platform are virtual using real market data.
 ```
+
+**ENTERED IN PLAY CONSOLE 2026-07-10** (title + short + full description
++ 512×512 icon all live in the listing draft).
 
 Longtails this paragraph captures (Play indexes them all):
 - `stock trader leaderboard`
@@ -409,6 +462,66 @@ Longtails this paragraph captures (Play indexes them all):
 - `trader watchlist`
 - `S&P 500 benchmark`
 - `verified performance`
+
+---
+
+## Feature graphic (Play) — copy + display dynamics
+
+### Locked copy (Jul 8, 2026 — Option A, see Decision below)
+- **Headline (on graphic):** `The stock-picking leaderboard.`
+- **Kicker (on graphic, small):** `AI vs humans.`
+- **Migrated copy (screenshot captions / description — NOT on graphic):**
+  `See trades live. Traders keep 85%.` (was `…Top traders get paid.` —
+  see ranking-language caution below)
+
+### How Google actually uses the feature graphic (researched Jul 8, 2026)
+1. **It does NOT appear on your own listing page unless a preview video is
+   attached** — with a video it becomes the video's cover image with a
+   centered play-button overlay. No video (our v1 state) → the listing page
+   shows screenshots only.
+2. **Its real surface is Google-controlled promotion:** large-format
+   collection/recommendation cards, editorial placements, homepage/search
+   card formats, and App Campaign ads. (This is why browse cards show a
+   banner whose text "disappears" on the listing page — the card was the
+   feature graphic; the listing shows screenshots.)
+3. **Hidden entirely on desktop web Play.**
+
+### Design constraints that follow (Google "Add preview assets" + store-listing best-practice docs)
+- **Guideline compliance gates promotion eligibility** — non-compliant
+  graphics can be excluded from exactly the large-format surfaces that are
+  the graphic's only exposure for us.
+- **Minimize text** (Google's words). Working heuristic: ≤ ~7 words, ≥ 40px
+  bold sans-serif, so copy survives ~50% search-card scale and ~20%
+  carousel scale.
+- **No app-name wordmark on the graphic** — Google renders it adjacent to
+  the app icon + title in card formats and explicitly warns that prominent
+  icon-duplicating branding causes duplication. Brand via color + motif
+  (extension of the 512×512 icon), not the name.
+- **Safe zone:** keep critical content in the center ~80% (~820×400px);
+  outer edges get cropped in some formats. Nothing critical dead-center
+  (play-button overlay if a video is ever added).
+- **No ranking/price text** ("#1", "Best of Play", "free", "% off") — and
+  per the v4.1 warning, automated checks flag `top`/`best` even when they
+  describe platform users rather than store rank.
+- **Background color:** avoid pure white/black/dark-gray (blends into Play
+  light/dark themes). Use green-tinted charcoal + vibrant green accents.
+
+### Decision (Jul 8, 2026): Option A locked
+Graphic carries `The stock-picking leaderboard.` + small kicker
+`AI vs humans.` (7 words total). Art: the text-free "human silhouette vs
+AI head" banner variant, text added in the empty center. Remaining kicker
+copy moves to screenshot captions / description.
+
+**Ranking-language caution (learned from the Play Console warning on the
+v4 short description):** Google's automated checks flag `top` / `best` /
+`#1` as store-performance language even when they describe platform users,
+not the app. Keep those words OFF the feature graphic and screenshots —
+use `Traders keep 85%.` instead of `Top traders get paid.` in migrated
+copy.
+
+**Future-video caveat:** this layout centers the headline. If a preview
+video is ever added, the play-button overlay lands on the text — the
+graphic must be re-laid-out at that point.
 
 ---
 
@@ -629,8 +742,12 @@ Make the device take ~70% of vertical real estate so the text has air.
 > **Two practical tips for the lock-screen / notification screenshots
 > (#2 and #8):** (a) put the test device on Do Not Disturb so a single
 > alert sits cleanly without competing notifications; (b) trigger the
-> alert via the admin "Test Push" button in `/admin-panel` →
-> System Health → Test Push Notification.
+> alert via the **Sample Trade** button in `/admin-panel` → System
+> Health → Test Push Notification card (added Session 26). It sends a
+> production-formatted trade alert — `🟢 Wolff's Flagship Fund BUY /
+> 25 NVDA @ $184.10` — via `preset: 'trade'` on
+> `/api/mobile/admin/test-push`. The plain **Send** button sends a
+> generic diagnostic push and is NOT what you want for screenshots.
 
 ### Screenshot 6 — Creator earnings (real shipping screen as of 2026-06-30)
 
@@ -747,10 +864,10 @@ keyword capacity by the number of locales.
 
 ### App Store Connect (iOS)
 - [ ] Title set to **`ApesTogether: AI Stock Trader`** (29 char)
-- [ ] Subtitle set to **`Follow Verified Strategies`** (26 char)
+- [ ] Subtitle set to **`Top Picks Alerts Tracker Live`** (29 char — v4 keyword string)
 - [ ] Keywords field set to:
-      `stock,trader,pick,leaderboard,sector,alert,watchlist,dub,finelo,alinea,moomoo,sp500,gainer,wsb`
-      (94 char)
+      `stock,trader,leaderboard,sector,watchlist,dub,finelo,alinea,moomoo,sp500,wsb,portfolio,screener`
+      (95 char — v4 rebalance)
 - [ ] **Spanish (Mexico) localization keywords** field set to:
       `finance,investor,wallstreet,meme,daytrading,swing,broker,scanner,nasdaq,nyse,robinhood,etoro`
       (cross-localization free indexing for US storefront)
@@ -777,10 +894,14 @@ keyword capacity by the number of locales.
 ### Google Play Console
 **Step-by-step listing creation guide: see `docs/PLAY_STORE_LISTING_GUIDE.md`**
 
-- [ ] Title set to **`ApesTogether: AI Stock Trader`** (29 char)
-- [ ] Short description: **`Verified stock strategies. Every pick tracked. Traders keep 85%.`** (64 char)
-- [ ] Full description with weaved-in longtails (see Play section above)
-- [ ] Feature graphic uploaded (1024 × 500)
+- [x] Title set to **`ApesTogether: AI Stock Trader`** (29 char) — **DONE 2026-07-10 (in Console)**
+- [x] Short description: **`Verified stock picks, trade alerts, portfolio tracker, AI trading, leaderboard`** (78 char — v4.1; `top` removed after Play Console ranking-language warning) — **DONE 2026-07-10 (in Console)**
+- [x] Full description with weaved-in longtails (v4.2 not-investment-advice text) — **DONE 2026-07-10 (in Console)**
+- [x] App icon 512×512 uploaded — **DONE 2026-07-10** (file: `android/play_store_icon_512.png`, untracked — commit it)
+- [x] Feature graphic uploaded (1024 × 500, JPG / 24-bit PNG, no alpha) —
+      **DONE Jul 8, 2026.** File versioned at
+      `assets/store/play_feature_graphic_1024x500.png`; locked copy + display
+      dynamics: see §"Feature graphic (Play)" above
 - [ ] 8 screenshots uploaded (6 iOS-shared + 2 Android-specific)
 - [ ] Content rating questionnaire completed (declare: financial info,
       no gambling, no real-money execution)

@@ -1,6 +1,13 @@
-# Apes Together — Influencer & Journalist Outreach Messages
+# ApesTogether — Influencer & Journalist Outreach Messages
 
 All messages personalized per recipient. Reference IDs match the calendar in `LAUNCH_PLAYBOOK.md`.
+
+> **Rewritten Session 25 (2026-07-10):** every message is paste-ready — fill the
+> `[bracketed]` slots and send. Style rules: plain, direct, first-person; no
+> flattery openers, no buzzwords, no "I'd love to"/"resonates"/"aligns" filler.
+> Compliance: never say "copy trading" in press (playbook §11), always note
+> trades are virtual when talking to journalists, no unsourced stats stated as
+> fact, brand is **ApesTogether** (fused).
 
 ---
 
@@ -27,31 +34,31 @@ All messages personalized per recipient. Reference IDs match the calendar in `LA
 ### Template for X/Twitter Algo Traders
 *Find people who post daily P&L, algo backtests, or trading systems*
 ```
-Hey [name] — I've been following your [algo/trading] posts. The [specific post or result you noticed] was impressive.
+Hey [name] — been following your [algo/trading] posts for a while. The [specific post or result] was really good.
 
-I'm building Apes Together — a platform where traders with verified performance earn subscriber revenue ($6.50/mo per sub, 85% payout). Algorithms explicitly welcome.
+I'm building ApesTogether — an app where traders build a verified track record and earn subscription money from it (85% payout, ~$6.50/sub/mo). Bots and algos are allowed — part of the leaderboard is already AI.
 
-Would you want to try the beta? No content creation required — just trade and the platform tracks everything.
+Want beta access? No content to make — you just trade and it tracks everything.
 
 apestogether.ai
 ```
 
 ### Template for Finance Student Accounts
 ```
-Hey [name] — saw your posts about [specific trading topic]. Solid analysis.
+Hey [name] — saw your posts about [specific trading topic]. Solid stuff.
 
-I'm building a platform where student traders can monetize their performance without becoming content creators. Verified trades, public leaderboard, 85% payout on subscriber revenue.
+I'm building ApesTogether — an app where you can earn subscription money off your trading track record without becoming a content creator. Every trade gets tracked on a public leaderboard, and you keep 85% of what subscribers pay.
 
-Would you want to be a founding trader on the beta? We launch June 1. apestogether.ai
+Want to be one of the founding traders on the beta? apestogether.ai
 ```
 
 ### Template for Small Trading Discord/Community Owners
 ```
-Hey [name] — I know you run [community name]. Respect the work you put into that.
+Hey [name] — I know you run [community name].
 
-I'm building Apes Together — think of it as a verified leaderboard where your best traders can earn subscriber revenue from their actual performance. 85% payout, no content creation required.
+I'm building ApesTogether — a verified leaderboard where your best traders can earn subscription money from their actual performance. Every trade is tracked on-platform so nobody can fake a record. 85% goes to the trader, no content required.
 
-Would you want to check it out? Happy to give your community early beta access.
+Want early beta access for your community? Easy to set up.
 
 apestogether.ai
 ```
@@ -64,17 +71,15 @@ apestogether.ai
 ### Humphrey Yang (TikTok — Finance Educator)
 **Platform:** TikTok | **Approach:** Email or TikTok DM
 ```
-Subject: Quick question — would you demo a fintech app that verifies finfluencer performance?
+Subject: An app that verifies finfluencer performance
 
 Hi Humphrey,
 
-Your breakdowns of complex money topics are exactly the kind of credible, accessible content the finance space needs.
+I built ApesTogether — an app where every trade is tracked at market price the moment it's made, so a trader's record is actually verifiable. Subscribers pay $9/month and traders keep 85%. No courses, no content grind. AI models compete on the same leaderboard as humans.
 
-I built Apes Together — a platform where every trade is verified at market price and every trader's performance is public. Subscribers pay $9/month and traders keep 85%. No courses, no content grind.
+Basically: verified performance instead of "trust me" screenshots. Figured that's a topic you could have fun with either way.
 
-I think your audience would find the concept interesting — verified performance vs. unverifiable claims.
-
-Would you want beta access to try it? Happy to walk you through it.
+Want beta access? Takes 10 minutes to see the whole thing.
 
 [Your name]
 apestogether.ai
@@ -82,17 +87,15 @@ apestogether.ai
 
 ### Tori Dunlap (TikTok — Empowering Finance)
 ```
-Subject: A fintech app built on the transparency your audience deserves
+Subject: An investing app with actual receipts
 
 Hi Tori,
 
-Your mission to make financial confidence accessible resonates with what I'm building.
+I built ApesTogether — an app where you can see a trader's real, tracked performance before you follow anyone. Every pick is logged at market price when it's made. No self-reported returns, no screenshots.
 
-Apes Together is a platform where retail investors can follow traders with verified, on-platform performance — no unverifiable claims, no "trust me" screenshots. Traders earn 85% of subscriber revenue just by making trades.
+So much of finance social media is unverifiable hype; this is the opposite — look at the actual numbers and decide for yourself. That felt like something your audience would care about.
 
-I think your audience — especially women taking control of their finances — would want to know this exists. The emphasis is on informed decision-making, not following gurus.
-
-Would you be interested in trying the beta? Happy to demo.
+Want to try the beta? Happy to show you around it.
 
 [Your name]
 apestogether.ai
@@ -100,15 +103,13 @@ apestogether.ai
 
 ### Andrew Lokenauth (TikTok — Tactical Finance)
 ```
-Subject: A platform that turns trading skill into subscriber revenue
+Subject: Getting paid for trading skill, not content
 
 Hi Andrew,
 
-Your no-nonsense approach to finance insights is exactly the tone we're building for.
+Quick pitch: I built ApesTogether. Traders' picks get tracked at market price on a public leaderboard, people subscribe to the ones who are good ($9/month), and the trader keeps 85%. No content needed — the track record is the product.
 
-Apes Together verifies every trade at market price and ranks traders on a public leaderboard. Subscribers pay $9/month, traders keep 85%. No content creation needed — just trade.
-
-I think your audience would want to know about a platform that values results over marketing. Would you want to try the beta?
+You call out finance hype for a living, so this seemed up your alley. Want beta access?
 
 [Your name]
 apestogether.ai
@@ -116,17 +117,15 @@ apestogether.ai
 
 ### Eric Balchunas (X — ETF/Market Commentary)
 ```
-Subject: A fintech angle you might find interesting — verified trading performance marketplace
+Subject: A public leaderboard for retail traders — verified, benchmarked vs the S&P
 
 Hi Eric,
 
-Your ETF analysis is some of the most data-driven commentary on X. I wanted to share something in the same spirit.
+I built ApesTogether — an app where every trader's picks are logged at market price when they're made, and everyone is benchmarked against the S&P 500 on a public leaderboard. AI models compete against humans on the same board.
 
-I built Apes Together — a platform where every trader's performance is verified at market price and ranked on a public leaderboard. Think of it as what would happen if the fund performance disclosure standard applied to retail traders and finfluencers.
+It's basically fund-style performance disclosure applied to retail traders and finfluencers. No self-reported returns, no cherry-picked screenshots.
 
-No self-reported returns. No cherry-picked screenshots. Just math.
-
-Would love your take. Happy to share a beta walkthrough.
+Would genuinely like your take, even a critical one. Beta's yours if you want it.
 
 [Your name]
 apestogether.ai
@@ -134,17 +133,15 @@ apestogether.ai
 
 ### Charles Bilello (X — Data-Driven Market Commentary)
 ```
-Subject: A platform where trading performance is the only credential
+Subject: Every trader benchmarked vs the S&P 500, publicly
 
 Hi Charles,
 
-Your data-grounded approach to market commentary is exactly the standard we're trying to bring to retail trading.
+I built ApesTogether — an app where every trade is logged at real-time market price and every trader is ranked by actual performance against the S&P 500. No historical credit and no self-reported returns; a track record starts when the tracking starts.
 
-Apes Together verifies every trade at real-time market price. No historical credit, no self-reported returns. Every trader ranked by actual, on-platform performance vs. the S&P 500.
+Subscribers pay $9/month, traders keep 85%.
 
-Subscribers pay $9/month. Traders keep 85%. The leaderboard doesn't lie.
-
-I think this aligns with your evidence-over-hype philosophy. Would you want to see the beta?
+Given how much of your feed is correcting bad data, figured you'd at least find the idea interesting. Want to see the beta?
 
 [Your name]
 apestogether.ai
@@ -152,17 +149,15 @@ apestogether.ai
 
 ### Liz Ann Sonders (X — Macro Commentary)
 ```
-Subject: Bringing institutional-grade transparency to retail trading
+Subject: Performance disclosure for retail traders
 
 Hi Liz Ann,
 
-Your macro insights bring institutional clarity to a public audience that desperately needs it.
+I built ApesTogether — an app that applies something like an institutional disclosure standard to retail trading. Every trade is logged at market price, performance is public, and everyone is benchmarked against the S&P 500.
 
-I built Apes Together — a platform where retail traders prove their performance through verified, on-platform trades. Every trade is logged at market price. Performance is public. No self-reported returns.
+The idea: anyone who wants to be followed for stock picks should have to show a real, verifiable track record first.
 
-The goal: bring the disclosure standard you'd expect from institutional investing to the retail trading world.
-
-Would appreciate your perspective — happy to demo the beta.
+I'd value your perspective on it. Happy to demo the beta.
 
 [Your name]
 apestogether.ai
@@ -170,17 +165,15 @@ apestogether.ai
 
 ### The Plain Bagel (YouTube — Skeptical Finance)
 ```
-Subject: I built the fintech app you'd actually recommend
+Subject: I built an app for the finfluencer trust gap you talk about
 
-Hi,
+Hi Richard,
 
-Your approach to finance content — calm, educational, skeptical of hype — is exactly what inspired the transparency model behind Apes Together.
+You've made the point plenty of times that most finance content is unverifiable. I tried to build the verification layer: ApesTogether.
 
-On our platform, every trade is verified at market price. There are no self-reported returns, no cherry-picked winners. The leaderboard ranks traders by actual performance, period.
+Every trade is logged at market price the moment it's made. No self-reported returns, no cherry-picked winners — the leaderboard ranks traders by actual tracked performance vs the S&P 500.
 
-I built this specifically because the finfluencer trust gap you've talked about is real — and I wanted to build the verification layer.
-
-Would you be interested in reviewing the beta? Honest take welcome.
+I'd honestly welcome a skeptical review. Want beta access?
 
 [Your name]
 apestogether.ai
@@ -188,19 +181,15 @@ apestogether.ai
 
 ### Ben Felix (YouTube — Evidence-Based Investing)
 ```
-Subject: An evidence-based approach to the finfluencer problem
+Subject: Data on whether stock pickers can actually pick stocks
 
 Hi Ben,
 
-Your commitment to research-backed, evidence-based investing is well known and deeply respected.
+I built ApesTogether — a platform where every trader's picks are tracked at market price and ranked publicly against the S&P 500. No self-reported returns and no survivorship games; the record is whatever the platform tracked.
 
-I built Apes Together as the evidence-based answer to the finfluencer problem: every trade verified at market price, performance calculated on-platform, all traders ranked on a public leaderboard vs. the S&P 500.
+Given your priors, you'd probably expect most traders on it to lose to the index — and if that's true, the data will show it plainly. That's sort of the point.
 
-No self-reported returns. No historical credit. Just data.
-
-I think your audience would find the concept interesting — whether as something to recommend or to critically analyze. Either way, I'd value your perspective.
-
-Would you want beta access?
+I'd value your take, supportive or brutal. Want beta access?
 
 [Your name]
 apestogether.ai
@@ -208,17 +197,15 @@ apestogether.ai
 
 ### Sasha Evdakov (YouTube — Technical Analysis Education)
 ```
-Subject: A platform where your technical analysis track record becomes income
+Subject: Turn a TA track record into subscription income
 
 Hi Sasha,
 
-Your structured approach to technical analysis education has helped a lot of traders build systematic processes.
+I built ApesTogether — an app where traders earn subscription money from a verified track record. Every trade is logged at market price and ranked on a public leaderboard vs the S&P 500.
 
-I'm building Apes Together — a platform where traders earn subscriber revenue from verified on-platform performance. Every trade logged at market price, ranked on a public leaderboard.
+For a technical trader that means your chart analysis becomes a provable record you can monetize — 85% of every $9/month subscription, no content required.
 
-For technical traders, this means your chart analysis translates directly into a provable, monetizable track record. 85% payout, no content creation required.
-
-Would you be interested in checking out the beta?
+Want to check out the beta?
 
 [Your name]
 apestogether.ai
@@ -226,17 +213,15 @@ apestogether.ai
 
 ### SMB Capital (YouTube — Professional Trading)
 ```
-Subject: A platform for developing traders to build verified track records
+Subject: Verified public track records for developing traders
 
 Hi team,
 
-SMB Capital's focus on trading psychology and professional development is well respected.
+I built ApesTogether — an app where traders build a verified public track record (every trade logged at market price, benchmarked vs the S&P 500) and earn 85% of subscriber revenue from it.
 
-I built Apes Together — a platform where traders earn subscriber revenue from verified performance. Every trade is logged at market price, ranked on a public leaderboard.
+Thought it might be useful for your training programs: students could build a provable record as they develop and monetize performance without starting a media presence.
 
-I think this could be interesting for your training programs: students could build a verified public track record as they develop, and potentially monetize their performance without needing to start a media presence.
-
-Would you be interested in exploring a partnership or beta access for your community?
+Open to a partnership or beta access for your community if that's interesting.
 
 [Your name]
 apestogether.ai
@@ -249,17 +234,15 @@ apestogether.ai
 
 ### Graham Stephan (YouTube — 6M+ subscribers)
 ```
-Subject: A fintech demo your audience hasn't seen before
+Subject: What if finfluencers had to prove their returns?
 
 Hi Graham,
 
-I built Apes Together — an app where every trade is verified at market price and traders earn 85% of subscriber revenue from their performance. No courses, no content grind.
+I built ApesTogether — an app where every trade is tracked at market price and traders earn 85% of subscription revenue from their performance. No courses, no content grind.
 
-The pitch to your audience: What if every finfluencer had to prove their returns before selling subscriptions? That's what this app does.
+The hook for your audience: what if every finfluencer had to prove their returns before selling anything? That's the whole app. There's also a twist — AI models compete on the same leaderboard as the humans.
 
-I'd love to offer you exclusive beta access to demo on your channel. You'd be the first major creator to cover it.
-
-No obligations — try it and share your honest opinion.
+You'd be the first major creator to cover it. No obligations — try it and say what you actually think.
 
 [Your name]
 apestogether.ai
@@ -267,15 +250,15 @@ apestogether.ai
 
 ### Kevin Paffrath (YouTube — Finance/Tech Reviews)
 ```
-Subject: New fintech app for your review — verified trading performance marketplace
+Subject: New app for your review — verified trader leaderboard
 
 Hi Kevin,
 
-I built Apes Together — a platform where retail traders monetize their verified performance through subscribers ($9/month, 85% to the trader). Every trade is logged at real-time market price.
+I built ApesTogether — an app where retail traders earn subscription money from a verified track record ($9/month, 85% to the trader). Every trade is logged at real-time market price, and AI models compete against the humans on one leaderboard.
 
-I know you review fintech tools and I think this would be a compelling demo for your audience: an app that makes finfluencer performance transparent and verifiable.
+You review fintech tools — this one's built around a simple question: can the people selling stock picks actually trade? Now there's a leaderboard for that.
 
-Would you be open to a beta walkthrough? Happy to give you an exclusive first look.
+Want an early look at the beta?
 
 [Your name]
 apestogether.ai
@@ -283,15 +266,13 @@ apestogether.ai
 
 ### Honest Finance (YouTube — Fintech Reviews)
 ```
-Subject: A fintech app built on the transparency you review for
+Subject: An app to review — trader leaderboard with receipts
 
 Hi,
 
-Your reviews are known for being straightforward — which is exactly why I'm reaching out.
+I built ApesTogether. Every trade is tracked at market price, traders earn 85% of subscription revenue, and the leaderboard ranks by performance — not followers.
 
-Apes Together verifies every trade at market price. Traders earn 85% of subscription revenue. The leaderboard ranks by performance, not followers.
-
-I'd love you to review it honestly. Beta access is yours if you want it.
+Your reviews are straightforward, which is exactly what I want pointed at this. Beta access is yours if you want it.
 
 [Your name]
 apestogether.ai
@@ -299,15 +280,15 @@ apestogether.ai
 
 ### Matt Levine (Substack — Money Stuff)
 ```
-Subject: A fintech product that might make a good "Money Stuff" item
+Subject: Possible Money Stuff item: a leaderboard where AI models and retail traders compete for subscribers
 
 Hi Matt,
 
-I'm a solo developer in NYC who built Apes Together — a marketplace where retail traders earn subscription revenue from verified on-platform performance. Think: what if the performance disclosure standard of institutional finance applied to finfluencers.
+I'm a solo developer in NYC. I built ApesTogether — an app where retail traders (and AI trading bots, on equal footing) earn subscription revenue from tracked on-platform performance. Every trade is logged at market price; all the trading is virtual, so it's a track-record layer, not a brokerage.
 
-Every trade logged at market price. No self-reported returns. Algorithms and AI bots compete on equal footing. Traders keep 85% of the $9/month subscription.
+The Money Stuff-shaped part: the way to monetize stock-picking here isn't to run money or sell a course — it's to be publicly right, on the record, next to a bot trying to do the same thing.
 
-I know you appreciate the weird and interesting corners of finance — this might fit. Happy to share more details or a beta walkthrough.
+Happy to share details or a walkthrough.
 
 [Your name]
 apestogether.ai
@@ -315,17 +296,15 @@ apestogether.ai
 
 ### Lyn Alden (Substack — Macro/Systems Analysis)
 ```
-Subject: A systems-level approach to the finfluencer trust problem
+Subject: An incentive-design answer to the finfluencer trust problem
 
 Hi Lyn,
 
-Your macro and systems-level analysis approach to investing is deeply respected. I'm writing because I built something that applies that same systematic thinking to a different problem.
+I built ApesTogether — a platform where every trader's performance is tracked at market price and ranked publicly against the S&P 500. The design bet: if the only way to earn subscribers is a verifiable record, the incentives flip — performance gets rewarded instead of marketing.
 
-Apes Together is a platform where every trader's performance is verified at market price, tracked on-platform, and ranked publicly. The hypothesis: if you build a transparent system, the best traders rise to the top and earn subscriber revenue (85% of $9/month).
+Traders keep 85% of $9/month subscriptions, and AI models compete on the same board as humans.
 
-I think your audience — people who think about systems, incentives, and market structure — would find the model interesting.
-
-Would you be open to learning more?
+You write about systems and incentives, so I'd be curious whether you think this one is built right. Open to taking a look?
 
 [Your name]
 apestogether.ai
@@ -333,17 +312,15 @@ apestogether.ai
 
 ### Nick Maggiulli (Substack — Of Dollars And Data)
 ```
-Subject: A data-driven fintech product for your data-driven audience
+Subject: Verification as the product
 
 Hi Nick,
 
-Your work at Of Dollars And Data sits at the intersection of behavioral finance and hard numbers — which is exactly where Apes Together lives.
+I built ApesTogether — a platform where every trade is logged at market price and every trader is ranked by tracked performance vs the S&P 500. Subscribers pay $9/month; traders keep 85%.
 
-I built a platform where every trade is verified at market price and every trader is ranked by actual, on-platform performance vs. the S&P 500. Subscribers pay $9/month. Traders keep 85%.
+The behavioral angle you'd probably see immediately: people follow confident claims they can't verify, and the whole finfluencer economy runs on that. This flips it — the record is public or it doesn't count.
 
-The behavioral insight: people trust claims they can verify. On our platform, verification is the product.
-
-I think your audience would find the model interesting. Would you want beta access?
+Want beta access?
 
 [Your name]
 apestogether.ai
@@ -351,15 +328,13 @@ apestogether.ai
 
 ### Trader Synapse (Trading Education)
 ```
-Subject: A platform that turns your trading system into subscriber revenue
+Subject: Your trading system as a provable track record
 
 Hi,
 
-I follow your work on trading systems and workflow documentation. Your emphasis on repeatable processes aligns with what we're building.
+I follow your work on trading systems. I built ApesTogether — every trade tracked at market price, traders ranked on a public leaderboard, 85% of subscriber revenue to the trader. No content creation, no courses.
 
-Apes Together verifies every trade at market price and ranks traders on a public leaderboard. Traders keep 85% of subscriber revenue — no content creation, no courses.
-
-For systematic traders, this means your process becomes a provable, monetizable track record. Would you want to try the beta?
+For a systematic trader, the pitch is simple: your process becomes a provable, monetizable record instead of a claim. Want to try the beta?
 
 [Your name]
 apestogether.ai
@@ -375,9 +350,7 @@ Subject: Re: [original subject]
 
 Hi [name],
 
-Just bumping this — wanted to make sure it didn't get buried.
-
-Happy to send a quick demo video if that's easier than downloading the beta.
+Bumping this once in case it got buried. If a 60-second demo video is easier than installing the beta, say the word and I'll send one.
 
 [Your name]
 ```
@@ -387,23 +360,23 @@ Happy to send a quick demo video if that's easier than downloading the beta.
 
 ## INFLUENCER BETA INVITATION (For those who responded positively)
 ```
-Subject: Your Apes Together beta access
+Subject: Your ApesTogether beta access
 
 Hi [name],
 
-Thanks for your interest — here's your beta access:
+Thanks for taking a look — here's your beta access:
 
-🍎 TestFlight (iOS): [link]
-🤖 Google Play (Android): [link]
+iOS (TestFlight): [link]
+Android (Google Play): [link]
 
-What I'd love your feedback on:
+Three things I'd genuinely like your read on:
 1. Is the onboarding clear?
-2. Does the leaderboard make sense?
-3. Would you recommend this to your audience? Why or why not?
+2. Does the leaderboard make sense at a glance?
+3. Would you show this to your audience? Why or why not?
 
-No pressure to post about it. But if you do, I'd appreciate a tag @ApesTogetherApp.
+Zero pressure to post. If you do, a tag @ApesTogetherApp helps a lot.
 
-Happy to hop on a 10-minute call if you want a walkthrough.
+And if you'd rather get a 10-minute walkthrough first, happy to hop on a call.
 
 [Your name]
 ```
@@ -441,45 +414,45 @@ Happy to hop on a 10-minute call if you want a walkthrough.
 
 ### Template: Fintech/Startup Blogs
 ```
-Subject: NYC solo founder launches anti-finfluencer trading platform — beta June 1
+Subject: NYC solo founder launches anti-finfluencer trading app — launching [launch date]
 
 Hi [name],
 
-I'm [your name], a solo developer in NYC. I built Apes Together — an app where every trade is verified at market price and traders earn 85% of subscription revenue from their verified performance.
+I'm [your name], a solo developer in NYC. I built ApesTogether — an app where every trade is tracked at market price and traders earn 85% of subscription revenue from that verified record.
 
-The thesis: 85% of young investors use social media for stock tips, but there's no verification layer. We built one.
+The thesis: most young investors get stock ideas from social media, and there's no verification layer for any of it. So I built one.
 
 Key details:
-- Paper trading verified at real-time market price
-- Public leaderboard ranked by actual performance vs S&P 500
+- All trading is virtual (real market data, no brokerage) — it's a track-record layer, not a trading venue
+- Public leaderboard ranked by tracked performance vs the S&P 500
 - $9/month subscriptions, 85% to traders
-- Algorithms and AI bots explicitly welcome
-- No VC funding — bootstrapped in NYC
+- AI trading bots compete alongside humans on the same board
+- No VC — bootstrapped
 
-Beta opens June 1. Happy to share screenshots, demo, or talk more.
+Launching [launch date]. Happy to share screenshots, a demo, or more detail.
 
 Press kit: [link or attached]
 
 [Your name]
-Founder, Apes Together
+Founder, ApesTogether
 apestogether.ai
 ```
 
 ### Template: Creator Economy Publications
 ```
-Subject: The creator economy just came for Wall Street — here's what that looks like
+Subject: Creator-economy pitch: the "content" is a verified trading record
 
 Hi [name],
 
-What if traders could monetize their skill the way YouTubers monetize views — but without creating any content?
+What if traders could monetize skill the way YouTubers monetize views — without making any content?
 
-That's Apes Together. Every trade is verified at market price. Traders earn 85% of $9/month subscriber revenue. The leaderboard ranks by performance, not followers. Algorithms compete with humans.
+That's ApesTogether. Every trade is tracked at market price (all virtual — real market data, no brokerage). Traders keep 85% of $9/month subscriptions. The leaderboard ranks by performance, not followers, and AI bots compete with the humans.
 
-It's the creator economy model applied to trading — except the "content" is your verified performance.
+It's the creator-economy model where the "content" is a verified track record.
 
-Built by one person in NYC. No VC. Beta opens June 1.
+Built by one person in NYC, no VC. Launching [launch date].
 
-Interested in covering this? Happy to share more.
+Want more — screenshots, demo, interview?
 
 [Your name]
 apestogether.ai
@@ -495,38 +468,38 @@ Subject: [Angle — pick from the 5 story angles above]
 
 Hi [name],
 
-I noticed your recent piece on [their recent relevant article]. I'm writing because I built something at the intersection of the creator economy and retail investing that I think your readers would find interesting.
+I read your piece on [their recent relevant article] — I'm writing because I built something adjacent to it, at the intersection of the creator economy and retail investing.
 
-Apes Together is a marketplace where skilled traders earn subscriber revenue from verified, on-platform performance — no content creation required. Every trade logged at market price, ranked on a public leaderboard vs. the S&P 500.
+ApesTogether is an app where traders earn subscription revenue from tracked, on-platform performance — no content creation required. Every trade is logged at market price and ranked on a public leaderboard vs the S&P 500. All trading is virtual (real market data, no brokerage), which is the point: prove the record first.
 
-What makes this different from copy trading (Dub, eToro):
-- Paper trading as trust layer — prove performance before people follow
-- 85% payout to traders (vs. typical 50-70%)
-- AI/algorithmic bots explicitly welcomed as competitors
+How it differs from apps like Dub and eToro:
+- The track record IS the product — performance is proven before anyone follows
+- 85% payout to traders
+- AI/algorithmic bots explicitly welcome as competitors
 - Solo founder, zero VC, bootstrapped in NYC
 
-Beta opens June 1. [X] traders already building verified track records.
+Launching [launch date]. [X] traders already building tracked records.
 
 Happy to talk, demo, or send screenshots.
 
 [Your name]
-Founder, Apes Together
+Founder, ApesTogether
 apestogether.ai
 ```
 
 ### Product Hunt Launch
-*Schedule for June 1 or June 2*
+*Schedule for launch day or the day after*
 ```
 Tagline: Follow verified traders. Not TikToks.
 
 Description:
-Apes Together is where skilled traders earn subscriber revenue from verified performance — no content creation required.
+ApesTogether is where traders earn subscription revenue from a verified track record — no content creation required.
 
-Every trade verified at real-time market price. Public leaderboard ranked by actual returns. Traders keep 85% of $9/month subscriptions. Algorithms and AI bots welcome.
+Every trade is logged at real-time market price (all virtual — it's a track-record layer, not a brokerage). Public leaderboard ranked by actual returns vs the S&P 500. Traders keep 85% of $9/month subscriptions. AI bots compete against humans on the same board.
 
-We built the transparency layer the investing world is missing.
+The transparency layer finance social media is missing.
 
-🍎 iOS | 🤖 Android | 🌐 apestogether.ai
+iOS | Android | apestogether.ai
 ```
 
 ---
@@ -535,27 +508,27 @@ We built the transparency layer the investing world is missing.
 
 ### WSJ Pitch
 ```
-Subject: The anti-finfluencer app — NYC founder builds verified trading performance marketplace
+Subject: The anti-finfluencer app — NYC founder builds a verified trader leaderboard
 
 Hi [journalist name],
 
 I'm [your name], a solo app developer in NYC. You may have covered my previous app [mention it and the WSJ piece].
 
-I'm launching Apes Together on June 1 — a platform where retail traders earn subscriber revenue from verified on-platform performance, and investors follow transparent strategies instead of trusting unverifiable social media claims.
+I'm launching ApesTogether on [launch date] — an app where retail traders earn subscription revenue from a tracked, on-platform record, and users follow transparent performance instead of trusting social-media claims. All trading on the platform is virtual (real market data, no brokerage) — it's a verification layer, not a trading venue.
 
-Why this matters now:
-- 85% of investors aged 18-40 use social media for stock tips
-- Only 20% of finfluencer content includes proper disclosure
-- The copy trading market is $3-9 billion and growing, but with minimal transparency
+Why now:
+- Surveys consistently show most investors under 40 get stock ideas from social media
+- Very little finfluencer content carries real disclosure, and almost none of it is verifiable
+- Social trading keeps growing with essentially no transparency standard
 
 What's different:
-- Every trade verified at real-time market price (no self-reported returns)
+- Every trade logged at real-time market price — no self-reported returns
 - Public leaderboard — performance is the only credential
-- Algorithms and AI bots compete alongside humans
+- AI models compete alongside humans on the same board
 - Traders keep 85% of $9/month subscriptions
-- Bootstrapped in NYC, no VC funding
+- Bootstrapped in NYC, no VC
 
-I'd love to offer you an exclusive story or early beta access. Happy to demo in person (I'm in Manhattan) or on a call.
+Happy to offer an exclusive or early beta access — and to demo in person (I'm in Manhattan) or on a call.
 
 [Your name]
 Founder, Family Apps LLC
@@ -565,21 +538,21 @@ apestogether.ai
 
 ### Bloomberg/TechCrunch Pitch
 ```
-Subject: Fintech startup turns retail trading into a verified creator economy — launches June 1
+Subject: Solo NYC dev turns retail trading into a verified creator economy — launching [launch date]
 
 Hi [journalist name],
 
-Quick pitch: I built Apes Together — a marketplace where retail traders earn subscription revenue from verified, on-platform trading performance. No content creation, no courses, no self-reported returns. Every trade logged at market price.
+Quick pitch: I built ApesTogether — an app where retail traders earn subscription revenue from tracked, on-platform performance. No content creation, no courses, no self-reported returns. Every trade is logged at market price; all trading is virtual (real market data, no brokerage), so the product is the verified record itself.
 
 The model:
-- Investors subscribe to traders for $9/month
-- Traders keep 85% ($6.50/subscriber)
-- Performance ranked on a public leaderboard vs S&P 500
-- AI/algorithmic bots explicitly welcome
+- Users subscribe to traders for $9/month
+- Traders keep 85% (~$6.50/subscriber)
+- Performance ranked on a public leaderboard vs the S&P 500
+- AI/algorithmic bots explicitly welcome — humans vs machines on one board
 
-Competitive context: Dub raised $30M for copy trading. eToro has 35M users. But neither requires verified performance as the entry point. We do.
+Competitive context: Dub raised $30M and eToro has tens of millions of users, but neither requires proven performance as the entry point. That's the gap.
 
-One developer in NYC. No VC. Beta opens June 1 with [X] traders already building track records.
+One developer in NYC. No VC. Launching [launch date] with [X] traders already building records.
 
 Interested? Happy to share beta access or talk.
 
@@ -589,21 +562,21 @@ apestogether.ai
 
 ### CNBC Pitch
 ```
-Subject: "Apes Grow Up" — from meme stock frenzy to verified performance marketplace
+Subject: "Apes grow up" — from meme-stock frenzy to a verified trader leaderboard
 
 Hi [name],
 
-The meme stock movement was fundamentally about retail investors demanding transparency. Five years later, I built the platform for that demand.
+The meme-stock movement was, at its core, retail investors demanding transparency. Five years later I built an app for exactly that demand.
 
-Apes Together launches June 1 — a marketplace where:
-- Every trade is verified at real-time market price
-- Traders earn 85% of subscriber revenue from performance alone
-- A public leaderboard ranks by actual returns, not followers
-- AI bots compete with human traders
+ApesTogether launches [launch date]:
+- Every trade tracked at real-time market price (all virtual — no brokerage)
+- Traders earn 85% of subscription revenue from performance alone
+- A public leaderboard ranks by actual returns vs the S&P 500, not followers
+- AI bots compete against human traders on the same board
 
-The name "Apes Together" is a nod to that movement — but the product is the grown-up version. Verified performance. Real accountability. No hype.
+The name is a nod to that movement — the product is the grown-up version. Tracked performance, real accountability, no hype.
 
-Solo founder in NYC. Would love to discuss for a segment or article.
+Solo founder in NYC. Free to talk for a segment or article.
 
 [Your name]
 apestogether.ai
@@ -612,19 +585,17 @@ apestogether.ai
 
 ### Business Insider Pitch
 ```
-Subject: This NYC developer built the "anti-finfluencer" app — and he's paying traders 85%
+Subject: This NYC developer built the "anti-finfluencer" app — and pays traders 85%
 
 Hi [name],
 
-85% of young investors use social media for stock tips. Only 20% of finfluencer content has proper disclosure.
+Most young investors get stock ideas from social media, and almost none of it is verifiable. I'm a solo developer in NYC and I built the verification layer: ApesTogether.
 
-I'm a solo developer in NYC who built the verification layer: Apes Together.
+Every trade tracked at market price (all virtual — real market data, no brokerage). Public leaderboard vs the S&P 500. Traders earn 85% of $9/month subscriptions. No content creation, no self-reported returns — and AI bots compete against the humans.
 
-Every trade verified at market price. Public leaderboard. Traders earn 85% of $9/month subscriber revenue. No content creation. No self-reported returns.
+Creator economy meets Wall Street, with receipts.
 
-Think of it as the creator economy meets Wall Street — but with receipts.
-
-Launches June 1. No VC funding. Happy to talk or demo.
+Launching [launch date]. No VC. Happy to talk or demo.
 
 [Your name]
 apestogether.ai
@@ -640,11 +611,11 @@ Subject: Re: [original subject]
 
 Hi [name],
 
-Following up on my note about Apes Together — the verified trading performance marketplace launching June 1.
+Following up on my note about ApesTogether — the verified trader leaderboard launching [launch date].
 
-Since I wrote, we've had [X] beta testers and [Y] traders building verified track records. Early retention data: [Z]%.
+Since I wrote: [X] beta testers, [Y] traders building tracked records, [Z]% week-1 retention.
 
-Happy to share a quick demo or updated metrics. Also available for an in-person meeting if you're in NYC.
+Happy to send a quick demo or updated numbers — or meet in person if you're in NYC.
 
 [Your name]
 apestogether.ai
@@ -652,20 +623,20 @@ apestogether.ai
 
 ### Pre-Launch Final Reminder (Day 46)
 ```
-Subject: Apes Together launches Sunday — embargo available
+Subject: ApesTogether launches [launch day] — embargo available
 
 Hi [name],
 
-Apes Together goes live on the App Store and Google Play this Sunday, June 1.
+ApesTogether goes live on the App Store and Google Play on [launch date].
 
-If you're interested in covering the launch, I'm happy to:
-- Provide an exclusive quote or interview
-- Share beta data under embargo until Sunday 7 AM ET
-- Give you beta access to try the app before it goes public
+If you want to cover the launch, I can:
+- Give an exclusive quote or interview
+- Share beta data under embargo until [launch date] 7 AM ET
+- Get you beta access before it goes public
 
-Key stats: [X] beta testers, [Y] traders, [Z]% week-1 retention, [W] verified trades on platform.
+Where things stand: [X] beta testers, [Y] traders, [Z]% week-1 retention, [W] tracked trades on the platform.
 
-Let me know if you want any of the above.
+Say the word on any of the above.
 
 [Your name]
 apestogether.ai

@@ -110,11 +110,12 @@ fun LoginScreen(onSignedIn: () -> Unit) {
 
         Spacer(Modifier.height(20.dp))
 
-        // Two-tone wordmark: "Apes" (white) + " Together" (accent).
+        // Two-tone wordmark: "Apes" (white) + "Together" (accent), fused —
+        // brand spelling is "ApesTogether" with no space (Session 20 sweep).
         Text(
             text = buildAnnotatedString {
                 withStyle(SpanStyle(color = TextPrimary)) { append("Apes") }
-                withStyle(SpanStyle(color = PrimaryAccent)) { append(" Together") }
+                withStyle(SpanStyle(color = PrimaryAccent)) { append("Together") }
             },
             fontSize = 36.sp,
             fontWeight = FontWeight.Bold,

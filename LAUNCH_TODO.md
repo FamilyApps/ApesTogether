@@ -34,11 +34,11 @@ The authoritative, deduplicated checklist of **everything** required for public 
 2. [x] **Payout-integrity + monthly-cron + 1099/W-9 code PUSHED** — commits `e630f13` + `1c9eaa5` on `origin/master` (verified Session 18; no uncommitted money-file changes).
 3. [x] **Slot 2–20 store products CREATED** — 19 iOS subscription groups (monthly+annual) + 38 Play products (USER, Session 18).
 4. [ ] **Verify Apple ASSN V2** via a real sandbox subscription (no test-button in ASC). Google RTDN already [x] verified (Session 18).
-5. [ ] **Ship updated builds** — iOS Build 41 archive + Android rebuild (carry slots, CTA copy, store-cancel, recent-trades-15, trade icons).
+5. [~] **Ship updated builds** — **iOS Build 45 uploaded to ASC (2026-07-10, repo at `60b7233`)**; **Android `versionCode 4` AAB built + uploaded (2026-07-10)**. Remaining: next Android build (v5) carries the fused login wordmark (Session 25 fix); start closed-testing rollout.
 6. [~] **App Links / AASA — backend DONE + verified live (2026-06-24); on-device autoVerify remains.** Both endpoints confirmed serving correct content at `https://apestogether.ai/.well-known/{assetlinks.json, apple-app-site-association}`: iOS `appID = M8R8YVW472.com.apestogether.ApesTogether` (`APPLE_TEAM_ID` already set on Vercel — the `TEAM_ID` placeholder only lived in the unused static file, now also corrected); Android now serves **both** SHA-256 fingerprints. **Fixed a real bug:** assetlinks was shipping an EMPTY fingerprint list (Vercel `includeFiles` doesn't bundle the static file into the Python lambda → route fell back to an unset env var), which silently disables `autoVerify`; now backstopped by an embedded code constant + `Cache-Control: no-store` (commits `13c65b2`, `3a0b14d`). **Remaining:** on-device `adb shell pm get-app-links com.apestogether.app` after installing a build signed with the matching Play key.
 7. [ ] **E2E money tests** — paid subscribe → validate → Xero bill → 1099; cancel-path (iOS StoreKit + Android license tester); W-9 hold/release. Both platforms.
 8. [ ] **Generate real store assets** → fill both listings → **submit for review**.
-9. [!] **Attorney privacy policy** + ToS + disclaimers (external blocker — start now).
+9. [~] **Attorney privacy policy + ToS** — **ENGAGED: USER sent requirements 2026-07-09; Privacy Policy + ToS updates in progress.** Disclaimers audit still ours.
 10. [ ] **Google Play 14-day Closed-Testing gate** (wall-clock; first confirm the Family Apps LLC *org* account is even subject to it, then start ASAP).
 
 ### 1. 🔒 Security & Backend
@@ -57,8 +57,8 @@ The authoritative, deduplicated checklist of **everything** required for public 
 - [ ] **#1 Bot creation/batch rules verification** — trades stay in assigned sector; research method + `max_cash_deployed` wired (`bot_executor.py`/`bot_strategies.py`/`bot_data_hub.py`).
 
 ### 3. 🍎 iOS app + App Store
-- [ ] iOS **Build 41 archive** (ships slots + CTA + store-cancel + recent-trades-15 + trade icons).
-- [ ] Listing (`docs/ASO_STRATEGY.md`): Title `ApesTogether: AI Stock Trader`, Subtitle `Follow Verified Strategies`, Keywords (+ es-MX loc), Promo text, Description.
+- [x] iOS build archive — **Build 45 uploaded to App Store Connect (2026-07-10**; Mac pulled to `60b7233`, ships slots + CTA + store-cancel + recent-trades-15 + trade icons + login legal links + deleted-creator UI**)**.
+- [ ] Listing (`docs/ASO_STRATEGY.md`): Title `ApesTogether: AI Stock Trader`, Subtitle `Top Picks Alerts Tracker Live` (v4 keyword string), Keywords (v4 rebalance + es-MX loc), Promo text, Description.
 - [x] **6 iOS screenshots DONE (Session 21, 2026-07-03)** — real app captures composited @ **1290×2796** (6.9") via `scripts/compose_appstore_screenshots_v2.ps1` → `~/Downloads/AppStore_Screenshots_v2` (`01_leaderboard`…`06_earnings`); captions/disclaimers from `docs/ASO_STRATEGY.md`. Upload straight into ASC Media Manager (PNGs are outputs, not committed). **Still:** app icon; app-preview video optional.
 - [ ] Age rating **17+**, Privacy nutrition labels, Export-compliance answers.
 - [ ] In-App Events drafted; review-prompt after follow + 3rd session.
@@ -67,23 +67,29 @@ The authoritative, deduplicated checklist of **everything** required for public 
 - [x] FCM push, Apple/Google sign-in, billing verified on-device (§C).
 
 ### 4. 🤖 Android app + Play
-- [ ] Android **rebuild** (slots + CTA + recent-trades-15 + trade icons + pending render).
+- [x] Android **rebuild** — **`versionCode 4` AAB built + uploaded (2026-07-10)** (slots + CTA + recent-trades-15 + trade icons + pending render + ad-ID fix + login legal links + deleted-creator UI + scale-input commas).
+- [ ] **Next Android build (v5):** fused login wordmark (Session 25 fix, committed — see 🐛 list below); verify commas + stable A/B/C slot order on-device.
+- 🐛 **Bugs from the USER's 2026-07-10 screenshot session (Session 25 triage):**
+  - [x] Login screen "Apes Together" spaced — `LoginScreen.kt` wordmark appended " Together" with a leading space (missed by the Session 20 sweep because it's split across two `append()` spans); **fused in code, ships in v5**.
+  - [x] Scale input missing commas-as-you-type — **already shipped** (`ThousandsSeparatorVisualTransformation`, commit `6c6a9db` 2026-06-27, included in v4); the device showing the bug ran an older build — update from the testing track and re-verify.
+  - [x] Subscriptions reshuffled A, C, B — **root cause backend:** `GET /subscriptions` had no ORDER BY → Postgres heap order reshuffles when a row is updated (push toggle/renewal). **Fixed with `ORDER BY slot NULLS LAST, id`** (+ deterministic subscribers order); fixes BOTH apps, no rebuild — **needs deploy**.
+  - [ ] Android notification screenshot — fire the admin-panel **Test Push** (same as iOS): sign in on the Pixel (registers FCM token), background the app, `/admin` → Test Push card, capture the tray notification.
 - [ ] LegalText port + Settings linkouts status check.
-- [~] Listing per `docs/PLAY_STORE_LISTING_GUIDE.md`: title/short/full desc, feature graphic, 8 screenshots, content rating (Reference/Educational, **not** gambling); **Data safety DONE (2026-07-07)** — Advertising ID = **No** (after the AD_ID fix below); declared Name/Email/User IDs/Address/Other-info (Tax ID)/Purchase history/Other-financial (holdings)/App interactions/Device IDs, all **Collected, not Shared**; **Financial features DONE (2026-07-07) = "Other" → "Simulated (paper) stock-portfolio tracking"** — the old UI's "Personal investment research and management" no longer exists and we deliberately avoid "Stock trading and portfolio management"; **Play confirmed no additional documentation required** (see rewritten `docs/PLAY_STORE_LISTING_GUIDE.md §2.9`); target audience **18+**, privacy-policy URL 200, reviewer login.
+- [~] Listing per `docs/PLAY_STORE_LISTING_GUIDE.md`: title/short/full desc (v4.1 slate locked in `docs/ASO_STRATEGY.md` — short desc rewritten after Play flagged `top` as ranking language), **feature graphic DONE + uploaded (2026-07-08)**, **listing text fields (title / v4.1 short / v4.2 full desc) + 512×512 icon ENTERED IN CONSOLE (2026-07-10)**, 8 screenshots, content rating (Reference/Educational, **not** gambling); **Data safety DONE (2026-07-07)** — Advertising ID = **No** (after the AD_ID fix below); declared Name/Email/User IDs/Address/Other-info (Tax ID)/Purchase history/Other-financial (holdings)/App interactions/Device IDs, all **Collected, not Shared**; **Financial features DONE (2026-07-07) = "Other" → "Simulated (paper) stock-portfolio tracking"** — the old UI's "Personal investment research and management" no longer exists and we deliberately avoid "Stock trading and portfolio management"; **Play confirmed no additional documentation required** (see rewritten `docs/PLAY_STORE_LISTING_GUIDE.md §2.9`); target audience **18+**, privacy-policy URL 200, reviewer login.
 - [ ] Subscriptions **Active** + **Small Business Program (15%) enrolled**; payments/bank/tax profile complete.
-- [~] **14-day Closed Testing** (≥12 opted-in testers) → Production rollout **@20%** → ramp. **Session 22 (2026-07-06):** signed release **AAB built + uploaded** to *Closed testing – Alpha* (`versionCode 2` — bumped from 1, which a prior internal-testing upload had already claimed; `versionName 1.0`, target SDK 35). Play App Signing **confirmed enrolled** (upload key `apestogether-upload` = assetlinks cert A; Google's app-signing key = cert B). **⚠ `versionCode 2` is now SUPERSEDED** — the Advertising-ID fix (commit `c86b89f`, `versionCode 3`) must be **rebuilt (`bundleRelease`) + uploaded before rollout** so the shipped build actually drops the ad ID; do NOT roll out the stale v2 AAB. **Next: rebuild v3 → upload → add ≥12 testers + start rollout — the 14-day clock begins at first rollout.**
+- [~] **14-day Closed Testing** (≥12 opted-in testers) → Production rollout **@20%** → ramp. **Session 22 (2026-07-06):** signed release **AAB built + uploaded** to *Closed testing – Alpha* (`versionCode 2` — bumped from 1, which a prior internal-testing upload had already claimed; `versionName 1.0`, target SDK 35). Play App Signing **confirmed enrolled** (upload key `apestogether-upload` = assetlinks cert A; Google's app-signing key = cert B). **⚠ `versionCode 2` is now SUPERSEDED** — the Advertising-ID fix (commit `c86b89f`, `versionCode 3`) must be **rebuilt (`bundleRelease`) + uploaded before rollout** so the shipped build actually drops the ad ID; do NOT roll out the stale v2 AAB. **Next: rebuild v3 → upload → add ≥12 testers + start rollout — the 14-day clock begins at first rollout.** **UPDATE 2026-07-10 (Session 25): `versionCode 4` AAB rebuilt + UPLOADED (supersedes v3; carries ad-ID fix + login legal links + deleted-creator UI + scale commas). Remaining: add ≥12 testers + start rollout.**
 - [x] Slot 2–20 products created (Session 18); RTDN verified; on-device sign-in/billing/deep-link verified.
 
 ### 5. 🎨 Shared store assets & review prep
-- [ ] Generate **app icon**, **feature graphic (1024×500)**, **8 screenshots** (Gemini prompts in `docs/ASO_STRATEGY.md`; no text in icon).
-- [~] **Android screenshots — generator ready (Session 22, 2026-07-03).** Reuse the iOS captures behind an Android frame: `compose_appstore_screenshots_v2.ps1 -FrameFile pixel_frame.png -AndroidStatusBar -OutputDir …\Play_Screenshots` — the new `-AndroidStatusBar` mode overpaints the iOS status bar + Dynamic Island with a synthetic Android status bar (clock/wifi/battery) and auto-uses a **2:1 canvas** (Play caps aspect at 2:1). Generated a first pass to `~/Downloads/Play_Screenshots`. **Note:** these are iOS UI behind a Pixel frame — fine for a first listing given the near-identical custom UI, but **recapture the 6 screens on the real Pixel 8a** before/soon after launch for full Play-policy fidelity — **Pixel 8A now in hand (2026-07-06); native capture unblocked.** Still need the **1024×500 feature graphic** (Play-only).
+- [~] Generate **app icon** — **Play 512×512 DONE + uploaded (2026-07-10**; `android/play_store_icon_512.png`, untracked — commit it**)**; iOS ASC icon rides the build — ~~feature graphic (1024×500)~~ **feature graphic DONE (2026-07-08)** — Gemini art + Option-A text, normalized to exactly 1024×500 24-bit PNG at `assets/store/play_feature_graphic_1024x500.png`, uploaded to Play — **8 screenshots** (Gemini prompts in `docs/ASO_STRATEGY.md`; no text in icon).
+- [~] **Android screenshots — generator ready (Session 22, 2026-07-03).** Reuse the iOS captures behind an Android frame: `compose_appstore_screenshots_v2.ps1 -FrameFile pixel_frame.png -AndroidStatusBar -OutputDir …\Play_Screenshots` — the new `-AndroidStatusBar` mode overpaints the iOS status bar + Dynamic Island with a synthetic Android status bar (clock/wifi/battery) and auto-uses a **2:1 canvas** (Play caps aspect at 2:1). Generated a first pass to `~/Downloads/Play_Screenshots`. **Note:** these are iOS UI behind a Pixel frame — fine for a first listing given the near-identical custom UI, but **recapture the 6 screens on the real Pixel 8a** before/soon after launch for full Play-policy fidelity — **Pixel 8A now in hand (2026-07-06); native capture unblocked.** ~~Still need the **1024×500 feature graphic** (Play-only).~~ **Feature graphic DONE + uploaded (2026-07-08, Session 24).**
 - [ ] Create **reviewer demo account(s)** (`reviewer@apestogether.ai`) with followed traders, for Apple + Google reviewers.
 - [ ] **Brand-spelling sweep** — "ApesTogether" (fused) everywhere: iOS/Android strings, push sender label, share-sheet, landing, emails, social display names.
 - [ ] **UGC pre-submission scrub** — review all trader display names + shared content (one bad string rejects the whole app).
 
 ### 6. ⚖️ Legal / Compliance
-- [!] Privacy policy final — **blocked on attorney**.
-- [ ] ToS final (reconcile `ATTermsOfService03APR2026.docx` ↔ `/legal/terms-of-service.md`).
+- [~] Privacy policy final — **attorney ENGAGED (USER sent requirements 2026-07-09; drafting now)**.
+- [~] ToS final — **attorney drafting (same engagement)**; reconcile `ATTermsOfService03APR2026.docx` ↔ `/legal/terms-of-service.md` when it lands.
 - [ ] Investment-disclaimers audit (`LAUNCH_PLAYBOOK §11` — never imply guaranteed returns; "informational/educational only").
 - [ ] Per-store disclaimer: "We do not offer real brokerage services. All trades are virtual using real market data."
 
@@ -186,6 +192,35 @@ Tracked here so nothing is dropped; checked off as resolved. Detail/answers land
 - **Feature graphic (1024×500) — Gemini prompt drafted** (in chat this session). Still needs generating + upload.
 
 **Still open (unchanged priorities):** rebuild + upload the Android **`versionCode 3`** AAB (now carries the ad-ID fix **+** login links **+** deleted-creator UI); generate + upload the **feature graphic**; iOS **Build 43** archive + ASC listing on the Mac; add ≥12 closed testers + start the 14-day clock; E2E money tests; attorney privacy policy. **Deploy the backend** so the pause switch + creator-deletion notifications go live.
+
+---
+
+## 🔁 Session 24 (2026-07-08) — ASO v4/v4.1 slate locked + Play feature graphic shipped
+
+- **ASO v4 locked** (`docs/ASO_STRATEGY.md`, now versioned v4): iOS Subtitle = keyword string `Top Picks Alerts Tracker Live` (29 char; subtitle renders tiny/truncated → pure keyword play, comma-free); iOS keyword field rebalanced (`pick`/`alert` promoted to subtitle, `gainer` dropped, `portfolio` + `screener` added — 95 char); Play short description = keyword string.
+- **v4.1 correction:** Play Console flagged `top` in the short desc (*"Should not use keywords that indicate store performance or ranking"* — costs promotion eligibility, not publishing). Final: `Verified stock picks, trade alerts, portfolio tracker, AI trading, leaderboard` (78 char). **Rule recorded: no `top`/`best`/`#1` in ANY Play listing text or graphics** — automated checks don't parse intent.
+- **Feature graphic DONE + UPLOADED.** Display-dynamics research (in ASO doc): without a promo video it NEVER shows on our own listing page — only on Google promo surfaces (collection cards / editorial / ads), so guideline compliance (minimal text, no wordmark, safe zone) gates its only exposure. Final: Gemini "human vs AI head" art + `The stock-picking leaderboard.` / `AI vs humans.` (7 words), normalized to exactly 1024×500 24-bit PNG → `assets/store/play_feature_graphic_1024x500.png`.
+- Migrated kicker copy for screenshot captions/description: `See trades live. Traders keep 85%.` (ranking-language-safe).
+
+---
+
+## 🔁 Session 25 (2026-07-10) — Play listing fields live, v4 AAB + iOS Build 45, Android bug pass, desc v4.2
+
+**USER-completed (Console/store actions):** Play **512×512 icon** generated + uploaded (`android/play_store_icon_512.png`, untracked — commit it); **Play listing text fields entered** (title + v4.1 short + v4.2 full desc); **Android `versionCode 4` AAB rebuilt + uploaded**; **iOS Build 45** archived + uploaded to ASC (Mac pulled to `60b7233`, bumped 44→45); **attorney engaged** — requirements sent 2026-07-09, Privacy Policy + ToS in progress.
+
+**Backend deploy verification (USER asked):** Session 23 work IS live — `10052a1` (pause switch + creator-deletion notifications + login links + deleted-creator UI) sits on `origin/master` two commits before HEAD `60b7233`, so today's deploys included it, plus `14a50b5` (email idempotency) and the Wolff reversal.
+
+**Android bug pass:** see the 🐛 list in §4 — (1) login wordmark space fixed in code (ships v5); (2) scale commas already shipped in v4 (`6c6a9db`, stale build on device); (3) A/C/B reshuffle root-caused to missing ORDER BY in `GET /subscriptions`, fixed server-side (deploy pending); (4) notification screenshot → admin Test Push.
+
+**Store copy v4.2:** "not investment advice" strengthened in BOTH full descriptions (opening + explicit second line + "do not provide investment advice" in the closing disclaimer); Play version live in Console; iOS master updated in `docs/ASO_STRATEGY.md` (keeps Apple-specific cancel line + disclaimer paragraph).
+
+**Trader API status (USER asked):** NOT BUILT — scoped only (Session 18 → `docs/TRADER_API_SCOPING.md`). UC-A (bots submit trades for an authenticated account via API key + scopes over the proven internal bot trade logic) is the v1 candidate; no routes or instructions exist yet; open decisions D-1..D-6. Its hard dependency (S-1 shared rate limiter) shipped Session 19, so it's buildable when prioritized.
+
+**OPEN (new this session):**
+- [ ] Commit + push today's fixes; **deploy backend** (subscriptions ORDER BY).
+- [ ] Android **v5 build** (fused wordmark) when convenient — non-blocking for the 14-day clock.
+- [ ] Capture the Android **notification screenshot** via admin Test Push.
+- [x] **Outreach language rewrite — DONE (Session 25).** Both docs now open with a style-rules banner; every message is paste-ready with `[bracketed]` slots. Fixed across ~70 messages: killed AI-flattery openers ("Your macro insights bring institutional clarity…") + "resonates/aligns" filler; plain direct register; brand fused everywhere; stale `June 1`/`Sunday`/`Memorial Day` → `[launch date]`/`[launch day]` placeholders; **removed the fabricated #X-26 stat** ("underperformed by 12%") and softened the unsourced "85%/20%" stats to defensible phrasing; scrubbed `copy trading` from press pitches (playbook §11) and added the virtual-trading disclosure to every journalist pitch; "report trades" → trades placed in-app. (Tester-recruitment email lives in `PLAY_STORE_LISTING_GUIDE.md` §4.5.)
 
 ---
 

@@ -613,14 +613,23 @@ def get_subscriptions():
     from models import MobileSubscription, User, InAppPurchase
     
     try:
-        # Subscriptions user has made
+        # Subscriptions user has made. Explicit ORDER BY: without it Postgres
+        # returns heap order, which silently reshuffles whenever a row is
+        # updated (push toggle, renewal) — users saw slots render A, C, B.
+        # Slot order (A..T, legacy NULL-slot rows last), then id as tiebreak.
         made_subs = MobileSubscription.query.filter_by(
             subscriber_id=g.user_id
+        ).order_by(
+            MobileSubscription.slot.asc().nullslast(),
+            MobileSubscription.id.asc()
         ).all()
         
-        # Users subscribed to this user
+        # Users subscribed to this user (newest first, deterministic)
         received_subs = MobileSubscription.query.filter_by(
             subscribed_to_id=g.user_id
+        ).order_by(
+            MobileSubscription.created_at.desc(),
+            MobileSubscription.id.desc()
         ).all()
         
         from subscription_slots import slot_label as _slot_label
@@ -6311,6 +6320,12 @@ def admin_test_push():
         username: str (required)
         title: str (optional, default 'Test Push')
         body: str (optional, default a timestamped message)
+        preset: str (optional) — 'trade' sends a realistic trade alert using
+            the exact production formatting from
+            PushNotificationService.send_trade_notification, for the store
+            listing lock-screen/notification-shade screenshots (ASO frames
+            #2 and #8). Optional overrides: trader_name, action, ticker,
+            quantity, price.
     """
     from models import db, User, DeviceToken
     from push_notification_service import get_push_service
@@ -6332,8 +6347,33 @@ def admin_test_push():
             'user_id': user.id,
         }), 404
 
-    title = data.get('title') or 'Test Push'
-    body = data.get('body') or f'Test push at {datetime.utcnow().isoformat()}Z'
+    if (data.get('preset') or '').strip().lower() == 'trade':
+        # Mirror PushNotificationService.send_trade_notification formatting
+        # exactly (emoji title + "qty TICKER @ $price" body + trade_alert data
+        # type) so the tray/lock-screen rendering is indistinguishable from a
+        # real trade alert. Used for ASO screenshot frames #2 (iOS) and #8
+        # (Android).
+        trader_name = data.get('trader_name') or "Wolff's Flagship Fund"
+        action = (data.get('action') or 'BUY').upper()
+        ticker = (data.get('ticker') or 'NVDA').upper()
+        quantity = data.get('quantity') or 25
+        price = float(data.get('price') or 184.10)
+        action_emoji = '\U0001F7E2' if action == 'BUY' else '\U0001F534'
+        title = f"{action_emoji} {trader_name} {action}"
+        body = f"{quantity} {ticker} @ ${price:.2f}"
+        payload = {
+            'type': 'trade_alert',
+            'trader': trader_name,
+            'action': action,
+            'ticker': ticker,
+            'quantity': str(quantity),
+            'price': str(price),
+            'timestamp': datetime.utcnow().isoformat(),
+        }
+    else:
+        title = data.get('title') or 'Test Push'
+        body = data.get('body') or f'Test push at {datetime.utcnow().isoformat()}Z'
+        payload = {'type': 'test_push'}
 
     service = get_push_service()
     if not service.is_available:
@@ -6346,7 +6386,7 @@ def admin_test_push():
     # Multicast obscures which specific token caused which specific failure.
     results = []
     for dt in device_tokens:
-        r = service._send_single(dt.token, title, body, {'type': 'test_push'})
+        r = service._send_single(dt.token, title, body, payload)
         results.append({
             'device_token_id': dt.id,
             'platform': dt.platform,

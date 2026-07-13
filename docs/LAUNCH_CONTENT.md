@@ -1,6 +1,12 @@
-# Apes Together — Social Media Content Library & Email Sequences
+# ApesTogether — Social Media Content Library & Email Sequences
 
 Reference IDs match the Day-by-Day Calendar in `LAUNCH_PLAYBOOK.md`.
+
+> **Rewritten Session 25 (2026-07-10):** all copy is paste-ready — fill `[bracketed]`
+> slots and post/send. Dates are placeholders pegged to the playbook calendar
+> (`[launch date]` = public launch). Style: plain and direct, no fabricated
+> stats, brand fused (**ApesTogether**), trades are *placed in-app* (not
+> "reported"), and the virtual-trading disclaimer stays on launch posts.
 
 ---
 
@@ -16,13 +22,13 @@ Just verified performance tracked on-platform, and 85% of subscriber revenue goe
 
 Here's why 🧵
 
-1/ 85% of investors aged 18–40 use social media for stock tips.
+1/ Most investors under 40 get their stock ideas from social media.
 
-But only 20% of finfluencer recommendations include proper disclosure.
+Almost none of those ideas come with proof the person can actually trade.
 
 The trust model is broken. We're fixing it with math.
 
-2/ On Apes Together, every trade is logged at market price the moment it's reported.
+2/ On ApesTogether, every trade is logged at market price the moment it's made.
 
 No self-reported returns. No cherry-picked screenshots. No "I called it" with no proof.
 
@@ -40,7 +46,7 @@ Subscribe to the traders whose strategies match your style. Get a push notificat
 
 Then decide for yourself what to do in your own brokerage.
 
-5/ We're launching the beta June 1.
+5/ We're launching the beta [launch date].
 
 Sign up for the waitlist: apestogether.ai
 
@@ -66,7 +72,7 @@ They have no way to monetize that skill besides their own portfolio.
 
 We're building a platform where they can. No content grind. No courses. Just trades.
 
-apestogether.ai — beta opens June 1.
+apestogether.ai — beta opens [launch date].
 ```
 
 ## #X-04 — The Trust Gap (Day 4)
@@ -74,7 +80,7 @@ apestogether.ai — beta opens June 1.
 Finfluencer: "I'm up 200% this year"
 Proof: A screenshot that could be from a paper trading account, a demo, or Photoshop.
 
-On Apes Together, every trade is verified at market price. Every return is calculated on-platform.
+On ApesTogether, every trade is verified at market price. Every return is calculated on-platform.
 
 No screenshots. Receipts.
 ```
@@ -107,7 +113,7 @@ That's literally what we built. More next week.
 ```
 Most trading platforms treat bots as something to hide.
 
-On Apes Together, we explicitly welcome them.
+On ApesTogether, we explicitly welcome them.
 
 If your algorithm beats the S&P 500 with a verified, on-platform track record — you can earn subscribers and get paid monthly.
 
@@ -136,7 +142,7 @@ But for traders, the only way to monetize knowledge is:
 
 What if you could just... trade? And earn subscribers based on performance?
 
-That's Apes Together.
+That's ApesTogether.
 ```
 
 ## #X-10 — Social Proof (Day 11)
@@ -157,7 +163,7 @@ No pitch decks. No "disrupting" anything. Just building a product that solves a 
 Retail investors want to follow proven strategies.
 Skilled traders want to get paid for performance.
 
-We connect them. Beta opens June 1.
+We connect them. Beta opens [launch date].
 ```
 
 ## #X-12 — Week 2 Recap (Day 14)
@@ -203,7 +209,7 @@ What if every finfluencer had to show their actual, verified trading performance
 
 That's not a hypothetical. That's what @ApesTogetherApp does.
 
-Beta opens June 1. apestogether.ai
+Beta opens [launch date]. apestogether.ai
 ```
 
 ## #X-16 — For Builders (Day 18)
@@ -223,7 +229,7 @@ Markets are [up/down] today. Your timeline is full of people explaining why.
 
 But how many of them showed you their actual positions BEFORE the move?
 
-On Apes Together, subscribers see every trade in real-time. No hindsight. No "I told you so."
+On ApesTogether, subscribers see every trade in real-time. No hindsight. No "I told you so."
 
 Just receipts.
 ```
@@ -254,7 +260,7 @@ Want in? Drop your email at apestogether.ai and we'll send invites this week.
 ```
 Day 2 of beta testing:
 
-Real people. Real trades being reported. Real performance being tracked.
+Real people. Real trades. Real performance being tracked.
 
 No screenshots. No claims. Just math.
 
@@ -265,7 +271,7 @@ If you want early access: apestogether.ai
 ```
 Feature spotlight: The Leaderboard.
 
-On Apes Together, every trader is ranked by verified, on-platform performance.
+On ApesTogether, every trader is ranked by verified, on-platform performance.
 
 Not by followers. Not by engagement. Not by how confidently they talk.
 
@@ -274,7 +280,7 @@ By actual returns. That's it.
 
 ## #X-22 — Trader Shoutout (Day 25)
 ```
-Our beta traders are already reporting real trades and building their track records.
+Our beta traders are already trading and building their track records.
 
 In a few weeks, subscribers will be able to follow their every move in real-time.
 
@@ -296,12 +302,12 @@ We're listening. We're building. Beta: apestogether.ai
 ```
 Week 4 building @ApesTogetherApp:
 
-- Beta testers are in and reporting trades
+- Beta testers are in and making trades
 - Google Play testing requirements on track
 - TestFlight running smoothly
 - First trader hit [X]% performance in [Y] days
 
-This is getting real. Launch: June 1.
+This is getting real. Launch: [launch date].
 ```
 
 ## #X-25 — Week 5 Momentum (Day 29)
@@ -315,16 +321,18 @@ Still accepting traders for the beta — if you can beat the S&P, DM me.
 
 ## #X-26 — Data Point (Day 30)
 ```
-In 2024, retail investors who followed social media trading advice underperformed the S&P 500 by an average of 12%.
+Nobody tracks whether social-media stock tips actually beat the market.
 
-On Apes Together, you'll see exactly who beats the index and who doesn't — before you subscribe.
+That's the whole problem — the people giving the advice never have to show a record.
+
+On ApesTogether, you'll see exactly who beats the index and who doesn't — before you subscribe.
 
 Transparency changes behavior. apestogether.ai
 ```
 
 ## #X-27 — Notification Feature (Day 31)
 ```
-When a trader you follow buys or sells on Apes Together, you get a push notification instantly.
+When a trader you follow buys or sells on ApesTogether, you get a push notification instantly.
 
 Not a morning newsletter. Not a weekly recap.
 
@@ -339,7 +347,7 @@ Financial advisor: 1-2% annual fee
 Hedge fund: 2 and 20
 Finfluencer Discord: $50-200/month + no verification
 
-Apes Together: $9/month, verified performance, 85% to the trader
+ApesTogether: $9/month, verified performance, 85% to the trader
 
 We think the market is ready for something different.
 ```
@@ -352,7 +360,7 @@ Milestone: Google Play closed testing requirement nearly complete.
 
 Building a fintech in 2026 means building for compliance. Every step of the way.
 
-Launch day: June 1.
+Launch day: [launch date].
 ```
 
 ## #X-30 — Week 5 Recap (Day 35)
@@ -372,7 +380,7 @@ The home stretch.
 ```
 Two weeks until @ApesTogetherApp launches.
 
-Every day between now and June 1, I'll share something about what we're building and why.
+Every day between now and [launch date], I'll share something about what we're building and why.
 
 Today: the leaderboard doesn't lie.
 
@@ -385,14 +393,14 @@ Just submitted @ApesTogetherApp to the App Store and Google Play for review.
 
 The butterflies are real.
 
-If everything goes right, you'll be able to download it on June 1.
+If everything goes right, you'll be able to download it on [launch date].
 
 apestogether.ai
 ```
 
 ## #X-33 — Mission Statement (Day 38)
 ```
-Apes Together isn't about meme stocks.
+ApesTogether isn't about meme stocks.
 
 It's about what the meme stock movement was actually about at its core:
 
@@ -431,10 +439,10 @@ Now we find out if the market agrees with our thesis:
 
 Verified performance > unverifiable claims.
 
-June 1. apestogether.ai
+[launch date]. apestogether.ai
 ```
 
-## #X-37 — Memorial Day (Day 43)
+## #X-37 — One Week Out (Day 43)
 ```
 One week from today, @ApesTogetherApp goes live.
 
@@ -442,8 +450,6 @@ A platform where traders earn from performance, not content.
 Where investors follow strategies, not hype.
 
 Sign up before the doors open: apestogether.ai
-
-Happy Memorial Day.
 ```
 
 ## #X-38 — 4 Days (Day 44)
@@ -452,18 +458,18 @@ Happy Memorial Day.
 
 Every trade tracked. Every claim verified. Every return calculated on-platform.
 
-@ApesTogetherApp launches Sunday. apestogether.ai
+@ApesTogetherApp launches [launch day]. apestogether.ai
 ```
 
 ## #X-39 — Stunt Day (Day 45)
 ```
-Just handed out $2 bills with QR codes to Apes Together in Midtown Manhattan.
+Just handed out $2 bills with QR codes to ApesTogether in Midtown Manhattan.
 
 If Wall Street won't give you transparency, we'll bring it to their front door.
 
 [Photo/video of the stunt]
 
-apestogether.ai — launches this Sunday.
+apestogether.ai — launches [launch day].
 ```
 
 ## #X-40 — 2 Days (Day 46)
@@ -481,7 +487,7 @@ Sunday morning, the doors open. apestogether.ai
 ```
 Tomorrow night, we flip the switch.
 
-Apes Together goes public on the App Store and Google Play.
+ApesTogether goes public on the App Store and Google Play.
 
 If you've ever wanted to follow a verified trading strategy — or earn money from yours — this is it.
 
@@ -494,12 +500,12 @@ Tonight at midnight.
 
 No more waitlist. No more "coming soon."
 
-Apes Together goes live. apestogether.ai
+ApesTogether goes live. apestogether.ai
 ```
 
-## #X-LAUNCH — Launch Day Thread (June 1)
+## #X-LAUNCH — Launch Day Thread ([launch date])
 ```
-Apes Together is LIVE on the App Store and Google Play.
+ApesTogether is LIVE on the App Store and Google Play.
 
 The anti-finfluencer platform. Every trade tracked. Every return verified. 85% of revenue to traders.
 
@@ -514,15 +520,15 @@ Here's what we built and why 🧵
 No gurus. No hype. Just receipts.
 
 2/ For traders:
-- Report trades — verified at market price
+- Trade in the app — every trade priced at live market
 - Build your track record on the leaderboard
 - Earn 85% of every subscriber's $9/mo
 - Algorithms and AI bots welcome
 
 3/ We built this because:
-- 85% of young investors use social media for stock tips
-- Only 20% of finfluencer content has proper disclosure
-- Millions of skilled traders can't monetize their performance
+- Most young investors get stock ideas from social media
+- Almost none of it comes with verifiable proof
+- Skilled traders can't monetize performance without becoming content creators
 
 That's broken. This is the fix.
 
@@ -542,27 +548,27 @@ Built in NYC. No VC. No hype. Just math. 🦍
 ## #TT-01 — "What If Finfluencers Had to Prove It?" (Day 2)
 **Format:** Face-to-camera, 45-60s
 ```
-85% of investors under 40 get their stock tips from social media.
+Most investors under 40 get their stock tips from social media.
 
-But only 20% of finfluencer recommendations include proper disclosure.
+And almost none of those tips come with proof the person actually makes money.
 
-So I built an app where every single trade is tracked and verified at market price. No screenshots. No "trust me bro." Just math.
+So I built an app where every single trade is tracked and priced at live market. No screenshots. No "trust me bro." Just math.
 
-It's called Apes Together. Traders earn 85% of subscription revenue just by making trades they're already making.
+It's called ApesTogether. Traders earn 85% of subscription revenue just by making trades they're already making.
 
 No courses. No content grind. Just performance.
 
-Beta opens June 1. Link in bio.
+Beta opens [launch date]. Link in bio.
 ```
 **Caption:** What if every finfluencer had to prove their returns? We built that. #investing #stockmarket #fintech #finfluencer
 
 ## #TT-02 — "How We Verify Every Trade" (Day 4)
 **Format:** Screen recording + voiceover, 30-45s
 ```
-Here's how Apes Together verifies every trade:
+Here's how ApesTogether verifies every trade:
 
-Step 1: You report a buy or sell in the app.
-Step 2: We check the stock's real market price at that exact moment.
+Step 1: You place a buy or sell in the app.
+Step 2: The trade is priced at the stock's real market price at that exact moment.
 Step 3: Your performance is calculated from that verified price.
 
 You can't fake it. You can't backdate it. You can't cherry-pick.
@@ -586,14 +592,14 @@ What if you got paid for it?
 No videos. No courses. No content grind.
 Just your verified trades.
 
-Apes Together. Beta opens June 1.
+ApesTogether. Beta opens [launch date].
 ```
 **Caption:** 85% of revenue goes to the trader. Link in bio. #passiveincome #stockmarket #sidehustle
 
 ## #TT-04 — "The Stat That Changed Everything" (Day 11)
 **Format:** Face-to-camera, 30-40s
 ```
-85% of investors under 40 go to social media for investment ideas.
+Most investors under 40 go to social media for investment ideas.
 
 But here's the thing nobody talks about — you have no idea if any of those people are actually making money.
 
@@ -603,7 +609,7 @@ So we built a platform where that's impossible. Every trade verified. Every retu
 
 If someone's strategy beats the S&P 500, you can see exactly how. And if it doesn't? You can see that too.
 
-Apes Together. Link in bio.
+ApesTogether. Link in bio.
 ```
 **Caption:** The investing trust gap is real. We're closing it. #investing #finfluencer #stockmarket
 
@@ -612,7 +618,7 @@ Apes Together. Link in bio.
 ```
 Wall Street: Charges 2 and 20. You need $500K minimum.
 Finfluencers: Free advice. Zero proof they follow their own tips.
-Apes Together: $9/month. Every trade verified. 85% to the trader.
+ApesTogether: $9/month. Every trade verified. 85% to the trader.
 
 Three models. Only one shows receipts.
 ```
@@ -636,7 +642,7 @@ The trades you can't see are the ones that should worry you.
 ## #TT-07 — "Beta Walkthrough" (Day 22)
 **Format:** Screen recording of actual app, 45-60s
 ```
-The Apes Together beta is live. Here's what it looks like:
+The ApesTogether beta is live. Here's what it looks like:
 
 [Show leaderboard] This is the leaderboard. Every trader ranked by verified performance.
 [Show trader profile] Tap any trader. See their full trade history and performance chart.
@@ -651,9 +657,9 @@ Beta is open. Link in bio.
 ## #TT-08 — "Beta Is Open" (Day 25)
 **Format:** Face-to-camera, 20-30s
 ```
-We just opened the beta for Apes Together.
+We just opened the beta for ApesTogether.
 
-Real people reporting real trades. The leaderboard is taking shape.
+Real people making real trades. The leaderboard is taking shape.
 
 If you can beat the S&P, we want you. If you want to follow someone who can — we built this for you.
 
@@ -664,7 +670,7 @@ Link in bio. Limited spots.
 **Format:** Screen recording, 20-30s
 ```
 On most platforms, the loudest voice wins.
-On Apes Together, the best trader wins.
+On ApesTogether, the best trader wins.
 
 [Show leaderboard scrolling]
 
@@ -675,7 +681,7 @@ Just returns. That's the whole game.
 ## #TT-10 — "Beta Feedback" (Day 32)
 **Format:** Text overlay with reactions, 25-35s
 ```
-Things beta testers have said about Apes Together:
+Things beta testers have said about ApesTogether:
 
 "This is what I wished existed when I started investing"
 "The fact that I can't inflate my returns is the whole point"
@@ -688,7 +694,7 @@ Beta is open. Link in bio.
 ## #TT-11 — "One Week" (Day 36)
 **Format:** Face-to-camera, 20-30s
 ```
-One week until Apes Together launches.
+One week until ApesTogether launches.
 
 Your trading performance is your only credential.
 No courses. No content. No "trust me bro."
@@ -707,7 +713,7 @@ One week. Link in bio.
 4. Whether they hold the stocks they recommend
 5. Their returns vs. just buying the S&P 500
 
-On Apes Together, all 5 are visible. For every trader. By default.
+On ApesTogether, all 5 are visible. For every trader. By default.
 
 Launches next week.
 ```
@@ -715,7 +721,7 @@ Launches next week.
 ## #TT-13 — "4 Days" (Day 44)
 **Format:** Quick montage + face-to-camera, 15-20s
 ```
-4 days until Apes Together launches.
+4 days until ApesTogether launches.
 
 Follow verified traders. Get notified when they trade. $9/month.
 Your money, your call. Their performance, verified.
@@ -730,7 +736,7 @@ I just handed out $2 bills with QR codes in front of [bank name] in Manhattan.
 
 If Wall Street won't give retail investors transparency, we're bringing it to their front door.
 
-Apes Together launches this Sunday.
+ApesTogether launches [launch day].
 
 [Show reactions, people scanning QR codes]
 ```
@@ -738,7 +744,7 @@ Apes Together launches this Sunday.
 ## #TT-15 — "Tomorrow" (Day 47)
 **Format:** Face-to-camera, calm, 20-30s
 ```
-Tomorrow, Apes Together goes live.
+Tomorrow, ApesTogether goes live.
 
 I've been building this for months. The idea is simple: if you can beat the market, prove it and get paid.
 
@@ -752,7 +758,7 @@ Tomorrow. Link in bio.
 ```
 IT'S LIVE.
 
-Apes Together is on the App Store and Google Play.
+ApesTogether is on the App Store and Google Play.
 
 Follow verified traders. Get notified instantly. $9/month.
 
@@ -771,17 +777,17 @@ Download link in bio. 🦍
 ```
 I'm building something different.
 
-For the past [X months], I've been developing Apes Together — a platform where skilled traders monetize their performance through subscribers, and retail investors follow verified strategies instead of trusting unverifiable claims.
+For the past [X months], I've been developing ApesTogether — a platform where skilled traders monetize their performance through subscribers, and retail investors follow verified strategies instead of trusting unverifiable claims.
 
 The problem:
-• 85% of investors aged 18-40 use social media for stock tips
-• Only 20% of finfluencer content includes proper disclosure
-• Millions of skilled traders can't profit from their track record without becoming content creators
+• Most investors under 40 get stock ideas from social media
+• Almost none of that content is verifiable
+• Skilled traders can't profit from their track record without becoming content creators
 
 The solution:
 Every trade is verified at real-time market price. Performance is calculated on-platform. Traders keep 85% of subscription revenue. Algorithms and AI bots compete on equal footing.
 
-Launching beta June 1 from NYC.
+Launching beta [launch date] from NYC.
 
 If you're a trader, investor, or someone at the intersection of creator economy and finance — I'd love to connect.
 
@@ -800,13 +806,13 @@ But there's a fundamental problem: there's no accountability layer.
 
 Anyone can claim they beat the market. The people following that advice have no way to verify it.
 
-At Apes Together, we made verification the product. Not a feature — the product.
+At ApesTogether, we made verification the product. Not a feature — the product.
 
 Every trade logged at market price. Every return calculated on-platform. Every trader ranked on a public leaderboard by actual performance.
 
 We're not anti-creator. We're anti-unverifiable claims.
 
-Beta opens June 1: apestogether.ai
+Beta opens [launch date]: apestogether.ai
 ```
 
 ## #LI-03 — Building Insight (Day 17)
@@ -826,7 +832,7 @@ If you're building in fintech, compliance isn't a checkbox. It's the product.
 
 ## #LI-04 — Beta Announcement (Day 24)
 ```
-We just opened the Apes Together beta.
+We just opened the ApesTogether beta.
 
 Real traders. Real trades. Real verification.
 
@@ -841,7 +847,7 @@ Beta access: apestogether.ai
 ```
 One week of beta data:
 
-- [X] traders reporting verified trades
+- [X] traders making verified trades
 - Average [Y] trades per day
 - [Z]% of traders outperforming the S&P 500 in their first week
 
@@ -852,18 +858,18 @@ Two weeks until public launch. apestogether.ai
 
 ## #LI-06 — Pre-Launch Reflection (Day 38)
 ```
-11 days until we launch Apes Together.
+11 days until we launch ApesTogether.
 
 When I started building this, the thesis was simple: the investing trust gap between social media claims and actual performance is enormous, and someone should build the verification layer.
 
 Now, with beta data in hand, I know it's real. Traders want to prove their performance. Investors want to see it.
 
-June 1. apestogether.ai
+[launch date]. apestogether.ai
 ```
 
 ## #LI-07 — Launch Eve (Day 48)
 ```
-Tomorrow we launch Apes Together.
+Tomorrow we launch ApesTogether.
 
 One person. One app. One mission: make investing transparency the default, not the exception.
 
@@ -874,7 +880,7 @@ See you tomorrow. apestogether.ai
 
 ## #LI-LAUNCH — Launch Day
 ```
-Today we launch Apes Together.
+Today we launch ApesTogether.
 
 A platform where skilled traders earn 85% of subscriber revenue from trades they're already making. No content creation required.
 
@@ -897,7 +903,7 @@ Learn more: apestogether.ai
 ```
 Hey r/startups,
 
-Solo founder building a fintech app called Apes Together. Core idea: skilled traders (humans or algorithms) monetize performance through subscribers, retail investors follow verified strategies.
+Solo founder building a fintech app called ApesTogether. Core idea: skilled traders (humans or algorithms) monetize performance through subscribers, retail investors follow verified strategies.
 
 Lessons so far:
 
@@ -911,7 +917,7 @@ Lessons so far:
 
 Would love feedback from anyone who's launched in fintech. What do you wish you knew?
 
-(Beta opens June 1: apestogether.ai)
+(Beta opens [launch date]: apestogether.ai)
 ```
 
 ## #R-02 — r/algotrading (Day 9)
@@ -919,7 +925,7 @@ Would love feedback from anyone who's launched in fintech. What do you wish you 
 ```
 Genuine question for the community.
 
-Building a platform (Apes Together) where algo traders earn subscription revenue from followers. Trades verified at market price, performance on public leaderboard. 85% of $9/month per subscriber.
+Building a platform (ApesTogether) where algo traders earn subscription revenue from followers. Trades verified at market price, performance on public leaderboard. 85% of $9/month per subscriber.
 
 Before I assume what algo traders want:
 
@@ -930,16 +936,16 @@ Before I assume what algo traders want:
 
 Not selling — trying to build something useful. Algorithms and AI bots explicitly welcome.
 
-apestogether.ai (beta June 1)
+apestogether.ai (beta [launch date])
 ```
 
 ## #R-03 — r/SideProject (Day 12)
 **Title:** "I built an app where traders earn money from subscribers just by trading — no content creation"
 ```
-Solo developer in NYC. Building Apes Together:
+Solo developer in NYC. Building ApesTogether:
 
-- Traders upload portfolio, report buys/sells
-- Verified at real-time market price
+- Traders declare their holdings, then buy/sell in-app
+- Every trade priced at real-time market price
 - Performance on public leaderboard
 - Investors subscribe for $9/month
 - Traders keep 85%
@@ -948,11 +954,11 @@ Key differentiator: no content creation required. Verified performance IS the pr
 
 Tech: iOS (Swift), Android (coming), Flask backend, Vercel, AlphaVantage.
 
-Feedback welcome. Beta June 1. apestogether.ai
+Feedback welcome. Beta [launch date]. apestogether.ai
 ```
 
-## #R-LAUNCH — r/wallstreetbets (June 1)
-**Title:** "Built an app called Apes Together where you earn from subscribers by sharing verified trades — live today"
+## #R-LAUNCH — r/wallstreetbets ([launch date])
+**Title:** "Built an app called ApesTogether where you earn from subscribers by sharing verified trades — live today"
 ```
 What's up apes,
 
@@ -973,12 +979,12 @@ One person in NYC. No VC. No hype. Just math.
 Not financial advice. All trades shared for informational/educational purposes.
 ```
 
-## #R-LAUNCH-2 — r/stocks (June 1)
+## #R-LAUNCH-2 — r/stocks ([launch date])
 **Title:** "Launching a transparent investing app — follow verified traders ranked by performance, not followers"
 ```
-Launching Apes Together today:
+Launching ApesTogether today:
 
-- Traders report buys/sells, verified at market price
+- Traders buy/sell in-app, priced at live market
 - Public leaderboard ranked vs S&P 500
 - Subscribe to traders for $9/month, push notifications on every trade
 - Traders keep 85%
@@ -991,8 +997,8 @@ All info is educational/informational. We are not a broker-dealer.
 Happy to answer questions.
 ```
 
-## #R-LAUNCH-3 — r/startups (June 1)
-**Title:** "After 7 weeks building in public, launching Apes Together today — a verified trading strategy marketplace"
+## #R-LAUNCH-3 — r/startups ([launch date])
+**Title:** "After 7 weeks building in public, launching ApesTogether today — a verified trading strategy marketplace"
 ```
 Some of you saw my earlier post about building a fintech in NYC. Today's launch day.
 
@@ -1014,15 +1020,15 @@ Would love to hear from other marketplace founders — what did you learn post-l
 # EMAIL SEQUENCES
 
 ## #E-WELCOME — Welcome Email (sent to each new waitlist signup)
-**Subject:** You're on the Apes Together waitlist
+**Subject:** You're on the ApesTogether waitlist
 ```
 Hey [first name if captured, otherwise "there"],
 
-Thanks for joining the Apes Together waitlist. You're early — and that matters.
+Thanks for joining the ApesTogether waitlist. You're early — and that matters.
 
 Here's what's coming:
 
-• Beta opens June 1 on iOS and Android
+• Beta opens [launch date] on iOS and Android
 • You'll get an invite link before the general public
 • Early users will have first access to top traders on the leaderboard
 
@@ -1030,7 +1036,7 @@ In the meantime, if you're a trader who beats the S&P 500 and want to earn from 
 
 Talk soon,
 [Your name]
-Founder, Apes Together
+Founder, ApesTogether
 apestogether.ai
 ```
 
@@ -1039,12 +1045,12 @@ apestogether.ai
 ```
 Hi [Name],
 
-I'm [Your name], founder of Apes Together — a new fintech app where traders monetize their verified performance through subscribers.
+I'm [Your name], founder of ApesTogether — a new fintech app where traders monetize their verified performance through subscribers.
 
 I'm reaching out because I think [Club Name] members would be a great fit as founding traders on the platform. Here's why:
 
 1. Your members already track their trading performance
-2. On Apes Together, that performance translates directly to income — 85% of every $9/month subscriber
+2. On ApesTogether, that performance translates directly to income — 85% of every $9/month subscriber
 3. No content creation required — just trade, and the platform verifies and tracks everything
 
 Would you be open to sharing this with your members? I'm happy to do a quick Zoom demo or come present in person (I'm in NYC).
@@ -1053,16 +1059,16 @@ I can also set up a [Club Name] trading competition on the platform if that's of
 
 Best,
 [Your name]
-Founder, Apes Together
+Founder, ApesTogether
 apestogether.ai
 ```
 
 ## #E-BETA — Beta Invitation (for waitlist signups)
-**Subject:** Your Apes Together beta invite is ready
+**Subject:** Your ApesTogether beta invite is ready
 ```
 Hey [name],
 
-The Apes Together beta is live — and you're in.
+The ApesTogether beta is live — and you're in.
 
 Download the app:
 🍎 TestFlight: [link]
@@ -1080,11 +1086,11 @@ Thanks for being early.
 ```
 
 ## #E-BETA-02 — Subscriber-Segment Beta Invite
-**Subject:** See who's beating the S&P 500 — Apes Together beta access
+**Subject:** See who's beating the S&P 500 — ApesTogether beta access
 ```
 Hey [name],
 
-You signed up for the Apes Together waitlist. The beta is now open.
+You signed up for the ApesTogether waitlist. The beta is now open.
 
 Here's what you can do right now:
 - Browse the leaderboard — real traders with verified, on-platform performance
@@ -1102,7 +1108,7 @@ Reply with any feedback — we're listening.
 ```
 
 ## #E-TESTIMONIAL — Testimonial Request
-**Subject:** Quick favor — what do you think of Apes Together?
+**Subject:** Quick favor — what do you think of ApesTogether?
 ```
 Hey [name],
 
@@ -1122,11 +1128,11 @@ No pressure — and thanks again for testing.
 ```
 
 ## #E-PRELAUNCH — "Launch Is Coming" (Day 37)
-**Subject:** Apes Together launches June 1
+**Subject:** ApesTogether launches [launch date]
 ```
 Hey [name],
 
-Quick update: Apes Together launches publicly on June 1.
+Quick update: ApesTogether launches publicly on [launch date].
 
 As a waitlist member, you'll get the download link before anyone else.
 
@@ -1135,18 +1141,18 @@ What's new since you signed up:
 - The leaderboard is live and updated daily
 - Push notifications work — you'll know the instant a trader you follow makes a move
 
-Mark your calendar: June 1.
+Mark your calendar: [launch date].
 
 [Your name]
-Founder, Apes Together
+Founder, ApesTogether
 ```
 
 ## #E-COUNTDOWN-1 — 4 Days (Day 44)
-**Subject:** 4 days until Apes Together
+**Subject:** 4 days until ApesTogether
 ```
 4 days.
 
-On June 1, Apes Together goes live on iOS and Android.
+On [launch date], ApesTogether goes live on iOS and Android.
 
 Follow verified traders. Get notified when they trade. $9/month.
 
@@ -1160,14 +1166,14 @@ You signed up early. You'll get the link first.
 ## #E-COUNTDOWN-2 — 2 Days (Day 46)
 **Subject:** 2 days
 ```
-June 1 is almost here.
+[launch date] is almost here.
 
 [X] traders have verified track records on the leaderboard.
 [Y] people are on the waitlist.
 
 You're one of them.
 
-Sunday morning: download links in your inbox.
+[launch day] morning: download links in your inbox.
 
 — [Your name]
 ```
@@ -1175,7 +1181,7 @@ Sunday morning: download links in your inbox.
 ## #E-COUNTDOWN-3 — Tomorrow (Day 47)
 **Subject:** Tomorrow morning
 ```
-Tomorrow at 7 AM ET, you'll get the download link for Apes Together.
+Tomorrow at 7 AM ET, you'll get the download link for ApesTogether.
 
 iOS and Android.
 
@@ -1184,12 +1190,12 @@ Thank you for being early. It matters.
 — [Your name]
 ```
 
-## #E-LAUNCH — Launch Day (June 1)
-**Subject:** Apes Together is live. Download now.
+## #E-LAUNCH — Launch Day ([launch date])
+**Subject:** ApesTogether is live. Download now.
 ```
 It's here.
 
-Apes Together is live on the App Store and Google Play.
+ApesTogether is live on the App Store and Google Play.
 
 🍎 Download on iOS: [link]
 🤖 Download on Android: [link]
@@ -1203,7 +1209,7 @@ What to do:
 You were early. That matters. Thank you.
 
 — [Your name]
-Founder, Apes Together
+Founder, ApesTogether
 apestogether.ai
 ```
 
@@ -1211,7 +1217,7 @@ apestogether.ai
 
 # $2 BILL STUNT EXECUTION PLAN
 
-## Date: Wednesday, May 28 (Day 45)
+## Date: [stunt date — a weekday ~3 days before launch] (Day 45)
 ## Time: 11:30 AM – 1:30 PM (lunch rush)
 
 ### Supplies
@@ -1230,7 +1236,7 @@ apestogether.ai
 
 ### Script (What You Say)
 When handing bills to people:
-> "Hey! Free $2 bill. There's a QR code on it — it's a new investing app called Apes Together. Follow verified traders instead of trusting TikTok. Happy lunch!"
+> "Hey! Free $2 bill. There's a QR code on it — it's a new investing app called ApesTogether. Follow verified traders instead of trusting TikTok. Happy lunch!"
 
 Keep it light, friendly, fast. Don't pitch. Hand and move.
 
@@ -1275,4 +1281,4 @@ Keep it light, friendly, fast. Don't pitch. Hand and move.
 
 **Reddit cadence:** 1 post/week + 5 comments/day (genuine participation)
 
-**Email cadence:** Welcome (on signup) → Pre-launch (Day 37) → Countdown (Days 44, 46, 47) → Launch (June 1)
+**Email cadence:** Welcome (on signup) → Pre-launch (Day 37) → Countdown (Days 44, 46, 47) → Launch ([launch date])
