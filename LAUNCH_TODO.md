@@ -114,6 +114,16 @@ The authoritative, deduplicated checklist of **everything** required for public 
 - [ ] Consolidate the two `SQLAlchemy(app)` instances; remove the legacy OAuth decode shim.
 - [ ] Email deliverability (`notifications@` → spam) diagnosis; later tighten DMARC → `p=reject`.
 
+### 11. 🚀 Post-launch feature backlog (not built — tracked so they aren't lost)
+- [ ] **Trader API (UC-A: bots submit trades via API key)** — scoped in `docs/TRADER_API_SCOPING.md` (open decisions D-1..D-6); rate-limiter dependency already shipped (Session 19 S-1). No routes, no docs page yet.
+- [ ] **Outbound trade-event feed** (UC-B: machine-readable JSON/CSV poll + webhook for subscribers) — same scoping doc.
+- [ ] **Waitlist 2.0** — position number + queue-jump referrals + tiered rewards → `docs/MARKETING_PLAN.md` §Demand & Scarcity, Phase A (~1–2 days: `BetaWaitlist.referral_code`/`referred_by`, position endpoint, landing UI).
+- [ ] **Invite-gate at signup (launch window)** — decision needed, then ~2–3 days: invite-code table, 3-codes-per-user, read-only leaderboard preview pre-auth, auto-expiry → MARKETING_PLAN §Phase B. **If shipped: reviewer access notes (Apple App Review notes + Play App access declaration) are mandatory.**
+- [ ] **Founding Trader cap/badge (100 slots)** — MARKETING_PLAN §Phase B.
+- [ ] **Play pre-registration + Apple pre-order** setup — converts waitlist → day-one install spike.
+- [ ] **"ApesTogether vs Dub vs eToro" comparison page** on the site (GEO/AI-search play).
+- [ ] Settings v1.1 screens (Payment History, Tax Info / W-9 sheet, FAQ link) — both apps.
+
 ---
 
 ## 🛠 SESSION 19 WORK ITEMS (opened 2026-06-22, from USER review)
@@ -217,10 +227,22 @@ Tracked here so nothing is dropped; checked off as resolved. Detail/answers land
 **Trader API status (USER asked):** NOT BUILT — scoped only (Session 18 → `docs/TRADER_API_SCOPING.md`). UC-A (bots submit trades for an authenticated account via API key + scopes over the proven internal bot trade logic) is the v1 candidate; no routes or instructions exist yet; open decisions D-1..D-6. Its hard dependency (S-1 shared rate limiter) shipped Session 19, so it's buildable when prioritized.
 
 **OPEN (new this session):**
-- [ ] Commit + push today's fixes; **deploy backend** (subscriptions ORDER BY).
-- [ ] Android **v5 build** (fused wordmark) when convenient — non-blocking for the 14-day clock.
-- [ ] Capture the Android **notification screenshot** via admin Test Push.
+- [x] Commit + push today's fixes; **deploy backend** (subscriptions ORDER BY). → Done Session 26 (`cf8b2b1`).
+- [x] Android **v5 build** (fused wordmark) — built Session 26; AAB upload to Play closed testing still on USER.
+- [ ] Capture the Android **notification screenshot** — now via the **Sample Trade** button (Session 26), not plain Test Push.
 - [x] **Outreach language rewrite — DONE (Session 25).** Both docs now open with a style-rules banner; every message is paste-ready with `[bracketed]` slots. Fixed across ~70 messages: killed AI-flattery openers ("Your macro insights bring institutional clarity…") + "resonates/aligns" filler; plain direct register; brand fused everywhere; stale `June 1`/`Sunday`/`Memorial Day` → `[launch date]`/`[launch day]` placeholders; **removed the fabricated #X-26 stat** ("underperformed by 12%") and softened the unsourced "85%/20%" stats to defensible phrasing; scrubbed `copy trading` from press pitches (playbook §11) and added the virtual-trading disclosure to every journalist pitch; "report trades" → trades placed in-app. (Tester-recruitment email lives in `PLAY_STORE_LISTING_GUIDE.md` §4.5.)
+
+---
+
+## 🔁 Session 26 (2026-07-13) — commit/deploy, v5 build, Sample Trade push, scarcity strategy
+
+- **Committed + pushed `cf8b2b1`** (12 files) → Vercel backend deploy carries: subscriptions ORDER BY fix (A/B/C reshuffle), admin Sample Trade preset, landing FAQ/urgency fixes, outreach rewrite docs. **No iOS action needed** — nothing in this commit touches Swift; next Mac pull/bump/archive is only when iOS code changes.
+- **Android v5 built** (versionCode 5, fused login wordmark, comma formatting confirmed in-source): APK + AAB at `android/app/build/outputs/{apk/release/app-release.apk, bundle/release/app-release.aab}`. Direct `adb install` to the Pixel 8a for the scale-popup comma screenshot (uninstall first — Play-signed vs upload-key signature mismatch); **USER: upload the v5 AAB to Play closed testing** so the test track stops lagging the source (root cause of the "comma still broken on device" confusion — the fix shipped in v4 source but the Pixel was running an older build).
+- **Sample-trade push for screenshots:** `/api/mobile/admin/test-push` now takes `preset: 'trade'` → production-formatted alert (🟢 Wolff's Flagship Fund BUY / 25 NVDA @ $184.10, `trade_alert` payload); admin panel Test Push card gained a **Sample Trade** button. This is the answer to "how did we do the iOS screenshot" — we never had a trade-formatted sender; the ASO doc's old tip pointed at the generic Test Push (now corrected in `docs/ASO_STRATEGY.md`).
+- **Landing page fixes (live on deploy):** stale hero urgency `Beta opens June 1 — limited spots` → honest weekly-invite-wave line; two FAQ answers still describing the old *report-trades* model rewritten to the in-app execution model.
+- **Demand & Scarcity strategy written** → `docs/MARKETING_PLAN.md` new top-level section (Doublespeed-article prompt): scarcity-vs-fabrication bright line, store policy answer (invite-gating allowed on both stores w/ reviewer access), Waitlist 2.0 referral mechanics, weekly invite drops, soft invite gate, founding-trader cap, pre-registration/pre-order, GEO/founder-led notes. Build items tracked in new **§11 backlog**.
+- **§11 Post-launch feature backlog added** — Trader API + outbound feed + scarcity builds + v1.1 settings now have a permanent tracked home (previously only in session narratives/scoping docs).
+- **OPEN:** adb-install v5 on the Pixel 8a (device wasn't connected this session) → comma screenshot; Sample-Trade push → notification screenshot; USER uploads v5 AAB to Play closed testing; USER decision on the invite-gate (§11).
 
 ---
 

@@ -48,3 +48,106 @@ starts it (see the playbook below).
 
 ## Highest-ROI, budget-agnostic
 App Preview video · Apple Search Ads · referral loop · in-app ratings prompt.
+
+---
+
+# Demand & Scarcity Strategy (added Session 26, 2026-07-13)
+
+_Prompted by the Doublespeed/a16z bot-farm article (manufactured scarcity as
+launch fuel). Answers: can we gate access, should we, and how._
+
+## The bright line: scarcity ✅, fabrication ❌
+
+Our entire product thesis is *verification vs. unverifiable claims*. If we're
+ever caught faking demand (botted content, invented waitlist numbers, fake
+"sold out" claims), the product thesis dies with the story — for us it's not
+a marketing risk, it's an existential one. The Doublespeed lesson we CAN
+take: **real, mechanically-enforced scarcity** (caps, invite codes, timed
+drops) is honest and works. The lesson we CANNOT take: astroturfed volume.
+Related existing rule: no paid reviews (top of this doc). Our AI traders are
+*disclosed* AI competing on the leaderboard — a feature, never a sock puppet.
+
+**Honest scarcity rationales we can state publicly (all true):**
+- Market-data API rate limits (price checks scale with active traders)
+- Solo founder = finite support capacity during beta
+- Google *requires* a capped closed test (12+ testers / 14 days) before
+  production access — the platform itself imposes scarcity; use it
+
+## Can we gate access to invitees only? (store policy)
+
+**Yes — with conditions.** Both stores require the *listing* to be publicly
+downloadable, but gating *account creation / functionality* behind an invite
+is allowed (precedents: Clubhouse, Superhuman, Bluesky):
+
+- **Apple** — App Review Guideline 2.1: reviewers must be able to access the
+  full app → provide a demo account **and a working invite code** in App
+  Review notes. Guideline 2.3 (accurate metadata): the listing should say
+  it's invite-gated.
+- **Google Play** — the **App access** declaration in Play Console must
+  include working credentials/instructions for any restricted parts. The
+  minimum-functionality policy means a hard login wall with nothing behind
+  it is risky — so ship a **read-only leaderboard preview** pre-invite
+  (which is also our best conversion screen).
+- **Distribution-level gating alternatives:** TestFlight (10k cap — cap is
+  real and Apple-enforced) and Play closed testing, which we're in anyway.
+
+## Current state (what exists today)
+
+- Waitlist: `BetaWaitlist` model, landing form with investor/trader
+  segmentation, live public count (`/api/waitlist/count`), welcome email.
+- No referral mechanics, no positions, no invite codes. The stale
+  "Beta opens June 1 — limited spots" urgency line was replaced Session 26
+  with honest invite-wave framing.
+- In-app referral system exists (see referral tie-in in the influencer
+  playbook above) — waitlist referrals can reuse the pattern.
+
+## Recommended mechanics (phased)
+
+### Phase A — pre-launch (build now, ~1–2 days of work)
+1. **Waitlist 2.0: position + queue-jump referrals.** On signup show
+   "You're #N in line" + a unique referral link; each referral jumps the
+   queue. Tiered rewards (tiers convert better than a single ask):
+   3 referrals = guaranteed launch-day invite · 10 = founding badge +
+   3 invite codes to give away · 25 = 3 months of one subscription free.
+   (Robinhood's pre-launch waitlist — ~1M signups — is the canonical run
+   of this play in our exact category.)
+2. **Weekly invite drops, fixed cadence.** Announce a fixed weekly slot
+   (e.g., Wednesday 4 PM ET) when the next wave of beta invites goes out.
+   Recurring content beat for X/TikTok + honest urgency. Numbers are real:
+   "40 invites this week" because that's what support capacity allows.
+
+### Phase B — launch window (weeks 1–4 after store approval)
+3. **Soft invite gate at signup.** App public on both stores; anyone can
+   browse the read-only leaderboard preview; creating an account requires
+   an invite code (from a user, a drop, or the waitlist email). **Every new
+   user gets 3 invite codes** (Gmail model) — turns each user into a
+   recruiter and keeps growth attributable. Auto-expire the gate (~week 4
+   or at a user cap) — scarcity that never releases turns into abandonment.
+4. **Founding-trader cap.** Exactly 100 "Founding Trader" slots (permanent
+   badge). Trader supply is the marketplace constraint anyway; capping it
+   is honest, creates status, and gives the waitlist's trader segment a
+   reason to move fast.
+5. **Store demand mechanics:** Google Play **pre-registration** and Apple
+   **pre-orders** (up to 180 days out) — both convert waitlist hype into a
+   day-one install spike, which is what chart rank + featuring algorithms
+   reward.
+
+### Standing rules (July 2026 dynamics)
+- **Founder-led > brand account.** Post-slop-backlash, builder accounts
+  outperform brand accounts; the playbook's build-in-public calendar is
+  correctly founder-voiced. Our anti-slop positioning ("verified humans
+  and *disclosed* AIs, in the most botted content category — fintok") is
+  the marketing angle the Doublespeed backlash hands us for free.
+- **AI-search discoverability (GEO).** People now ask ChatGPT/Perplexity
+  "app to follow verified traders" — citations come from Reddit threads,
+  comparison content, and crawlable FAQ/structured pages. Our landing FAQ
+  and genuine Reddit participation double as GEO. Add one "ApesTogether
+  vs Dub vs eToro" comparison page on the site.
+- **Never**: bought reviews, botted engagement, fake counts, "sold out"
+  claims that aren't mechanically true. Show the live waitlist counter
+  only once it clears ~100 (small real numbers are anti-social-proof).
+
+## Review-submission impact (do not skip)
+If the invite gate ships: put a working invite code + demo account in
+**App Review notes** (Apple) and complete the **App access** declaration
+(Play) or expect rejection. Add to both store submission checklists.
