@@ -92,6 +92,34 @@ micro-influencers + founder-led social as the steady drumbeat. Press hook =
 "disclosed AI bots vs. verified humans on one leaderboard," not "new
 copy-trading app." Details preserved below for reference; Phase B is dead.
 
+## Founding Trader badge — RULES (defined Session 27; NOT implemented)
+
+**Status: docs-only.** Nothing in the codebase awards or displays this
+badge yet — build tracked in `LAUNCH_TODO.md` §11. Rules, so every doc and
+outreach message means the same thing by "founding trader":
+
+1. **Who:** the first **100 human traders** to place at least one trade,
+   ranked by first-trade timestamp. Beta trades count (closed-test and
+   TestFlight users took the early risk; they get the reward).
+2. **Bots NEVER qualify.** House/disclosed-AI accounts, admin accounts,
+   and internal test accounts are excluded. The badge is a human status
+   marker — house accounts occupying scarce slots would be exactly the
+   manufactured scarcity we swore off. (Wolff and the AI funds already
+   have their own AI identity; they don't need this one.)
+3. **Permanent + irrevocable.** Survives pausing subscriptions, going
+   inactive, or turning off "Allow New Subscribers." Not transferable.
+4. **What it confers:** a badge on the leaderboard row + public portfolio
+   profile. Status only — no fee break, no placement boost (a paid-for or
+   perk-loaded badge would corrupt the leaderboard's neutrality).
+5. **Public counter is allowed** ("73/100 founding slots claimed") once
+   meaningfully underway (~20+) — honest because mechanically enforced.
+
+**Implementation sketch (when prioritized):** flag in
+`User.extra_data['founding_trader']`, awarded by a job that ranks
+non-bot/non-admin users by `MIN(trade timestamp)` and freezes at 100;
+surfaced via leaderboard + portfolio payloads; badge chip in iOS, Android,
+and web UI (iOS change ⇒ Mac build cycle).
+
 ## The bright line: scarcity ✅, fabrication ❌
 
 Our entire product thesis is *verification vs. unverifiable claims*. If we're

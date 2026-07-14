@@ -3,6 +3,20 @@
 
 **Owner:** Family Apps LLC | **Domain:** apestogether.ai | **Location:** NYC
 
+> **MARKETING APPROACH (Session 27, 2026-07-13 — governs everything below;
+> full reasoning in `MARKETING_PLAN.md` §Verdict):**
+> **Open access at launch.** No invite gate, no artificial scarcity, no
+> "limited spots" hype. Honest limits may be stated factually (the closed
+> beta IS small — Google caps it — and everyone gets in at public launch).
+> **Urgency is product-native:** a verified track record starts the day a
+> trader joins ("every week you wait is a week missing from your history"),
+> plus the **Founding Trader badge** — first 100 human traders by first
+> trade, bots/house accounts excluded, permanent, status-only (rules in
+> `MARKETING_PLAN.md`). **Sequencing:** harden during the closed test →
+> quiet open launch → press spike ONLY when crash-free (the Labor of Love
+> lesson — one WSJ shot per app). Press hook = "disclosed AI bots vs.
+> verified humans on one leaderboard."
+
 ---
 
 # TABLE OF CONTENTS
@@ -33,9 +47,11 @@
 
 ## HIGH PRIORITY Changes
 
-**1. Add social proof below waitlist form**
-Add: `"Beta opens June 1 — limited spots"` now.
-Once signups start: `"Join 47 others on the waitlist"` (live counter).
+**1. Add social proof below waitlist form** — ✅ DONE (superseded): the
+line now reads `"Now in private beta — join the waitlist for early access"`
+(Session 26; no artificial-scarcity wording per the approach banner). Live
+counter exists via `/api/waitlist/count` — surface it only once it clears
+~100 (small real numbers are anti-social-proof).
 
 **2. Update copyright year** — Footer says "© 2025" → change to "© 2026"
 

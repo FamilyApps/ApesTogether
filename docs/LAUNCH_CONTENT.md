@@ -7,6 +7,13 @@ Reference IDs match the Day-by-Day Calendar in `LAUNCH_PLAYBOOK.md`.
 > (`[launch date]` = public launch). Style: plain and direct, no fabricated
 > stats, brand fused (**ApesTogether**), trades are *placed in-app* (not
 > "reported"), and the virtual-trading disclaimer stays on launch posts.
+>
+> **Approach note (Session 27):** open access at launch — never imply gated
+> access or artificial scarcity ("limited spots"-style hype is banned; the
+> playbook banner governs). Small-beta statements are fine when factual and
+> paired with "everyone gets in at launch." "Founding trader" now means one
+> specific thing: **first 100 human traders by first trade, permanent badge,
+> bots excluded** (`MARKETING_PLAN.md` rules).
 
 ---
 
@@ -251,9 +258,9 @@ Biggest learning: people are tired of unverifiable claims. They want math.
 ```
 The @ApesTogetherApp beta is officially in testing.
 
-We're accepting a limited group of traders and investors to help us build something the market actually needs.
+We're starting with a small first group while we harden the app — early testers shape what ships at launch.
 
-Want in? Drop your email at apestogether.ai and we'll send invites this week.
+Want in early? Drop your email at apestogether.ai. Everyone gets in at public launch.
 ```
 
 ## #X-20 — Beta Day 2 (Day 23)
@@ -663,7 +670,7 @@ Real people making real trades. The leaderboard is taking shape.
 
 If you can beat the S&P, we want you. If you want to follow someone who can — we built this for you.
 
-Link in bio. Limited spots.
+Link in bio. The beta group is small while we test — everyone gets in at launch.
 ```
 
 ## #TT-09 — "Leaderboard Feature" (Day 29)
@@ -1032,7 +1039,7 @@ Here's what's coming:
 • You'll get an invite link before the general public
 • Early users will have first access to top traders on the leaderboard
 
-In the meantime, if you're a trader who beats the S&P 500 and want to earn from your performance — reply to this email. We're looking for founding traders.
+In the meantime, if you're a trader who beats the S&P 500 and want to earn from your performance — reply to this email. The first 100 traders on the platform get a permanent Founding Trader badge, and your verified track record starts the day you make your first trade.
 
 Talk soon,
 [Your name]

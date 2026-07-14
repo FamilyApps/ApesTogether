@@ -8,6 +8,13 @@ All messages personalized per recipient. Reference IDs match the calendar in `LA
 > Compliance: never say "copy trading" in press (playbook §11), always note
 > trades are virtual when talking to journalists, no unsourced stats stated as
 > fact, brand is **ApesTogether** (fused).
+>
+> **Approach note (Session 27):** open access at launch — never imply the app
+> is gated or spots are artificially scarce. Offering press/creators *early*
+> or *exclusive first-look* access is fine (time-based, not gated). The
+> **Founding Trader badge** (first 100 human traders by first trade,
+> permanent, bots excluded — rules in `MARKETING_PLAN.md`) is a legitimate
+> offer in trader-recruitment messages.
 
 ---
 
