@@ -553,6 +553,12 @@ private fun LeaderboardCard(
                             text = "%.0f/wk".format(tpw),
                         )
                     }
+                    // Founding Trader — one of the first 100 human traders.
+                    // Compact chip on the stats line (not next to the name)
+                    // so long usernames never truncate because of it.
+                    if (entry.user.foundingTrader == true) {
+                        FoundingTraderChip()
+                    }
                 }
             }
 
@@ -676,6 +682,40 @@ private fun RankBadge(rank: Int, rankChange: Int?) {
                 modifier = Modifier.size(14.dp),
             )
         }
+    }
+}
+
+/**
+ * Compact gold "FOUNDER" chip for leaderboard rows. Mirrors the iOS chip in
+ * LeaderboardView.swift. Sized to sit inline with [SubBadge] on the stats
+ * line: 10dp icon + 8sp caps text inside a 1dp-padded pill ≈ 14dp tall,
+ * matching the SubBadge line height so the row height doesn't change.
+ */
+@Composable
+private fun FoundingTraderChip() {
+    val gold = Color(0xFFFFD700)
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(7.dp))
+            .background(gold.copy(alpha = 0.14f))
+            .border(0.5.dp, gold.copy(alpha = 0.45f), RoundedCornerShape(7.dp))
+            .padding(horizontal = 5.dp, vertical = 1.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Default.WorkspacePremium,
+            contentDescription = "Founding Trader",
+            tint = gold,
+            modifier = Modifier.size(10.dp),
+        )
+        Text(
+            text = "FOUNDER",
+            color = gold,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.5.sp,
+            style = tightTextStyle(8.sp),
+        )
     }
 }
 

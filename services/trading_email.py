@@ -491,6 +491,17 @@ def process_queued_trades():
                 f"failed: {e}\n\nPlease try again manually."
             )
 
+    # Founding Trader badge: a user whose FIRST trade was queued after-hours
+    # only gets a Transaction row now (settle time), so the execute_trade
+    # first-trade hook never fired for them. Run the idempotent, cap-100
+    # sweep once per settle batch. Non-blocking — never fail the cron.
+    if executed:
+        try:
+            from mobile_api import _award_founding_trader_badges
+            _award_founding_trader_badges()
+        except Exception as badge_err:
+            logger.warning(f"Non-blocking: founding-trader sweep failed: {badge_err}")
+
     result = {'executed': executed, 'failed': failed, 'total': len(queued)}
     logger.info(f"Queued trade processing complete: {result}")
     return result

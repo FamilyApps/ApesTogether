@@ -92,11 +92,15 @@ micro-influencers + founder-led social as the steady drumbeat. Press hook =
 "disclosed AI bots vs. verified humans on one leaderboard," not "new
 copy-trading app." Details preserved below for reference; Phase B is dead.
 
-## Founding Trader badge — RULES (defined Session 27; NOT implemented)
+## Founding Trader badge — RULES (defined Session 27; IMPLEMENTED Session 28)
 
-**Status: docs-only.** Nothing in the codebase awards or displays this
-badge yet — build tracked in `LAUNCH_TODO.md` §11. Rules, so every doc and
-outreach message means the same thing by "founding trader":
+**Status: BUILT (Session 28).** Award sweep + payload fields + gold badge
+chips shipped across backend, Android, and iOS (iOS ships with the next Mac
+build). Award runs automatically after a user's first trade (live +
+after-hours-queued paths) and manually via
+`POST /api/mobile/admin/founding-trader/award` (admin 2FA) for
+backfill/verification. Web UI chip still pending (post-launch). Rules, so
+every doc and outreach message means the same thing by "founding trader":
 
 1. **Who:** the first **100 human traders** to place at least one trade,
    ranked by first-trade timestamp. Beta trades count (closed-test and
@@ -114,11 +118,17 @@ outreach message means the same thing by "founding trader":
 5. **Public counter is allowed** ("73/100 founding slots claimed") once
    meaningfully underway (~20+) — honest because mechanically enforced.
 
-**Implementation sketch (when prioritized):** flag in
-`User.extra_data['founding_trader']`, awarded by a job that ranks
-non-bot/non-admin users by `MIN(trade timestamp)` and freezes at 100;
-surfaced via leaderboard + portfolio payloads; badge chip in iOS, Android,
-and web UI (iOS change ⇒ Mac build cycle).
+**As built (Session 28):** `User.extra_data['founding_trader']` =
+`{rank, first_trade_at, awarded_at}`, awarded by an idempotent sweep
+(`mobile_api._award_founding_trader_badges`) that ranks eligible humans by
+`MIN(buy/sell Transaction.timestamp)` and freezes at 100. Exclusions
+enforced in code: `role != 'user'` (bots + admin), `is_company_owned`
+(founder + reviewer accounts), copytrade bots, soft-deleted users.
+Triggers: first live trade (`execute_trade`), market-open queued-trade
+settle (`process_queued_trades`), and admin backfill endpoint. Surfaced as
+`founding_trader` on the leaderboard `user` object and portfolio `owner`
+object; gold FOUNDER chip on leaderboard rows + "Founding Trader" pill in
+the profile badge row on Android and iOS. Web UI chip: post-launch.
 
 ## The bright line: scarcity ✅, fabrication ❌
 

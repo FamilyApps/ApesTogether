@@ -318,14 +318,19 @@ private fun PortfolioBody(
                         )
                     }
 
-                    // Badges
-                    portfolio.leaderboardBadges?.takeIf { it.isNotEmpty() }?.let { badges ->
+                    // Badges — Founding Trader pill first (permanent status),
+                    // then the period-based leaderboard medals. Same horizontal-
+                    // scroll row, so any overflow scrolls instead of wrapping.
+                    val isFounder = portfolio.owner.foundingTrader == true
+                    val badges = portfolio.leaderboardBadges.orEmpty()
+                    if (isFounder || badges.isNotEmpty()) {
                         Row(
                             modifier = Modifier
                                 .horizontalScroll(rememberScrollState())
                                 .padding(horizontal = 16.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
+                            if (isFounder) FoundingTraderPill()
                             badges.forEach { LeaderboardBadgePill(badge = it) }
                         }
                     }
@@ -668,6 +673,39 @@ private fun formatLargeNumber(value: Double): String {
 // ─────────────────────────────────────────────────────────────────────────
 // Badge pill
 // ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Gold "Founding Trader" pill — one of the first 100 human traders
+ * (permanent). Dimensions intentionally match [LeaderboardBadgePill]
+ * (10/6dp padding, 20dp corner, 11sp label) so mixed badge rows align.
+ * Mirrors FoundingTraderPill in iOS PortfolioDetailView.swift.
+ */
+@Composable
+private fun FoundingTraderPill() {
+    val gold = Color(0xFFFFD700)
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(gold.copy(alpha = 0.15f))
+            .border(1.dp, gold.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Default.WorkspacePremium,
+            contentDescription = null,
+            tint = gold,
+            modifier = Modifier.size(13.dp),
+        )
+        Text(
+            text = "Founding Trader",
+            color = TextPrimary,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
 
 @Composable
 private fun LeaderboardBadgePill(badge: LeaderboardBadge) {

@@ -119,7 +119,7 @@ The authoritative, deduplicated checklist of **everything** required for public 
 - [ ] **Outbound trade-event feed** (UC-B: machine-readable JSON/CSV poll + webhook for subscribers) — same scoping doc.
 - ~~**Waitlist 2.0** (queue-jump referrals)~~ **DROPPED (Session 26 verdict)** — waitlist stays a simple email collector; revisit only if pre-launch traffic materializes.
 - ~~**Invite-gate at signup**~~ **REJECTED (Session 26 verdict, USER + product-fit review)** — AT is a marketplace where every user adds leaderboard supply and the core asset (track-record time) can't be gated without starving it; r/wsb audience is allergic to velvet ropes. → MARKETING_PLAN §Verdict.
-- [ ] **Founding Trader badge (100 slots)** — the ONE scarcity mechanic kept. **Rules defined Session 27** (→ MARKETING_PLAN §"Founding Trader badge — RULES"): first 100 human traders by first-trade timestamp, beta counts, bots/admin/test accounts NEVER qualify, permanent, status-only (no fee break / placement boost). **NOT implemented** — needs `extra_data['founding_trader']` award job frozen at 100 + badge chip on leaderboard/portfolio in iOS + Android + web (iOS ⇒ Mac build cycle).
+- [x] **Founding Trader badge (100 slots) — BUILT (Session 28)** — the ONE scarcity mechanic kept. **Rules defined Session 27** (→ MARKETING_PLAN §"Founding Trader badge — RULES"): first 100 human traders by first-trade timestamp, beta counts, bots/admin/test accounts NEVER qualify, permanent, status-only (no fee break / placement boost). **Shipped:** idempotent award sweep (`mobile_api._award_founding_trader_badges`, frozen at 100) triggered on first live trade + queued-trade settle + `POST /admin/founding-trader/award` backfill; `founding_trader` on leaderboard `user` + portfolio `owner` payloads; gold FOUNDER chip (leaderboard row stats line) + "Founding Trader" pill (profile badge row) on **Android and iOS** (iOS ships with the next Mac build). **Remaining:** web UI chip (post-launch); public "N/100 claimed" counter (deferred until ~20+ claimed per rules).
 - [ ] **Play pre-registration + Apple pre-order** setup — converts waitlist → day-one install spike.
 - [ ] **"ApesTogether vs Dub vs eToro" comparison page** on the site (GEO/AI-search play).
 - [ ] Settings v1.1 screens (Payment History, Tax Info / W-9 sheet, FAQ link) — both apps.
@@ -257,7 +257,26 @@ Tracked here so nothing is dropped; checked off as resolved. Detail/answers land
 - **OPEN:**
   - [ ] USER: add the upload-key SHA-1 fingerprint in Firebase → re-test Google Sign-In on the Pixel.
   - [ ] Then: scale-popup **comma screenshot** + Sample-Trade (divi51) **notification screenshot** (deploy is live).
-  - [ ] Founding Trader badge build (§11) when prioritized.
+  - [x] Founding Trader badge build (§11) — **DONE Session 28** (below).
+
+---
+
+## 🔁 Session 28 (2026-07-13 late PM) — Founding Trader badge BUILT, debug-build screenshot path, package-name explainer
+
+- **Screenshot workaround (USER dislikes SHA juggling): use the DEBUG build — no Firebase change needed.** The debug keystore's SHA-1 (`29:56:AA:…`) has been registered since May 10 (§ANDROID setup) and debug shares the `com.apestogether.app` package + prod API (`build.gradle.kts` — no `applicationIdSuffix`). So: uninstall the sideloaded release v5 → `gradlew :app:installDebug` → sign-in works → device token registers → Sample-Trade (divi51) push arrives. The notification shade renders identically (same app name + icon) — fine for the ASO screenshot. The upload-key fingerprint add (Session 27 OPEN) is now OPTIONAL — only needed if we ever test sideloaded *release* APKs again; installing from the Play closed-testing track needs nothing.
+- **Package-name confusion resolved:** `com.apestogether.app` = the **Android** package (hardcoded in Play Console, `google-services.json`, assetlinks — CORRECT, keep forever). `com.apestogether.ApesTogether` = the **iOS** bundle ID. The Firebase entry pending deletion is the stray **iOS** app that shipped in builds 1-33 with the wrong `BUNDLE_ID=com.apestogether.app` (§FCM-iOS fix log). ⚠️ **Do NOT delete the Android `com.apestogether.app` Firebase app** — that kills Android sign-in + FCM. The sign-in error naming `com.apestogether.app` is expected/correct: it's the Android app reporting its own package.
+- **Founding Trader badge — IMPLEMENTED end-to-end** (rules → MARKETING_PLAN §"Founding Trader badge", now marked BUILT):
+  - **Backend (`mobile_api.py`):** `FOUNDING_TRADER_CAP=100` + `_award_founding_trader_badges()` — one aggregate query (`MIN(timestamp)` over buy/sell Transactions), walks in first-trade order, awards `extra_data['founding_trader']={rank, first_trade_at, awarded_at}` to eligible humans only (`role=='user'`, not `is_company_owned`, not copytrade-bot, not soft-deleted); existing holders never touched (irrevocable); process-lifetime cap short-circuit. Triggers: (a) `execute_trade` post-commit when the COUNT says first trade (non-blocking), (b) `process_queued_trades` after the market-open settle batch (`services/trading_email.py` — covers a user whose FIRST trade was queued after-hours), (c) `POST /api/mobile/admin/founding-trader/award` (admin 2FA) for backfill/verification — **run this once after deploy to backfill beta traders**, response reports `{awarded, total_holders, cap_reached}`.
+  - **Payloads:** `founding_trader: bool` on the leaderboard `user` object + `get_portfolio` `owner` object (additive — old clients unaffected).
+  - **Android:** `LeaderboardUser`/`PortfolioOwner` DTO fields; `FoundingTraderChip` (gold `WorkspacePremium` + 8sp "FOUNDER", pill ≈ SubBadge line height) on the leaderboard row **stats line** — deliberately NOT next to the username so long names never truncate and row height is unchanged; `FoundingTraderPill` ("Founding Trader", 10/6dp + 20dp corner — dimensions match `LeaderboardBadgePill`) leads the profile badge row, which now also renders for founder-without-medals.
+  - **iOS (needs Mac build):** same two surfaces, mirrored styling (`medal.fill`, gold FFD700, matching paddings) in `LeaderboardView.swift` + `PortfolioDetailView.swift`; DTO fields decode via `.convertFromSnakeCase`. Verified no manual `LeaderboardUser(`/`PortfolioOwner(` constructions anywhere, so the added fields can't break memberwise inits.
+  - **Layout audit:** leaderboard chip sits inline with the 10sp sub-badges (star-count, trades/wk) inside the `weight(1f)` name column — worst case it clips off the right edge of that column, never pushes the sparkline/alpha cluster; profile pill row is a horizontal scroller on both platforms, so founder + multiple medals overflow by scrolling, not wrapping.
+- **OPEN:**
+  - [ ] Deploy backend → `POST /api/mobile/admin/founding-trader/award` once (backfill beta traders) → verify chip on leaderboard.
+  - [ ] Build Android v6 (badge UI) when convenient — badge is additive, so v5 keeps working meanwhile.
+  - [ ] Screenshots via **debug build** (see above): scale-popup comma + Sample-Trade (divi51) notification.
+  - [ ] iOS: next Mac session — build + verify badge chips, then archive.
+  - [ ] Web UI founder chip (post-launch, §11).
 
 ---
 

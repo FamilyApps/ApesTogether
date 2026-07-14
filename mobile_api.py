@@ -721,6 +721,117 @@ def _get_accepts_new_subscribers(user) -> bool:
         return True
 
 
+# ─── Founding Trader badge (MARKETING_PLAN.md §Founding Trader) ─────────────
+# The first 100 HUMAN traders to place ≥1 real trade (buy/sell), ranked by
+# first-trade timestamp. Permanent + irrevocable status marker — survives
+# inactivity, pausing, and "Allow New Subscribers" OFF. Status only: no fee
+# break, no leaderboard placement boost. Stored in
+# User.extra_data['founding_trader'] = {'rank': N, 'first_trade_at': iso,
+# 'awarded_at': iso} (JSON — no migration needed).
+#
+# NEVER awarded to: bots (role='agent'), copytrade bots, admins
+# (role='admin'), or company-owned accounts (founder + app-store reviewer,
+# via User.is_company_owned) — house accounts occupying scarce slots would be
+# exactly the manufactured scarcity the marketing plan rejects.
+FOUNDING_TRADER_CAP = 100
+
+# Process-lifetime short-circuit: once the cap is confirmed reached, skip the
+# sweep entirely (resets on cold start, which is fine — the sweep is idempotent).
+_founding_trader_cap_reached = False
+
+
+def _has_founding_trader_badge(user) -> bool:
+    """True when this user already holds the Founding Trader badge."""
+    try:
+        return bool((getattr(user, 'extra_data', None) or {}).get('founding_trader'))
+    except Exception:
+        return False
+
+
+def _award_founding_trader_badges():
+    """Idempotent sweep: award Founding Trader badges to eligible users in
+    first-trade order until the cap (100) is reached.
+
+    Existing badge holders are NEVER modified (permanent + irrevocable), so
+    re-running is always safe. Returns a summary dict for the admin endpoint.
+    Called after a user's first trade (execute_trade), after the market-open
+    queued-trade settle (services.trading_email.process_queued_trades), and
+    manually via POST /admin/founding-trader/award.
+    """
+    global _founding_trader_cap_reached
+    from models import db, User, Transaction
+    from sqlalchemy import func
+    from sqlalchemy.orm.attributes import flag_modified
+
+    if _founding_trader_cap_reached:
+        return {'awarded': 0, 'total_holders': FOUNDING_TRADER_CAP,
+                'cap': FOUNDING_TRADER_CAP, 'cap_reached': True}
+
+    # One aggregate query: each trader's first real trade (dividends excluded).
+    first_trades = (
+        db.session.query(
+            Transaction.user_id,
+            func.min(Transaction.timestamp).label('first_trade_at'),
+        )
+        .filter(Transaction.transaction_type.in_(('buy', 'sell')))
+        .group_by(Transaction.user_id)
+        .order_by(func.min(Transaction.timestamp).asc())
+        .all()
+    )
+    if not first_trades:
+        return {'awarded': 0, 'total_holders': 0,
+                'cap': FOUNDING_TRADER_CAP, 'cap_reached': False}
+
+    user_ids = [row.user_id for row in first_trades]
+    users_by_id = {u.id: u for u in User.query.filter(User.id.in_(user_ids)).all()}
+
+    holders = 0
+    awarded = 0
+    now_iso = datetime.utcnow().isoformat() + 'Z'
+    for row in first_trades:
+        if holders >= FOUNDING_TRADER_CAP:
+            break
+        user = users_by_id.get(row.user_id)
+        if not user:
+            continue
+        # Existing holders keep their slot + rank untouched (irrevocable).
+        if _has_founding_trader_badge(user):
+            holders += 1
+            continue
+        # Eligibility: humans only, alive, never company-owned/bot/admin.
+        if user.role != 'user':
+            continue  # excludes 'agent' bots and 'admin'
+        if user.deleted_at is not None:
+            continue
+        if user.is_company_owned:
+            continue  # founder accounts + app-store reviewer/QA accounts
+        if _is_copytrade_bot(user):
+            continue  # belt-and-braces: copytrade bots are role='agent' anyway
+        holders += 1
+        extra = dict(user.extra_data or {})
+        extra['founding_trader'] = {
+            'rank': holders,
+            'first_trade_at': (row.first_trade_at.isoformat() + 'Z')
+                              if row.first_trade_at else None,
+            'awarded_at': now_iso,
+        }
+        user.extra_data = extra
+        flag_modified(user, 'extra_data')
+        awarded += 1
+        logger.info(
+            f"Founding Trader badge #{holders} awarded to "
+            f"user={user.id} ({user.username})"
+        )
+
+    if awarded:
+        db.session.commit()
+    if holders >= FOUNDING_TRADER_CAP:
+        _founding_trader_cap_reached = True
+    return {'awarded': awarded, 'total_holders': holders,
+            'cap': FOUNDING_TRADER_CAP,
+            'cap_reached': holders >= FOUNDING_TRADER_CAP}
+
+
 @mobile_api.route('/subscriptions/slot-for-creator', methods=['GET'])
 @require_auth
 def slot_for_creator():
@@ -1275,7 +1386,10 @@ def get_portfolio(slug):
                 'id': owner.id,
                 'username': owner.username,
                 'display_name': owner.public_name,
-                'portfolio_slug': owner.portfolio_slug
+                'portfolio_slug': owner.portfolio_slug,
+                # Founding Trader badge — first 100 human traders (permanent).
+                # Clients render a gold pill on the public profile.
+                'founding_trader': _has_founding_trader_badge(owner)
             },
             'is_owner': is_owner,
             'is_subscribed': is_subscribed,
@@ -2230,7 +2344,10 @@ def get_leaderboard():
                     'id': user_id,
                     'username': user.username,  # Live DB is source of truth (avoids stale cached usernames after renames)
                     'display_name': user.public_name,
-                    'portfolio_slug': user.portfolio_slug
+                    'portfolio_slug': user.portfolio_slug,
+                    # Founding Trader badge — first 100 human traders (permanent).
+                    # Clients render a compact gold chip on the leaderboard row.
+                    'founding_trader': _has_founding_trader_badge(user)
                 },
                 'return_percent': user_return,
                 'sp500_return': round(sp500_return_for_period, 2),
@@ -4023,6 +4140,20 @@ def execute_trade():
         # We used to fan out again here which caused duplicate notifications
         # per trade (one with position_pct, one without). The single source
         # of truth is now process_transaction, which receives position_before_qty.
+        
+        # Founding Trader badge: if this was the user's FIRST real trade, run
+        # the (idempotent, cap-100) award sweep. Non-blocking — a failure here
+        # must never fail the trade. Cheap gate: one indexed COUNT, only
+        # sweeping when the count says "first trade".
+        try:
+            first_trade = Transaction.query.filter(
+                Transaction.user_id == g.user_id,
+                Transaction.transaction_type.in_(('buy', 'sell')),
+            ).count() == 1
+            if first_trade:
+                _award_founding_trader_badges()
+        except Exception as badge_err:
+            logger.warning(f"Non-blocking: founding-trader sweep failed: {badge_err}")
         
         return jsonify({
             'success': True,
@@ -6303,6 +6434,28 @@ def admin_record_dividend():
         db.session.rollback()
         logger.error(f"Dividend recording error: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@mobile_api.route('/admin/founding-trader/award', methods=['POST'])
+@require_admin_2fa
+@with_db_retry
+def admin_award_founding_trader():
+    """Run the Founding Trader badge award sweep (idempotent, frozen at 100).
+
+    Backfill/manual trigger: awards the badge to eligible HUMAN traders in
+    first-trade order until the cap. Existing holders are never modified.
+    The sweep also runs automatically after a user's first live trade and
+    after the market-open queued-trade settle, so this endpoint is mainly
+    for the initial backfill of beta traders + verification.
+    """
+    try:
+        result = _award_founding_trader_badges()
+        return jsonify({'success': True, **result})
+    except Exception as e:
+        from models import db
+        db.session.rollback()
+        logger.error(f"Founding trader award sweep failed: {e}")
+        return jsonify({'error': 'award_sweep_failed', 'detail': str(e)}), 500
 
 
 @mobile_api.route('/admin/test-push', methods=['POST'])

@@ -48,10 +48,17 @@ struct PortfolioDetailView: View {
                                 .padding(.horizontal, 16)
                         }
                         
-                        // ── Leaderboard Badges ──
-                        if let badges = portfolio.leaderboardBadges, !badges.isEmpty {
+                        // ── Badges: Founding Trader first (permanent status),
+                        // then the period-based leaderboard medals. Same
+                        // horizontal-scroll row, so overflow scrolls, not wraps.
+                        let isFounder = portfolio.owner.foundingTrader == true
+                        let badges = portfolio.leaderboardBadges ?? []
+                        if isFounder || !badges.isEmpty {
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 8) {
+                                    if isFounder {
+                                        FoundingTraderPill()
+                                    }
                                     ForEach(badges) { badge in
                                         LeaderboardBadgePill(badge: badge)
                                     }
@@ -1003,6 +1010,35 @@ class PortfolioDetailViewModel: ObservableObject {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+}
+
+// MARK: - Founding Trader Pill
+
+/// Gold "Founding Trader" pill — one of the first 100 human traders
+/// (permanent). Dimensions intentionally match LeaderboardBadgePill
+/// (10/6pt padding, 20pt corner, 11pt label) so mixed badge rows align.
+/// Mirrors FoundingTraderPill in Android PortfolioDetailScreen.kt.
+struct FoundingTraderPill: View {
+    private let gold = Color(hex: "FFD700")
+    
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "medal.fill")
+                .font(.system(size: 11))
+                .foregroundColor(gold)
+            Text("Founding Trader")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.textPrimary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(gold.opacity(0.15))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(gold.opacity(0.4), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
     }
 }
 

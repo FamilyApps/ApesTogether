@@ -82,6 +82,10 @@ struct LeaderboardUser: Codable {
     let username: String
     let displayName: String?
     let portfolioSlug: String?
+    // Founding Trader badge — one of the first 100 human traders (permanent).
+    // Rendered as a compact gold FOUNDER chip on the leaderboard row.
+    // Optional/defaults-false for legacy responses.
+    let foundingTrader: Bool?
 
     var publicName: String {
         if let dn = displayName, !dn.isEmpty { return dn }
@@ -162,6 +166,10 @@ struct PortfolioOwner: Codable {
     let username: String
     let displayName: String?
     let portfolioSlug: String?
+    // Founding Trader badge — one of the first 100 human traders (permanent).
+    // Rendered as a gold pill in the public profile's badge row.
+    // Optional/defaults-false for legacy responses.
+    let foundingTrader: Bool?
 
     var publicName: String {
         if let dn = displayName, !dn.isEmpty { return dn }

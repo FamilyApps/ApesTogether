@@ -101,6 +101,10 @@ data class LeaderboardUser(
     val username: String,
     @SerialName("display_name") val displayName: String? = null,
     @SerialName("portfolio_slug") val portfolioSlug: String? = null,
+    // Founding Trader badge — one of the first 100 human traders (permanent).
+    // Rendered as a compact gold FOUNDER chip on the leaderboard row.
+    // Optional/defaults-false for legacy responses.
+    @SerialName("founding_trader") val foundingTrader: Boolean? = null,
 ) {
     val publicName: String get() = displayName?.takeIf { it.isNotEmpty() } ?: username
 }
@@ -180,6 +184,10 @@ data class PortfolioOwner(
     val username: String,
     @SerialName("display_name") val displayName: String? = null,
     @SerialName("portfolio_slug") val portfolioSlug: String? = null,
+    // Founding Trader badge — one of the first 100 human traders (permanent).
+    // Rendered as a gold pill in the public profile's badge row.
+    // Optional/defaults-false for legacy responses.
+    @SerialName("founding_trader") val foundingTrader: Boolean? = null,
 ) {
     val publicName: String get() = displayName?.takeIf { it.isNotEmpty() } ?: username
 }
