@@ -6353,7 +6353,7 @@ def admin_test_push():
         # type) so the tray/lock-screen rendering is indistinguishable from a
         # real trade alert. Used for ASO screenshot frames #2 (iOS) and #8
         # (Android).
-        trader_name = data.get('trader_name') or "Wolff's Flagship Fund"
+        trader_name = data.get('trader_name') or 'divi51'
         action = (data.get('action') or 'BUY').upper()
         ticker = (data.get('ticker') or 'NVDA').upper()
         quantity = data.get('quantity') or 25

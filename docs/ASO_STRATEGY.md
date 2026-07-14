@@ -744,7 +744,7 @@ Make the device take ~70% of vertical real estate so the text has air.
 > alert sits cleanly without competing notifications; (b) trigger the
 > alert via the **Sample Trade** button in `/admin-panel` → System
 > Health → Test Push Notification card (added Session 26). It sends a
-> production-formatted trade alert — `🟢 Wolff's Flagship Fund BUY /
+> production-formatted trade alert — `🟢 divi51 BUY /
 > 25 NVDA @ $184.10` — via `preset: 'trade'` on
 > `/api/mobile/admin/test-push`. The plain **Send** button sends a
 > generic diagnostic push and is NOT what you want for screenshots.

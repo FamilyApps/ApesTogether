@@ -117,9 +117,9 @@ The authoritative, deduplicated checklist of **everything** required for public 
 ### 11. 🚀 Post-launch feature backlog (not built — tracked so they aren't lost)
 - [ ] **Trader API (UC-A: bots submit trades via API key)** — scoped in `docs/TRADER_API_SCOPING.md` (open decisions D-1..D-6); rate-limiter dependency already shipped (Session 19 S-1). No routes, no docs page yet.
 - [ ] **Outbound trade-event feed** (UC-B: machine-readable JSON/CSV poll + webhook for subscribers) — same scoping doc.
-- [ ] **Waitlist 2.0** — position number + queue-jump referrals + tiered rewards → `docs/MARKETING_PLAN.md` §Demand & Scarcity, Phase A (~1–2 days: `BetaWaitlist.referral_code`/`referred_by`, position endpoint, landing UI).
-- [ ] **Invite-gate at signup (launch window)** — decision needed, then ~2–3 days: invite-code table, 3-codes-per-user, read-only leaderboard preview pre-auth, auto-expiry → MARKETING_PLAN §Phase B. **If shipped: reviewer access notes (Apple App Review notes + Play App access declaration) are mandatory.**
-- [ ] **Founding Trader cap/badge (100 slots)** — MARKETING_PLAN §Phase B.
+- ~~**Waitlist 2.0** (queue-jump referrals)~~ **DROPPED (Session 26 verdict)** — waitlist stays a simple email collector; revisit only if pre-launch traffic materializes.
+- ~~**Invite-gate at signup**~~ **REJECTED (Session 26 verdict, USER + product-fit review)** — AT is a marketplace where every user adds leaderboard supply and the core asset (track-record time) can't be gated without starving it; r/wsb audience is allergic to velvet ropes. → MARKETING_PLAN §Verdict.
+- [ ] **Founding Trader badge (100 slots)** — the ONE scarcity mechanic kept (cheap, honest status; targets trader supply). Pair with the product-native urgency line: "your verified track record starts the day you join."
 - [ ] **Play pre-registration + Apple pre-order** setup — converts waitlist → day-one install spike.
 - [ ] **"ApesTogether vs Dub vs eToro" comparison page** on the site (GEO/AI-search play).
 - [ ] Settings v1.1 screens (Payment History, Tax Info / W-9 sheet, FAQ link) — both apps.
@@ -242,7 +242,9 @@ Tracked here so nothing is dropped; checked off as resolved. Detail/answers land
 - **Landing page fixes (live on deploy):** stale hero urgency `Beta opens June 1 — limited spots` → honest weekly-invite-wave line; two FAQ answers still describing the old *report-trades* model rewritten to the in-app execution model.
 - **Demand & Scarcity strategy written** → `docs/MARKETING_PLAN.md` new top-level section (Doublespeed-article prompt): scarcity-vs-fabrication bright line, store policy answer (invite-gating allowed on both stores w/ reviewer access), Waitlist 2.0 referral mechanics, weekly invite drops, soft invite gate, founding-trader cap, pre-registration/pre-order, GEO/founder-led notes. Build items tracked in new **§11 backlog**.
 - **§11 Post-launch feature backlog added** — Trader API + outbound feed + scarcity builds + v1.1 settings now have a permanent tracked home (previously only in session narratives/scoping docs).
-- **OPEN:** adb-install v5 on the Pixel 8a (device wasn't connected this session) → comma screenshot; Sample-Trade push → notification screenshot; USER uploads v5 AAB to Play closed testing; USER decision on the invite-gate (§11).
+- **Strategy verdict (after USER pushback):** invite-gate REJECTED — marketplace dynamics (every user = supply), track-record time is the ungateable core asset, scarcity amplifies attention but generates none, r/wsb receipts-culture fits the product but hates gatekeeping. **Adopted: open access + product-native urgency (track-record clock + Founding Trader badge) + USER's simple sequenced plan** — soft-launch open, harden during the closed-test window (Labor of Love lesson: never point the one-shot WSJ spike at a buggy app), then earned media with the AI-vs-human hook + micro-influencers + founder-led social. → MARKETING_PLAN §Verdict.
+- **v5 installed on the Pixel 8a via adb** (uninstall + install, Play-signed→upload-key signature swap) and launched. Sample-trade preset default changed Wolff→divi51; landing urgency line neutralized ("Now in private beta — join the waitlist for early access") — USER correctly flagged that strategy language shouldn't have shipped to the site unprompted.
+- **OPEN:** comma screenshot (scale popup, v5 now on device); Sample-Trade push → notification screenshot (needs the divi51 deploy, ~2 min after push); USER uploads v5 AAB to Play closed testing.
 
 ---
 

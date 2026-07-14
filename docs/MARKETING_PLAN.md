@@ -56,6 +56,42 @@ App Preview video · Apple Search Ads · referral loop · in-app ratings prompt.
 _Prompted by the Doublespeed/a16z bot-farm article (manufactured scarcity as
 launch fuel). Answers: can we gate access, should we, and how._
 
+## ⚠️ VERDICT (same session, after product-fit review — read this first)
+
+USER challenged the invite-gate idea and the challenge holds. **Scarcity
+gating is a bad fit for ApesTogether** and Phase B below is **REJECTED**:
+
+1. **AT is a marketplace where every user is also supply.** Anyone who joins
+   and trades adds leaderboard content. Gating shrinks the shelf on both
+   sides — unlike Clubhouse, where each invitee WAS the product, our product
+   improves with open participation.
+2. **Our core asset is time.** A track record can't be manufactured or
+   accelerated — the leaderboard only gets interesting after months of
+   history. Gating early users starves the exact asset launch depends on.
+3. **Scarcity generates zero attention; it only amplifies attention you
+   already have.** Robinhood's waitlist worked because "$0 commissions" was
+   a self-evidently huge, universal benefit that earned press FIRST; the
+   queue mechanics compounded it. "Follow verified traders" is not legible
+   as a benefit until the leaderboard has history — weak waitlist fuel.
+4. **Audience mismatch.** The r/wsb crowd runs on "positions or ban" —
+   receipts culture is a PERFECT product fit, but that same crowd is
+   allergic to velvet ropes and growth-hack gimmicks. A public leaderboard
+   anyone can lurk fits; an invite gate reads as fintech-bro scammy.
+
+**What replaces artificial scarcity: product-native urgency.** Your track
+record starts the day you join — "every week you wait is a week missing
+from your verified history" is true, unfabricatable, and targets the trader
+side we most need. Plus a capped **Founding Trader badge** (cheap, honest
+status). That's ALL the scarcity we keep.
+
+**Adopted plan: open access + sequenced simple strategy** (Labor of Love
+lesson applied): soft-launch open → harden with a trickle of organic users
+(the mandatory Play closed-test period doubles as this QA window) → THEN
+fire the one-shot earned-media spike (WSJ playbook) once crash-free, with
+micro-influencers + founder-led social as the steady drumbeat. Press hook =
+"disclosed AI bots vs. verified humans on one leaderboard," not "new
+copy-trading app." Details preserved below for reference; Phase B is dead.
+
 ## The bright line: scarcity ✅, fabrication ❌
 
 Our entire product thesis is *verification vs. unverifiable claims*. If we're
@@ -103,7 +139,9 @@ is allowed (precedents: Clubhouse, Superhuman, Bluesky):
 
 ## Recommended mechanics (phased)
 
-### Phase A — pre-launch (build now, ~1–2 days of work)
+### Phase A — pre-launch *(SCALED BACK per verdict: no queue-jump build;
+waitlist stays a simple email collector + trader segmentation. Revisit
+referral mechanics only if pre-launch traffic actually materializes.)*
 1. **Waitlist 2.0: position + queue-jump referrals.** On signup show
    "You're #N in line" + a unique referral link; each referral jumps the
    queue. Tiered rewards (tiers convert better than a single ask):
@@ -116,7 +154,7 @@ is allowed (precedents: Clubhouse, Superhuman, Bluesky):
    Recurring content beat for X/TikTok + honest urgency. Numbers are real:
    "40 invites this week" because that's what support capacity allows.
 
-### Phase B — launch window (weeks 1–4 after store approval)
+### Phase B — launch window — ❌ REJECTED (see verdict) — kept for the record
 3. **Soft invite gate at signup.** App public on both stores; anyone can
    browse the read-only leaderboard preview; creating an account requires
    an invite code (from a user, a drop, or the waitlist email). **Every new

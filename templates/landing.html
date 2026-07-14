@@ -58,7 +58,7 @@
                 <button type="submit" class="btn-lg">Join the Beta Waitlist</button>
             </form>
             <div class="waitlist-msg" id="hero-waitlist-msg"></div>
-            <div class="waitlist-urgency">The private beta is live — invites go out in weekly waves</div>
+            <div class="waitlist-urgency">Now in private beta — join the waitlist for early access</div>
         </div>
 
         <!-- App mockup -->
@@ -429,7 +429,7 @@ async function submitWaitlist(e, formId) {
             if (data.message === 'already_on_list') {
                 msg.innerHTML = '<span class="wl-ok">You&#39;re already on the list! We&#39;ll be in touch soon.</span>';
             } else {
-                msg.innerHTML = '<span class="wl-ok">You&#39;re on the list! Invites go out in weekly waves — watch your inbox.</span>';
+                msg.innerHTML = '<span class="wl-ok">You&#39;re on the list! We&#39;ll email you when your beta access is ready.</span>';
             }
             form.style.display = 'none';
         } else {

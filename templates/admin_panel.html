@@ -1652,7 +1652,7 @@ const SystemHealth = ({ api }) => {
   // Test push button — wraps /api/mobile/admin/test-push. Replaces the old
   // workflow of pasting JS into the browser console for push diagnostics.
   // preset: undefined = plain diagnostic push; 'trade' = production-formatted
-  // trade alert (🟢 Wolff's Flagship Fund BUY / 25 NVDA @ $184.10) for the
+  // trade alert (🟢 divi51 BUY / 25 NVDA @ $184.10) for the
   // store-listing notification screenshots (ASO frames #2 and #8).
   const runTestPush = useCallback(async (preset) => {
     const username = (testPushUser || '').trim().toLowerCase();
@@ -2059,7 +2059,7 @@ const SystemHealth = ({ api }) => {
             {testPushRunning ? 'Sending…' : 'Send'}
           </Btn>
           <Btn small onClick={() => runTestPush('trade')} disabled={testPushRunning || !testPushUser.trim()}
-            title="Sends a production-formatted trade alert (🟢 Wolff's Flagship Fund BUY · 25 NVDA @ $184.10) — use for the store notification screenshots">
+            title="Sends a production-formatted trade alert (🟢 divi51 BUY · 25 NVDA @ $184.10) — use for the store notification screenshots">
             {testPushRunning ? 'Sending…' : 'Sample Trade'}
           </Btn>
         </div>
