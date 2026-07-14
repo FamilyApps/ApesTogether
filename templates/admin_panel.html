@@ -1595,6 +1595,8 @@ const SystemHealth = ({ api }) => {
   const [testPushUser, setTestPushUser] = useState('bobford00');
   const [testPushResult, setTestPushResult] = useState(null);
   const [testPushRunning, setTestPushRunning] = useState(false);
+  const [founderResult, setFounderResult] = useState(null);
+  const [founderRunning, setFounderRunning] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // Drift-check endpoints live on the main Flask app, not /api/mobile.
@@ -1670,6 +1672,23 @@ const SystemHealth = ({ api }) => {
     }
     setTestPushRunning(false);
   }, [api, testPushUser, testPushRunning]);
+
+  // Founding Trader award sweep — wraps POST /api/mobile/admin/founding-trader/award.
+  // The endpoint is POST-only (it mutates — awards badges), so visiting the URL
+  // in a browser 405s; this button is the supported way to run the backfill.
+  // Idempotent + frozen at 100, so it's always safe to click again.
+  const runFounderAward = useCallback(async () => {
+    if (founderRunning) return;
+    setFounderRunning(true);
+    setFounderResult(null);
+    try {
+      const data = await api('/admin/founding-trader/award', { method: 'POST' });
+      setFounderResult({ ok: true, data });
+    } catch (e) {
+      setFounderResult({ ok: false, error: e.message || String(e) });
+    }
+    setFounderRunning(false);
+  }, [api, founderRunning]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -2074,6 +2093,39 @@ const SystemHealth = ({ api }) => {
             {testPushResult.ok
               ? JSON.stringify(testPushResult.data, null, 2)
               : `Error: ${testPushResult.error}`}
+          </div>
+        )}
+      </Card>
+
+      {/* Founding Trader card — runs the idempotent award sweep (first 100
+          human traders by first-trade timestamp, frozen at 100; bots/admin/
+          company accounts never qualify). POST-only endpoint, hence a button
+          instead of a pasteable URL. Response reports awarded / total_holders /
+          cap_reached, so this doubles as the "N/100 claimed" status readout. */}
+      <Card>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>
+          Founding Trader Badges
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400, marginLeft: 8 }}>
+            (award sweep — idempotent, frozen at 100)
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+          <Btn variant="primary" small onClick={runFounderAward} disabled={founderRunning}
+            title="Awards the badge to eligible human traders in first-trade order until 100. Existing holders are never modified — always safe to re-run.">
+            {founderRunning ? 'Running…' : 'Run Award Sweep'}
+          </Btn>
+        </div>
+        {founderResult && (
+          <div style={{
+            padding: '10px 12px', borderRadius: 6,
+            background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+            fontSize: 11, fontFamily: 'monospace', color: 'var(--text-secondary)',
+            whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+            maxHeight: 240, overflowY: 'auto',
+          }}>
+            {founderResult.ok
+              ? JSON.stringify(founderResult.data, null, 2)
+              : `Error: ${founderResult.error}`}
           </div>
         )}
       </Card>
