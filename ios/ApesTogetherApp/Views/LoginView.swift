@@ -35,10 +35,13 @@ struct LoginView: View {
                         .cornerRadius(22)
                         .shadow(color: Color.primaryAccent.opacity(0.3), radius: 20, x: 0, y: 10)
                     
+                    // Fused wordmark — "ApesTogether" with no space (brand
+                    // style, matches the Android v5 login). Two-tone split
+                    // stays: "Apes" primary, "Together" accent.
                     VStack(spacing: 8) {
                         Text("Apes")
                             .foregroundColor(.textPrimary) +
-                        Text(" Together")
+                        Text("Together")
                             .foregroundColor(.primaryAccent)
                     }
                     .font(.system(size: 36, weight: .bold))

@@ -282,6 +282,26 @@ Tracked here so nothing is dropped; checked off as resolved. Detail/answers land
 
 ---
 
+## 🔁 Session 29 (2026-07-14 PM) — earnings screenshot fixture, Android framing workflow, USER app-review fixes
+
+- **Notification + scale/comma screenshots captured** ✅ (USER, via the debug build — Session 28 zombie-socket explanation held: resend after the reconnect landed instantly).
+- **Earnings screenshot (the missing one) — how it works:** it's the **Screenshot Mode fixture** (aspirational-but-self-consistent Earnings card: 467 subs × $6.50 ≈ $3,036/mo), never real data — iOS = `forceScreenshotMode`/`-screenshotMode` in `SubscriptionsView.swift`; Android = `SHOW_SCREENSHOT_FIXTURE` in `SubscriptionsScreen.kt` (both `#if DEBUG`/`BuildConfig.DEBUG` gated, never ship enabled). **Flipped the Android flag, installed the fixture build on the Pixel, then reverted the source flag (uncommitted-flip workflow)** — the installed APK keeps rendering the fixture until the next install. USER: Subscriptions tab → capture → save as `06_earnings.png`.
+- **Android screenshot-framing workflow (USER asked):** SAME folder + script as iOS — `Downloads\raw_screenshots` (01…06 file names in `scripts/compose_appstore_screenshots_v2.ps1`) already has the iOS captures. For Play: (a) drop real Android captures over the matching numbers (e.g. notification → `02_alerts.png`, comma scale → `05_scale.png`, earnings → `06_earnings.png`); (b) add a Gemini-generated **Pixel mockup with solid-magenta screen** as `pixel_frame.png` in `Downloads`; (c) run the script with `-FrameFile "$env:USERPROFILE\Downloads\pixel_frame.png" -AndroidStatusBar -OutputDir "$env:USERPROFILE\Downloads\Play_Screenshots"` (auto 2:1 canvas for Play's cap; synthetic Android status bar overpaints any iOS chrome on reused captures).
+- **USER app-review batch (6 items):**
+  1. **Leaderboard vs private portfolio gains mismatch intraday (1W/3M) — BY DESIGN, USER self-confirmed:** leaderboard serves pre-computed `LeaderboardCache` (populated at market close from EOD snapshots) while the private portfolio computes live intraday values; they converge after close. No fix.
+  2. **(truncated in USER's message — "I'm going to gift…" — awaiting the rest.)**
+  3. **Daily Signups spike — EXPLAINED, label fix:** 'signups' counts EVERY new User row; in-app bot creations are `created_by='system'` (+ `apestogether_review`), so making bots spikes the purple line. Human growth = 'New Real Accounts'. Relabeled → **"Daily Signups (all accounts)"** in `admin_panel.html`.
+  4. **Activity Feed (Command Center) dates — FIXED:** timestamps now render `MMM d, hh:mm` via `toLocaleString` (was time-only, ambiguous across days).
+  5. **Top Creators error/retry after gifting subs — FIXED on both apps:** `/top-influencers` never 500s (returns empty on error), so the flash was a transient client-side failure (cold Vercel instance / network blip) surfaced as the full-screen error. Both `TopInfluencersViewModel`s (Android `TopInfluencersScreen.kt`, iOS `TopInfluencersView.swift`) now **retry once after 1.5s** before surfacing any error and **keep already-loaded entries on failed refreshes** (error screen only when there's nothing to show). Industry-filter change still resets to Loading (content invalid).
+  6. **iOS login wordmark "Apes Together" → fused "ApesTogether" — FIXED** in `LoginView.swift` (space removed, two-tone kept; matches Android v5's fused wordmark). Ships with the next Mac build.
+- **OPEN:**
+  - [ ] USER: capture the Android Earnings screenshot (fixture build is on the Pixel) → drop Android captures + `pixel_frame.png` → run the v2 script with the `-AndroidStatusBar` line above.
+  - [ ] USER: finish item 2 ("I'm going to gift…").
+  - [ ] iOS: next Mac session — build + verify badge chips, wordmark, Top Creators retry; then archive.
+  - [ ] Reinstall a clean debug build on the Pixel after the earnings capture (clears the fixture; any `installDebug` build now has the flag off).
+
+---
+
 ## ▶ RESUME HERE — Sunday (AI tokens reset)
 
 **Last worked: Session 11, 2026-06-04. Committed `7a21b67` (8 files, +254/−95).** Stopped because AI tokens ran low.

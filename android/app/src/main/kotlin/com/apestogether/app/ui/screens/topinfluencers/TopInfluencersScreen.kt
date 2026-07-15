@@ -61,6 +61,7 @@ import com.apestogether.app.ui.theme.TextMuted
 import com.apestogether.app.ui.theme.TextPrimary
 import com.apestogether.app.ui.theme.TextSecondary
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -563,19 +564,44 @@ class TopInfluencersViewModel @Inject constructor(
     private val _industry = MutableStateFlow("all")
     val industry: StateFlow<String> = _industry.asStateFlow()
 
-    fun load() {
+    /**
+     * Transient-failure resilience (a cold Vercel instance or a brief network
+     * blip previously flashed the full-screen error): failures are retried
+     * once after a short delay before ANY error is surfaced, and if content
+     * is already on screen a failed re-fetch keeps it instead of replacing
+     * it with the error state — subscriber counts changing mid-session must
+     * never kick the user out to a retry screen. [reset] forces the loading
+     * state when the current content is invalid (industry filter changed).
+     */
+    fun load(reset: Boolean = false) {
         viewModelScope.launch {
-            _state.value = TopInfluencersState.Loading
-            runCatching { apiService.getTopInfluencers(_industry.value, limit = 20) }
+            val hadData = !reset && _state.value is TopInfluencersState.Loaded
+            if (!hadData) _state.value = TopInfluencersState.Loading
+            var result = runCatching { apiService.getTopInfluencers(_industry.value, limit = 20) }
+            if (result.isFailure) {
+                delay(RETRY_DELAY_MS)
+                result = runCatching { apiService.getTopInfluencers(_industry.value, limit = 20) }
+            }
+            result
                 .onSuccess { _state.value = TopInfluencersState.Loaded(it.entries) }
-                .onFailure { _state.value = TopInfluencersState.Error(it.message ?: "Failed to load") }
+                .onFailure {
+                    // Keep showing existing content on a failed refresh; only
+                    // surface the error screen when there is nothing to show.
+                    if (!hadData) {
+                        _state.value = TopInfluencersState.Error(it.message ?: "Failed to load")
+                    }
+                }
         }
     }
 
     fun setIndustry(industry: String) {
         if (_industry.value == industry) return
         _industry.value = industry
-        load()
+        load(reset = true)
+    }
+
+    companion object {
+        private const val RETRY_DELAY_MS = 1_500L
     }
 }
 

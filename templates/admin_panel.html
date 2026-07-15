@@ -388,7 +388,8 @@ const CommandCenter = ({ api }) => {
               <span style={{ flex: 1, color: 'var(--text-primary)' }}>{e.detail}</span>
               {e.user && <Badge text={e.role === 'agent' ? '🤖 ' + e.user : e.user} color={e.role === 'agent' ? 'var(--blue)' : 'var(--accent)'} />}
               <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                {e.timestamp ? new Date(e.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                {/* Date + time (was time-only — ambiguous once the feed spans days). */}
+                {e.timestamp ? new Date(e.timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
               </span>
             </div>
           ))}
@@ -963,7 +964,10 @@ const UsersPage = ({ api }) => {
 
 // ─── Page: Platform Growth ──────────────────────────────────────────────────
 const METRICS = [
-  { key: 'signups',          label: 'Daily Signups',        color: '#8b5cf6' },
+  // 'signups' counts EVERY new User row — bots created in the admin panel and
+  // seeded accounts included — so it spikes when we create bots. 'New Real
+  // Accounts' (created_by != 'system') is the human-growth line.
+  { key: 'signups',          label: 'Daily Signups (all accounts)', color: '#8b5cf6' },
   { key: 'real_signups',     label: 'New Real Accounts',    color: '#3b82f6' },
   { key: 'bot_signups',      label: 'New Bots',             color: '#f59e0b' },
   { key: 'trades',           label: 'Daily Trades',         color: '#10b981' },

@@ -363,22 +363,39 @@ class TopInfluencersViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var error: String?
     
+    /// Transient-failure resilience (mirrors Android TopInfluencersViewModel):
+    /// failures are retried once after a short delay before any error is
+    /// surfaced, and a failed re-fetch keeps the entries already on screen —
+    /// subscriber counts changing mid-session must never kick the user out
+    /// to a retry screen.
     func loadInfluencers(industry: String = "all") async {
         isLoading = true
         error = nil
         
         do {
-            let response = try await APIService.shared.getTopInfluencers(industry: industry)
+            let response = try await fetchWithRetry(industry: industry)
             entries = response.entries
             // Only update available industries on first load (unfiltered)
             if industry == "all" || availableIndustries.isEmpty {
                 availableIndustries = response.availableIndustries
             }
         } catch {
-            self.error = error.localizedDescription
+            // Only surface the full-screen error when there is nothing to show.
+            if entries.isEmpty {
+                self.error = error.localizedDescription
+            }
         }
         
         isLoading = false
+    }
+    
+    private func fetchWithRetry(industry: String) async throws -> TopInfluencersResponse {
+        do {
+            return try await APIService.shared.getTopInfluencers(industry: industry)
+        } catch {
+            try await Task.sleep(nanoseconds: 1_500_000_000)
+            return try await APIService.shared.getTopInfluencers(industry: industry)
+        }
     }
 }
 
