@@ -74,6 +74,16 @@ public static class ChromaKey {
 # -AndroidStatusBar auto-drops the height to 2*width unless -CanvasH is passed.
 if($AndroidStatusBar -and -not $PSBoundParameters.ContainsKey('CanvasH')){ $CanvasH = $CanvasW*2 }
 $W=$CanvasW; $H=$CanvasH
+# Vertical design scale. All fixed vertical constants (font px, caption Y,
+# margins) were designed on the 1290x2796 App Store canvas. On a shorter canvas
+# (Play's 2:1 cap) the same pixel sizes read ~8% BIGGER when the two stores'
+# images are viewed at equal heights — so scale them by the height ratio to
+# keep the Android set visually identical to the iOS reference. 2796 canvas →
+# scale 1.0 (iOS output unchanged). Explicitly passed sizes are respected.
+$vScale=$H/2796.0
+if(-not $PSBoundParameters.ContainsKey('CaptionSize')){ $CaptionSize=[int][math]::Round($CaptionSize*$vScale) }
+if(-not $PSBoundParameters.ContainsKey('SubtitleSize')){ $SubtitleSize=[int][math]::Round($SubtitleSize*$vScale) }
+if(-not $PSBoundParameters.ContainsKey('CaptionTop')){ $CaptionTop=[int][math]::Round($CaptionTop*$vScale) }
 $colTop=[Drawing.Color]::FromArgb(11,15,25)
 $colBottom=[Drawing.Color]::FromArgb(22,33,62)
 $colGray=[Drawing.Color]::FromArgb(156,163,175)
@@ -81,7 +91,12 @@ $colDisc=[Drawing.Color]::FromArgb(175,255,255,255)   # brighter so the fine-pri
 
 $frames=@(
   @{file="01_leaderboard.png"; cap="The best AI and human traders."; sub="Every trade tracked the moment it's made."; disc="For educational purposes only. All trades on the platform are virtual using real market data."},
-  @{file="02_alerts.png"; cap="Real-time alerts. Every move."; sub="Push notifications when traders trade."; disc=""},
+  # sb='noclock': lock-screen capture — the strip still gets overpainted (hides
+  # carrier text like "No SIM — Emergency calls only") and the right-side icons
+  # are drawn, but NO status-bar clock: it would contradict the lock screen's
+  # own big clock (Pixel lock screens don't show one anyway). sb=$false skips
+  # the synthetic bar entirely.
+  @{file="02_alerts.png"; cap="Real-time alerts. Every move."; sub="Push notifications when traders trade."; disc=""; sb="noclock"},
   @{file="03_tracked.png"; cap="Tracked vs. S&P 500."; sub="Every period. Every portfolio. No spin."; disc=""},
   @{file="04_filter.png"; cap="Filter by sector or cap."; sub="Find traders who match your interest."; disc=""},
   @{file="05_scale.png"; cap="Scale any portfolio."; sub="Adjust to fit your size. Frozen at apply."; disc=""},
@@ -173,17 +188,19 @@ function Draw-Header($g,$cap,$sub,[single]$deviceTop){
   $gap=[single]($capLH*0.30)
   $blockH=($capLines.Count*$capLH)+$gap+($subLines.Count*$subLH)
   $top=[single]$CaptionTop
-  $maxTop=$deviceTop-48-$blockH            # never let the header touch the phone
-  if($top -gt $maxTop){$top=[Math]::Max([single]48,$maxTop)}
+  $pad=[single](48*$vScale)
+  $maxTop=$deviceTop-$pad-$blockH          # never let the header touch the phone
+  if($top -gt $maxTop){$top=[Math]::Max($pad,$maxTop)}
   $afterCap=Draw-CenteredLines $g $capLines $capFont $whiteBrush $top $capLH
   Draw-CenteredLines $g $subLines $subFont $grayBrush ($afterCap+$gap) $subLH | Out-Null
 }
 function Draw-Disclaimer($g,$disc,[single]$deviceBottom){
   if([string]::IsNullOrWhiteSpace($disc)){return}
-  $maxW=1130; $bottomMargin=56; $gapAbove=56   # gapAbove clears the phone's bottom bezel
+  $maxW=1130; $bottomMargin=[int](56*$vScale); $gapAbove=[int](56*$vScale)   # gapAbove clears the phone's bottom bezel
   # Shrink-to-fit so the disclaimer always lands in the navy band BELOW the device.
-  # Larger base size (32px) for legibility; balanced wrap avoids orphan words like "data."
-  for($fs=32; $fs -ge 26; $fs--){
+  # Larger base size (32px @ reference height) for legibility; balanced wrap
+  # avoids orphan words like "data."
+  for($fs=[int][math]::Round(32*$vScale); $fs -ge [int][math]::Round(26*$vScale); $fs--){
     $f=New-Object Drawing.Font($bodyFamily,$fs,[Drawing.FontStyle]::Regular,[Drawing.GraphicsUnit]::Pixel)
     $lines=Get-BalancedLines $g $disc $f $maxW
     $lh=$f.GetHeight($g)*1.28
@@ -195,7 +212,7 @@ function Draw-Disclaimer($g,$disc,[single]$deviceBottom){
     $f.Dispose()
   }
   # Even at the smallest size it collides with the device -> draw just below it and warn.
-  $f=New-Object Drawing.Font($bodyFamily,26,[Drawing.FontStyle]::Regular,[Drawing.GraphicsUnit]::Pixel)
+  $f=New-Object Drawing.Font($bodyFamily,[int][math]::Round(26*$vScale),[Drawing.FontStyle]::Regular,[Drawing.GraphicsUnit]::Pixel)
   $lines=Get-BalancedLines $g $disc $f $maxW
   $lh=$f.GetHeight($g)*1.28
   $short=[int]((($deviceBottom+$gapAbove)+($lines.Count*$lh)+$bottomMargin)-$H)
@@ -214,14 +231,17 @@ function Fill-Gradient($g){
 # with a synthetic Android status bar (left clock; right signal / wifi / battery),
 # so the same captures read as Android behind the Pixel frame. The strip background
 # is sampled from the screenshot's top corners so it blends with the app header.
-function Draw-AndroidStatusBar($g,[int]$w,[int]$stripH,[Drawing.Color]$fg,[Drawing.FontFamily]$fam){
+function Draw-AndroidStatusBar($g,[int]$w,[int]$stripH,[Drawing.Color]$fg,[Drawing.FontFamily]$fam,[bool]$noClock=$false){
   $brush=New-Object Drawing.SolidBrush($fg)
   $pad=[int][math]::Round($w*0.055)
-  # clock (left)
-  $clockPx=[int][math]::Round($stripH*0.34)
-  $cf=New-Object Drawing.Font($fam,$clockPx,[Drawing.FontStyle]::Bold,[Drawing.GraphicsUnit]::Pixel)
-  $txt="9:41"; $tsz=$g.MeasureString($txt,$cf)
-  $g.DrawString($txt,$cf,$brush,[single]$pad,[single](($stripH-$tsz.Height)/2)); $cf.Dispose()
+  # clock (left) — skipped in noclock mode (lock-screen frames: the big lock
+  # clock is the only time shown, matching real Pixel behavior)
+  if(-not $noClock){
+    $clockPx=[int][math]::Round($stripH*0.34)
+    $cf=New-Object Drawing.Font($fam,$clockPx,[Drawing.FontStyle]::Bold,[Drawing.GraphicsUnit]::Pixel)
+    $txt="9:41"; $tsz=$g.MeasureString($txt,$cf)
+    $g.DrawString($txt,$cf,$brush,[single]$pad,[single](($stripH-$tsz.Height)/2)); $cf.Dispose()
+  }
   # right-side icons: battery, then wifi, then signal (laid out right -> left)
   $iconH=[int][math]::Round($stripH*0.30)
   $iy=[int](($stripH-$iconH)/2)
@@ -259,7 +279,7 @@ function Draw-AndroidStatusBar($g,[int]$w,[int]$stripH,[Drawing.Color]$fg,[Drawi
   }
   $pen.Dispose(); $brush.Dispose()
 }
-function Androidize-Shot([Drawing.Image]$shot,[Drawing.FontFamily]$fam){
+function Androidize-Shot([Drawing.Image]$shot,[Drawing.FontFamily]$fam,[bool]$noClock=$false){
   $w=$shot.Width; $h=$shot.Height
   $bmp=New-Object Drawing.Bitmap($w,$h)
   $g=[Drawing.Graphics]::FromImage($bmp)
@@ -275,7 +295,7 @@ function Androidize-Shot([Drawing.Image]$shot,[Drawing.FontFamily]$fam){
   $g.FillRectangle((New-Object Drawing.SolidBrush($bg)),0,0,$w,$stripH)
   $lum=0.299*$bg.R+0.587*$bg.G+0.114*$bg.B
   $fg=if($lum -lt 140){[Drawing.Color]::White}else{[Drawing.Color]::FromArgb(20,20,20)}
-  Draw-AndroidStatusBar $g $w $stripH $fg $fam
+  Draw-AndroidStatusBar $g $w $stripH $fg $fam $noClock
   $g.Dispose()
   return $bmp
 }
@@ -291,14 +311,23 @@ if(Test-Path $FrameFile){
   $baseFrame=New-Object Drawing.Bitmap($W,$H)
   $gg=[Drawing.Graphics]::FromImage($baseFrame)
   $gg.InterpolationMode=[Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-  # Aspect-preserving COVER (not a stretch): a frame whose ratio differs from
-  # the canvas (e.g. 704x1520 Pixel mockup on the 2:1 Play canvas) must not
-  # distort the device — scale uniformly, center, and crop the overflow (only
-  # empty gradient at the frame's edges is lost). Ratio-matched frames (the
-  # iOS set) render identically to the old full-canvas stretch.
-  $fr=[math]::Max($W/[double]$src.Width,$H/[double]$src.Height)
-  $fdw=[int][math]::Round($src.Width*$fr); $fdh=[int][math]::Round($src.Height*$fr)
-  $gg.DrawImage($src,[int](($W-$fdw)/2),[int](($H-$fdh)/2),$fdw,$fdh); $gg.Dispose(); $src.Dispose()
+  # Fit-HEIGHT (uniform scale) so the mockup's vertical proportions — the
+  # breathing room above/below the device that the caption and disclaimer
+  # live in — are preserved on ANY canvas ratio. (Cover-cropping on the
+  # squatter 2:1 Play canvas ate ~200px of that room and rendered the phone
+  # proportionally taller than the iOS reference.) Horizontal deficit is
+  # filled by stretching the frame's outermost 1px columns — seamless on a
+  # smooth gradient background; horizontal overflow is center-cropped.
+  # Ratio-matched frames (the iOS set) render as before.
+  $fr=$H/[double]$src.Height
+  $fdw=[int][math]::Round($src.Width*$fr)
+  $fox=[int][math]::Floor(($W-$fdw)/2.0)
+  if($fox -gt 0){
+    $gg.DrawImage($src,(New-Object Drawing.Rectangle(0,0,$fox,$H)),0,0,1,$src.Height,[Drawing.GraphicsUnit]::Pixel)
+    $gg.DrawImage($src,(New-Object Drawing.Rectangle(($fox+$fdw),0,($W-$fox-$fdw),$H)),($src.Width-1),0,1,$src.Height,[Drawing.GraphicsUnit]::Pixel)
+  }
+  $gg.DrawImage($src,(New-Object Drawing.Rectangle($fox,0,$fdw,$H)),0,0,$src.Width,$src.Height,[Drawing.GraphicsUnit]::Pixel)
+  $gg.Dispose(); $src.Dispose()
   $bd=$baseFrame.LockBits((New-Object Drawing.Rectangle(0,0,$W,$H)),[Drawing.Imaging.ImageLockMode]::ReadWrite,[Drawing.Imaging.PixelFormat]::Format32bppArgb)
   $stride=$bd.Stride
   $buf=New-Object byte[] ($stride*$H)
@@ -339,7 +368,7 @@ foreach($f in $frames){
   $shot=$null
   if(Test-Path $imgPath){
     $shotRaw=[Drawing.Image]::FromFile($imgPath)
-    if($AndroidStatusBar){ $shot=Androidize-Shot $shotRaw $bodyFamily; $shotRaw.Dispose() }
+    if($AndroidStatusBar -and ($f.sb -ne $false)){ $shot=Androidize-Shot $shotRaw $bodyFamily ($f.sb -eq 'noclock'); $shotRaw.Dispose() }
     else{ $shot=$shotRaw }
   }
 
