@@ -291,7 +291,14 @@ if(Test-Path $FrameFile){
   $baseFrame=New-Object Drawing.Bitmap($W,$H)
   $gg=[Drawing.Graphics]::FromImage($baseFrame)
   $gg.InterpolationMode=[Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-  $gg.DrawImage($src,0,0,$W,$H); $gg.Dispose(); $src.Dispose()
+  # Aspect-preserving COVER (not a stretch): a frame whose ratio differs from
+  # the canvas (e.g. 704x1520 Pixel mockup on the 2:1 Play canvas) must not
+  # distort the device — scale uniformly, center, and crop the overflow (only
+  # empty gradient at the frame's edges is lost). Ratio-matched frames (the
+  # iOS set) render identically to the old full-canvas stretch.
+  $fr=[math]::Max($W/[double]$src.Width,$H/[double]$src.Height)
+  $fdw=[int][math]::Round($src.Width*$fr); $fdh=[int][math]::Round($src.Height*$fr)
+  $gg.DrawImage($src,[int](($W-$fdw)/2),[int](($H-$fdh)/2),$fdw,$fdh); $gg.Dispose(); $src.Dispose()
   $bd=$baseFrame.LockBits((New-Object Drawing.Rectangle(0,0,$W,$H)),[Drawing.Imaging.ImageLockMode]::ReadWrite,[Drawing.Imaging.PixelFormat]::Format32bppArgb)
   $stride=$bd.Stride
   $buf=New-Object byte[] ($stride*$H)
