@@ -16,10 +16,14 @@
 # USAGE
 #   powershell -NoProfile -ExecutionPolicy Bypass -File compose_appstore_screenshots_v2.ps1
 #
-#   Android (Google Play) variant — reuse the SAME iOS captures behind an Android
-#   (Pixel) frame, swapping the iOS status bar + Dynamic Island for a synthetic
+#   Android (Google Play) variant — SEPARATE input folder so the iOS set stays
+#   untouched for future tweaks (decision 2026-07-14). `raw_screenshots_android`
+#   starts as a copy of the iOS captures; overwrite the Android-native ones
+#   (02_alerts / 05_scale / 06_earnings) and drop a Pixel mockup with a solid
+#   MAGENTA screen as `frame.png` in that folder. -AndroidStatusBar overpaints
+#   any iOS status bar + Dynamic Island on reused captures with a synthetic
 #   Android status bar (left clock; right signal/wifi/battery):
-#     ... -FrameFile "$env:USERPROFILE\Downloads\pixel_frame.png" -AndroidStatusBar `
+#     ... -InputDir "$env:USERPROFILE\Downloads\raw_screenshots_android" -AndroidStatusBar `
 #         -OutputDir "$env:USERPROFILE\Downloads\Play_Screenshots"
 #   -AndroidStatusBar auto-uses a 2:1 canvas (Play caps screenshots at 2:1).
 param(
