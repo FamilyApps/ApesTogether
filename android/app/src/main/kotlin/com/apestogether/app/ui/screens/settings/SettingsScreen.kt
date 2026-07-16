@@ -29,7 +29,9 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.automirrored.filled.Help
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.People
@@ -166,13 +168,28 @@ fun SettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
-            // ── Account ──
-            SettingsSection(title = "Account") {
+            // ── Account & Privacy ──
+            // The section name and the two rows below are referenced verbatim by
+            // the Privacy Policy (§9.1 / §11.7: "Request My Data or Delete My
+            // Account options in Account & Privacy settings") — keep in sync.
+            SettingsSection(title = "Account & Privacy") {
                 user?.let { u ->
                     SettingsRow(label = "Email", value = u.email)
                     Divider()
                     SettingsRow(label = "Username", value = u.username)
+                    Divider()
                 }
+                NavRow(
+                    icon = Icons.Default.Download,
+                    label = "Request My Data",
+                    onClick = { openMailTo(context, "support@apestogether.ai", subject = "Data Request") },
+                )
+                Divider()
+                NavRow(
+                    icon = Icons.Default.Delete,
+                    label = "Delete My Account",
+                    onClick = { showDeleteConfirm = true },
+                )
             }
 
             // ── Portfolio Link ──
@@ -280,18 +297,9 @@ fun SettingsScreen(
             // ── Sign Out ──
             SignOutButton(onClick = { showSignOutConfirm = true })
 
-            // ── Delete Account ──
-            Text(
-                text = "Delete Account",
-                color = TextMuted,
-                fontSize = 13.sp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { showDeleteConfirm = true }
-                    .padding(8.dp),
-            )
-
             // ── Version ──
+            // (Delete My Account lives in the Account & Privacy section above,
+            // matching the Privacy Policy's description of the flow.)
             Text(
                 text = "Version 1.0",
                 color = TextMuted,
@@ -331,10 +339,10 @@ fun SettingsScreen(
     if (showDeleteConfirm) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("Delete Account", color = TextPrimary) },
+            title = { Text("Delete My Account", color = TextPrimary) },
             text = {
                 Text(
-                    "This will permanently delete your account, portfolio data, and all subscriptions. This action cannot be undone.",
+                    "Your account will be hidden immediately and permanently deleted after a 30-day grace period. To restore it within that window, email support@apestogether.ai — signing back in won't restore it. Paid subscriptions are not cancelled automatically; cancel them in Google Play to stop billing.",
                     color = TextSecondary,
                 )
             },
@@ -569,8 +577,13 @@ private fun openUrl(context: Context, url: String) {
     runCatching { context.startActivity(intent) }
 }
 
-private fun openMailTo(context: Context, address: String) {
-    val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:$address"))
+private fun openMailTo(context: Context, address: String, subject: String? = null) {
+    val uri = if (subject != null) {
+        Uri.parse("mailto:$address?subject=${Uri.encode(subject)}")
+    } else {
+        Uri.parse("mailto:$address")
+    }
+    val intent = Intent(Intent.ACTION_SENDTO, uri)
     runCatching { context.startActivity(intent) }
 }
 

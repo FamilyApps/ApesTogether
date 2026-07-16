@@ -1319,7 +1319,7 @@ struct BlurredHoldingsTeaser: View {
                         .foregroundColor(.primaryAccent)
                 }
                 
-                Text("See every trade, instantly")
+                Text("See every trade, in real time")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(.textPrimary)
                 

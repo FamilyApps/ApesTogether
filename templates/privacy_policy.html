@@ -6,159 +6,358 @@
 <div class="container mt-4">
     <div class="row justify-content-center">
         <div class="col-lg-10">
-            <h1 class="mb-4">Privacy Policy</h1>
-            <p class="text-muted"><strong>Effective Date:</strong> July 6, 2026</p>
-            
+            <h1 class="mb-2">ApesTogether Privacy Policy</h1>
+            <p class="mb-1"><em>A Service of Family Apps LLC</em></p>
+            <p class="text-muted mb-1"><strong>Effective Date:</strong> July 15, 2026</p>
+            <p class="text-muted"><em>Includes disclosures required under the California Consumer Privacy Act, as amended by the California Privacy Rights Act</em></p>
+            {% if gpc_detected %}
+            <div class="alert alert-success">
+                <strong>Global Privacy Control detected.</strong> Your browser sent an opt-out preference signal (GPC). We treat it as a valid request to opt out of the sale or sharing of your personal information, as described in Section 6 below. (We do not sell or share personal information.)
+            </div>
+            {% endif %}
             <div class="legal-content">
-                <h2>1. Information We Collect</h2>
-                
-                <h3>1.1 Personal Information</h3>
+                <p>This Privacy Policy (&ldquo;Policy&rdquo;) describes how Family Apps LLC (&ldquo;Family Apps,&rdquo; &ldquo;Company,&rdquo; &ldquo;we,&rdquo; &ldquo;us,&rdquo; or &ldquo;our&rdquo;) collects, uses, discloses, and protects personal information in connection with the ApesTogether mobile application, the apestogether.ai website, and related services (collectively, the &ldquo;Service&rdquo;). ApesTogether allows users to track their own investment portfolios, self-report their trading activity, follow other users&rsquo; verified trading performance on a public leaderboard, and, for eligible users, monetize a trading track record through paid subscriptions.</p>
+                <p>This Policy applies to all visitors to and users of the Service in the United States, including residents of California and other states with comprehensive consumer privacy laws, as addressed in Sections 11 and 12 below. This Policy is incorporated by reference into, and should be read together with, our <a href="/terms-of-service">Terms of Service</a>. Capitalized terms not defined in this Policy have the meanings given to them in the Terms of Service.</p>
+
+                <h2>Contents</h2>
+                <ol class="pp-toc">
+                    <li><a href="#s1">Definitions</a></li>
+                    <li><a href="#s2">Personal Information We Collect</a></li>
+                    <li><a href="#s3">Sources of Personal Information</a></li>
+                    <li><a href="#s4">How We Use Personal Information</a></li>
+                    <li><a href="#s5">How We Disclose Personal Information</a></li>
+                    <li><a href="#s6">Cookies, Analytics, and Advertising Technologies</a></li>
+                    <li><a href="#s7">Payment and Tax Information</a></li>
+                    <li><a href="#s8">Data Security</a></li>
+                    <li><a href="#s9">Data Retention</a></li>
+                    <li><a href="#s10">Your Privacy Rights and Choices (All Users)</a></li>
+                    <li><a href="#s11">California Privacy Rights (CCPA/CPRA)</a></li>
+                    <li><a href="#s12">Additional State Privacy Rights</a></li>
+                    <li><a href="#s13">Children&rsquo;s Privacy</a></li>
+                    <li><a href="#s14">Geographic Scope</a></li>
+                    <li><a href="#s15">Third-Party Links and Services</a></li>
+                    <li><a href="#s16">Changes to This Policy</a></li>
+                    <li><a href="#s17">Contact Us</a></li>
+                </ol>
+
+                <h2 id="s1">1. Definitions</h2>
                 <ul>
-                    <li>Name, email address, and contact information</li>
-                    <li>Tax identification information (legal name, mailing address, and SSN/EIN via Form W-9) &mdash; collected only from creators who receive payouts</li>
-                    <li>In-app purchase records for subscriptions. Payments are processed by the Apple App Store and Google Play; we do <strong>not</strong> collect or store your card or bank account details</li>
-                    <li>Portfolio and investment data you choose to share</li>
+                    <li><strong>&ldquo;Personal information&rdquo;</strong> means information that identifies, relates to, describes, is reasonably capable of being associated with, or could reasonably be linked, directly or indirectly, with a particular consumer, household, or device, as further defined by applicable law, including the California Consumer Privacy Act as amended by the California Privacy Rights Act (collectively, the &ldquo;CCPA&rdquo;).</li>
+                    <li><strong>&ldquo;Sell&rdquo; or &ldquo;sale&rdquo;</strong> means selling, renting, releasing, disclosing, disseminating, making available, transferring, or otherwise communicating personal information to a third party for monetary or other valuable consideration.</li>
+                    <li><strong>&ldquo;Share&rdquo; or &ldquo;sharing&rdquo;</strong> means disclosing or making available personal information to a third party for cross-context behavioral advertising, whether or not for monetary consideration.</li>
+                    <li><strong>&ldquo;Service provider&rdquo;</strong> means an entity that processes personal information on our behalf under a written contract that prohibits it from using the information for any purpose other than performing the services specified in that contract.</li>
+                    <li><strong>&ldquo;Content Creator&rdquo;</strong> means a user who reports and shares portfolio and trading information through the Service, including on a paid-subscription basis.</li>
+                    <li><strong>&ldquo;Subscriber&rdquo;</strong> means a user who pays to view a Content Creator&rsquo;s shared portfolio and trading information.</li>
+                    <li><strong>&ldquo;Sensitive personal information&rdquo;</strong> has the meaning given in Cal. Civ. Code &sect; 1798.140(ae) and, as relevant to the Service, includes government identification numbers submitted for tax purposes and account log-in credentials.</li>
                 </ul>
 
-                <h3>1.2 Financial Information</h3>
+                <h2 id="s2">2. Personal Information We Collect</h2>
+                <h3>2.1 Information You Provide Directly</h3>
                 <ul>
-                    <li>Portfolio holdings, transactions, and performance data</li>
-                    <li>Subscription payment history</li>
-                    <li>Payout records and tax reporting data</li>
+                    <li><strong>Account and profile information:</strong> email address, username, display name, and, if you choose to provide it, phone number, together with your password (stored only as a salted cryptographic hash &mdash; we never store passwords in plain text). If you register or sign in through a third-party identity provider, we receive the basic profile information (such as name and email) that the provider shares with us.</li>
+                    <li><strong>Portfolio and trading information:</strong> the investment portfolio you upload when you join, and the security and quantity of each buy or sell transaction you subsequently self-report. We independently record the prevailing market price at the time you submit a trade to calculate performance; we do not accept retroactive purchase prices for historical gains. Aggregated rankings and leaderboard placements are inferences we generate from this reported data.</li>
+                    <li><strong>Subscription and social-graph information:</strong> the Content Creators you subscribe to and, if you are a Content Creator, the subscriber records necessary to administer and bill subscriptions.</li>
+                    <li><strong>Creator tax and payout information (Content Creators who receive payouts only):</strong> your legal name, business name (if applicable), tax classification, and mailing address, submitted via IRS Form W-9, together with information needed to calculate payouts and prepare Form 1099-NEC. We store only the last four digits of your Social Security Number or EIN in our own systems, in encrypted form. Your full Social Security Number or EIN is never stored in our systems at all &mdash; it is transmitted directly and securely to our third-party accounting and tax-filing provider (currently Xero), which serves as the system of record for the complete number.</li>
+                    <li><strong>Communications:</strong> information you provide when contacting customer support, completing surveys, participating in feature polls, or otherwise corresponding with us.</li>
+                </ul>
+                <h3>2.2 Information Collected Automatically</h3>
+                <ul>
+                    <li><strong>Device and usage data:</strong> device type, operating system and version, app version, unique device and push-notification identifiers, crash logs, and diagnostic data.</li>
+                    <li><strong>IP address</strong> and, derived from it, your approximate (city/region-level) location, used primarily to confirm eligibility for the Service, which is currently limited to users located in the United States. We do not collect precise geolocation data (such as exact GPS coordinates).</li>
+                    <li><strong>App and website usage information:</strong> screens or pages viewed, features used, session duration, and similar analytics.</li>
+                    <li><strong>Cookies and similar technologies</strong> on apestogether.ai, described in Section 6.</li>
+                </ul>
+                <h3>2.3 Information We Receive From Third Parties</h3>
+                <ul>
+                    <li><strong>Apple App Store and Google Play:</strong> confirmation of in-app purchases, subscription status, and renewal or cancellation events. We do not receive or store your payment card or bank account numbers; payment processing is performed directly by Apple or Google under their own privacy policies.</li>
+                    <li><strong>Market data providers:</strong> real-time and historical securities pricing used solely to value the trades you report; this is not personal information about you.</li>
+                    <li><strong>Identity or authentication providers,</strong> if you register or sign in using a third-party account.</li>
                 </ul>
 
-                <h3>1.3 Usage Information</h3>
+                <h2 id="s3">3. Sources of Personal Information</h2>
+                <p>We collect the personal information described in Section 2 (a) directly from you, such as when you register, upload a portfolio, report a trade, or contact support; (b) automatically, through your use of the Service; and (c) from third parties, including Apple, Google, market-data providers, and identity providers.</p>
+
+                <h2 id="s4">4. How We Use Personal Information</h2>
+                <p>We use personal information for the following business and commercial purposes:</p>
                 <ul>
-                    <li>Platform usage analytics</li>
-                    <li>Content viewing and subscription patterns</li>
-                    <li>Device and browser information</li>
+                    <li><strong>Providing, operating, and maintaining the Service,</strong> including creating and authenticating accounts, tracking and calculating portfolio performance, operating the leaderboard, administering subscriptions between Content Creators and Subscribers, and sending real-time push notifications when a Content Creator you follow reports a trade.</li>
+                    <li><strong>Processing payments and creator payouts,</strong> including administering in-app billing through Apple App Store and Google Play, calculating and disbursing Creator Share payments, collecting and validating Form W-9 information, applying IRS backup withholding when required, and preparing and filing Form 1099-NEC.</li>
+                    <li><strong>Complying with tax, accounting, and other legal obligations,</strong> and maintaining the records those obligations require.</li>
+                    <li><strong>Maintaining the security and integrity of the Service,</strong> including verifying reported performance data and detecting and preventing fraud, manipulated or falsified information, unauthorized access, and other violations of our Terms of Service.</li>
+                    <li><strong>Communicating with you,</strong> including sending service and transactional messages, responding to support requests, and, where you have not opted out, sending product updates or promotional communications.</li>
+                    <li><strong>Improving and developing the Service</strong> through analytics, testing, and troubleshooting.</li>
+                    <li><strong>Exercising or defending legal claims</strong> and enforcing our Terms of Service and this Policy.</li>
                 </ul>
-
-                <h2>2. How We Use Your Information</h2>
-                
-                <h3>2.1 Service Provision</h3>
+                <p>We do not use sensitive personal information for any purpose beyond those permitted without additional consumer consent under Cal. Civ. Code &sect; 1798.121(a), including providing the Service, verifying identity, ensuring security, and complying with legal and tax obligations.</p>
+                <h2 id="s5">5. How We Disclose Personal Information</h2>
+                <h3>5.1 With Other Users</h3>
+                <p>If you are a Content Creator, the portfolio holdings, trades, and performance data you choose to report are visible to your Subscribers, and your ranking and headline performance metrics may appear publicly on the leaderboard. You control what you share by choosing what to report in the app. If you are a Subscriber, your subscription activity is used to operate the Service but is not displayed publicly.</p>
+                <h3>5.2 With Service Providers</h3>
                 <ul>
-                    <li>Provide portfolio tracking and subscription services</li>
-                    <li>Process payments and subscriptions</li>
-                    <li>Enable content sharing between users</li>
+                    <li>Apple App Store and Google Play, for billing and subscription management.</li>
+                    <li>Our accounting and tax-filing service provider (currently Xero), for financial record-keeping and preparation of Form 1099-NEC. This provider is the system of record for full taxpayer identification numbers submitted on Form W-9.</li>
+                    <li>Cloud hosting, database, and infrastructure providers that store and process Service data on our behalf.</li>
+                    <li>Push-notification, product-analytics, and customer-support tool providers.</li>
                 </ul>
-
-                <h3>2.2 Tax Compliance and Legal Obligations</h3>
+                <p>These service providers may access personal information only as needed to perform services for us and are contractually restricted from using it for any other purpose.</p>
+                <h3>5.3 For Legal and Regulatory Compliance</h3>
                 <ul>
-                    <li>Comply with IRS reporting requirements (Form 1099-NEC)</li>
-                    <li>Process backup withholding when required</li>
-                    <li>Maintain records for tax and legal compliance</li>
-                    <li>Share information with tax authorities as required by law</li>
+                    <li>With the IRS and other tax authorities, as required for tax reporting and compliance.</li>
+                    <li>With law enforcement, regulators, or other parties when required by law, subpoena, or court order, or when we believe disclosure is necessary to protect the rights, property, or safety of the Company, our users, or others.</li>
                 </ul>
+                <h3>5.4 Business Transfers</h3>
+                <p>If we are involved in a merger, acquisition, financing, reorganization, or sale of all or a portion of our assets, personal information may be transferred as part of that transaction, subject to this Policy or a successor policy.</p>
+                <h3>5.5 Sale and Sharing of Personal Information</h3>
+                <p>We do not sell personal information for monetary or other valuable consideration. We do not currently use third-party advertising technologies on apestogether.ai or in the app that would constitute &ldquo;sharing&rdquo; of personal information for cross-context behavioral advertising under the CCPA. If this changes, we will update this Policy and provide the notices and opt-out mechanisms required by law, as described in Section 11.4.</p>
 
-                <h3>2.3 Business Operations</h3>
+                <h2 id="s6">6. Cookies, Analytics, and Advertising Technologies</h2>
+                <p>The apestogether.ai website uses cookies and similar technologies for several purposes:</p>
                 <ul>
-                    <li>Calculate and process creator payments</li>
-                    <li>Prevent fraud and ensure platform security</li>
-                    <li>Improve service functionality</li>
+                    <li><strong>Strictly necessary cookies,</strong> which support core functions such as login sessions and account security.</li>
+                    <li><strong>Functional cookies,</strong> which remember your preferences and settings.</li>
+                    <li><strong>Analytics and performance cookies,</strong> which help us understand how the site and leaderboard are used and measure performance.</li>
                 </ul>
+                <p>Our mobile app similarly uses analytics and crash-reporting tools to understand usage and improve the Service. We do not currently use these technologies for third-party targeted or cross-context behavioral advertising. You can control website cookies through your browser settings, though disabling certain cookies may affect site functionality. Where you visit apestogether.ai with a browser that broadcasts an opt-out preference signal, including the Global Privacy Control (&ldquo;GPC&rdquo;), we treat that signal as a valid request to opt out of the sale or sharing of your personal information, consistent with 11 Cal. Code Regs. &sect; 7025.</p>
 
-                <h2>3. Information Sharing</h2>
-                
-                <h3>3.1 With Other Users</h3>
+                <h2 id="s7">7. Payment and Tax Information</h2>
+                <p>All subscription payments are processed directly by the Apple App Store or Google Play; we receive confirmation of the transaction but do not collect or store your payment card or bank account details. Content Creators who receive payouts must submit a valid IRS Form W-9 before payments are disbursed. We store your W-9 legal name, business name, tax classification, mailing address, and only the last four digits of your Social Security Number or EIN in our own systems, protected by application-level (column-level) encryption. Your full Social Security Number or EIN is never stored locally in our systems &mdash; it is transmitted directly to our third-party accounting and tax-filing provider (currently Xero), which serves as the system of record for the complete number and for Form 1099-NEC filing. We issue Form 1099-NEC to any Content Creator who receives $600 or more in payments during a calendar year, as required by the IRS.</p>
+
+                <h2 id="s8">8. Data Security</h2>
+                <p>We maintain technical and organizational safeguards designed to protect personal information, including:</p>
                 <ul>
-                    <li>Portfolio information you choose to make available to subscribers</li>
-                    <li>Public profile information for content creators</li>
+                    <li>Encryption of data in transit using TLS.</li>
+                    <li>Encryption of data at rest, provided at the disk level by our hosting and database infrastructure providers.</li>
+                    <li>Additional application-level (column-level) encryption using industry-standard symmetric encryption (Fernet/AES), applied specifically to W-9 identity and address information and accessible only through a dedicated, restricted encryption key.</li>
+                    <li>Secure, salted, one-way hashing of account passwords &mdash; we never store passwords in plain text.</li>
+                    <li>Storage of only the last four digits of taxpayer identification numbers within our systems; full Social Security Numbers and EINs are never stored locally and are transmitted directly to our third-party accounting and tax-filing provider.</li>
+                    <li>Access controls limiting personal information access to personnel and service providers who need it to perform their functions.</li>
                 </ul>
+                <p>No method of transmission over the internet or electronic storage is completely secure, and we cannot guarantee the absolute security of your information. If we experience a security incident affecting your personal information, we will notify you and any applicable regulators as required by law.</p>
 
-                <h3>3.2 With Service Providers</h3>
+                <h2 id="s9">9. Data Retention</h2>
+                <p>We retain personal information only as long as reasonably necessary for the purposes described in this Policy, taking into account (a) how long the information is needed to provide the Service, (b) statutory retention requirements, including tax and accounting recordkeeping rules, and (c) the need to resolve disputes and enforce our agreements.</p>
+                <h3>9.1 Account Deletion</h3>
+                <p>You may request deletion of your account at any time, either in the app (Account &amp; Privacy &gt; Delete My Account), on our <a href="/delete-account">website</a>, or by emailing <a href="mailto:support@apestogether.ai">support@apestogether.ai</a>. Your request initiates a soft delete: your account is immediately hidden from leaderboards, public pages, and subscriber views and can no longer sign in. After a 30-day grace period, your content is deleted and your account is irreversibly anonymized. You may request restoration within the 30-day grace period by emailing support@apestogether.ai; simply signing back in will not restore a deleted account. Deleting your account does not cancel a paid subscription; subscriptions must be cancelled separately through the App Store or Google Play.</p>
+                <h3>9.2 Records Retained After Deletion</h3>
                 <ul>
-                    <li>App stores (Apple App Store and Google Play) for in-app purchase and subscription billing</li>
-                    <li>Accounting software (Xero) for financial record keeping and 1099 tax reporting</li>
+                    <li>For Content Creators who received payouts: your W-9 identity information (legal name, business name, tax classification, and mailing address), in-app purchase records, and associated Form 1099-NEC and payout records, retained for 7 years following the applicable tax year, consistent with IRS recordkeeping requirements for payee and payment records. Because these records must identify a payee for tax purposes, they are retained in full rather than anonymized, and access to them is restricted to tax, accounting, and legal-compliance purposes.</li>
+                    <li>If you never received creator payouts, we do not retain W-9, taxpayer ID, or Form 1099 records for you beyond the account-deletion process described in Section 9.1.</li>
                 </ul>
-
-                <h3>3.3 For Legal Compliance</h3>
+                <h2 id="s10">10. Your Privacy Rights and Choices (All Users)</h2>
                 <ul>
-                    <li>Tax authorities (IRS) for required reporting</li>
-                    <li>Law enforcement when required by law</li>
-                    <li>Legal proceedings when necessary</li>
+                    <li><strong>Access and correction:</strong> review and update your account information in the app at any time, or request a copy of, or a correction to, your personal information by emailing <a href="mailto:support@apestogether.ai">support@apestogether.ai</a>.</li>
+                    <li><strong>Sharing controls:</strong> as a Content Creator, you control what portfolio and trading information you choose to report and share.</li>
+                    <li><strong>Marketing preferences:</strong> opt out of promotional emails and manage push-notification preferences in the app or through the unsubscribe link in our emails.</li>
+                    <li><strong>Deletion:</strong> see Section 9.1 above.</li>
                 </ul>
+                <p>Residents of California and certain other states have additional statutory rights described in Sections 11 and 12.</p>
 
-                <h3>3.4 Business Transfers</h3>
-                <ul>
-                    <li>Information may be transferred in case of merger, acquisition, or sale</li>
-                </ul>
-
-                <h2>4. Tax Information Handling</h2>
-                
-                <h3>4.1 W-9 Collection</h3>
-                <ul>
-                    <li>We collect Form W-9 information for tax reporting purposes</li>
-                    <li>This information is securely stored and used only for tax compliance</li>
-                    <li>Failure to provide W-9 may result in backup withholding</li>
-                </ul>
-
-                <h3>4.2 1099 Reporting</h3>
-                <ul>
-                    <li>We issue Form 1099-NEC for payments $600+ annually</li>
-                    <li>Tax information is shared with the IRS as required</li>
-                    <li>Records are maintained per IRS requirements</li>
-                </ul>
-
-                <h2>5. Data Security</h2>
-                <p>We implement reasonable technical and organizational security measures to protect your information:</p>
-                <ul>
-                    <li>SSL/TLS encryption for all data in transit</li>
-                    <li>Encrypted database connections (sslmode=require)</li>
-                    <li>Secure password hashing (PBKDF2-SHA256)</li>
-                    <li>Environment-variable-based secrets management (no hardcoded credentials)</li>
-                    <li>Secure storage of W-9 and payment information</li>
-                    <li>Limited access to personal information</li>
-                </ul>
-                <p>However, no method of transmission over the internet or electronic storage is completely secure, and the Company cannot guarantee absolute security of personal information.</p>
-
-                <h2>6. Your Rights and Choices</h2>
-                
-                <h3>6.1 Account Information</h3>
-                <ul>
-                    <li>Update personal and contact information</li>
-                    <li>Modify privacy settings for portfolio sharing</li>
-                    <li>Request account deletion &mdash; see our <a href="/delete-account">Account Deletion</a> page for the steps and what data is deleted vs. retained (subject to tax record retention)</li>
-                </ul>
-
-                <h3>6.2 Marketing Communications</h3>
-                <ul>
-                    <li>Opt out of promotional emails</li>
-                    <li>Control notification preferences</li>
-                </ul>
-
-                <h3>6.3 Data Access</h3>
-                <ul>
-                    <li>Request copies of your personal information</li>
-                    <li>Correct inaccurate information</li>
-                </ul>
-
-                <h2>7. Data Retention</h2>
-                <p>We retain information as follows:</p>
-                <ul>
-                    <li><strong>Tax records:</strong> 7 years per IRS requirements</li>
-                    <li><strong>Payment records:</strong> 7 years for business purposes</li>
-                    <li><strong>Account information:</strong> Until account deletion requested</li>
-                    <li><strong>Portfolio data:</strong> Until you remove or delete</li>
-                </ul>
-
-                <h2>8. Geographic Limitations</h2>
-                <p>This service is designed for U.S. users only. International users may have limited functionality, particularly for monetization features.</p>
-
-                <h2>9. Children's Privacy</h2>
-                <p>This service is not intended for users under 18. We do not knowingly collect information from minors.</p>
-
-                <h2>10. Changes to Privacy Policy</h2>
-                <p>We may update this Privacy Policy periodically. Material changes will be communicated via email or platform notification.</p>
-
-                <h2>11. Contact Information</h2>
-                <p>For privacy-related questions or requests:<br><br>
-                Family Apps LLC<br>
-                Email: <a href="mailto:support@apestogether.ai">support@apestogether.ai</a></p>
-
-                <div class="alert alert-info mt-4">
-                    <strong>By using our Service, you consent to the collection and use of information as described in this Privacy Policy.</strong>
+                <h2 id="s11">11. California Privacy Rights (CCPA/CPRA)</h2>
+                <p>This section applies to California residents and supplements the rest of this Policy. It is provided pursuant to the California Consumer Privacy Act of 2018, as amended by the California Privacy Rights Act of 2020 (collectively, the CCPA).</p>
+                <h3>11.1 Categories of Personal Information We Collect</h3>
+                <p>The table below identifies, for the preceding 12 months, the categories of personal information we collect, using the categories defined by Cal. Civ. Code &sect; 1798.140, and whether we collect each category.</p>
+                <div class="table-responsive">
+                <table class="legal-table">
+                    <thead>
+                        <tr>
+                            <th>Category</th>
+                            <th>Examples From Our Service</th>
+                            <th>Collected?</th>
+                            <th>Source(s)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>A. Identifiers</td>
+                            <td>Email address, username, display name, phone number (optional), IP address, device and push-notification identifiers</td>
+                            <td>Yes</td>
+                            <td>Directly from you; automatically</td>
+                        </tr>
+                        <tr>
+                            <td>B. Personal records (Cal. Civ. Code &sect; 1798.80(e))</td>
+                            <td>Legal name, business name, tax classification, and mailing address (Content Creators receiving payouts only); only the last four digits of the taxpayer ID number are stored by us</td>
+                            <td>Yes, limited</td>
+                            <td>Directly from you</td>
+                        </tr>
+                        <tr>
+                            <td>C. Protected classification characteristics</td>
+                            <td>Age, gender, race, and similar characteristics</td>
+                            <td>No</td>
+                            <td>N/A</td>
+                        </tr>
+                        <tr>
+                            <td>D. Commercial information</td>
+                            <td>Subscription history, portfolio and trading activity, payout records</td>
+                            <td>Yes</td>
+                            <td>Directly from you; automatically</td>
+                        </tr>
+                        <tr>
+                            <td>E. Biometric information</td>
+                            <td>Fingerprints, voiceprints, and similar data</td>
+                            <td>No</td>
+                            <td>N/A</td>
+                        </tr>
+                        <tr>
+                            <td>F. Internet or network activity</td>
+                            <td>App and website usage, interaction data, crash logs</td>
+                            <td>Yes</td>
+                            <td>Automatically</td>
+                        </tr>
+                        <tr>
+                            <td>G. Geolocation data</td>
+                            <td>Approximate (IP-based) location only; no precise GPS data</td>
+                            <td>Yes, approximate only</td>
+                            <td>Automatically</td>
+                        </tr>
+                        <tr>
+                            <td>H. Sensory data</td>
+                            <td>Audio, visual, or similar recordings</td>
+                            <td>No</td>
+                            <td>N/A</td>
+                        </tr>
+                        <tr>
+                            <td>I. Professional or employment information</td>
+                            <td>Independent-contractor status information for Content Creators receiving payouts</td>
+                            <td>Yes, limited</td>
+                            <td>Directly from you</td>
+                        </tr>
+                        <tr>
+                            <td>J. Non-public education information</td>
+                            <td>Not applicable</td>
+                            <td>No</td>
+                            <td>N/A</td>
+                        </tr>
+                        <tr>
+                            <td>K. Inferences</td>
+                            <td>Performance rankings and leaderboard placement derived from reported trades</td>
+                            <td>Yes</td>
+                            <td>Generated by us</td>
+                        </tr>
+                        <tr>
+                            <td>L. Sensitive personal information</td>
+                            <td>Last four digits of taxpayer ID number (full SSN/EIN sent directly to our accounting provider and never stored by us); account log-in credentials</td>
+                            <td>Yes, limited</td>
+                            <td>Directly from you</td>
+                        </tr>
+                    </tbody>
+                </table>
                 </div>
+                <h3>11.2 Purpose of Collection, Disclosure, and Sale/Sharing</h3>
+                <p>The table below identifies, for each category of personal information we collect, the business or commercial purpose(s) for collection, the categories of third parties to whom we disclose that category for a business purpose, and whether the category is sold or shared as defined by the CCPA.</p>
+                <div class="table-responsive">
+                <table class="legal-table">
+                    <thead>
+                        <tr>
+                            <th>Category</th>
+                            <th>Business/Commercial Purpose</th>
+                            <th>Disclosed To (Category of Recipient)</th>
+                            <th>Sold or Shared?</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>A. Identifiers</td>
+                            <td>Operating the Service; account security; communications</td>
+                            <td>Service providers (hosting, support, notifications); Apple/Google</td>
+                            <td>No</td>
+                        </tr>
+                        <tr>
+                            <td>B. Personal records</td>
+                            <td>Tax reporting and payout processing</td>
+                            <td>Accounting/tax-filing service provider; IRS</td>
+                            <td>No</td>
+                        </tr>
+                        <tr>
+                            <td>D. Commercial information</td>
+                            <td>Operating subscriptions and the leaderboard; payouts</td>
+                            <td>Other users (as shared by the Content Creator); service providers</td>
+                            <td>No</td>
+                        </tr>
+                        <tr>
+                            <td>F. Internet/network activity</td>
+                            <td>Analytics, security, and troubleshooting</td>
+                            <td>Analytics and hosting service providers</td>
+                            <td>No</td>
+                        </tr>
+                        <tr>
+                            <td>G. Geolocation (approximate)</td>
+                            <td>Confirming U.S. eligibility for the Service</td>
+                            <td>Hosting/infrastructure service providers</td>
+                            <td>No</td>
+                        </tr>
+                        <tr>
+                            <td>I. Professional/employment info</td>
+                            <td>Independent-contractor tax and payout compliance</td>
+                            <td>Accounting/tax-filing service provider; IRS</td>
+                            <td>No</td>
+                        </tr>
+                        <tr>
+                            <td>K. Inferences</td>
+                            <td>Displaying rankings and leaderboard placement</td>
+                            <td>Other users (public leaderboard)</td>
+                            <td>No</td>
+                        </tr>
+                        <tr>
+                            <td>L. Sensitive personal information</td>
+                            <td>Tax reporting; account authentication and security</td>
+                            <td>Accounting/tax-filing service provider (taxpayer ID only)</td>
+                            <td>No</td>
+                        </tr>
+                    </tbody>
+                </table>
+                </div>
+                <h3>11.3 Sensitive Personal Information and Your Right to Limit Its Use</h3>
+                <p>We collect limited sensitive personal information &mdash; the last four digits of taxpayer identification numbers (for Content Creators receiving payouts; the full number is transmitted directly to our accounting provider and never stored by us) and account log-in credentials. We use this information only for the purposes permitted without additional consumer consent under Cal. Civ. Code &sect; 1798.121(a): providing the Service, verifying identity, ensuring security and preventing fraud, and complying with legal and tax obligations. We do not use or disclose sensitive personal information to derive characteristics about you or for any purpose that would require us to offer a right to limit under Section 1798.121; nonetheless, you may submit a request to limit use of your sensitive personal information as described in Section 11.7, and we will honor it to the extent it does not conflict with our legal and tax obligations.</p>
+                <h3>11.4 Sale and Sharing of Personal Information</h3>
+                <p>We do not sell personal information. We do not currently &ldquo;share&rdquo; personal information, as that term is defined by the CCPA, for cross-context behavioral advertising. Although no opt-out mechanism is currently required for this reason, we honor the Global Privacy Control as described in Section 6, and California residents may still submit a Do Not Sell or Share request as described in Section 11.7 out of an abundance of caution and in case our practices change.</p>
+                <h3>11.5 Retention</h3>
+                <p>Our retention periods and criteria for each category of personal information are described in Section 9.</p>
+                <h3>11.6 Your Rights as a California Resident</h3>
+                <ul>
+                    <li><strong>Right to know/access:</strong> request that we disclose the categories and specific pieces of personal information we have collected about you, the categories of sources, the business or commercial purpose for collecting it, and the categories of third parties with whom we share it, for the 12 months preceding your request.</li>
+                    <li><strong>Right to delete:</strong> request that we delete personal information we have collected from you, subject to certain exceptions (for example, information we must retain to comply with a legal obligation, such as our 7-year tax recordkeeping requirement).</li>
+                    <li><strong>Right to correct:</strong> request that we correct inaccurate personal information we maintain about you.</li>
+                    <li><strong>Right to opt out of sale or sharing:</strong> as described in Section 11.4, we do not currently sell or share personal information, but you may still submit an opt-out request.</li>
+                    <li><strong>Right to limit use of sensitive personal information:</strong> as described in Section 11.3.</li>
+                    <li><strong>Right to data portability:</strong> request a copy of your personal information in a portable, and to the extent technically feasible, readily usable format.</li>
+                    <li><strong>Right to non-discrimination:</strong> we will not deny you goods or services, charge different prices or rates, or provide a different level or quality of goods or services because you exercised any right described in this Section. We do not currently offer any financial incentive or price/service difference program in exchange for personal information.</li>
+                    <li><strong>Right to designate an authorized agent</strong> to submit a request on your behalf, subject to the verification requirements described below.</li>
+                </ul>
+                <h3>11.7 How to Submit a Request</h3>
+                <p>You may submit a request to exercise these rights in either of the following ways, which reflect how we primarily interact with you: (a) email <a href="mailto:support@apestogether.ai">support@apestogether.ai</a> with the subject line &ldquo;California Privacy Rights Request&rdquo;; or (b) use the Request My Data or Delete My Account options in Account &amp; Privacy settings within the app. To protect your information, we will take steps to verify your identity before completing a request, generally by matching the information you provide against the information in our records, and we may ask you to provide additional information for verification. If you designate an authorized agent, we may require the agent to provide proof of your written authorization and may still require you to directly verify your own identity with us.</p>
+                <h3>11.8 Response Timing</h3>
+                <p>We will confirm receipt of your request within 10 business days and will respond substantively within 45 calendar days. If we need more time, we will notify you and may take up to an additional 45 days (90 days total) when reasonably necessary.</p>
+                <h3>11.9 Appeals</h3>
+                <p>If we decline to act on your request, in whole or in part, you may appeal our decision by emailing <a href="mailto:support@apestogether.ai">support@apestogether.ai</a> with the subject line &ldquo;Privacy Rights Appeal.&rdquo; We will respond to your appeal in writing within 45 days. If we deny your appeal, we will provide a means to submit a complaint to the California Privacy Protection Agency or the California Attorney General.</p>
+                <h3>11.10 &ldquo;Shine the Light&rdquo; (Cal. Civ. Code &sect; 1798.83)</h3>
+                <p>California residents may request certain information about our disclosure, if any, of personal information to third parties for those third parties&rsquo; own direct marketing purposes during the preceding calendar year. We do not disclose personal information to third parties for their own direct marketing purposes. If this changes, California residents may submit one request per year by emailing <a href="mailto:support@apestogether.ai">support@apestogether.ai</a>.</p>
+                <h3>11.11 Minors</h3>
+                <p>The Service is not directed to, and may not be used by, anyone under the age of 18. We do not knowingly collect, sell, or share the personal information of consumers under 16 years of age without the affirmative authorization required by Cal. Bus. &amp; Prof. Code &sect; 22581. If we learn that a minor has used the Service, we will delete the minor&rsquo;s information as described in Section 13.</p>
+
+                <h2 id="s12">12. Additional State Privacy Rights</h2>
+                <p>Residents of Colorado, Connecticut, Virginia, Utah, and other states with comprehensive consumer privacy laws may have rights similar to those described in Section 11, including the right to confirm whether we process your personal information, access it, correct it, delete it, obtain a portable copy of it, and opt out of the processing of personal information for targeted advertising, the sale of personal information, or profiling in furtherance of decisions that produce legal or similarly significant effects. As described in Section 5.5, we do not currently sell personal information or use it for targeted advertising. You may submit a request under an applicable state law using the contact methods in Section 11.7, and, where required, you may appeal a denied request by emailing <a href="mailto:support@apestogether.ai">support@apestogether.ai</a> with the subject line &ldquo;Privacy Rights Appeal&rdquo;; we will respond to appeals within 45 to 60 days as required by applicable law.</p>
+
+                <h2 id="s13">13. Children&rsquo;s Privacy</h2>
+                <p>The Service is not intended for, and may not be used by, anyone under the age of 18. We do not knowingly collect personal information from minors. If we learn that we have collected personal information from someone under 18, we will delete it. If you believe a minor has provided us with personal information, please contact us at <a href="mailto:support@apestogether.ai">support@apestogether.ai</a>.</p>
+
+                <h2 id="s14">14. Geographic Scope</h2>
+                <p>The Service is currently offered only to individuals located in the United States, and personal information is stored and processed in the United States. Creator monetization features additionally require U.S. tax residency and the ability to receive U.S. domestic payments.</p>
+
+                <h2 id="s15">15. Third-Party Links and Services</h2>
+                <p>The Service may reference or link to third-party websites or services, including your brokerage and social media platforms. We do not control these third parties and are not responsible for their privacy practices. We encourage you to review the privacy policies of any third-party site or service you visit or use.</p>
+
+                <h2 id="s16">16. Changes to This Policy</h2>
+                <p>We may update this Policy from time to time. If we make material changes, we will notify you by email or through a notice in the app or on the website, and will update the Effective Date above. Your continued use of the Service after a change takes effect constitutes your acceptance of the updated Policy.</p>
+
+                <h2 id="s17">17. Contact Us</h2>
+                <p>If you have questions about this Policy or wish to exercise any of the rights described above, please contact:</p>
+                <p>
+                    Family Apps LLC<br>
+                    1 West St, Apt 2604<br>
+                    New York, NY 10004<br>
+                    Email: <a href="mailto:support@apestogether.ai">support@apestogether.ai</a>
+                </p>
+                <p>For California privacy rights requests, use the subject line &ldquo;California Privacy Rights Request&rdquo; described in Section 11.7.</p>
             </div>
         </div>
     </div>
@@ -169,12 +368,17 @@
     margin-top: 2rem;
     margin-bottom: 1rem;
     color: #333;
+    font-weight: 700;
 }
 
+/* Subsection heads (9.1, 11.4, ...) are bold-italic, matching the attorney's document. */
 .legal-content h3 {
     margin-top: 1.5rem;
     margin-bottom: 0.75rem;
     color: #555;
+    font-size: 1.15rem;
+    font-weight: 700;
+    font-style: italic;
 }
 
 .legal-content p, .legal-content li {
@@ -184,6 +388,40 @@
 
 .legal-content ul {
     margin-bottom: 1rem;
+}
+
+.legal-content ol.pp-toc {
+    margin-bottom: 1rem;
+}
+
+/* CCPA disclosure tables — dark navy header band with white text and full
+   cell borders, matching the attorney's Word formatting. */
+.legal-content table.legal-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0 1.5rem;
+    font-size: 0.9rem;
+}
+
+.legal-content table.legal-table th {
+    background-color: #1f3355;
+    color: #fff;
+    text-align: left;
+    padding: 8px 10px;
+    border: 1px solid #1f3355;
+    vertical-align: top;
+}
+
+.legal-content table.legal-table td {
+    padding: 8px 10px;
+    border: 1px solid #b9c2d0;
+    vertical-align: top;
+}
+
+/* First (Category) column lightly shaded, as in the reference document. */
+.legal-content table.legal-table td:first-child {
+    background-color: #eef1f6;
+    font-weight: 600;
 }
 </style>
 {% endblock %}

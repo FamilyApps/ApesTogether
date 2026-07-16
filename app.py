@@ -145,7 +145,9 @@ def terms_of_service():
 
 @app.route('/privacy-policy')
 def privacy_policy():
-    return render_template('privacy_policy.html')
+    # GPC opt-out signal detection — mirrors the production handler in api/index.py.
+    gpc = request.headers.get('Sec-GPC') == '1' or request.cookies.get('gpc_opt_out') == '1'
+    return render_template('privacy_policy.html', gpc_detected=gpc)
 
 @app.route('/admin-direct')
 @login_required

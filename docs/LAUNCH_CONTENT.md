@@ -49,7 +49,7 @@ Algorithms and AI bots are welcome. If it beats the S&P, we want it.
 
 4/ For investors: browse a leaderboard ranked by verified, on-platform performance.
 
-Subscribe to the traders whose strategies match your style. Get a push notification the instant they trade.
+Subscribe to the traders whose strategies match your style. Get a real-time push notification when they trade.
 
 Then decide for yourself what to do in your own brokerage.
 
@@ -339,7 +339,7 @@ Transparency changes behavior. apestogether.ai
 
 ## #X-27 — Notification Feature (Day 31)
 ```
-When a trader you follow buys or sells on ApesTogether, you get a push notification instantly.
+When a trader you follow buys or sells on ApesTogether, you get a push notification in real time.
 
 Not a morning newsletter. Not a weekly recap.
 
@@ -521,7 +521,7 @@ Here's what we built and why 🧵
 1/ For investors:
 - Browse traders ranked by verified performance
 - Subscribe for $9/mo
-- Push notification the instant they trade
+- Real-time push notification when they trade
 - Make your own decisions in your own brokerage
 
 No gurus. No hype. Just receipts.
@@ -654,7 +654,7 @@ The ApesTogether beta is live. Here's what it looks like:
 [Show leaderboard] This is the leaderboard. Every trader ranked by verified performance.
 [Show trader profile] Tap any trader. See their full trade history and performance chart.
 [Show subscribe] Subscribe for $9/month. The trader gets 85%.
-[Show notification] Push notification the instant they trade.
+[Show notification] Real-time push notification when they trade.
 [Show portfolio upload] Want to earn? Upload your portfolio and start building your record.
 
 Beta is open. Link in bio.
@@ -767,7 +767,7 @@ IT'S LIVE.
 
 ApesTogether is on the App Store and Google Play.
 
-Follow verified traders. Get notified instantly. $9/month.
+Follow verified traders. Get notified in real time. $9/month.
 
 Or earn 85% of subscriber revenue from trades you're already making.
 
@@ -891,7 +891,7 @@ Today we launch ApesTogether.
 
 A platform where skilled traders earn 85% of subscriber revenue from trades they're already making. No content creation required.
 
-For retail investors: follow traders ranked by math, not marketing. Get notified the instant they trade.
+For retail investors: follow traders ranked by math, not marketing. Get notified in real time when they trade.
 
 We built this because the investing trust gap is real — and the current solutions aren't working.
 
@@ -975,7 +975,7 @@ Every trade verified at market price. No screenshots, no "trust me bro." Leaderb
 
 Algorithms welcome. If your bot beats the market, it earns subscribers.
 
-Subscribers get push notifications the instant someone they follow buys or sells. Then you decide what to do in your own brokerage.
+Subscribers get real-time push notifications when someone they follow buys or sells. Then you decide what to do in your own brokerage.
 
 Just went live:
 🍎 [App Store link]
@@ -1102,7 +1102,7 @@ You signed up for the ApesTogether waitlist. The beta is now open.
 Here's what you can do right now:
 - Browse the leaderboard — real traders with verified, on-platform performance
 - Subscribe to any trader for $9/month (free during beta)
-- Get push notifications the instant they trade
+- Get real-time push notifications when they trade
 
 No "trust me bro." Just verified returns.
 
@@ -1146,7 +1146,7 @@ As a waitlist member, you'll get the download link before anyone else.
 What's new since you signed up:
 - [X] traders now have verified track records on the platform
 - The leaderboard is live and updated daily
-- Push notifications work — you'll know the instant a trader you follow makes a move
+- Push notifications work — you'll know in real time when a trader you follow makes a move
 
 Mark your calendar: [launch date].
 

@@ -1389,7 +1389,7 @@ private fun BlurredHoldingsTeaser(
         Text(
             text = if (!acceptsNewSubscribers)
                 "$ownerName isn't accepting new subscribers right now."
-            else previewMessage ?: "Subscribe to see exactly what they're trading and get instant alerts.",
+            else previewMessage ?: "Subscribe to see exactly what they're trading and get real-time alerts.",
             color = TextSecondary,
             fontSize = 13.sp,
         )

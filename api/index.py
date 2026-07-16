@@ -4739,8 +4739,34 @@ def terms_of_service():
 
 @app.route('/privacy-policy')
 def privacy_policy():
-    """Privacy Policy page"""
-    return render_template_with_defaults('privacy_policy.html')
+    """Privacy Policy page.
+
+    Detects the Global Privacy Control opt-out preference signal (Sec-GPC: 1,
+    11 CCR § 7025) and surfaces an on-page confirmation that the signal is
+    honored. The signal is also recorded site-wide by _honor_gpc_signal().
+    """
+    gpc = request.headers.get('Sec-GPC') == '1' or request.cookies.get('gpc_opt_out') == '1'
+    return render_template_with_defaults('privacy_policy.html', gpc_detected=gpc)
+
+
+@app.after_request
+def _honor_gpc_signal(response):
+    """Honor the Global Privacy Control opt-out preference signal.
+
+    We do not sell or share personal information and run no third-party
+    ad-tech, so there is nothing to disable — but per 11 CCR § 7025 the
+    browser's Sec-GPC signal must be TREATED as a valid opt-out of
+    sale/sharing. We persist the preference in a first-party cookie so the
+    opt-out is recorded, demonstrable, and already enforced should our
+    practices ever change (any future ad-tech integration must check it).
+    """
+    try:
+        if request.headers.get('Sec-GPC') == '1' and request.cookies.get('gpc_opt_out') != '1':
+            response.set_cookie('gpc_opt_out', '1', max_age=31536000,
+                                secure=True, httponly=False, samesite='Lax')
+    except Exception:
+        pass  # never let the privacy cookie break a response
+    return response
 
 @app.route('/delete-account')
 def delete_account_info():

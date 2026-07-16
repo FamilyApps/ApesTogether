@@ -37,15 +37,32 @@ struct SettingsView: View {
                 
                 ScrollView {
                     VStack(spacing: 24) {
-                        // Account section
+                        // Account & Privacy section.
+                        // The section name and the two rows below are referenced
+                        // verbatim by the Privacy Policy (§9.1 / §11.7: "Request My
+                        // Data or Delete My Account options in Account & Privacy
+                        // settings") — keep in sync.
                         VStack(alignment: .leading, spacing: 12) {
-                            SectionHeader(title: "Account")
+                            SectionHeader(title: "Account & Privacy")
                             
                             VStack(spacing: 0) {
                                 if let user = authManager.currentUser {
                                     SettingsRow(label: "Email", value: user.email)
                                     AccentDivider()
                                     SettingsRow(label: "Username", value: user.username)
+                                    AccentDivider()
+                                }
+                                SettingsLinkRow(
+                                    icon: "square.and.arrow.down",
+                                    label: "Request My Data",
+                                    url: "mailto:support@apestogether.ai?subject=Data%20Request"
+                                )
+                                AccentDivider()
+                                SettingsNavRow(
+                                    icon: "trash",
+                                    label: "Delete My Account"
+                                ) {
+                                    showingDeleteAlert = true
                                 }
                             }
                             .cardStyle(padding: 0)
@@ -229,15 +246,8 @@ struct SettingsView: View {
                                 .stroke(Color.losses.opacity(0.5), lineWidth: 1)
                         )
                         
-                        // Delete account button
-                        Button {
-                            showingDeleteAlert = true
-                        } label: {
-                            Text("Delete Account")
-                                .font(.subheadline)
-                                .foregroundColor(.textMuted)
-                        }
-                        .padding(.top, -8)
+                        // (Delete My Account lives in the Account & Privacy section
+                        // above, matching the Privacy Policy's description of the flow.)
                         
                         // Version
                         Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")")
@@ -267,7 +277,7 @@ struct SettingsView: View {
             } message: {
                 Text("Are you sure you want to sign out?")
             }
-            .alert("Delete Account", isPresented: $showingDeleteAlert) {
+            .alert("Delete My Account", isPresented: $showingDeleteAlert) {
                 Button("Cancel", role: .cancel) {}
                 Button("Delete", role: .destructive) {
                     Task {
@@ -275,7 +285,7 @@ struct SettingsView: View {
                     }
                 }
             } message: {
-                Text("This will permanently delete your account, portfolio data, and all subscriptions. This action cannot be undone.")
+                Text("Your account will be hidden immediately and permanently deleted after a 30-day grace period. To restore it within that window, email support@apestogether.ai — signing back in won't restore it. Paid subscriptions are not cancelled automatically; cancel them in the App Store to stop billing.")
             }
             .sheet(isPresented: $showTOS) {
                 LegalTextView(title: "Terms of Service", content: tosText)
@@ -465,7 +475,7 @@ struct FAQView: View {
         ("How do I get paid?", "Payments are disbursed monthly via check from Family Apps LLC. You must submit a W-9 form to receive payments."),
         ("What is the 1099-NEC?", "If you earn $600 or more in a calendar year, Family Apps LLC will issue you a 1099-NEC tax form for reporting your earnings to the IRS."),
         ("How do I cancel my subscription?", "You can manage your subscriptions through your Apple ID settings or through the Subscriptions tab in the app."),
-        ("How do I delete my account?", "Go to Settings and tap 'Delete Account' at the bottom. This action is permanent and cannot be undone."),
+        ("How do I delete my account?", "Go to Settings > Account & Privacy and tap 'Delete My Account'. Your account is hidden immediately and permanently deleted after a 30-day grace period — email support@apestogether.ai within that window to restore it. Paid subscriptions must be cancelled separately in the App Store."),
         ("Who can use this app?", "ApesTogether is available to users located in the United States who are U.S. tax residents.")
     ]
     
