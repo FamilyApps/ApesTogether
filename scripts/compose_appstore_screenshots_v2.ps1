@@ -120,6 +120,14 @@ $capFont  = New-Object Drawing.Font($capFamily,$CaptionSize,$capStyle,[Drawing.G
 $subFont  = New-Object Drawing.Font($bodyFamily,$SubtitleSize,[Drawing.FontStyle]::Regular,[Drawing.GraphicsUnit]::Pixel)
 $discFont = New-Object Drawing.Font($bodyFamily,26,[Drawing.FontStyle]::Regular,[Drawing.GraphicsUnit]::Pixel)
 $phFont   = New-Object Drawing.Font($bodyFamily,40,[Drawing.FontStyle]::Regular,[Drawing.GraphicsUnit]::Pixel)
+# Reference line-spacing ratio (SF Pro Display lineSpacing/em = 1.1934 — the font
+# the iOS set was rendered with). Line pitch is computed from FONT SIZE × this
+# constant instead of the family's own metric: fallback families are much
+# looser (Segoe UI = 1.3301, +11.5%), which spread the Android caption lines
+# apart and pushed the subtitle down against the bezel. With a fixed ratio the
+# LAYOUT is identical across fonts; only glyph shapes differ. (SF runs are
+# unchanged: size×1.1934 = GetHeight for that family.)
+$RefLine=1.1934
 $whiteBrush=New-Object Drawing.SolidBrush([Drawing.Color]::White)
 $grayBrush =New-Object Drawing.SolidBrush($colGray)
 $discBrush =New-Object Drawing.SolidBrush($colDisc)
@@ -183,14 +191,19 @@ function Draw-Header($g,$cap,$sub,[single]$deviceTop){
   # Narrower caption wrap (980) encourages balanced 2-line breaks on long headlines.
   $capLines=Get-BalancedLines $g $cap $capFont 980
   $subLines=Get-WrappedLines $g $sub $subFont 1050
-  $capLH=$capFont.GetHeight($g)*1.06
-  $subLH=$subFont.GetHeight($g)*1.20
+  $capLH=[single]($capFont.Size*$RefLine*1.06)
+  $subLH=[single]($subFont.Size*$RefLine*1.20)
   $gap=[single]($capLH*0.30)
   $blockH=($capLines.Count*$capLH)+$gap+($subLines.Count*$subLH)
   $top=[single]$CaptionTop
-  $pad=[single](48*$vScale)
-  $maxTop=$deviceTop-$pad-$blockH          # never let the header touch the phone
-  if($top -gt $maxTop){$top=[Math]::Max($pad,$maxTop)}
+  # $deviceTop is the VISIBLE shell edge (bezel), not the screen cutout — gaps
+  # measured to the screen let text hug thick-bezeled mockups (Pixel shell is
+  # ~2x the iPhone's above the screen). 56px @ reference height matches the
+  # iOS set's subtitle-to-shell air (~60px, unclamped there).
+  $gapToPhone=[single](56*$vScale)
+  $minTop=[single](48*$vScale)
+  $maxTop=$deviceTop-$gapToPhone-$blockH   # never let the header touch the phone
+  if($top -gt $maxTop){$top=[Math]::Max($minTop,$maxTop)}
   $afterCap=Draw-CenteredLines $g $capLines $capFont $whiteBrush $top $capLH
   Draw-CenteredLines $g $subLines $subFont $grayBrush ($afterCap+$gap) $subLH | Out-Null
 }
@@ -203,7 +216,7 @@ function Draw-Disclaimer($g,$disc,[single]$deviceBottom){
   for($fs=[int][math]::Round(32*$vScale); $fs -ge [int][math]::Round(26*$vScale); $fs--){
     $f=New-Object Drawing.Font($bodyFamily,$fs,[Drawing.FontStyle]::Regular,[Drawing.GraphicsUnit]::Pixel)
     $lines=Get-BalancedLines $g $disc $f $maxW
-    $lh=$f.GetHeight($g)*1.28
+    $lh=[single]($f.Size*$RefLine*1.28)
     $top=$H-$bottomMargin-($lines.Count*$lh)
     if($top -ge ($deviceBottom+$gapAbove)){
       Draw-CenteredLines $g $lines $f $discBrush $top $lh | Out-Null
@@ -214,7 +227,7 @@ function Draw-Disclaimer($g,$disc,[single]$deviceBottom){
   # Even at the smallest size it collides with the device -> draw just below it and warn.
   $f=New-Object Drawing.Font($bodyFamily,[int][math]::Round(26*$vScale),[Drawing.FontStyle]::Regular,[Drawing.GraphicsUnit]::Pixel)
   $lines=Get-BalancedLines $g $disc $f $maxW
-  $lh=$f.GetHeight($g)*1.28
+  $lh=[single]($f.Size*$RefLine*1.28)
   $short=[int]((($deviceBottom+$gapAbove)+($lines.Count*$lh)+$bottomMargin)-$H)
   Write-Host ("WARNING: disclaimer doesn't fit below the phone (short by ~$short px). Regenerate frame.png with the phone ~$short px higher (or slightly smaller) for clean spacing.")
   Draw-CenteredLines $g $lines $f $discBrush ($deviceBottom+$gapAbove) $lh | Out-Null
@@ -338,7 +351,22 @@ if(Test-Path $FrameFile){
   $baseFrame.UnlockBits($bd)
   if($maxX -gt $minX -and $maxY -gt $minY){
     $bx=$minX;$by=$minY;$bw=$maxX-$minX;$bh=$maxY-$minY
-    Write-Host "Base frame in use. Detected screen region: x=$bx y=$by w=$bw h=$bh"
+    # Visible shell (bezel) extent. The mockup bakes its own background, so alpha
+    # can't isolate the device — instead scan the screen's center column outward
+    # from the keyed bbox for the outermost BRIGHT pixel (titanium / silver shell
+    # reads lum>110 against the dark navy backdrop; the black bezel ring and any
+    # drop shadow stay below it). Text gaps measure from these shell edges.
+    $bezelTop=$by; $bezelBottom=$by+$bh
+    $cxCol=[int]($bx+$bw/2); $scan=[int]($H*0.06)
+    for($yy=[math]::Max(0,$by-$scan); $yy -lt $by; $yy++){
+      $p=$baseFrame.GetPixel($cxCol,$yy)
+      if($p.A -gt 200 -and (0.299*$p.R+0.587*$p.G+0.114*$p.B) -gt 110){ $bezelTop=$yy; break }
+    }
+    for($yy=[math]::Min($H-1,$by+$bh+$scan); $yy -gt ($by+$bh); $yy--){
+      $p=$baseFrame.GetPixel($cxCol,$yy)
+      if($p.A -gt 200 -and (0.299*$p.R+0.587*$p.G+0.114*$p.B) -gt 110){ $bezelBottom=$yy; break }
+    }
+    Write-Host "Base frame in use. Detected screen region: x=$bx y=$by w=$bw h=$bh; shell y=$bezelTop..$bezelBottom"
   } else {
     Write-Host "WARNING: no magenta screen found in $FrameFile (check the key color). Using drawn frame."
     $baseFrame.Dispose(); $baseFrame=$null
@@ -384,8 +412,8 @@ foreach($f in $frames){
       $g.ResetClip()
     }
     $g.DrawImage($baseFrame,0,0,$W,$H)
-    Draw-Header $g $f.cap $f.sub $by
-    $deviceBottom=$by+$bh
+    Draw-Header $g $f.cap $f.sub $bezelTop
+    $deviceBottom=$bezelBottom
   } else {
     for($s=12;$s -ge 2;$s-=5){
       $a=[int](60/$s)
