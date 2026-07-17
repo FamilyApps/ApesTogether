@@ -326,7 +326,7 @@ Tracked here so nothing is dropped; checked off as resolved. Detail/answers land
   - Also this session (pre-MBGL): pipeline tab UX overhaul — all-statuses view, `Z`-suffix UTC timestamp fix, idempotency-ledger table (which is what identified the `Fwd:` culprit).
 - **Play screenshot 01 REDONE** — USER recaptured the 1W leaderboard without Wolff (`raw_screenshots_android/01_leaderboard.png`), full 6-frame set regenerated deterministically → `Downloads\Play_Screenshots` (visually verified: `apestogether_review` on top, frame/captions clean). Upload to Play Console still open (master list §0.8).
 - **OPEN:**
-  - [ ] **USER: paste the updated `scripts/public_email_parser.gs` into Apps Script** (script.google.com as bobford00 → replace file contents → Save). The repo does NOT deploy GAS. Script Properties + trigger unchanged.
+  - [x] **USER: paste the updated `scripts/public_email_parser.gs` into Apps Script — DONE (2026-07-17 3:43 PM).** Manual `checkForTradeEmails` run clean ("0 new, 325 previously seen" — the 1:16 PM forward is dedupe-filtered before the guard, so no skip line; guard applies to all future first-seen messages). Script Properties + trigger unchanged.
   - [ ] USER: upload the regenerated `Play_Screenshots` set to the Play listing.
   - [ ] Attorney: ToS §5.2(a) redraft → then update web ToS + `legal/terms-of-service.md` + iOS `LegalText.swift` (carried from Session 29).
 
