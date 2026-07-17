@@ -73,6 +73,20 @@ function checkForTradeEmails() {
         if (alreadyProcessed.has(msgId) || seenIds.has(msgId)) continue;
         seenIds.add(msgId);
 
+        // Thread-level search returns EVERY message in a matching thread —
+        // including your own forwards/replies of a trade confirmation, which
+        // have new message IDs the dedupe sets can't catch (2026-07-17: a
+        // "Fwd: Your trade executed" was re-ingested as a new MBGL trade).
+        // Only parse messages actually SENT BY Public.
+        const sender = String(message.getFrom() || '');
+        const subj = String(message.getSubject() || '');
+        if (!/[@.]public\.com/i.test(sender) || /^\s*(fwd?|re)\s*:/i.test(subj)) {
+          Logger.log(`Skipping non-Public/forwarded message: "${subj}" from ${sender}`);
+          message.markRead();
+          newlyProcessed.push(msgId);
+          continue;
+        }
+
         try {
           const result = processTradeEmail(message, config);
           if (result) {

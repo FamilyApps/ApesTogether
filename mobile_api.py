@@ -20,6 +20,7 @@ from datetime import datetime, date, timedelta
 from collections import defaultdict
 import asyncio
 import logging
+import re
 import jwt
 import os
 import requests
@@ -7137,6 +7138,25 @@ def bot_email_trade():
             'message': 'Email-trade ingestion is paused; trade skipped and recorded.',
         })
 
+    # Forward/reply guard: GAS thread-level search returns EVERY message in a
+    # matching thread — including the admin's own forward of a trade
+    # confirmation, which has a NEW message-id that dedupe can't catch
+    # (2026-07-17: a "Fwd: Your trade executed" re-ingested the MBGL trade as
+    # PendingTrade #144). Record it in the ledger and drop it.
+    if re.match(r'^\s*(fwd?|re)\s*:', email_subject or '', re.IGNORECASE):
+        _record_processed_email(
+            email_message_id, status='skipped_forward',
+            subject=email_subject, received_at=email_received_at,
+        )
+        logger.info(f"bot_email_trade: forwarded/reply subject skipped — {email_subject!r}")
+        return jsonify({
+            'success': True,
+            'status': 'skipped_forward',
+            'trades_submitted': 0,
+            'trades_executed': 0,
+            'message': 'Forwarded/reply email ignored (not an original Public confirmation).',
+        })
+
     if not bot_username:
         return jsonify({'error': 'bot_username required'}), 400
 
@@ -7316,11 +7336,15 @@ def bot_email_trade():
         # Record the message as processed in the SAME transaction as the trades,
         # so a crash can't leave trades executed without a dedupe marker (which
         # would let a GAS re-POST double-execute).
+        trades_desc = ', '.join(
+            f"{(t.get('ticker') or '?').upper()} {(t.get('action') or '?')} {t.get('quantity')}"
+            for t in trades[:10]
+        )
         _stage_processed_email(
             email_message_id, status=status,
             subject=email_subject, received_at=email_received_at,
             trades_count=len(trades),
-            detail=f"batch={batch_id} executed={executed_count} deferred={len(deferred_results)}",
+            detail=f"batch={batch_id} executed={executed_count} deferred={len(deferred_results)} | {trades_desc}",
         )
 
         db.session.commit()

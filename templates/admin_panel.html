@@ -1585,7 +1585,7 @@ const EmailMonitor = ({ api }) => {
   const emailStatusColor = v => (
     (v === 'executed' || v === 'executed_manual') ? 'var(--green)'
     : (v === 'skipped_paused') ? 'var(--red)'
-    : (v === 'duplicate') ? 'var(--text-secondary)'
+    : (v === 'duplicate' || v === 'skipped_forward') ? 'var(--text-secondary)'
     : 'var(--yellow)'
   );
 
