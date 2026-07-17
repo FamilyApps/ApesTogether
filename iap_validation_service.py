@@ -661,6 +661,58 @@ class IAPValidationService:
             logger.error(f"Failed to cancel Google subscription: {e}")
             return {'success': False, 'error': str(e)}
 
+    async def revoke_google_subscription(self, purchase_token: str) -> Dict[str, Any]:
+        """Revoke a Google Play subscription with a PRORATED REFUND.
+
+        POST purchases.subscriptionsv2:revoke with
+        revocationContext.proratedRefund — entitlement ends immediately and
+        Google automatically refunds the unused portion of the current billing
+        period to the subscriber's original payment method.
+
+        Used when a creator deletes their account: the portfolio disappears
+        immediately, so their subscribers get their unused time back rather
+        than riding out a period they can no longer use. Google then fires a
+        SUBSCRIPTION_REVOKED RTDN, which iap_webhooks handles (purchase ->
+        'refunded', subscription -> 'expired', Xero revenue reversed), so the
+        caller must NOT mutate the DB itself.
+
+        (subscriptionsv2:revoke takes only the token — no product id needed.)
+        """
+        if not self.google_credentials:
+            logger.error("GOOGLE_PLAY_CREDENTIALS_JSON not configured")
+            return {'success': False, 'error': 'server_config_error'}
+
+        try:
+            access_token = await self._get_google_access_token()
+            if not access_token:
+                return {'success': False, 'error': 'failed_to_get_access_token'}
+
+            url = (
+                f"https://androidpublisher.googleapis.com/androidpublisher/v3/"
+                f"applications/{self.google_package_name}/purchases/subscriptionsv2/"
+                f"tokens/{purchase_token}:revoke"
+            )
+
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    url,
+                    headers={'Authorization': f'Bearer {access_token}'},
+                    json={'revocationContext': {'proratedRefund': {}}},
+                    timeout=30.0
+                )
+
+            if response.status_code in (200, 204):
+                return {'success': True}
+            logger.warning(
+                f"Google subscription revoke API {response.status_code} for "
+                f"token ...{purchase_token[-8:]}: {response.text[:300]}"
+            )
+            return {'success': False, 'error': f'api_error_{response.status_code}'}
+
+        except Exception as e:
+            logger.error(f"Failed to revoke Google subscription: {e}")
+            return {'success': False, 'error': str(e)}
+
 
 # Singleton instance
 _iap_service = None

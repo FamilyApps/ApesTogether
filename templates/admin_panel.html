@@ -1587,7 +1587,7 @@ const EmailMonitor = ({ api }) => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h2 style={{ fontSize: 20, fontWeight: 700 }}>Email Trade Pipeline</h2>
-          <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{pending.length} unresolved trade(s) · last 100 shown (all statuses)</p>
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{pending.length} staged trade(s) · last 100, all statuses — sells route instantly (only unroutable ones land here); buys always stage here until a sell anchors the batch</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn variant="secondary" small onClick={togglePause} disabled={pauseBusy}>{paused ? 'Resume Ingestion' : 'Pause Ingestion'}</Btn>

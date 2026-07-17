@@ -3287,14 +3287,21 @@ def get_current_user():
         return jsonify({'error': 'failed_to_get_user'}), 500
 
 
-def _cancel_google_purchases(purchases):
-    """Cancel auto-renewal for a batch of Google InAppPurchase rows.
+def _cancel_google_purchases(purchases, revoke=False):
+    """Cancel — or revoke with a prorated refund — Google InAppPurchase rows.
 
-    Fires the Play Developer API :cancel calls concurrently in one event loop
-    (the deletion request is synchronous Flask). Each subscriber keeps access
-    until their paid period ends; they simply are not billed again. Returns
-    {purchase_id: bool_cancelled}. Best-effort: failures are logged, never
-    raised — a billing hiccup must not block an account deletion.
+    revoke=False: Play Developer API :cancel. Auto-renew turns off; the
+    subscriber keeps access until their paid period ends, no refund.
+    revoke=True: :revoke with revocationContext.proratedRefund. Entitlement
+    ends immediately and Google refunds the unused portion of the current
+    period. Google then fires a SUBSCRIPTION_REVOKED RTDN, which iap_webhooks
+    handles (purchase -> 'refunded', subscription -> 'expired', Xero revenue
+    reversed) — so no DB mutation happens here.
+
+    Calls run concurrently in one event loop (the deletion request is
+    synchronous Flask). Returns {purchase_id: bool_succeeded}. Best-effort:
+    failures are logged, never raised — a billing hiccup must not block an
+    account deletion.
     """
     results = {}
     google = [p for p in purchases
@@ -3307,16 +3314,16 @@ def _cancel_google_purchases(purchases):
         svc = get_iap_service()
 
         async def _run():
-            tasks = [
-                svc.cancel_google_subscription(
-                    # For Google rows receipt_data holds the purchase token
-                    # (validate_and_save_purchase stores it there); fall back
-                    # to the linked/original token for older rows.
-                    (p.receipt_data or p.original_transaction_id),
-                    p.product_id,
-                )
-                for p in google
-            ]
+            tasks = []
+            for p in google:
+                # For Google rows receipt_data holds the purchase token
+                # (validate_and_save_purchase stores it there); fall back
+                # to the linked/original token for older rows.
+                token = (p.receipt_data or p.original_transaction_id)
+                if revoke:
+                    tasks.append(svc.revoke_google_subscription(token))
+                else:
+                    tasks.append(svc.cancel_google_subscription(token, p.product_id))
             return await asyncio.gather(*tasks, return_exceptions=True)
 
         loop = asyncio.new_event_loop()
@@ -3329,8 +3336,8 @@ def _cancel_google_purchases(purchases):
             ok = isinstance(out, dict) and out.get('success') is True
             results[p.id] = ok
             logger.info(
-                f"google auto-renew cancel purchase={p.id} "
-                f"subscriber={p.subscriber_id} -> {'ok' if ok else out}"
+                f"google {'revoke+refund' if revoke else 'auto-renew cancel'} "
+                f"purchase={p.id} subscriber={p.subscriber_id} -> {'ok' if ok else out}"
             )
     except Exception as e:
         logger.error(f"_cancel_google_purchases error: {e}", exc_info=True)
@@ -3338,13 +3345,15 @@ def _cancel_google_purchases(purchases):
 
 
 def _cancel_billing_for_deleted_account(user):
-    """Stop Google Play auto-renewals tied to a deleted account (both sides).
+    """Stop Google Play billing tied to a deleted account (both sides).
 
     INBOUND — subscriptions the deleted creator's subscribers pay for: the
-    portfolio is hidden immediately on deletion, so leaving auto-renew on
-    would keep charging people for content that no longer exists.
-    OUTBOUND — subscriptions the deleted user pays for as a subscriber: a
-    deleted account can't open the app, so those renewals stop too.
+    portfolio is hidden immediately on deletion, so these are REVOKED with a
+    prorated refund — access and billing end now, and Google automatically
+    returns the unused portion of the current period to the subscriber.
+    OUTBOUND — subscriptions the deleted user pays for as a subscriber: these
+    are merely CANCELLED (auto-renew off, no refund) — leaving was their own
+    choice, and refunding would claw money back from unrelated creators.
 
     Apple offers no cancellation API for standard StoreKit subscriptions;
     Apple-billed subscribers get the deep-linked cancellation email instead
@@ -3362,7 +3371,7 @@ def _cancel_billing_for_deleted_account(user):
         inbound = [s.in_app_purchase for s in subs
                    if s.in_app_purchase is not None
                    and (s.in_app_purchase.status or '') == 'active']
-        inbound_res = _cancel_google_purchases(inbound)
+        inbound_res = _cancel_google_purchases(inbound, revoke=True)
         summary['inbound_cancelled_purchase_ids'] = {
             pid for pid, ok in inbound_res.items() if ok
         }
@@ -3392,20 +3401,21 @@ def _build_creator_deleted_email(creator_name, platforms, google_auto_cancelled=
     tokens. If the platform is unknown or they have both, both sets of steps
     are included.
 
-    google_auto_cancelled: we already turned off auto-renewal for their
-    Google-billed subscription server-side (Play Developer API :cancel), so
-    the Google copy becomes a no-action-needed confirmation instead of manual
-    cancellation steps. Apple exposes no equivalent API for standard StoreKit
-    subscriptions, so the Apple copy always carries the manage-subscriptions
-    deep link + manual steps.
+    google_auto_cancelled: we already revoked their Google-billed subscription
+    server-side with a prorated refund (Play Developer API :revoke), so the
+    Google copy becomes a no-action-needed confirmation (cancelled + refunded)
+    instead of manual cancellation steps. Apple exposes no equivalent API for
+    standard StoreKit subscriptions, so the Apple copy always carries the
+    manage-subscriptions deep link + manual steps.
     """
     ios_steps = ("On iPhone or iPad: open https://apps.apple.com/account/subscriptions "
                  "to cancel (or: Settings > your name > Subscriptions > "
                  "ApesTogether > Cancel Subscription).")
-    google_done = ("Google Play: no action needed — we've already turned off "
-                   "auto-renewal for this subscription, so you will not be "
-                   "charged again. (You can verify under Play Store > Payments "
-                   "& subscriptions > Subscriptions.)")
+    google_done = ("Google Play: no action needed — we've cancelled this "
+                   "subscription and issued a prorated refund for the unused "
+                   "portion of your current billing period. The refund goes "
+                   "back to your original payment method, typically within a "
+                   "few business days.")
     android_steps = ("On Android: open the Google Play Store, tap your profile "
                      "icon, tap Payments & subscriptions, tap Subscriptions, "
                      "select ApesTogether, then Cancel subscription.")
@@ -3421,15 +3431,14 @@ def _build_creator_deleted_email(creator_name, platforms, google_auto_cancelled=
         steps = [ios_steps, android_steps]
 
     billing_done = google_auto_cancelled and not has_ios
-    refund_note = ("Their portfolio is no longer viewable as of today. If you "
-                   "were charged for time you can no longer use, you can "
-                   "request a refund: Apple-billed subscriptions at "
-                   "https://reportaproblem.apple.com; Google Play-billed "
-                   "subscriptions by emailing support@apestogether.ai.")
+    refund_note = ("Their portfolio is no longer viewable as of today. "
+                   "Apple-billed subscribers can request a refund for unused "
+                   "time at https://reportaproblem.apple.com. Questions about "
+                   "a refund? Email support@apestogether.ai.")
 
     lead_plain = (
-        "Billing: nothing to do — we've already stopped future charges for "
-        "this subscription:"
+        "Billing: nothing to do — we've cancelled your subscription and "
+        "refunded the unused time:"
         if billing_done else
         "Important: deleting an account does not automatically cancel an "
         "app-store subscription, so to avoid any future charges please review "
@@ -3445,8 +3454,8 @@ def _build_creator_deleted_email(creator_name, platforms, google_auto_cancelled=
     )
     steps_html = "".join(f"<li style='margin-bottom:8px'>{s}</li>" for s in steps)
     lead_html = (
-        "<strong>Billing:</strong> nothing to do &mdash; we've already stopped "
-        "future charges for this subscription:"
+        "<strong>Billing:</strong> nothing to do &mdash; we've cancelled your "
+        "subscription and refunded the unused time:"
         if billing_done else
         "<strong>Important:</strong> deleting an account does not "
         "automatically cancel an app-store subscription. To avoid any future "
@@ -3470,14 +3479,14 @@ def _build_creator_deleted_email(creator_name, platforms, google_auto_cancelled=
 def _notify_subscribers_creator_deleted(creator, google_cancelled_purchase_ids=None):
     """Notify a deleted creator's active subscribers (push + email).
 
-    google_cancelled_purchase_ids: InAppPurchase ids whose Google auto-renewal
-    we already cancelled server-side (_cancel_billing_for_deleted_account) —
+    google_cancelled_purchase_ids: InAppPurchase ids we already revoked
+    server-side with a prorated refund (_cancel_billing_for_deleted_account) —
     those subscribers get "no action needed" copy instead of cancel steps.
 
-    Google-billed subscriptions are cancelled server-side before this runs
-    (see _cancel_billing_for_deleted_account); Apple offers no cancellation
-    API for standard StoreKit subscriptions, so Apple-billed subscribers keep
-    being billed until THEY cancel. We therefore fan out a push (which
+    Google-billed subscriptions are revoked + refunded server-side before this
+    runs (see _cancel_billing_for_deleted_account); Apple offers no
+    cancellation API for standard StoreKit subscriptions, so Apple-billed
+    subscribers keep being billed until THEY cancel. We therefore fan out a push (which
     deep-links to the Subscriptions tab) and an email carrying a
     platform-specific billing CTA. The Subscriptions tab itself also flags
     the subscription via the `creator_deleted` field on GET /subscriptions.
@@ -3519,7 +3528,7 @@ def _notify_subscribers_creator_deleted(creator, google_cancelled_purchase_ids=N
                 platforms = {(t.platform or '').lower() for t in tokens}
             body = (
                 f"{creator_name} has left ApesTogether. Your Google Play "
-                f"auto-renewal has been turned off — you won't be billed again."
+                f"subscription was cancelled and the unused time refunded."
                 if g_cancelled else
                 f"{creator_name} has left ApesTogether. Open the app to see how "
                 f"to cancel your subscription and stop billing."
@@ -3594,11 +3603,12 @@ def delete_account():
 
         db.session.commit()
 
-        # Stop Google Play auto-renewals tied to this account (subscribers who
-        # pay THIS creator + subscriptions this user pays for). The content
-        # disappears immediately, so billing must stop too. Apple exposes no
-        # cancel API for standard StoreKit subs — those subscribers get the
-        # deep-linked cancellation email below instead.
+        # Stop Google Play billing tied to this account: subscribers paying
+        # THIS creator are revoked with a prorated refund (content disappears
+        # immediately, so unused time goes back to them); subscriptions this
+        # user pays for are merely cancelled. Apple exposes no cancel API for
+        # standard StoreKit subs — those subscribers get the deep-linked
+        # cancellation email below instead.
         billing = _cancel_billing_for_deleted_account(user)
 
         # Tell this creator's active subscribers they've left + either that
@@ -7571,8 +7581,11 @@ def bot_pending_trades():
             'message_id': r.message_id,
             'status': r.status,
             'subject': r.email_subject,
-            'received_at': r.received_at.isoformat() if r.received_at else None,
-            'processed_at': r.processed_at.isoformat() if r.processed_at else None,
+            # Naive-UTC datetimes: suffix Z so browser JS parses them as UTC
+            # (bare isoformat was read as LOCAL time -> negative ages and
+            # future 'Received' stamps in the admin tab).
+            'received_at': r.received_at.isoformat() + 'Z' if r.received_at else None,
+            'processed_at': r.processed_at.isoformat() + 'Z' if r.processed_at else None,
             'trades_count': r.trades_count,
             'detail': r.detail,
         } for r in recent],
@@ -7585,7 +7598,7 @@ def bot_pending_trades():
             'price': t.price,
             'status': t.status,
             'assigned_bot_id': t.assigned_bot_id,
-            'created_at': t.created_at.isoformat() if t.created_at else None,
+            'created_at': t.created_at.isoformat() + 'Z' if t.created_at else None,
             'expires_at': t.expires_at.isoformat() if t.expires_at else None,
             'routed_at': t.routed_at.isoformat() if t.routed_at else None,
             'email_subject': t.source_email_subject,

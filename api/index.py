@@ -12703,11 +12703,12 @@ def delete_account():
         current_user.deleted_at = datetime.utcnow()
         db.session.commit()
 
-        # Stop Google Play auto-renewals tied to this account (both the
-        # subscribers paying THIS creator and subscriptions this user pays
-        # for), then notify the creator's active subscribers (push + email).
-        # Apple has no cancel API — Apple-billed subscribers get a deep-linked
-        # cancellation email instead. Best-effort; never blocks deletion.
+        # Stop Google Play billing tied to this account (subscribers paying
+        # THIS creator are revoked with a prorated refund; this user's own
+        # subscriptions are cancelled), then notify the creator's active
+        # subscribers (push + email). Apple has no cancel API — Apple-billed
+        # subscribers get a deep-linked cancellation email instead.
+        # Best-effort; never blocks deletion.
         try:
             from mobile_api import (
                 _cancel_billing_for_deleted_account,
