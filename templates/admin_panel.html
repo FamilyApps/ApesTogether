@@ -1569,7 +1569,10 @@ const EmailMonitor = ({ api }) => {
 
   const handleAssign = (otp) => {
     if (!assignData) return;
-    api('/admin/bot/assign-pending-trades', { method: 'POST', body: { trade_ids: [assignData.id], bot_user_id: assignData.botId }, otp })
+    const req = assignData.mode === 'dismiss'
+      ? api('/admin/bot/dismiss-pending-trades', { method: 'POST', body: { trade_ids: [assignData.id] }, otp })
+      : api('/admin/bot/assign-pending-trades', { method: 'POST', body: { trade_ids: [assignData.id], bot_user_id: assignData.botId }, otp });
+    req
       .then(res => {
         setShowOtp(null); setAssignData(null);
         if (res.errors && res.errors.length) alert('Assign errors: ' + res.errors.map(e => `${e.ticker}: ${e.error}`).join('; '));
@@ -1619,10 +1622,17 @@ const EmailMonitor = ({ api }) => {
             { key: 'created_at', label: 'Age', render: v => v ? `${Math.round((Date.now() - new Date(v).getTime()) / 60000)}m` : '—' },
             { key: 'assign', label: '', render: (v, row) => (
               ['pending', 'unroutable', 'skipped_not_held'].includes(row.status) ? (
-                <Btn small variant="secondary" onClick={() => {
-                  const botId = prompt(`Assign #${row.id} ${row.ticker} ${(row.action || '').toUpperCase()} to bot user ID:`);
-                  if (botId) { setAssignData({ id: row.id, botId: parseInt(botId, 10) }); setShowOtp(true); }
-                }}>Assign</Btn>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <Btn small variant="secondary" onClick={() => {
+                    const botId = prompt(`Assign #${row.id} ${row.ticker} ${(row.action || '').toUpperCase()} to bot user ID:`);
+                    if (botId) { setAssignData({ id: row.id, botId: parseInt(botId, 10), mode: 'assign' }); setShowOtp(true); }
+                  }}>Assign</Btn>
+                  <Btn small variant="danger" onClick={() => {
+                    if (confirm(`Dismiss #${row.id} ${row.ticker} ${(row.action || '').toUpperCase()} without executing? Use this for mislabelled emails or trades that must never be mirrored.`)) {
+                      setAssignData({ id: row.id, mode: 'dismiss' }); setShowOtp(true);
+                    }
+                  }}>Dismiss</Btn>
+                </div>
               ) : null
             ) },
           ]} data={pending} />
@@ -1643,7 +1653,7 @@ const EmailMonitor = ({ api }) => {
           ]} data={recent} />
         </Card>
       </div>
-      <OtpModal open={!!showOtp} onClose={() => setShowOtp(null)} onConfirm={handleAssign} title="Confirm Trade Assignment" />
+      <OtpModal open={!!showOtp} onClose={() => setShowOtp(null)} onConfirm={handleAssign} title={assignData && assignData.mode === 'dismiss' ? 'Confirm Dismiss (no execution)' : 'Confirm Trade Assignment'} />
     </div>
   );
 };

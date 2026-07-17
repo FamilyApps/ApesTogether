@@ -7713,6 +7713,42 @@ def bot_assign_pending_trades():
         return jsonify({'error': str(e)}), 500
 
 
+@mobile_api.route('/admin/bot/dismiss-pending-trades', methods=['POST'])
+@require_admin_2fa
+@with_db_retry
+def bot_dismiss_pending_trades():
+    """Mark pending/unroutable/skipped trades 'dismissed' WITHOUT executing.
+
+    For rows that must never be mirrored — e.g. an email whose action was
+    mislabelled by the sender and was backfilled manually via the explicit-bot
+    path of /admin/bot/email-trade, or a source trade that predates the bot.
+    Dismissed rows lose their Assign/Dismiss buttons in the admin panel, so a
+    stray click can never execute them later.
+    """
+    from models import db, PendingTrade
+
+    data = request.get_json() or {}
+    trade_ids = data.get('trade_ids', [])
+    if not trade_ids:
+        return jsonify({'error': 'trade_ids required'}), 400
+    try:
+        rows = PendingTrade.query.filter(
+            PendingTrade.id.in_(trade_ids),
+            PendingTrade.status.in_(['pending', 'unroutable', 'skipped_not_held'])
+        ).all()
+        if not rows:
+            return jsonify({'error': 'No matching pending trades found'}), 404
+        for pt in rows:
+            pt.status = 'dismissed'
+            logger.info(f"Pending trade DISMISSED by admin: #{pt.id} {pt.ticker} {pt.action}")
+        db.session.commit()
+        return jsonify({'success': True, 'dismissed': [pt.id for pt in rows]})
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Dismiss pending trades error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 def _notify_admin_unroutable_trades(batch_id, trades, reason='no_anchor_30min', detail=None):
     """Send email notification to admin about unroutable trades.
 
