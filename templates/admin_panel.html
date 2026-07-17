@@ -1569,8 +1569,12 @@ const EmailMonitor = ({ api }) => {
 
   const handleAssign = (otp) => {
     if (!assignData) return;
-    api('/admin/bot/assign-pending-trades', { method: 'POST', body: { trade_ids: [assignData.id], bot_id: assignData.botId }, otp })
-      .then(() => { setShowOtp(null); setAssignData(null); load(); })
+    api('/admin/bot/assign-pending-trades', { method: 'POST', body: { trade_ids: [assignData.id], bot_user_id: assignData.botId }, otp })
+      .then(res => {
+        setShowOtp(null); setAssignData(null);
+        if (res.errors && res.errors.length) alert('Assign errors: ' + res.errors.map(e => `${e.ticker}: ${e.error}`).join('; '));
+        load();
+      })
       .catch(e => alert('Assign failed: ' + e.message));
   };
 
@@ -1610,9 +1614,17 @@ const EmailMonitor = ({ api }) => {
             { key: 'ticker', label: 'Ticker', render: v => <span style={{ fontWeight: 600 }}>{v}</span> },
             { key: 'action', label: 'Action', render: v => <Badge text={v?.toUpperCase()} color={v === 'buy' ? 'var(--green)' : 'var(--red)'} /> },
             { key: 'quantity', label: 'Qty', render: fmtQty },
-            { key: 'status', label: 'Status', render: v => <Badge text={v} color={v === 'routed' ? 'var(--green)' : v === 'pending' ? 'var(--yellow)' : 'var(--red)'} /> },
+            { key: 'status', label: 'Status', render: v => <Badge text={v} color={v === 'routed' ? 'var(--green)' : (v === 'pending' || v === 'skipped_not_held') ? 'var(--yellow)' : 'var(--red)'} /> },
             { key: 'assigned_bot_id', label: 'Bot', render: v => v || '—' },
             { key: 'created_at', label: 'Age', render: v => v ? `${Math.round((Date.now() - new Date(v).getTime()) / 60000)}m` : '—' },
+            { key: 'assign', label: '', render: (v, row) => (
+              ['pending', 'unroutable', 'skipped_not_held'].includes(row.status) ? (
+                <Btn small variant="secondary" onClick={() => {
+                  const botId = prompt(`Assign #${row.id} ${row.ticker} ${(row.action || '').toUpperCase()} to bot user ID:`);
+                  if (botId) { setAssignData({ id: row.id, botId: parseInt(botId, 10) }); setShowOtp(true); }
+                }}>Assign</Btn>
+              ) : null
+            ) },
           ]} data={pending} />
         )}
       </Card>

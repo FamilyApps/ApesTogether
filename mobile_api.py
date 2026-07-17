@@ -7475,6 +7475,7 @@ def bot_process_pending_trades():
 
             if chosen_bot_id is not None:
                 matched_bot = copytrade_by_id[chosen_bot_id]
+                not_held_skips = []
                 for pt in cluster:
                     r = _execute_single_bot_trade(
                         matched_bot, pt.action, pt.ticker.upper(),
@@ -7492,9 +7493,24 @@ def bot_process_pending_trades():
                             f"{matched_bot.username} (reason={decision_reason})"
                         )
                     else:
-                        # Execution failed but routing decision was made;
-                        # mark unroutable so it doesn't loop forever.
-                        pt.status = 'unroutable'
+                        err = (r.get('error') or '')
+                        if pt.action == 'sell' and 'does not hold' in err:
+                            # The source exited a position this bot never
+                            # entered (typical cause: the entry BUY email was
+                            # dropped — e.g. while ingestion was paused — or
+                            # the position predates the bot's seeding).
+                            # Mirroring only the exit would fabricate cash
+                            # proceeds, so skip with a distinct status and
+                            # notify the admin: backfill the missed entry
+                            # (explicit-bot POST to /admin/bot/email-trade),
+                            # then Assign this row — it replays the exit at
+                            # its original email timestamp.
+                            pt.status = 'skipped_not_held'
+                            not_held_skips.append(pt)
+                        else:
+                            # Execution failed but routing decision was made;
+                            # mark unroutable so it doesn't loop forever.
+                            pt.status = 'unroutable'
                         expired_count += 1
                         logger.error(
                             f"Cluster execute fail: {pt.ticker} {pt.action} "
@@ -7502,6 +7518,11 @@ def bot_process_pending_trades():
                         )
                 cluster_info['routed_to'] = matched_bot.username
                 routed_clusters_log.append(cluster_info)
+                if not_held_skips:
+                    _notify_admin_unroutable_trades(
+                        cluster[0].email_batch_id, not_held_skips,
+                        reason='sell_not_held', detail=cluster_info,
+                    )
 
             elif decision_reason in ('sell_anchors_conflict', 'buy_holders_conflict', 'mixed_holder_signals'):
                 for pt in cluster:
@@ -7611,7 +7632,12 @@ def bot_pending_trades():
 @with_db_retry
 def bot_assign_pending_trades():
     """
-    Manually assign pending/unroutable trades to a specific bot.
+    Manually assign pending/unroutable/skipped trades to a specific bot.
+
+    Executes via _execute_single_bot_trade (multiplier, live-price fetch,
+    unheld-sell guard) with timestamp = the trade's original
+    email_received_at, so a manual attribution BACKFILLS the Transaction at
+    the real trade time — not at whenever the admin clicked Assign.
     
     Request body:
     {
@@ -7619,11 +7645,11 @@ def bot_assign_pending_trades():
         "bot_user_id": 13
     }
     """
-    from models import db, User, Stock, PendingTrade
-    from cash_tracking import process_transaction
+    from models import db, User, PendingTrade
     
     data = request.get_json() or {}
-    bot_user_id = data.get('bot_user_id')
+    # Accept both spellings — the admin-panel UI sends bot_id.
+    bot_user_id = data.get('bot_user_id') or data.get('bot_id')
     batch_id = data.get('batch_id')
     trade_ids = data.get('trade_ids', [])
     
@@ -7636,74 +7662,48 @@ def bot_assign_pending_trades():
         bot = User.query.get(bot_user_id)
         if not bot:
             return jsonify({'error': 'bot_not_found'}), 404
-        
-        trade_multiplier = 1.0
-        if bot.extra_data and isinstance(bot.extra_data, dict):
-            trade_multiplier = float(bot.extra_data.get('trade_multiplier', 1.0))
-        
+
         if batch_id:
             pending = PendingTrade.query.filter_by(email_batch_id=batch_id).filter(
-                PendingTrade.status.in_(['pending', 'unroutable'])
+                PendingTrade.status.in_(['pending', 'unroutable', 'skipped_not_held'])
             ).all()
         else:
             pending = PendingTrade.query.filter(
                 PendingTrade.id.in_(trade_ids),
-                PendingTrade.status.in_(['pending', 'unroutable'])
+                PendingTrade.status.in_(['pending', 'unroutable', 'skipped_not_held'])
             ).all()
         
         if not pending:
             return jsonify({'error': 'No matching pending trades found'}), 404
         
         executed = []
+        errors = []
         now = datetime.utcnow()
         
         for pt in pending:
+            r = _execute_single_bot_trade(
+                bot, pt.action, (pt.ticker or '').upper(), float(pt.quantity),
+                pt.price, source='manual_assign',
+                timestamp=pt.created_at or now,
+            )
+            if r.get('status') != 'executed':
+                errors.append({'id': pt.id, 'ticker': pt.ticker, 'error': r.get('error')})
+                logger.error(f"Manual assign trade error {pt.ticker}: {r.get('error')}")
+                continue
             pt.assigned_bot_id = bot.id
             pt.status = 'routed'
             pt.routed_at = now
-            
-            qty = pt.quantity
-            if trade_multiplier != 1.0:
-                qty = round(qty * trade_multiplier, 6)
-            
-            price = pt.price
-            if not price:
-                try:
-                    from portfolio_performance import PortfolioPerformanceCalculator
-                    calc = PortfolioPerformanceCalculator()
-                    price_data = calc.get_stock_data(pt.ticker)
-                    price = price_data['price'] if price_data and price_data.get('price') else None
-                except Exception:
-                    price = None
-            
-            if price:
-                try:
-                    stock = Stock.query.filter_by(user_id=bot.id, ticker=pt.ticker).first()
-                    pos_before = stock.quantity if stock and pt.action == 'sell' else None
-                    process_transaction(db, bot.id, pt.ticker, qty, float(price), pt.action, timestamp=now, position_before_qty=pos_before)
-                    if pt.action == 'buy':
-                        if stock:
-                            total_cost = (stock.quantity * stock.purchase_price) + (qty * float(price))
-                            stock.quantity += qty
-                            stock.purchase_price = total_cost / stock.quantity if stock.quantity > 0 else float(price)
-                        else:
-                            stock = Stock(user_id=bot.id, ticker=pt.ticker, quantity=qty, purchase_price=float(price))
-                            db.session.add(stock)
-                    elif pt.action == 'sell' and stock and stock.quantity >= qty:
-                        stock.quantity -= qty
-                    
-                    executed.append({'ticker': pt.ticker, 'action': pt.action, 'quantity': qty, 'price': float(price)})
-                except Exception as e:
-                    logger.error(f"Manual assign trade error {pt.ticker}: {e}")
-        
+            executed.append(r)
+
         db.session.commit()
         
         return jsonify({
             'success': True,
             'bot_user_id': bot.id,
             'bot_username': bot.username,
-            'assigned': len(pending),
+            'assigned': len(executed),
             'executed': len(executed),
+            'errors': errors,
             'trades': executed
         })
         
@@ -8669,10 +8669,10 @@ def bot_alert_summary():
         try:
             from models import PendingTrade
             pending_count = PendingTrade.query.filter(
-                PendingTrade.status.in_(['pending', 'unroutable'])
+                PendingTrade.status.in_(['pending', 'unroutable', 'skipped_not_held'])
             ).count()
             oldest_pending = PendingTrade.query.filter(
-                PendingTrade.status.in_(['pending', 'unroutable'])
+                PendingTrade.status.in_(['pending', 'unroutable', 'skipped_not_held'])
             ).order_by(PendingTrade.created_at.asc()).first()
         except Exception:
             pass
