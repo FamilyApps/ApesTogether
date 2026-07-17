@@ -1617,11 +1617,11 @@ const EmailMonitor = ({ api }) => {
             { key: 'ticker', label: 'Ticker', render: v => <span style={{ fontWeight: 600 }}>{v}</span> },
             { key: 'action', label: 'Action', render: v => <Badge text={v?.toUpperCase()} color={v === 'buy' ? 'var(--green)' : 'var(--red)'} /> },
             { key: 'quantity', label: 'Qty', render: fmtQty },
-            { key: 'status', label: 'Status', render: v => <Badge text={v} color={v === 'routed' ? 'var(--green)' : (v === 'pending' || v === 'skipped_not_held') ? 'var(--yellow)' : 'var(--red)'} /> },
+            { key: 'status', label: 'Status', render: v => <Badge text={v} color={v === 'routed' ? 'var(--green)' : (v === 'pending' || v === 'skipped_not_held' || v === 'skipped_duplicate') ? 'var(--yellow)' : (v === 'dismissed') ? 'var(--text-secondary)' : 'var(--red)'} /> },
             { key: 'assigned_bot_id', label: 'Bot', render: v => v || '—' },
             { key: 'created_at', label: 'Age', render: v => v ? `${Math.round((Date.now() - new Date(v).getTime()) / 60000)}m` : '—' },
             { key: 'assign', label: '', render: (v, row) => (
-              ['pending', 'unroutable', 'skipped_not_held'].includes(row.status) ? (
+              ['pending', 'unroutable', 'skipped_not_held', 'skipped_duplicate'].includes(row.status) ? (
                 <div style={{ display: 'flex', gap: 6 }}>
                   <Btn small variant="secondary" onClick={() => {
                     const botId = prompt(`Assign #${row.id} ${row.ticker} ${(row.action || '').toUpperCase()} to bot user ID:`);

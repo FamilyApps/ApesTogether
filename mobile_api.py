@@ -6879,6 +6879,57 @@ def _execute_single_bot_trade(bot, action, ticker, quantity, price, source, time
         return {'ticker': ticker, 'error': str(e)}
 
 
+def _is_duplicate_trade_suspect(ticker, action, quantity, received_at, bot=None,
+                                exclude_pending_id=None):
+    """True if an identical trade was already ingested in the last 24h.
+
+    Public occasionally re-sends a trade confirmation as a NEW Gmail message
+    (seen 2026-07-17: two identical "sold 1.16967 MBGL" emails ~3.5h apart),
+    which message-id dedupe cannot catch. An identical ticker/action/quantity
+    arriving again within 24h is almost certainly that duplicate — a fractional
+    share quantity exactly repeating by chance is implausible — so callers
+    defer/skip instead of auto-executing. A legitimate repeat is parked for
+    the admin, who can still Assign it manually.
+
+    Checks PendingTrade rows (raw email quantity) and executed auto_*
+    Transactions (multiplier-scaled quantity, small tolerance; may miss
+    clamped sells — acceptable, the PendingTrade check covers the common
+    case).
+    """
+    from models import PendingTrade, Transaction
+    from datetime import timedelta
+
+    since = received_at - timedelta(hours=24)
+    q = PendingTrade.query.filter(
+        PendingTrade.ticker == ticker,
+        PendingTrade.action == action,
+        PendingTrade.quantity == quantity,
+        PendingTrade.created_at >= since,
+    )
+    if exclude_pending_id is not None:
+        q = q.filter(PendingTrade.id != exclude_pending_id)
+    if q.first() is not None:
+        return True
+
+    if bot is not None:
+        mult = 1.0
+        if bot.extra_data and isinstance(bot.extra_data, dict):
+            mult = float(bot.extra_data.get('trade_multiplier', 1.0))
+        scaled = round(quantity * mult, 6)
+        tol = max(1e-6, scaled * 0.001)
+        txs = Transaction.query.filter(
+            Transaction.user_id == bot.id,
+            Transaction.ticker == ticker,
+            Transaction.transaction_type == action,
+            Transaction.timestamp >= since,
+            Transaction.price_source.like('auto_%'),
+        ).all()
+        for tx in txs:
+            if abs(float(tx.quantity or 0) - scaled) <= tol:
+                return True
+    return False
+
+
 def _is_email_trade_paused() -> bool:
     """Whether Public->bot email-trade ingestion is paused (maintenance switch).
 
@@ -7194,6 +7245,19 @@ def bot_email_trade():
             # resolver uses to anchor sibling buys.
             anchor_bot = holders[0] if (action == 'sell' and len(holders) == 1) else None
 
+            # Duplicate-email guard: never let a suspect re-send anchor-execute
+            # — for a sell that would instantly liquidate the position and fan
+            # out a false exit alert. Defer it; the admin can Assign or Dismiss.
+            dup_suspect = False
+            if anchor_bot is not None and _is_duplicate_trade_suspect(
+                    ticker, action, quantity, email_received_at, anchor_bot):
+                logger.warning(
+                    f"bot_email_trade: duplicate-suspect {action} {ticker} "
+                    f"qty={quantity} — deferred instead of anchor-executed"
+                )
+                anchor_bot = None
+                dup_suspect = True
+
             if anchor_bot is not None:
                 try:
                     r = _execute_single_bot_trade(
@@ -7211,7 +7275,9 @@ def bot_email_trade():
                 executed_results.append(r)
             else:
                 # Defer — cluster resolver will route via anchors
-                if action == 'buy':
+                if dup_suspect:
+                    reason = 'duplicate_suspect'
+                elif action == 'buy':
                     reason = 'buy_always_deferred'
                 elif len(holders) == 0:
                     reason = 'sell_no_holder'
@@ -7476,7 +7542,23 @@ def bot_process_pending_trades():
             if chosen_bot_id is not None:
                 matched_bot = copytrade_by_id[chosen_bot_id]
                 not_held_skips = []
+                dup_skips = []
                 for pt in cluster:
+                    # Duplicate-email guard (see _is_duplicate_trade_suspect):
+                    # a trade identical to one already ingested in the last
+                    # 24h is parked for the admin instead of executed.
+                    if _is_duplicate_trade_suspect(
+                            pt.ticker.upper(), pt.action, float(pt.quantity),
+                            pt.created_at, matched_bot,
+                            exclude_pending_id=pt.id):
+                        pt.status = 'skipped_duplicate'
+                        dup_skips.append(pt)
+                        expired_count += 1
+                        logger.warning(
+                            f"Cluster route: duplicate-suspect {pt.ticker} "
+                            f"{pt.action} qty={pt.quantity} — skipped"
+                        )
+                        continue
                     r = _execute_single_bot_trade(
                         matched_bot, pt.action, pt.ticker.upper(),
                         float(pt.quantity), pt.price,
@@ -7522,6 +7604,11 @@ def bot_process_pending_trades():
                     _notify_admin_unroutable_trades(
                         cluster[0].email_batch_id, not_held_skips,
                         reason='sell_not_held', detail=cluster_info,
+                    )
+                if dup_skips:
+                    _notify_admin_unroutable_trades(
+                        cluster[0].email_batch_id, dup_skips,
+                        reason='duplicate_suspect', detail=cluster_info,
                     )
 
             elif decision_reason in ('sell_anchors_conflict', 'buy_holders_conflict', 'mixed_holder_signals'):
@@ -7665,12 +7752,12 @@ def bot_assign_pending_trades():
 
         if batch_id:
             pending = PendingTrade.query.filter_by(email_batch_id=batch_id).filter(
-                PendingTrade.status.in_(['pending', 'unroutable', 'skipped_not_held'])
+                PendingTrade.status.in_(['pending', 'unroutable', 'skipped_not_held', 'skipped_duplicate'])
             ).all()
         else:
             pending = PendingTrade.query.filter(
                 PendingTrade.id.in_(trade_ids),
-                PendingTrade.status.in_(['pending', 'unroutable', 'skipped_not_held'])
+                PendingTrade.status.in_(['pending', 'unroutable', 'skipped_not_held', 'skipped_duplicate'])
             ).all()
         
         if not pending:
@@ -7734,7 +7821,7 @@ def bot_dismiss_pending_trades():
     try:
         rows = PendingTrade.query.filter(
             PendingTrade.id.in_(trade_ids),
-            PendingTrade.status.in_(['pending', 'unroutable', 'skipped_not_held'])
+            PendingTrade.status.in_(['pending', 'unroutable', 'skipped_not_held', 'skipped_duplicate'])
         ).all()
         if not rows:
             return jsonify({'error': 'No matching pending trades found'}), 404
@@ -8705,10 +8792,10 @@ def bot_alert_summary():
         try:
             from models import PendingTrade
             pending_count = PendingTrade.query.filter(
-                PendingTrade.status.in_(['pending', 'unroutable', 'skipped_not_held'])
+                PendingTrade.status.in_(['pending', 'unroutable', 'skipped_not_held', 'skipped_duplicate'])
             ).count()
             oldest_pending = PendingTrade.query.filter(
-                PendingTrade.status.in_(['pending', 'unroutable', 'skipped_not_held'])
+                PendingTrade.status.in_(['pending', 'unroutable', 'skipped_not_held', 'skipped_duplicate'])
             ).order_by(PendingTrade.created_at.asc()).first()
         except Exception:
             pass
