@@ -608,6 +608,59 @@ class IAPValidationService:
             logger.error(f"Failed to acknowledge Google purchase: {e}")
             return False
 
+    async def cancel_google_subscription(self, purchase_token: str, product_id: str = None) -> Dict[str, Any]:
+        """Turn OFF auto-renewal for a Google Play subscription (server-side).
+
+        POST purchases.subscriptions:cancel — the subscriber keeps entitlement
+        until the end of the period they already paid for; they simply are not
+        billed again. No refund is issued (that would be
+        purchases.subscriptionsv2:revoke, which also kills entitlement).
+
+        Used when a creator deletes their account: their subscribers'
+        Google-billed subscriptions are cancelled so nobody keeps paying for a
+        portfolio that no longer exists. Apple exposes no cancellation API for
+        standard StoreKit subscriptions — those subscribers get a deep-linked
+        cancellation email/push instead, per Apple's own guidance.
+
+        Success = HTTP 200/204 (empty body). 400/404 usually means the token
+        is already cancelled, expired, or invalid — reported as a soft failure.
+        """
+        if not self.google_credentials:
+            logger.error("GOOGLE_PLAY_CREDENTIALS_JSON not configured")
+            return {'success': False, 'error': 'server_config_error'}
+
+        product_id = product_id or self.PRODUCT_ID
+
+        try:
+            access_token = await self._get_google_access_token()
+            if not access_token:
+                return {'success': False, 'error': 'failed_to_get_access_token'}
+
+            url = (
+                f"https://androidpublisher.googleapis.com/androidpublisher/v3/"
+                f"applications/{self.google_package_name}/purchases/subscriptions/"
+                f"{product_id}/tokens/{purchase_token}:cancel"
+            )
+
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    url,
+                    headers={'Authorization': f'Bearer {access_token}'},
+                    timeout=30.0
+                )
+
+            if response.status_code in (200, 204):
+                return {'success': True}
+            logger.warning(
+                f"Google subscription cancel API {response.status_code} for "
+                f"token ...{purchase_token[-8:]}: {response.text[:300]}"
+            )
+            return {'success': False, 'error': f'api_error_{response.status_code}'}
+
+        except Exception as e:
+            logger.error(f"Failed to cancel Google subscription: {e}")
+            return {'success': False, 'error': str(e)}
+
 
 # Singleton instance
 _iap_service = None

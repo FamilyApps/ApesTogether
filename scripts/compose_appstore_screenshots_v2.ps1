@@ -406,7 +406,17 @@ foreach($f in $frames){
       $cx=$bx-$pad; $cy=$by-$pad; $cw=$bw+2*$pad; $ch=$bh+2*$pad
       $ratio=[math]::Max($cw/$shot.Width,$ch/$shot.Height)   # cover (padded)
       $dw=[int]($shot.Width*$ratio); $dh=[int]($shot.Height*$ratio)
-      $dx=$cx+[int](($cw-$dw)/2); $dy=$cy+[int](($ch-$dh)/2)
+      $dx=$cx+[int](($cw-$dw)/2)
+      # TOP-anchor the vertical overflow instead of center-cropping. Cover
+      # scaling makes $dh >= $ch whenever the screen cutout is squatter than
+      # the capture; centering split that overflow across top AND bottom,
+      # slicing the status bar (clock / battery / icons) off the top. App
+      # screens keep their expendable pixels at the BOTTOM (gesture bar), so
+      # put the entire crop there. ($cy already includes the 8px fringe
+      # bleed, which the status strip's own height comfortably absorbs.)
+      $dy=$cy
+      $vCrop=$dh-$ch
+      if($vCrop -gt [int]($ch*0.04)){ Write-Host ("NOTE: {0}: cover-crop trims {1}px off the capture BOTTOM (screen-cutout vs capture aspect mismatch)." -f $f.file,$vCrop) }
       $g.SetClip((New-Object Drawing.Rectangle($cx,$cy,$cw,$ch)))
       $g.DrawImage($shot,$dx,$dy,$dw,$dh)
       $g.ResetClip()

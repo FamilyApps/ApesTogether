@@ -12703,12 +12703,21 @@ def delete_account():
         current_user.deleted_at = datetime.utcnow()
         db.session.commit()
 
-        # Notify this creator's active subscribers (push + email) that they've
-        # left and how to cancel in the store — deleting a creator does NOT
-        # cancel a subscriber's store subscription. Best-effort; never blocks.
+        # Stop Google Play auto-renewals tied to this account (both the
+        # subscribers paying THIS creator and subscriptions this user pays
+        # for), then notify the creator's active subscribers (push + email).
+        # Apple has no cancel API — Apple-billed subscribers get a deep-linked
+        # cancellation email instead. Best-effort; never blocks deletion.
         try:
-            from mobile_api import _notify_subscribers_creator_deleted
-            _notify_subscribers_creator_deleted(deleted_user)
+            from mobile_api import (
+                _cancel_billing_for_deleted_account,
+                _notify_subscribers_creator_deleted,
+            )
+            billing = _cancel_billing_for_deleted_account(deleted_user)
+            _notify_subscribers_creator_deleted(
+                deleted_user,
+                google_cancelled_purchase_ids=billing.get('inbound_cancelled_purchase_ids'),
+            )
         except Exception as notify_err:
             logger.error(f"creator-deleted notify (web) failed: {notify_err}")
 
@@ -12716,7 +12725,7 @@ def delete_account():
         from flask_login import logout_user
         logout_user()
         
-        flash('Your account has been scheduled for deletion (30-day grace period). To restore it, email support@apestogether.ai — logging in will not restore it. Note: this does not cancel paid subscriptions; cancel those in the App Store or Google Play to stop billing.', 'info')
+        flash('Your account has been scheduled for deletion (30-day grace period). To restore it, email support@apestogether.ai — logging in will not restore it. Billing: auto-renewal for Google Play subscriptions purchased in the app has been turned off automatically where possible; Apple subscriptions must be cancelled in the App Store (Settings > your name > Subscriptions).', 'info')
         return redirect(url_for('index'))
     
     except Exception as e:

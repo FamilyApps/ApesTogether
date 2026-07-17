@@ -1533,12 +1533,20 @@ const EmailMonitor = ({ api }) => {
   const [loading, setLoading] = useState(true);
   const [showOtp, setShowOtp] = useState(null);
   const [assignData, setAssignData] = useState(null);
+  const [recent, setRecent] = useState([]);
+  const [paused, setPaused] = useState(false);
+  const [pauseBusy, setPauseBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const data = await api('/admin/bot/pending-trades');
-      setPending(data.pending_trades || []);
+      // Endpoint returns {trades, recent_emails, paused}. The old code read
+      // data.pending_trades — a field that never existed — so this tab was
+      // ALWAYS empty even with rows in pending_trade.
+      setPending(data.trades || []);
+      setRecent(data.recent_emails || []);
+      setPaused(!!data.paused);
     } catch (e) { console.error(e); }
     setLoading(false);
   }, [api]);
@@ -1549,6 +1557,16 @@ const EmailMonitor = ({ api }) => {
     try { await api('/admin/bot/process-pending-trades', { method: 'POST' }); load(); } catch (e) { alert(e.message); }
   };
 
+  const togglePause = async () => {
+    if (pauseBusy) return;
+    setPauseBusy(true);
+    try {
+      await api('/admin/bot/email-trade-pause', { method: 'POST', body: { paused: !paused } });
+      await load();
+    } catch (e) { alert('Pause toggle failed: ' + e.message); }
+    setPauseBusy(false);
+  };
+
   const handleAssign = (otp) => {
     if (!assignData) return;
     api('/admin/bot/assign-pending-trades', { method: 'POST', body: { trade_ids: [assignData.id], bot_id: assignData.botId }, otp })
@@ -1556,18 +1574,35 @@ const EmailMonitor = ({ api }) => {
       .catch(e => alert('Assign failed: ' + e.message));
   };
 
+  const fmtWhen = v => v ? new Date(v).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+  const emailStatusColor = v => (
+    (v === 'executed' || v === 'executed_manual') ? 'var(--green)'
+    : (v === 'skipped_paused') ? 'var(--red)'
+    : (v === 'duplicate') ? 'var(--text-secondary)'
+    : 'var(--yellow)'
+  );
+
   return (
     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h2 style={{ fontSize: 20, fontWeight: 700 }}>Email Trade Pipeline</h2>
-          <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{pending.length} pending trade(s)</p>
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{pending.length} unresolved trade(s) · last 100 shown (all statuses)</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <Btn variant="secondary" small onClick={togglePause} disabled={pauseBusy}>{paused ? 'Resume Ingestion' : 'Pause Ingestion'}</Btn>
           <Btn variant="secondary" small onClick={load}>{Icons.refresh}</Btn>
           <Btn small onClick={handleProcess}>{Icons.play} Reprocess</Btn>
         </div>
       </div>
+      {paused && (
+        <Card style={{ border: '1px solid var(--red)', background: 'rgba(239,68,68,0.08)' }}>
+          <strong style={{ color: 'var(--red)' }}>⚠ Email-trade ingestion is PAUSED</strong>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
+            Inbound Public.com emails are recorded as <code>skipped_paused</code> and permanently dropped — they are NOT mirrored, queued, or replayed on resume. GAS still marks them read in Gmail. Hit “Resume Ingestion” to process new emails again.
+          </div>
+        </Card>
+      )}
       <Card style={{ padding: 0 }}>
         {loading ? <div style={{ padding: 40, textAlign: 'center' }}><Spinner /></div> : (
           <Table columns={[
@@ -1581,6 +1616,21 @@ const EmailMonitor = ({ api }) => {
           ]} data={pending} />
         )}
       </Card>
+      <div>
+        <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>Recent Inbound Emails</h3>
+        <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
+          Idempotency ledger (last 20) — every Gmail message the server received, including ones that executed immediately, were deduped, or were dropped while paused. If an email you expected is missing here entirely, the GAS parser never POSTed it.
+        </p>
+        <Card style={{ padding: 0 }}>
+          <Table columns={[
+            { key: 'subject', label: 'Subject', render: v => <span style={{ fontSize: 12 }}>{(v || '—').slice(0, 60)}</span> },
+            { key: 'status', label: 'Status', render: v => <Badge text={v} color={emailStatusColor(v)} /> },
+            { key: 'received_at', label: 'Received', render: fmtWhen },
+            { key: 'trades_count', label: 'Trades' },
+            { key: 'detail', label: 'Detail', render: v => <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{(v || '—').slice(0, 70)}</span> },
+          ]} data={recent} />
+        </Card>
+      </div>
       <OtpModal open={!!showOtp} onClose={() => setShowOtp(null)} onConfirm={handleAssign} title="Confirm Trade Assignment" />
     </div>
   );
