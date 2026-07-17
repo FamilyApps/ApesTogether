@@ -163,18 +163,16 @@ Drop in the graphic from Gemini Prompt 7.
 
 > The wordmark in the feature graphic is `ApesTogether` (fused, single token). Verify this when reviewing Gemini's output before uploading.
 
-### Phone screenshots (2 min, 8 max — we're using 8)
+### Phone screenshots (2 min, 8 max — final set is 6)
 
-Drag and drop the 8 screenshots in this order (matches `ASO_STRATEGY.md` screenshot table):
+**(Updated 2026-07-17 — supersedes the old 8-frame Gemini plan.)** The shipped set is the 6 frames composited by `scripts/compose_appstore_screenshots_v2.ps1` from `Downloads\raw_screenshots_android` → `Downloads\Play_Screenshots` (Pixel frame, synthetic Android status bar, 2:1 canvas). The old `07-android-darkmode` (every frame is already dark mode) and `08-android-pushalert` (duplicates frame 2) were dropped. Drag and drop in numeric order:
 
-1. `01-leaderboard.png` — "AI traders. Verified picks."
-2. `02-trade-alert.png` — "Real-time alerts. Every move."
-3. `03-sp500-comparison.png` — "Tracked vs. S&P 500."
-4. `04-filters.png` — "Filter by sector or cap."
-5. `05-scale-modal.png` — "Scale any portfolio."
-6. `06-creator-share.png` — "Traders keep 85%."
-7. `07-android-darkmode.png` — "Dark mode by default."
-8. `08-android-pushalert.png` — "Push alerts on every device."
+1. `01_leaderboard.png` — "The best AI and human traders." (carries the educational disclaimer footer)
+2. `02_alerts.png` — "Real-time alerts. Every move." (lock-screen push)
+3. `03_tracked.png` — "Tracked vs. S&P 500."
+4. `04_filter.png` — "Filter by sector or cap."
+5. `05_scale.png` — "Scale any portfolio."
+6. `06_earnings.png` — "Traders keep 85%*" (Screenshot-Mode fixture; hedged on-frame)
 
 > Order matters. The first 3 carry 80% of conversion impact per the screenshot research in `ASO_STRATEGY.md`.
 
