@@ -318,19 +318,21 @@ private fun PortfolioBody(
                         )
                     }
 
-                    // Badges — Founding Trader pill first (permanent status),
-                    // then the period-based leaderboard medals. Same horizontal-
-                    // scroll row, so any overflow scrolls instead of wrapping.
+                    // Badges — period-based leaderboard medals only. The
+                    // Founding Trader pill (permanent STATUS, not an earned
+                    // award) lives in the hero header under the portfolio
+                    // value on the public view; the owner view has no hero,
+                    // so owners still see their pill here.
                     val isFounder = portfolio.owner.foundingTrader == true
                     val badges = portfolio.leaderboardBadges.orEmpty()
-                    if (isFounder || badges.isNotEmpty()) {
+                    if ((isFounder && portfolio.isOwner) || badges.isNotEmpty()) {
                         Row(
                             modifier = Modifier
                                 .horizontalScroll(rememberScrollState())
                                 .padding(horizontal = 16.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            if (isFounder) FoundingTraderPill()
+                            if (isFounder && portfolio.isOwner) FoundingTraderPill()
                             badges.forEach { LeaderboardBadgePill(badge = it) }
                         }
                     }
@@ -646,6 +648,14 @@ private fun PortfolioHeroCard(
                 fontWeight = FontWeight.Black,
                 modifier = Modifier.padding(top = 2.dp),
             )
+        }
+
+        // Founding Trader — permanent status, so it belongs on the identity
+        // block, separate from the earned leaderboard medals row below.
+        if (portfolio.owner.foundingTrader == true) {
+            Box(modifier = Modifier.padding(top = 4.dp)) {
+                FoundingTraderPill()
+            }
         }
     }
 }

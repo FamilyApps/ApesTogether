@@ -48,15 +48,17 @@ struct PortfolioDetailView: View {
                                 .padding(.horizontal, 16)
                         }
                         
-                        // ── Badges: Founding Trader first (permanent status),
-                        // then the period-based leaderboard medals. Same
-                        // horizontal-scroll row, so overflow scrolls, not wraps.
+                        // ── Badges: period-based leaderboard medals only.
+                        // The Founding Trader pill (permanent STATUS, not an
+                        // earned award) lives in the hero header under the
+                        // portfolio value on the public view; the owner view
+                        // has no hero, so owners still see their pill here.
                         let isFounder = portfolio.owner.foundingTrader == true
                         let badges = portfolio.leaderboardBadges ?? []
-                        if isFounder || !badges.isEmpty {
+                        if (isFounder && portfolio.isOwner) || !badges.isEmpty {
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 8) {
-                                    if isFounder {
+                                    if isFounder && portfolio.isOwner {
                                         FoundingTraderPill()
                                     }
                                     ForEach(badges) { badge in
@@ -1131,6 +1133,13 @@ struct PortfolioHeroCard: View {
                     .font(.system(size: 28, weight: .heavy, design: .rounded))
                     .foregroundColor(.textPrimary)
                     .padding(.top, 2)
+            }
+            
+            // Founding Trader — permanent status, so it belongs on the
+            // identity block, separate from the earned medals row below.
+            if portfolio.owner.foundingTrader == true {
+                FoundingTraderPill()
+                    .padding(.top, 4)
             }
         }
         .frame(maxWidth: .infinity)
