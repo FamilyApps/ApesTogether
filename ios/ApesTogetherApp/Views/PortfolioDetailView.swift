@@ -1323,19 +1323,27 @@ struct BlurredHoldingsTeaser: View {
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(.textPrimary)
                 
-                // Benefits list
+                // Benefits list — three bullets, three DISTINCT features:
+                // alerts (push), transparency (holdings), personalization
+                // (resizer). The old middle bullet "Full position details &
+                // history" overlapped "Exact holdings breakdown", and the
+                // resizer — our real differentiator — went unmentioned.
                 VStack(alignment: .leading, spacing: 6) {
                     benefitRow("Real-time buy & sell alerts")
-                    benefitRow("Full position details & history")
-                    benefitRow("Exact holdings breakdown")
+                    benefitRow("Full position details")
+                    benefitRow("Scale any portfolio to your size")
                 }
                 .frame(maxWidth: 240)
                 
-                // Plan toggle pills
+                // Plan toggle pills. fixedSize(vertical) + maxHeight: .infinity
+                // inside planPill stretch BOTH pills to the taller (Annual,
+                // which carries the Save-36% tag) so the selected highlight is
+                // the same size on either side.
                 HStack(spacing: 0) {
                     planPill(label: "Annual", sublabel: "$69/year", tag: "Save 36%", plan: .annual)
                     planPill(label: "Monthly", sublabel: "$9/month", tag: nil, plan: .monthly)
                 }
+                .fixedSize(horizontal: false, vertical: true)
                 .background(
                     RoundedRectangle(cornerRadius: 10)
                         .fill(Color.white.opacity(0.06))
@@ -1411,7 +1419,7 @@ struct BlurredHoldingsTeaser: View {
                     .font(.system(size: 11))
                     .foregroundColor(isSelected ? .textSecondary : .textMuted)
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 10)
