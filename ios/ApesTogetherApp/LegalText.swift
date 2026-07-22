@@ -82,7 +82,7 @@ Subscribers shall remit payment to access educational portfolio information made
 
 5.2 Creator Payments
 
-(a) Revenue Share Structure. Content Creators shall receive seventy percent (70%) of the gross subscription revenue generated from subscriptions to their content ("Creator Share"), with the remaining thirty percent (30%) retained by the Company as compensation for platform services, payment processing, technology infrastructure, and administrative costs ("Platform Fee").
+(a) Revenue Share Structure. Content Creators shall receive eighty-five percent (85%) of the gross subscription revenue generated from subscriptions to their content ("Creator Share"), with the remaining fifteen percent (15%) retained by the Company as compensation for platform services, payment processing, technology infrastructure, and administrative costs ("Platform Fee").
 
 (b) Payment Processing and Disbursement. Creator Share payments shall be disbursed on a monthly basis via check drawn from the Company's business account. Payments shall be calculated based on subscription revenue collected during the preceding calendar month and shall be issued within 20 business days following the end of each monthly payment period.
 

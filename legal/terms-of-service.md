@@ -47,8 +47,8 @@ Content Creators who receive payments through the Service are classified as inde
 - Subscriptions are recurring unless cancelled
 
 ### 5.2 Creator Payments
-- Content Creators receive 70% of subscription revenue generated from their content
-- Family Apps LLC retains 30% as platform fees
+- Content Creators receive 85% of subscription revenue generated from their content
+- Family Apps LLC retains 15% as platform fees
 - Payments are made monthly via check from Family Apps LLC business account
 - Minimum payout threshold may apply
 

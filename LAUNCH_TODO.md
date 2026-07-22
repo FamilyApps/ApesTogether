@@ -345,6 +345,27 @@ Tracked here so nothing is dropped; checked off as resolved. Detail/answers land
 
 ---
 
+## 🔁 Session 32 (2026-07-21) — Play monetization setup, trial-offer correction, founder pill move, ToS 85/15
+
+- **15% SERVICE FEE: ENROLLED (2026-07-21).** Account group created via the Payments-profile banner; no associated developer accounts. Payout math in `iap_validation_service.PRICING` now matches reality.
+- **Primary payout method SET** — existing (already-verified) business checking selected as Primary; no micro-deposit wait.
+- **⚠ TRIAL OFFER CORRECTION — trial belongs ONLY on Slot A.** Per `docs/PER_CREATOR_SUBSCRIPTION_SLOTS.md` §"One free trial per user": the 7-day intro offer goes ONLY on the Slot-1 products (`com.apestogether.subscription.monthly` / `.annual`); slots B–T bill immediately BY DESIGN (one lifetime trial, store-enforced — first sub always lands in Slot A). Cascade's Session-31 advice to add `trial7` to every product was WRONG; USER added it to Trader Subscription B (eligibility "Never had any subscription") → **REMOVE/deactivate that offer**, and instead **verify the two Slot-A products have an ACTIVE 7-day offer** (search `com.apestogether.subscription` in the Subscriptions list; offers column should show 1). iOS mirror: intro offer only on the original Slot-A subscription group; B–T groups have none (once-per-group enforced by Apple automatically).
+- **Hardcoded trial CTA vs eligibility — OPEN DESIGN QUESTION.** "Try Free for 7 Days, then $X" is hardcoded on both platforms, but slots B+ and trial-used users get billed immediately. Options: (a) neutral copy ("7-day free trial for new subscribers"); (b) dynamic detection — Android: Play pre-filters `subscriptionOfferDetails` by eligibility, so check for a zero-price phase (BillingService already picks the first offer token, so the RIGHT price is always charged — only the copy lies); iOS: StoreKit 2 `isEligibleForIntroOffer`. Awaiting USER decision.
+- **Founder pill MOVED (both platforms, `de96edc`)** — public view: pill now renders inside `PortfolioHeroCard` under the portfolio value (permanent status on the identity block); medals row keeps only earned leaderboard badges. Owner view (no hero card): pill stays in the badges row.
+- **iOS locked-holdings CTA fixes (`f940e65`)** — plan-pill highlight now equal height both sides (`fixedSize` + `maxHeight: .infinity`); middle benefit bullet de-duplicated to "Full position details". Third bullet (resizer) copy still pending — USER wants info-only framing (no "follow these trades" implication); 50 new candidates delivered, decision open. **Ships in Build 46.**
+- **ToS 70/30 → 85/15 (numbers only, USER-approved)** — attorney's sentence structure kept verbatim; swapped seventy/70% → eighty-five/85% and thirty/30% → fifteen/15% in `templates/terms_of_service.html` §5.2(a), `legal/terms-of-service.md` §5.2, `ios/ApesTogetherApp/LegalText.swift`. NOTE: "of the gross subscription revenue" is still technically wrong (actual = 85% of net after store fees) — attorney redraft still owed.
+- **📅 POST-8/31 BUILD (v7) — REQUIRED by Aug 31, 2026 (Play warnings 2026-07-21):**
+  - [ ] `targetSdk` 35 → **36** (+ `compileSdk` 36, on-device sanity pass).
+  - [ ] Play Billing Library `7.1.1` → **8.x** (breaking API changes — dedicated session).
+  - [ ] While at it: `ndk.debugSymbolLevel = "FULL"` (native-symbols warning) + trial-CTA copy decision above.
+- **OPEN:**
+  - [ ] USER: remove `trial7` from Trader Subscription B; verify Slot-A offers active (steps above).
+  - [ ] USER: License testing (Settings → License testing, ACCOUNT level) → arrow on the checked "Internal testing" list → add `apestogether.review@gmail.com` → Save. (Distinct from App access, which is APP level: app's left nav → Policy → App content → App access.)
+  - [ ] USER: pick the resizer bullet copy → Cascade applies (iOS Build 46).
+  - [ ] Attorney: §5.2(a) gross→net redraft (carried).
+
+---
+
 ## ▶ RESUME HERE — Sunday (AI tokens reset)
 
 **Last worked: Session 11, 2026-06-04. Committed `7a21b67` (8 files, +254/−95).** Stopped because AI tokens ran low.
