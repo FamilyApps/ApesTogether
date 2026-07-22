@@ -372,7 +372,15 @@ Tracked here so nothing is dropped; checked off as resolved. Detail/answers land
 - **iOS Build 46** — *everything since Build 45 (uploaded to ASC 2026-07-10, NOT yet submitted for review)*: dynamic trial CTA (`SubscriptionManager.trialEligible` + `subscribeCtaText()`), founder-pill move, locked-holdings CTA fixes (equal-height plan pills, de-duped bullet, resizer bullet "Adjust the portfolio size instantly"), `LegalText.swift` 85/15.
   - **When:** next Mac session — archive + upload; Build 46 **supersedes 45 as the App Store review submission** (45 never went to review, so nothing is lost). Same session: verify the ASC Slot-A subscription group carries the 7-day intro offer, and check the resizer bullet doesn't wrap at 240pt.
 - **OPEN:**
-  - [ ] Attorney: §5.2(a) gross→net redraft — before/after handed to USER 2026-07-21 to decide whether to send (carried).
+  - [ ] Attorney: §5.2(a) gross→net redraft — USER approved sending the before/after (2026-07-21) but is holding it until the attorney answers his current outstanding question; send as the follow-up.
+
+### ▶ NEXT SESSION (planned 2026-07-22)
+
+1. **Play Billing E2E on-device (the long-blocked money test #4) — now UNBLOCKED:** v6 is live on the Internal track and license testers are set (`bobford00`, `apestogether.review@gmail.com`). On the Pixel 8a via the Internal opt-in link, with a license-tester account: subscribe **monthly** (confirm the Play sheet shows the 7-day trial from `monthly-7day-free`), then **annual** on a second creator (slot B — confirm NO trial + immediate [test] charge), confirm backend `MobileSubscription` rows + 200 from `/purchase/validate`, then cancel via Play + verify downgrade. License-tester purchases are free/fake — no real money moves.
+2. **Verify the v7 client fixes on-device (sideload debug build over USB):** founder pill in the hero header, and the dynamic trial CTA — after step 1 burns the test account's "never had any subscription" eligibility, the CTA should flip to "Subscribe for $69/yr" (live regression of `BillingService.trialEligible`).
+3. **If the Mac is available: iOS Build 46 session** — archive + upload (supersedes 45); verify ASC Slot-A intro offer; check resizer bullet at 240pt; create/confirm the Apple reviewer demo account (`reviewer@apestogether.ai`, master list §5); **submit for App Store review**.
+4. **Passive:** watch for the Play verdict → on approval, **promote v6 to Production** (= Android launch), then build/upload v7 per the PENDING BUILDS block.
+5. **Parked:** attorney §5.2(a) follow-up (after his current answer); Android v8 compliance build (by 8/31).
 
 ---
 
