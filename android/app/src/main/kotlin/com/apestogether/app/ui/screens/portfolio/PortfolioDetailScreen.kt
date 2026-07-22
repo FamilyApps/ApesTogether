@@ -254,6 +254,7 @@ private fun PortfolioBody(
 ) {
     val selectedPlan by viewModel.selectedPlan.collectAsState()
     val subscribeState by viewModel.subscribeState.collectAsState()
+    val trialEligible by viewModel.trialEligible.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     val activity = LocalContext.current.findActivity()
 
@@ -385,6 +386,7 @@ private fun PortfolioBody(
                                 selectedPlan = selectedPlan,
                                 subscriptionPrice = portfolio.subscriptionPrice,
                                 subscribeState = subscribeState,
+                                trialEligible = trialEligible,
                                 showSubscribe = accepting,
                                 onSubscribe = {
                                     activity?.let {
@@ -886,16 +888,22 @@ private fun SubscribeAndShareRow(
     subscribeState: SubscribeUiState,
     onSubscribe: () -> Unit,
     modifier: Modifier = Modifier,
+    // Trial copy only while Play confirms this account can still redeem
+    // the 7-day intro offer (BillingService.trialEligible) — slots B+ and
+    // trial-used accounts bill immediately, so the button must say so.
+    trialEligible: Boolean = true,
     // W7: hide the Subscribe button (Share-only) when the creator isn't
     // accepting new subscribers. The notice copy is rendered by the caller.
     showSubscribe: Boolean = true,
 ) {
     val context = LocalContext.current
     val processing = subscribeState is SubscribeUiState.Processing
-    val ctaText = when (selectedPlan) {
-        SubscriptionPlan.Annual -> "Try Free for 7 Days, then $69/yr"
-        SubscriptionPlan.Monthly -> "Try Free for 7 Days, then $${subscriptionPrice.toInt()}/mo"
+    val priceText = when (selectedPlan) {
+        SubscriptionPlan.Annual -> "$69/yr"
+        SubscriptionPlan.Monthly -> "$${subscriptionPrice.toInt()}/mo"
     }
+    val ctaText =
+        if (trialEligible) "Try Free for 7 Days, then $priceText" else "Subscribe for $priceText"
 
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -1529,6 +1537,9 @@ class PortfolioDetailViewModel @Inject constructor(
 
     /** Live Play Billing connection state — drives the Subscribe button disabled state. */
     val billingConnectionState = billingService.connectionState
+
+    /** Store-confirmed 7-day-trial eligibility — drives the Subscribe CTA copy. */
+    val trialEligible = billingService.trialEligible
 
     // ── Phase D: portfolio resizer ───────────────────────────────────────
     private val _scaleSaving = MutableStateFlow(false)

@@ -132,6 +132,7 @@ fun LeaderboardScreen(
     val period by viewModel.period.collectAsState()
     val filters by viewModel.filters.collectAsState()
     val selectedPlan by viewModel.selectedPlan.collectAsState()
+    val trialEligible by viewModel.trialEligible.collectAsState()
     val subscribeState by viewModel.subscribeState.collectAsState()
     val subscribeTargetId by viewModel.subscribeTargetId.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
@@ -196,6 +197,7 @@ fun LeaderboardScreen(
                                 period = period,
                                 isExpanded = isExpanded,
                                 selectedPlan = selectedPlan,
+                                trialEligible = trialEligible,
                                 onSelectPlan = viewModel::setPlan,
                                 subscribeState = if (subscribeTargetId == entry.user.id) {
                                     subscribeState
@@ -486,6 +488,7 @@ private fun LeaderboardCard(
     period: String,
     isExpanded: Boolean,
     selectedPlan: SubscriptionPlan,
+    trialEligible: Boolean,
     onSelectPlan: (SubscriptionPlan) -> Unit,
     subscribeState: SubscribeUiState,
     onDismissSubscribeState: () -> Unit,
@@ -614,6 +617,7 @@ private fun LeaderboardCard(
             ExpandedDetail(
                 entry = entry,
                 selectedPlan = selectedPlan,
+                trialEligible = trialEligible,
                 onSelectPlan = onSelectPlan,
                 subscribeState = subscribeState,
                 onDismissSubscribeState = onDismissSubscribeState,
@@ -747,6 +751,10 @@ private fun SubBadge(
 private fun ExpandedDetail(
     entry: LeaderboardEntry,
     selectedPlan: SubscriptionPlan,
+    // Trial copy only while Play confirms this account can still redeem
+    // the 7-day intro offer (BillingService.trialEligible) — slots B+ and
+    // trial-used accounts bill immediately, so the button must say so.
+    trialEligible: Boolean,
     onSelectPlan: (SubscriptionPlan) -> Unit,
     subscribeState: SubscribeUiState,
     onDismissSubscribeState: () -> Unit,
@@ -754,11 +762,12 @@ private fun ExpandedDetail(
     onSubscribe: () -> Unit,
 ) {
     val processing = subscribeState is SubscribeUiState.Processing
-    val ctaText = when (selectedPlan) {
-        SubscriptionPlan.Annual -> "Try Free for 7 Days, then \$69/yr"
-        SubscriptionPlan.Monthly ->
-            "Try Free for 7 Days, then \$${entry.subscriptionPrice.toInt()}/mo"
+    val priceText = when (selectedPlan) {
+        SubscriptionPlan.Annual -> "\$69/yr"
+        SubscriptionPlan.Monthly -> "\$${entry.subscriptionPrice.toInt()}/mo"
     }
+    val ctaText =
+        if (trialEligible) "Try Free for 7 Days, then $priceText" else "Subscribe for $priceText"
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1112,10 +1121,18 @@ class LeaderboardViewModel @Inject constructor(
                 _filters.value = _filters.value.copy(hideFractional = persisted)
             }
         }
+        // Prefetch product/offer details so the expanded-card Subscribe CTA
+        // can pick trial vs non-trial copy before the user ever taps
+        // (PortfolioDetailViewModel does the same on portfolio load).
+        // Failure is fine — trialEligible just keeps its optimistic default.
+        viewModelScope.launch { runCatching { billingService.queryProducts() } }
     }
 
     private val _selectedPlan = MutableStateFlow(SubscriptionPlan.Annual)
     val selectedPlan: StateFlow<SubscriptionPlan> = _selectedPlan.asStateFlow()
+
+    /** Store-confirmed 7-day-trial eligibility — drives the Subscribe CTA copy. */
+    val trialEligible = billingService.trialEligible
 
     private val _subscribeState = MutableStateFlow<SubscribeUiState>(SubscribeUiState.Idle)
     val subscribeState: StateFlow<SubscribeUiState> = _subscribeState.asStateFlow()

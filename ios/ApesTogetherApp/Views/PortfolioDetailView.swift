@@ -124,9 +124,7 @@ struct PortfolioDetailView: View {
                                         HStack(spacing: 6) {
                                             Image(systemName: "crown.fill")
                                                 .font(.system(size: 13))
-                                            Text(subscriptionManager.selectedPlan == .annual
-                                                 ? "Try Free for 7 Days, then $69/yr"
-                                                 : "Try Free for 7 Days, then $\(String(format: "%.0f", portfolio.subscriptionPrice))/mo")
+                                            Text(subscriptionManager.subscribeCtaText(monthlyPrice: portfolio.subscriptionPrice))
                                                 .font(.system(size: 14, weight: .bold))
                                         }
                                         .frame(maxWidth: .infinity)
@@ -1340,7 +1338,7 @@ struct BlurredHoldingsTeaser: View {
                 VStack(alignment: .leading, spacing: 6) {
                     benefitRow("Real-time buy & sell alerts")
                     benefitRow("Full position details")
-                    benefitRow("Scale any portfolio to your size")
+                    benefitRow("Adjust the portfolio size instantly")
                 }
                 .frame(maxWidth: 240)
                 
@@ -1364,9 +1362,7 @@ struct BlurredHoldingsTeaser: View {
                     HStack(spacing: 6) {
                         Image(systemName: "crown.fill")
                             .font(.system(size: 13))
-                        Text(subscriptionManager.selectedPlan == .annual
-                             ? "Try Free for 7 Days, then $69/yr"
-                             : "Try Free for 7 Days, then $9/mo")
+                        Text(subscriptionManager.subscribeCtaText())
                             .font(.system(size: 16, weight: .bold))
                     }
                     .foregroundColor(.white)

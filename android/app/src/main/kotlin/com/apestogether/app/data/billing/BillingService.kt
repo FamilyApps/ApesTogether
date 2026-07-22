@@ -73,6 +73,24 @@ class BillingService @Inject constructor(
     /** Keyed by product ID — empty until [queryProducts] succeeds. */
     val productDetails: StateFlow<Map<String, ProductDetails>> = _productDetails.asStateFlow()
 
+    private val _trialEligible = MutableStateFlow(true)
+    /**
+     * Whether THIS Google account can still redeem the 7-day free trial.
+     * Drives the Subscribe CTA copy ("Try Free for 7 Days…" vs "Subscribe
+     * for…"). Defaults to true (the common case: a brand-new user) and is
+     * corrected by [queryProducts] once Play answers.
+     *
+     * Why checking the Slot-A pair is sufficient: Play pre-filters
+     * `subscriptionOfferDetails` to offers the CURRENT account is eligible
+     * for, and the trial offer exists ONLY on the Slot-A products with
+     * "never had any subscription" eligibility (one lifetime trial — see
+     * docs/PER_CREATOR_SUBSCRIPTION_SLOTS.md). A user's first-ever sub
+     * lands in Slot A (trial applies iff Play still shows the offer);
+     * every later sub either reuses Slot A (eligibility already burned)
+     * or lands in B+ which never carry trial offers.
+     */
+    val trialEligible: StateFlow<Boolean> = _trialEligible.asStateFlow()
+
     /**
      * One-shot deferred for the in-flight purchase, completed by the
      * [PurchasesUpdatedListener] callback. We park the suspend coroutine
@@ -193,7 +211,14 @@ class BillingService @Inject constructor(
             // Merge (don't clobber) so any per-creator "slot" products fetched on
             // demand via [queryProduct] survive a refresh of the default pair.
             _productDetails.value = _productDetails.value + byId
-            Log.d(TAG, "Loaded ${byId.size} subscription products: ${byId.keys}")
+            // Recompute trial eligibility from the eligibility-filtered offers
+            // (see [trialEligible] docs). Zero-price phase present = trial.
+            (byId[MONTHLY_PRODUCT_ID] ?: byId[ANNUAL_PRODUCT_ID])?.let { slotA ->
+                _trialEligible.value = slotA.subscriptionOfferDetails.orEmpty().any { offer ->
+                    offer.pricingPhases.pricingPhaseList.any { it.priceAmountMicros == 0L }
+                }
+            }
+            Log.d(TAG, "Loaded ${byId.size} subscription products: ${byId.keys} (trialEligible=${_trialEligible.value})")
         } else {
             Log.w(
                 TAG,

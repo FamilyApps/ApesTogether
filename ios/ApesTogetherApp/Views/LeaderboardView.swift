@@ -793,9 +793,7 @@ struct LeaderboardCard: View {
                         HStack(spacing: 5) {
                             Image(systemName: "crown.fill")
                                 .font(.system(size: 12))
-                            Text(subscriptionManager.selectedPlan == .annual
-                                 ? "Try Free for 7 Days, then $69/yr"
-                                 : "Try Free for 7 Days, then $\(String(format: "%.0f", entry.subscriptionPrice))/mo")
+                            Text(subscriptionManager.subscribeCtaText(monthlyPrice: entry.subscriptionPrice))
                                 .font(.system(size: 13, weight: .bold))
                         }
                         .foregroundColor(.appBackground)

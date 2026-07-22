@@ -10,6 +10,17 @@ class SubscriptionManager: ObservableObject {
     @Published var isProcessing = false
     @Published var error: String?
     @Published var selectedPlan: PlanType = .annual
+    /// Whether THIS Apple ID can still redeem the 7-day free trial. Drives
+    /// the Subscribe CTA copy via [subscribeCtaText]. Defaults to true (the
+    /// common case: a brand-new user) and is corrected by [loadProducts].
+    ///
+    /// Why checking the Slot-A pair is sufficient: the intro offer exists
+    /// ONLY on the Slot-A subscription group (one lifetime trial — see
+    /// docs/PER_CREATOR_SUBSCRIPTION_SLOTS.md), and Apple tracks intro-offer
+    /// eligibility per group. A user's first-ever sub lands in Slot A (trial
+    /// applies iff still eligible); every later sub either reuses Slot A
+    /// (eligibility already burned) or lands in B+ which carry no intro offer.
+    @Published private(set) var trialEligible = true
     
     enum PlanType: String, CaseIterable {
         case monthly, annual
@@ -48,10 +59,36 @@ class SubscriptionManager: ObservableObject {
             if products.isEmpty {
                 print("[SubscriptionManager] WARNING: No products found for IDs: \(productIds)")
             }
+            await refreshTrialEligibility()
         } catch {
             print("[SubscriptionManager] Failed to load products: \(error)")
             self.error = "Could not load subscription products"
         }
+    }
+    
+    /// See [trialEligible]. Leaves the optimistic default untouched when the
+    /// products didn't load (we'd have no store answer to overrule it with).
+    private func refreshTrialEligibility() async {
+        guard let sub = (annualProduct ?? monthlyProduct)?.subscription else { return }
+        if sub.introductoryOffer == nil {
+            // No intro offer configured on Slot A at all — never promise one.
+            trialEligible = false
+        } else {
+            trialEligible = await sub.isEligibleForIntroOffer
+        }
+        print("[SubscriptionManager] trialEligible=\(trialEligible)")
+    }
+    
+    /// Subscribe-button label. Trial copy ONLY while the store confirms this
+    /// account can still redeem the 7-day intro offer — slots B+ and
+    /// trial-used accounts bill immediately, so the button must say so.
+    func subscribeCtaText(monthlyPrice: Double = 9) -> String {
+        let price = selectedPlan == .annual
+            ? "$69/yr"
+            : "$\(String(format: "%.0f", monthlyPrice))/mo"
+        return trialEligible
+            ? "Try Free for 7 Days, then \(price)"
+            : "Subscribe for \(price)"
     }
     
     /// Subscribe to [userId]. On a successful (backend-validated) purchase,
