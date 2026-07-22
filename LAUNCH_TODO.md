@@ -356,17 +356,23 @@ Tracked here so nothing is dropped; checked off as resolved. Detail/answers land
 - **Founder pill MOVED (both platforms, `de96edc`)** — public view: pill now renders inside `PortfolioHeroCard` under the portfolio value (permanent status on the identity block); medals row keeps only earned leaderboard badges. Owner view (no hero card): pill stays in the badges row.
 - **iOS locked-holdings CTA fixes (`f940e65`)** — plan-pill highlight now equal height both sides (`fixedSize` + `maxHeight: .infinity`); middle benefit bullet de-duplicated to "Full position details". Third bullet (resizer) copy still pending — USER wants info-only framing (no "follow these trades" implication); 50 new candidates delivered, decision open. **Ships in Build 46.**
 - **ToS 70/30 → 85/15 (numbers only, USER-approved)** — attorney's sentence structure kept verbatim; swapped seventy/70% → eighty-five/85% and thirty/30% → fifteen/15% in `templates/terms_of_service.html` §5.2(a), `legal/terms-of-service.md` §5.2, `ios/ApesTogetherApp/LegalText.swift`. NOTE: "of the gross subscription revenue" is still technically wrong (actual = 85% of net after store fees) — attorney redraft still owed.
-- **📅 POST-8/31 BUILD (v7) — REQUIRED by Aug 31, 2026 (Play warnings 2026-07-21):**
-  - [ ] `targetSdk` 35 → **36** (+ `compileSdk` 36, on-device sanity pass).
-  - [ ] Play Billing Library `7.1.1` → **8.x** (breaking API changes — dedicated session).
-  - [ ] While at it: `ndk.debugSymbolLevel = "FULL"` (native-symbols warning) + trial-CTA copy decision above.
 - **Console-navigation findings (2026-07 console):** "App access" no longer appears as its own declaration — the reviewer-credentials declaration is **"Sign in details"** (app → Monitor and improve → Policy and programs → App content → Actioned → Sign in details → Manage). License testing remains ACCOUNT-level (All apps → Settings → License testing).
-- **Release sequencing for the client fixes (v6 in review):** do NOT touch the Closed-testing release or App content while the review is pending. All fixes are committed; Android **v7 AAB** gets built AFTER v6 is approved + promoted to Production, then rides the normal update flow (Internal → Closed/Production). iOS side ships in **Build 46** (next Mac session, together with the founder-pill + CTA changes).
+- [x] USER: `apestogether.review@gmail.com` added to License testing → "Internal testing" list — **DONE 2026-07-21.**
+- [x] USER: "Sign in details" declaration confirmed to carry `apestogether.review@gmail.com` — **DONE 2026-07-21.**
+
+### 📦 PENDING BUILDS — contents + WHEN to deploy (single source of truth)
+
+- **Android v7 (versionCode 7)** — *client fixes riding `de96edc` + `fa95e73`*: dynamic trial CTA (trial vs "Subscribe for $X" per store eligibility) + founder-pill move to hero header.
+  - **When:** build + upload ONLY after the v6 review verdict lands and v6 is **promoted to Production** (do NOT touch the Closed-testing release or App content before then — edits can reset the review queue). Flow: build AAB → Internal testing smoke on the Pixel 8a → Production update.
+- **Android v8 — 📅 HARD DEADLINE Aug 31, 2026 (Play policy warnings 2026-07-21):**
+  - [ ] `targetSdk` 35 → **36** (+ `compileSdk` 36, on-device sanity pass).
+  - [ ] Play Billing Library `7.1.1` → **8.x** (breaking API changes — dedicated session; re-verify `BillingService.trialEligible` offer-filtering behavior after migration).
+  - [ ] `ndk.debugSymbolLevel = "FULL"` (native-symbols warning).
+  - **When:** separate from v7 on purpose — don't couple a billing-library migration to simple copy fixes. If the v6 review drags into August, fold v7's fixes into v8 instead and ship one update before 8/31.
+- **iOS Build 46** — *everything since Build 45 (uploaded to ASC 2026-07-10, NOT yet submitted for review)*: dynamic trial CTA (`SubscriptionManager.trialEligible` + `subscribeCtaText()`), founder-pill move, locked-holdings CTA fixes (equal-height plan pills, de-duped bullet, resizer bullet "Adjust the portfolio size instantly"), `LegalText.swift` 85/15.
+  - **When:** next Mac session — archive + upload; Build 46 **supersedes 45 as the App Store review submission** (45 never went to review, so nothing is lost). Same session: verify the ASC Slot-A subscription group carries the 7-day intro offer, and check the resizer bullet doesn't wrap at 240pt.
 - **OPEN:**
-  - [ ] USER: License testing → arrow on the checked "Internal testing" list → add `apestogether.review@gmail.com` → Save.
-  - [ ] USER: confirm "Sign in details" declaration carries the `apestogether.review@gmail.com` credentials + Google-sign-in-only note.
-  - [ ] Cascade/USER: verify ASC (iOS) intro offer exists on the Slot-A group — check during the Build 46 Mac session.
-  - [ ] Attorney: §5.2(a) gross→net redraft (carried).
+  - [ ] Attorney: §5.2(a) gross→net redraft — before/after handed to USER 2026-07-21 to decide whether to send (carried).
 
 ---
 
