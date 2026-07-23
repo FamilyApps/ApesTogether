@@ -384,6 +384,22 @@ Tracked here so nothing is dropped; checked off as resolved. Detail/answers land
 
 ---
 
+## 🔁 Session 33 (2026-07-22) — marketing full-plan review, trigger-based launch sequencing, USER: "no rush — do it right"
+
+- **Pixel was updating → yesterday's on-device items CARRIED to tomorrow (2026-07-23), unchanged:** (1) Play Billing E2E via Internal opt-in link (money test #4 — monthly w/ trial sheet check, annual on 2nd creator = slot B no-trial, backend rows + `/purchase/validate`, cancel); (2) sideload debug build → verify founder pill + dynamic trial CTA flip after step 1 burns eligibility; (3) Mac if available → iOS Build 46.
+- **MARKETING FULL-PLAN REVIEW — DONE** (USER asked; directive: no launch rush, do it right). Reviewed `MARKETING_PLAN.md`, `LAUNCH_PLAYBOOK.md`, `LAUNCH_CONTENT.md` (100+ content pieces), `LAUNCH_OUTREACH.md` (influencer/journalist templates + named targets) + fresh channel research. **Verdict: plan is date-broken, not content-broken** — the 49-day calendar assumed 7 pre-launch audience-building weeks that never ran. Fix = take the Session-26 quiet-launch verdict seriously: **store availability ≠ launch moment.** Full write-up appended to `MARKETING_PLAN.md` §"Full-Plan Review & Trigger-Based Sequencing (Session 33)": Phases 0–4 with EXIT GATES instead of dates (quiet availability → trader-supply hunt → proof accumulation → one-shot WSJ-first spike → post-spike engine). Quiet weeks BUILD the moat (verified track-record history compounds); "no rush" is strategically correct.
+- **Product Hunt DEPRIORITIZED** (2026 research: 500+ launches/day, AI-tool audience drift, B2C converts poorly, skip-if-pre-testimonials guidance) — never the launch moment; optional side-beat later.
+- **12-item gap register** logged in MARKETING_PLAN — biggest: **no trader-supply pipeline** (journalists are name-listed, traders aren't; playbook's own "supply first" principle). Others: waitlist rot (needs monthly build-log nurture email), unsustainable posting cadence (adopted 3 X + 1 TikTok/wk floor), install-attribution hole ("how did you hear" onboarding survey), **Android in-app review prompt MISSING** (iOS has it in `TradeSheetView.swift`; → **added to v7 scope**), GEO comparison page unbuilt, press kit + App Preview video unstarted (now Phase-2 exit gates).
+- **PHASE 0 ACTION ITEMS (can start immediately, no launch dependency):**
+  - [ ] USER: **register social handles** (X `@ApesTogetherApp`, TikTok/IG `@apestogether`, LinkedIn, YouTube, Reddit joins) — squatting risk, overdue since Session 13; ~2h once.
+  - [ ] Cascade: draft the **25-trader named target list + personal DM template** (gap #2 — the critical path for everything downstream).
+  - [ ] Cascade: **waitlist nurture email #1** ("build log") — waitlist has heard nothing for months.
+  - [ ] Cascade: **"ApesTogether vs Dub vs eToro" comparison page** (GEO) + landing FAQ crawlability check.
+  - [ ] Cascade: **Android Play In-App Review prompt** post-trade (mirror iOS) — rides v7.
+- **v7 scope now:** dynamic trial CTA + founder pill + **Play In-App Review prompt**.
+
+---
+
 ## ▶ RESUME HERE — Sunday (AI tokens reset)
 
 **Last worked: Session 11, 2026-06-04. Committed `7a21b67` (8 files, +254/−95).** Stopped because AI tokens ran low.

@@ -227,3 +227,113 @@ referral mechanics only if pre-launch traffic actually materializes.)*
 If the invite gate ships: put a working invite code + demo account in
 **App Review notes** (Apple) and complete the **App access** declaration
 (Play) or expect rejection. Add to both store submission checklists.
+
+---
+
+# Full-Plan Review & Trigger-Based Sequencing (Session 33, 2026-07-22)
+
+_USER directive: **no launch rush — do it right.** Full review of PLAYBOOK /
+CONTENT / OUTREACH / this doc + fresh channel research. This section
+supersedes the playbook's calendar dates; the playbook's CONTENT and
+SEQUENCE remain valid, re-anchored to triggers below._
+
+## Core finding: the plan is date-broken, not content-broken
+
+The 49-day playbook assumed 7 weeks of audience-building BEFORE store
+launch (Apr 14 → Jun 1). None of it ran (social handles still unregistered
+at Day 49+), yet store approval is now days away. The fix is NOT to cram —
+it's the already-adopted quiet-launch verdict taken seriously: **store
+availability ≠ launch moment.** Store-live day is infrastructure. The
+marketing launch is a separate, later, gated event we fire exactly once.
+This also converts our biggest weakness (no audience yet) into the moat:
+**every quiet week adds verified track-record history that competitors'
+marketing can't fabricate** — the product's core asset compounds during
+the delay. "No rush" is strategically correct, not a concession.
+
+## Phases (trigger-based — no calendar dates)
+
+- **Phase 0 — NOW → Play/Apple approval (infrastructure):** register the 6
+  social handles (squatting risk — overdue since Session 13); press-kit
+  skeleton; "vs Dub vs eToro" GEO comparison page; first waitlist nurture
+  email ("build log #1"); Android in-app review prompt (gap #9).
+- **Phase 1 — approval → QUIET availability (supply hunt):** promote to
+  production silently; waitlist email only ("you're early — the Founding
+  Trader clock is running"). 80% of effort = **1:1 recruitment of the
+  first 25 human traders** (operator-DM playbook — see gap #2). Founder
+  build-in-public cadence starts at a SUSTAINABLE rate (3 X posts + 1
+  TikTok/wk, founder-voiced, not the playbook's daily grind). Harden app;
+  collect testimonials; review prompts firing.
+- **Phase 2 — proof accumulation (4–10 wks):** exit gates for Phase 3:
+  crash-free ≥ 99.5% over 2 wks · ≥ 20 human traders with ≥ 5 trades ·
+  ≥ 10 traders with 30 d+ verified history · D7 retention ≥ 30% · 5–10
+  testimonials in hand · press kit + App Preview video DONE · Founding
+  Trader counter meaningfully underway. Build ASA keyword list; dry-run
+  attribution.
+- **Phase 3 — the one-shot public launch:** date picked 2–3 wks out ONLY
+  when every gate passes. Order: WSJ exclusive (existing relationship)
+  → embargo week: Tier 2/3 press + Reddit posts + influencer wave +
+  waitlist blast + $2-bill stunt + Apple Search Ads on. Product Hunt at
+  most a side-beat (see verdict below). Hook: "disclosed AI bots vs.
+  verified humans on one leaderboard" — the anti-slop angle is strongest
+  while the backlash is current.
+- **Phase 4 — post-spike engine:** ASA scale-up on winning keywords ·
+  micro-influencer affiliate program riding the in-app referral system ·
+  monthly "humans vs AI — Q results" content beat (leaderboard IS the
+  content) · GEO/SEO expansion · ratings flywheel · store-featuring
+  pitches to Apple/Google editorial (free long shot).
+
+## Product Hunt — DEPRIORITIZED (2026-07-22 research)
+
+2026 reality: 500+ launches/day (mostly AI tools), audience drifted from
+buyers to browsers, B2C consumer apps convert poorly, and guidance is
+explicit — skip if consumer-facing, pre-testimonials, or self-hunting.
+Expected yield even at top-5: low-hundreds of signups. **Verdict: never
+the launch moment; optional Phase 3/4 side-beat only if a credentialed
+hunter materializes. Ignore the fake-upvote vendors that will DM on
+launch.** (Playbook §PH copy stays — it's fine as-is if used.)
+
+## Gap register (from the full review)
+
+1. **Launch-moment ambiguity** — playbook Phase 7 still treats store-live
+   day as blast day; contradicts the quiet-launch verdict. FIXED by the
+   phases above.
+2. **No trader-supply pipeline (BIGGEST GAP).** "Supply first" is the
+   playbook's own #1 principle, yet journalists are name-listed and
+   traders aren't. Need: a named list of 25 target humans (finance-Discord
+   mods, r/algotrading posters with public track records, FinTwit paper-
+   trading accounts, NYU/Columbia/Baruch club officers), a personal DM (not
+   template blast), white-glove onboarding, Founding Trader slot as the
+   honest hook. Owner: founder; Cascade drafts the target list + DM.
+3. **Cold-start content** — partially covered by disclosed AI bots (built);
+   human seeding still required (#2).
+4. **Waitlist rot** — signups have heard nothing for months; only
+   countdown emails exist. Add a monthly founder "build log" nurture email
+   (first one in Phase 0) or the launch-day blast lands on a dead list.
+5. **Unsustainable posting cadence** — 49 days × 3+ platforms daily is
+   fantasy for a solo founder mid-bugfix. Adopted: 3+1/wk founder-voiced
+   floor; playbook content library becomes a menu, not a schedule.
+6. **Referral loop unwired to marketing** — in-app referral exists but no
+   onboarding surface pushes it at happy moments, and influencer comp
+   isn't tied to it. Phase 4 affiliate program should ride it.
+7. **Install attribution hole** — UTMs cover web only; store installs are
+   blind. Cheap fix: "How did you hear about us?" one-tap survey in
+   onboarding (build during Phase 1); ASA/Play attribution later.
+8. **Press kit + App Preview video unstarted** — both are Phase 2 exit
+   gates; the video is the top store-conversion lever after screenshots.
+9. **Android in-app review prompt MISSING** — iOS has it
+   (`TradeSheetView.swift` post-trade); Android has no Play In-App Review
+   call. Add to v7 (small, no policy risk when unconditional-frequency
+   rules respected). The ratings flywheel is our only legit ratings lever.
+10. **GEO page unbuilt** — "ApesTogether vs Dub vs eToro" comparison page
+    + crawlable FAQ; AI-search referrals compound with zero spend.
+11. **Store featuring never planned** — App Store featuring nomination
+    form + Play editorial pitch, post-spike.
+12. **KPI tracker has no owner/cadence** — re-point the playbook KPI table
+    at the phase gates above; review weekly during Phases 1–2.
+
+## What stays exactly as-is
+
+Compliance guardrails (playbook §11) · messaging rules (§2) · no-paid-
+reviews / no-fabrication bright lines · open-access verdict · Founding
+Trader rules · content library + outreach templates (re-dated) · WSJ-
+exclusive-first press strategy · $2-bill stunt (parked for Phase 3 week).
