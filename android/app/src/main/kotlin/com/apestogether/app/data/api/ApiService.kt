@@ -175,6 +175,10 @@ interface ApiService {
 
     @POST("tax/w9")
     suspend fun submitW9(@Body request: W9Request): W9SubmitResponse
+
+    // ── Acquisition survey ("How did you hear about us?") ───────────────
+    @POST("user/acquisition-source")
+    suspend fun setAcquisitionSource(@Body request: AcquisitionSourceRequest): EmptyResponse
 }
 
 /**
@@ -188,4 +192,13 @@ data class DeviceRegistrationRequest(
     @SerialName("device_id") val deviceId: String,
     @SerialName("app_version") val appVersion: String,
     @SerialName("os_version") val osVersion: String,
+)
+
+/**
+ * Body for the one-shot "How did you hear about us?" survey. Allowed values:
+ * x, tiktok, instagram, reddit, friend, search, press, other.
+ */
+@Serializable
+data class AcquisitionSourceRequest(
+    val source: String,
 )

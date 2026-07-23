@@ -13,6 +13,7 @@
 		AA000004AAAA000400000001 /* TradeSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000004AAAA000400000002 /* TradeSheetView.swift */; };
 		AA000005AAAA000500000001 /* W9FormView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000005AAAA000500000002 /* W9FormView.swift */; };
 		AA000006AAAA000600000001 /* FeaturePollView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000006AAAA000600000002 /* FeaturePollView.swift */; };
+		AA000007AAAA000700000001 /* AcquisitionSurveyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000007AAAA000700000002 /* AcquisitionSurveyView.swift */; };
 		D00A8DCB2FABE3920032E2A9 /* CompactPlanToggle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00A8DCA2FABE3920032E2A9 /* CompactPlanToggle.swift */; };
 		D0679C242F50E73B009960CC /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = D0679C232F50E73B009960CC /* FirebaseMessaging */; };
 		D0679C542F50F046009960CC /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0679C522F50F046009960CC /* ContentView.swift */; };
@@ -47,6 +48,7 @@
 		AA000004AAAA000400000002 /* TradeSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradeSheetView.swift; sourceTree = "<group>"; };
 		AA000005AAAA000500000002 /* W9FormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = W9FormView.swift; sourceTree = "<group>"; };
 		AA000006AAAA000600000002 /* FeaturePollView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeaturePollView.swift; sourceTree = "<group>"; };
+		AA000007AAAA000700000002 /* AcquisitionSurveyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AcquisitionSurveyView.swift; sourceTree = "<group>"; };
 		D00A8DCA2FABE3920032E2A9 /* CompactPlanToggle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactPlanToggle.swift; sourceTree = "<group>"; };
 		D0679BE92F50E652009960CC /* ApesTogether.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ApesTogether.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D0679C512F50F046009960CC /* ApesTogetherApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ApesTogetherApp.swift; path = ../ApesTogetherApp/ApesTogetherApp.swift; sourceTree = SOURCE_ROOT; };
@@ -146,6 +148,7 @@
 				AA000004AAAA000400000002 /* TradeSheetView.swift */,
 				AA000005AAAA000500000002 /* W9FormView.swift */,
 				AA000006AAAA000600000002 /* FeaturePollView.swift */,
+				AA000007AAAA000700000002 /* AcquisitionSurveyView.swift */,
 			);
 			name = Views;
 			path = ../ApesTogetherApp/Views;
@@ -286,6 +289,7 @@
 				AA000004AAAA000400000001 /* TradeSheetView.swift in Sources */,
 				AA000005AAAA000500000001 /* W9FormView.swift in Sources */,
 				AA000006AAAA000600000001 /* FeaturePollView.swift in Sources */,
+				AA000007AAAA000700000001 /* AcquisitionSurveyView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

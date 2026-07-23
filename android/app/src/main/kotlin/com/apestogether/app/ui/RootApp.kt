@@ -20,6 +20,7 @@ import com.apestogether.app.data.auth.AuthRepository
 import com.apestogether.app.data.models.User
 import com.apestogether.app.data.onboarding.OnboardingManager
 import com.apestogether.app.data.onboarding.OnboardingPreferences
+import com.apestogether.app.ui.components.AcquisitionSurveyHost
 import com.apestogether.app.ui.navigation.RootNavGraph
 import com.apestogether.app.ui.navigation.Screen
 import com.apestogether.app.ui.screens.onboarding.AddStocksScreen
@@ -185,6 +186,11 @@ fun RootApp() {
                 navController = navController,
                 startAuthenticated = isAuthed == true,
             )
+            // One-shot "How did you hear about us?" survey — authed users
+            // only, self-gating via DataStore (see AcquisitionSurveyHost).
+            if (isAuthed == true) {
+                AcquisitionSurveyHost()
+            }
         }
     }
 }

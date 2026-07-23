@@ -362,13 +362,15 @@ Tracked here so nothing is dropped; checked off as resolved. Detail/answers land
 
 ### 📦 PENDING BUILDS — contents + WHEN to deploy (single source of truth)
 
-- **Android v7 (versionCode 7)** — *client fixes riding `de96edc` + `fa95e73`*: dynamic trial CTA (trial vs "Subscribe for $X" per store eligibility) + founder-pill move to hero header.
+- **Android v7 (versionCode 7)** — *client fixes riding `de96edc` + `fa95e73` + this session*: dynamic trial CTA (trial vs "Subscribe for $X" per store eligibility) + founder-pill move to hero header + **Play In-App Review prompt** (`ReviewPrompter.kt`, 3rd trade) + **acquisition survey** (`AcquisitionSurvey.kt` one-tap chips, shows once ~1.5s after authed launch — on-device check: dialog appears, tap posts to `/user/acquisition-source`, never re-shows).
   - **When:** build + upload ONLY after the v6 review verdict lands and v6 is **promoted to Production** (do NOT touch the Closed-testing release or App content before then — edits can reset the review queue). Flow: build AAB → Internal testing smoke on the Pixel 8a → Production update.
 - **Android v8 — 📅 HARD DEADLINE Aug 31, 2026 (Play policy warnings 2026-07-21):**
   - [ ] `targetSdk` 35 → **36** (+ `compileSdk` 36, on-device sanity pass).
   - [ ] Play Billing Library `7.1.1` → **8.x** (breaking API changes — dedicated session; re-verify `BillingService.trialEligible` offer-filtering behavior after migration).
   - [ ] `ndk.debugSymbolLevel = "FULL"` (native-symbols warning).
+  - [ ] **#6 referral-loop "happy-moment" surfaces** (approved 2026-07-22): share/referral prompt after badge award or a green day + influencer comp tied to referral codes — design next session, rides v8.
   - **When:** separate from v7 on purpose — don't couple a billing-library migration to simple copy fixes. If the v6 review drags into August, fold v7's fixes into v8 instead and ship one update before 8/31.
+- **iOS Build 48 (future)** — acquisition survey (`AcquisitionSurveyView.swift`, registered in pbxproj — file is on master, rides whatever the next archive is) + #6 referral surfaces once designed. Build 47 was already uploaded before these landed.
 - **iOS Build 47 — ✅ UPLOADED to ASC by USER (2026-07-22).** USER pulled master on the MacBook, bumped build 46→47, archived + uploaded. Carries everything since 45: dynamic trial CTA (`SubscriptionManager.trialEligible` + `subscribeCtaText()`), founder-pill move, locked-holdings CTA fixes (equal-height plan pills, de-duped bullet, resizer bullet "Adjust the portfolio size instantly"), `LegalText.swift` 85/15. ("Build 46" was never uploaded — 47 supersedes 45 directly.)
   - **Still open before SUBMITTING 47 for App Store review:** (a) verify the ASC Slot-A subscription group carries the 7-day intro offer; (b) spot-check the resizer bullet at 240pt on a device/simulator; (c) create the Apple reviewer demo account (`reviewer@apestogether.ai`, with followed traders) and put its credentials in App Review notes; (d) then Submit for Review.
 - **OPEN:**
@@ -395,11 +397,18 @@ Tracked here so nothing is dropped; checked off as resolved. Detail/answers land
   - [x] Cascade: **trader-recruitment pipeline** → `docs/TRADER_RECRUITMENT.md` (sourcing queries, 3 DM templates, follow-up rule, white-glove onboarding, 25-row tracker). USER fills the names Sat 7/26 per the day-by-day.
   - [x] Cascade: **waitlist nurture email #1** → `LAUNCH_CONTENT.md` #E-BUILDLOG-01 (+ trader-segment variant). Send AFTER both stores quietly live + deliverability verified (`LAUNCH_EXECUTION_PLAN.md` §1.2).
   - [x] Cascade: **Android Play In-App Review prompt** — `ReviewPrompter.kt` (3rd successful trade, mirrors iOS `TradeSheetView`), wired in `TradeSheet.kt`, `review-ktx 2.0.2` added. **Rides v7.**
-  - [ ] Cascade: **GEO comparison page** — HELD for USER approval (gap-plan list, chat 2026-07-22).
+  - [x] Cascade: **GEO comparison page** — approved + BUILT same day (`/compare`; see gap-plan status below).
 - **NEW DOC: `docs/LAUNCH_EXECUTION_PLAN.md`** — Phases 0–4 click-by-click (handle registration, Build-47 ASC submission steps, v6 staged-rollout promotion, waitlist send mechanics, Phase-2 exit-gate table, spike-week run-of-show, post-spike engine) + **day-by-day calendar for 7/23–8/11** folding in every open ENG box (billing E2E, v7, v8-by-8/31, Build 47 submission, deliverability bug, attorney follow-up).
 - **Social content pass (Session 33, this model):** `LAUNCH_CONTENT.md` — added global re-anchoring banner (posts run during quiet availability → "live now" replaces "beta opens [date]"; AI-vs-human standings become the headline hook once real data exists); rewrote the 4 highest-stakes pieces (#X-01 pinned thread, #X-LAUNCH spike thread, #TT-01, #R-LAUNCH wsb — now leads with AI-vs-human standings, self-deprecating, includes removed-post fallback to the Daily thread). Remaining ~95 pieces: solid after the Session-25 rewrite; treat as menu per the banner.
-- **v7 scope now:** dynamic trial CTA + founder pill + **Play In-App Review prompt**.
-- **AWAITING USER APPROVAL (gap plans, presented in chat):** #3 cold-start seeding check · #6 referral-loop surfaces (v8/Build 48) · #7 "how did you hear about us" survey (v8/Build 48 + backend) · #8 press kit + `/press` page · #10 GEO comparison page · #11 store-featuring nominations (post-spike) · #12 KPI Friday cadence.
+- **v7 scope now:** dynamic trial CTA + founder pill + **Play In-App Review prompt** + **acquisition survey** (added after all-7 gap approval).
+- **GAP PLANS — ALL 7 APPROVED by USER (2026-07-22), status:**
+  - [x] **#7 attribution survey — BUILT (backend + both clients).** Backend: `POST /api/mobile/user/acquisition-source` (first-write-wins into `User.extra_data`, 8 allowed sources) + admin rollup `GET /api/mobile/admin/acquisition-sources` (2FA-gated counts). Android: `AcquisitionSurvey.kt` host wired in `RootApp` (DataStore-gated, rides **v7**). iOS: `AcquisitionSurveyView.swift` overlay on `MainTabView` (UserDefaults-gated, registered in pbxproj, rides **Build 48** — 47 already uploaded).
+  - [x] **#10 GEO comparison page — BUILT.** `templates/compare.html` ("ApesTogether vs Dub vs eToro": TL;DR verdict box, 10-row table, per-app deep dives, 6-item FAQ + FAQPage JSON-LD), routes in `api/index.py` + `app.py`, footer link on landing. Competitor claims kept qualitative + "check their current pricing" hedges + trademark disclaimer.
+  - [ ] **#6 referral surfaces** — scoped into v8/Build 48 (see PENDING BUILDS).
+  - [ ] **#8 press kit + `/press` page** — Cascade drafts next session; App Preview video stays USER's (Phase-2 gate).
+  - [ ] **#3 cold-start seeding** — operational: weekly admin check that all AI bots traded in the last 5 sessions; no build.
+  - [ ] **#11 store featuring** — post-spike only (Apple nomination form + Google pitch); no build.
+  - [ ] **#12 KPI cadence** — Friday metrics note (installs / signups / subs / trader count) appended here weekly; USER owns the 10-min review.
 
 ---
 

@@ -113,6 +113,7 @@ struct ContentView: View {
 
 struct MainTabView: View {
     @State private var selectedTab = 0
+    @State private var showAcquisitionSurvey = false
     
     init() {
         // Configure tab bar appearance
@@ -154,6 +155,20 @@ struct MainTabView: View {
                 .tag(3)
         }
         .accentColor(.primaryAccent)
+        // One-shot "How did you hear about us?" survey — delayed so it never
+        // races the leaderboard load; UserDefaults-gated (once per install).
+        .overlay {
+            if showAcquisitionSurvey {
+                AcquisitionSurveyView(isPresented: $showAcquisitionSurvey)
+            }
+        }
+        .task {
+            guard !UserDefaults.standard.bool(forKey: AcquisitionSurveyView.doneKey) else { return }
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            if !UserDefaults.standard.bool(forKey: AcquisitionSurveyView.doneKey) {
+                showAcquisitionSurvey = true
+            }
+        }
     }
 }
 

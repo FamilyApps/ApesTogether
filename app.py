@@ -139,6 +139,11 @@ def index():
 def register():
     return render_template('register.html')
 
+@app.route('/compare')
+def compare():
+    # GEO/SEO comparison page — mirrors the production route in api/index.py.
+    return render_template('compare.html')
+
 @app.route('/terms-of-service')
 def terms_of_service():
     return render_template('terms_of_service.html')

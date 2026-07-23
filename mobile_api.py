@@ -2828,6 +2828,54 @@ def update_user_preferences():
         return jsonify({'error': 'update_failed'}), 500
 
 
+ACQUISITION_SOURCES = {'x', 'tiktok', 'instagram', 'reddit', 'friend', 'search', 'press', 'other'}
+
+
+@mobile_api.route('/user/acquisition-source', methods=['POST'])
+@require_auth
+def set_acquisition_source():
+    """One-tap 'How did you hear about us?' onboarding survey answer.
+
+    Request body: { "source": "x" | "tiktok" | "instagram" | "reddit" |
+                    "friend" | "search" | "press" | "other" }
+
+    First write wins: the original answer is the attribution signal; a
+    re-shown survey (reinstall, second device) must not overwrite it. The
+    client treats an 'already_set' success the same as a fresh save.
+    Stored in User.extra_data (JSON) - no schema migration needed.
+    """
+    from models import db, User
+    data = request.get_json() or {}
+    source = (data.get('source') or '').strip().lower()
+    if source not in ACQUISITION_SOURCES:
+        return jsonify({'error': 'invalid_source', 'allowed': sorted(ACQUISITION_SOURCES)}), 400
+
+    try:
+        user = User.query.get(g.user_id)
+        if not user:
+            return jsonify({'error': 'user_not_found'}), 404
+
+        extra = dict(user.extra_data or {})
+        if extra.get('acquisition_source'):
+            return jsonify({'success': True, 'message': 'already_set',
+                            'source': extra['acquisition_source']})
+
+        extra['acquisition_source'] = source
+        extra['acquisition_source_at'] = datetime.utcnow().isoformat() + 'Z'
+        user.extra_data = extra
+        try:
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(user, 'extra_data')
+        except Exception:
+            pass
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'saved', 'source': source})
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Set acquisition source error: {e}")
+        return jsonify({'error': 'update_failed'}), 500
+
+
 # =============================================================================
 # Tax Info Status (Xero handles W-9 collection natively)
 # =============================================================================
@@ -4546,6 +4594,33 @@ def require_admin_2fa(f):
         
         return f(*args, **kwargs)
     return decorated
+
+
+@mobile_api.route('/admin/acquisition-sources', methods=['GET'])
+@require_admin_2fa
+@with_db_retry
+def admin_acquisition_sources():
+    """Rollup of the 'How did you hear about us?' survey answers.
+
+    Returns counts per source plus how many human users haven't answered.
+    Python-side aggregation is fine at current scale (JSON column keeps the
+    query portable between dev SQLite and prod Postgres).
+    """
+    from models import User
+    users = User.query.filter(User.role != 'agent', User.deleted_at.is_(None)).all()
+    counts = {}
+    answered = 0
+    for u in users:
+        source = (u.extra_data or {}).get('acquisition_source')
+        if source:
+            counts[source] = counts.get(source, 0) + 1
+            answered += 1
+    return jsonify({
+        'sources': dict(sorted(counts.items(), key=lambda kv: -kv[1])),
+        'answered': answered,
+        'unanswered': len(users) - answered,
+        'total_users': len(users),
+    })
 
 
 @mobile_api.route('/admin/bot/create-user', methods=['POST'])

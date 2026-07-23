@@ -27,6 +27,7 @@ class OnboardingPreferences @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
     private val completedKey = booleanPreferencesKey("has_completed_onboarding")
+    private val acquisitionSurveyKey = booleanPreferencesKey("acquisition_survey_done")
 
     /** Reactive flag driving the welcome-carousel routing decision. */
     val hasCompletedOnboarding: Flow<Boolean> =
@@ -37,4 +38,16 @@ class OnboardingPreferences @Inject constructor(
     }
 
     suspend fun isCompletedNow(): Boolean = hasCompletedOnboarding.first()
+
+    /**
+     * Has the one-shot "How did you hear about us?" survey been answered or
+     * dismissed on this install? Backend enforces first-write-wins, so a
+     * reinstall re-asking is harmless (the original answer is kept).
+     */
+    val acquisitionSurveyDone: Flow<Boolean> =
+        context.onboardingDataStore.data.map { it[acquisitionSurveyKey] == true }
+
+    suspend fun markAcquisitionSurveyDone() {
+        context.onboardingDataStore.edit { it[acquisitionSurveyKey] = true }
+    }
 }

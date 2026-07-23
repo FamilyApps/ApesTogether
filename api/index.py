@@ -1906,6 +1906,11 @@ def index():
         waitlist_count = 0
     return render_template('landing.html', waitlist_count=waitlist_count)
 
+@app.route('/compare')
+def compare():
+    """GEO/SEO comparison page: ApesTogether vs Dub vs eToro"""
+    return render_template('compare.html')
+
 @app.route('/api/waitlist', methods=['POST'])
 def join_waitlist():
     """Add an email to the beta waitlist"""

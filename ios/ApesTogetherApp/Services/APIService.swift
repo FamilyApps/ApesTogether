@@ -265,6 +265,15 @@ class APIService {
     func submitW9(_ body: [String: Any]) async throws -> W9SubmitResponse {
         return try await post("/tax/w9", body: body, authenticated: true)
     }
+
+    // MARK: - Acquisition Survey ("How did you hear about us?")
+
+    /// One-shot attribution survey answer. Allowed values: x, tiktok,
+    /// instagram, reddit, friend, search, press, other. The backend keeps
+    /// only the first answer (first-write-wins).
+    func setAcquisitionSource(_ source: String) async throws {
+        let _: EmptyResponse = try await post("/user/acquisition-source", body: ["source": source])
+    }
     
     // MARK: - Private Helpers
     
