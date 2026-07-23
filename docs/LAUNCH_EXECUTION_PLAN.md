@@ -88,9 +88,13 @@ apestogether.ai alias) + a password manager entry per account.
 - [x] Android Play In-App Review prompt (post-3rd-trade, mirrors iOS) — DONE, rides v7.
 - [x] Trader-recruitment pipeline doc → `TRADER_RECRUITMENT.md`.
 - [x] Waitlist nurture email #1 → `LAUNCH_CONTENT.md` #E-BUILDLOG-01.
-- [ ] GEO comparison page ("ApesTogether vs Dub vs eToro") — awaiting USER
-  approval (gap plan list).
-- [ ] Press-kit skeleton — awaiting approval.
+- [x] GEO comparison page — DONE 7/22, live at `/compare` (+ footer link).
+- [x] Press-kit skeleton — DONE 7/23: public `/press` page (boilerplate,
+  angles, fact-check FAQ, brand colors) + `docs/PRESS_KIT.md` assembly guide
+  (one-pager draft, screenshot shot-list, Gemini prompts). USER assembly
+  items in PRESS_KIT.md §1–§5.
+- [x] Acquisition survey (gap #7) — DONE 7/22: backend + Android (rides v7) +
+  iOS (rides Build 48).
 
 **PHASE 0 EXIT:** handles registered · Build 47 submitted · billing E2E
 passed · email deliverability verified.
@@ -162,7 +166,7 @@ straight.
 | Crash-free ≥ 99.5% over 14 days, both platforms | Play vitals / Xcode Organizer |
 | ≥ 20 human traders with ≥ 5 trades | admin dashboard |
 | ≥ 10 traders with ≥ 30-day history | leaderboard 1M view |
-| D7 retention ≥ 30% | store analytics |
+| D7 retention ≥ 20% (finance-category top quartile; benchmarks: category avg ≈17–18%, cross-app median ≈11–13% — 30% was nearly 2× category norm; keep 30% as stretch, not gate) | store analytics |
 | 5–10 usable testimonials | #E-TESTIMONIAL replies |
 | Press kit complete | §2.3 |
 | App Preview video live on both listings | §2.4 |
@@ -175,14 +179,14 @@ Send #E-TESTIMONIAL (`LAUNCH_CONTENT.md`) to every active user at ~day
 14 of their usage. Ask permission to quote with first name/handle. Park
 quotes in the press kit.
 
-## 2.3 Press kit (Cascade drafts, USER assembles, ~1 week)
+## 2.3 Press kit (Cascade drafted 7/23 — USER assembles)
 
-One shared folder (Drive) + one page on the site (`/press`): 6 store
-screenshots (have) · app icon + logo SVG (have) · founder bio + photo ·
-one-pager PDF (Cascade drafts: what/why/traction/AI-vs-human hook) ·
-3–5 data points (traders, trades logged, AI-vs-human standings) ·
-testimonial quotes · FAQ. The WSJ angle sheet comes from
-`LAUNCH_OUTREACH.md` §Story Angles.
+**Done:** `/press` page live · one-pager text drafted · shot-list + Gemini
+prompts ready — all in `docs/PRESS_KIT.md`. **USER (per PRESS_KIT.md):**
+Drive folder · 6 real screenshots (capture during on-device sessions) ·
+banner via Gemini · founder bio + real headshot · `press@apestogether.ai`
+alias · metrics fill at Phase-2 exit · swap Drive link into `/press`.
+The WSJ angle sheet comes from `LAUNCH_OUTREACH.md` §Story Angles.
 
 ## 2.4 App Preview video (~$500 budget or DIY)
 
@@ -205,7 +209,15 @@ Phase 3 date 2–3 weeks out (avoid earnings-season Fridays; Tue–Thu best).
 
 # PHASE 3 — The one-shot public launch (1 week, date-locked)
 
-## 3.0 T-minus-14 days
+_Research note (7/23): tier-1 exclusives need 2–3 weeks lead — treat the
+campaign as starting T-21, not T-14 (WSJ ask goes out at T-21 with a
+"claim by [date] or we go wide" window). OPTIONAL, needs USER call: Apple
+featuring nominations can be filed as "App Launch" type 6–8 weeks pre-date
+(3-week documented floor) — the approved gap plan #11 keeps featuring
+post-spike, but filing at T-45 costs nothing and could align featuring with
+launch week. Decide when the date is picked._
+
+## 3.0 T-minus-21 to T-minus-14 days
 - WSJ exclusive offer (your prior-coverage reporter first) —
   `LAUNCH_OUTREACH.md` WSJ pitch + press kit + embargo date. If no reply
   in 5 business days → follow-up; if dead by T-7 → release the exclusive
@@ -286,3 +298,27 @@ it doesn't. ENG = engineering box from LAUNCH_TODO; MKT = this plan._
 
 Then: Phase 1 rhythm until its exit criteria, Phase 2 gates review every
 Friday, and the Phase 3 date gets picked only when §2.1 is all green.
+
+---
+
+# PHASE DURATION TARGETS — research-grounded (Session 34, 2026-07-23)
+
+_Sources: YC pitch guide + founder-PR playbooks (tier-1 exclusive = 2–3 wks
+lead, follow-up at +2–3 days, ~6 wks full PR cycle) · Apple featuring docs
+(3-wk floor, 6–8 wks realistic for App Launch nominations) · 2025–26
+retention benchmarks (finance D7 ≈17–18% category avg). Durations are
+targets, not deadlines — gates still govern._
+
+| Phase | Ideal duration | Calendar (if nothing slips) | What actually bounds it |
+|---|---|---|---|
+| **0 — Infrastructure** | 1–2 weeks | now → ~Aug 1 | Play verdict (out of our hands) + Build 47 submission + billing E2E + deliverability fix. USER effort: ~1 evening (handles) + 2 short console/Mac sessions. |
+| **1 — Quiet + supply** | 4–6 weeks | ~Aug 1 → early/mid Sep | The ≥10-committed-traders gate: 15 DMs/wk × 10–20% yes-rate = 50–100 DMs ≈ 4–7 wks. Cadence-holding gate has a hard 3-wk floor. |
+| **2 — Proof** | 6–10 weeks (plan on 8) | mid-Sep → early Nov | Hard clocks that can't compress: 30-day track records only start once traders are active; 14-day crash-free window; testimonials at day-14 of usage. App Preview video + kit assembly + optional featuring nomination (T-45) live inside this window. |
+| **3 — Spike** | 4 weeks (T-21 → launch+7) | pitch ~mid-Oct → launch mid-Nov | Tier-1 exclusive lead time (2–3 wks) + launch week execution. |
+| **4 — Engine** | ongoing; first 90 days structured | mid-Nov → | Weekly leaderboard beat, monthly KPI vs playbook §9, quarterly "AI vs humans" report (the recurring hook). |
+
+**Ideal launch window: Tue–Thu, Nov 10–19, 2026** (post-Q3-earnings lull,
+before Thanksgiving week 11/23–27). **Fallback: Dec 1–3.** Slips past that →
+jump to mid-January; never launch Dec 10–Jan 5 (press dead zone). Total
+runway from today: ~16–19 weeks — the calendar month of quiet operation
+before the spike is a feature (track-record moat compounds), not a delay.

@@ -144,6 +144,11 @@ def compare():
     # GEO/SEO comparison page — mirrors the production route in api/index.py.
     return render_template('compare.html')
 
+@app.route('/press')
+def press():
+    # Press kit page — mirrors the production route in api/index.py.
+    return render_template('press.html')
+
 @app.route('/terms-of-service')
 def terms_of_service():
     return render_template('terms_of_service.html')

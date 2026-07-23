@@ -1911,6 +1911,11 @@ def compare():
     """GEO/SEO comparison page: ApesTogether vs Dub vs eToro"""
     return render_template('compare.html')
 
+@app.route('/press')
+def press():
+    """Press kit page: boilerplate, story angles, brand assets, media contact"""
+    return render_template('press.html')
+
 @app.route('/api/waitlist', methods=['POST'])
 def join_waitlist():
     """Add an email to the beta waitlist"""
