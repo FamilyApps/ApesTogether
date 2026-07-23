@@ -47,6 +47,9 @@ googleServices = "4.4.2"
 # Play Billing
 playBilling = "7.1.1"
 
+# Play In-App Review
+playReview = "2.0.2"
+
 # Testing
 junit = "4.13.2"
 junitExt = "1.2.1"
@@ -108,6 +111,9 @@ firebase-analytics = { module = "com.google.firebase:firebase-analytics-ktx" }
 
 # Play Billing
 billing-ktx = { module = "com.android.billingclient:billing-ktx", version.ref = "playBilling" }
+
+# Play In-App Review (ratings prompt at a happy moment — MARKETING_PLAN.md)
+play-review-ktx = { module = "com.google.android.play:review-ktx", version.ref = "playReview" }
 
 # Testing
 junit = { module = "junit:junit", version.ref = "junit" }

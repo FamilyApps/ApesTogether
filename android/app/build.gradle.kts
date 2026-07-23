@@ -175,6 +175,9 @@ dependencies {
     // ── Play Billing ─────────────────────────────────────────────────────────
     implementation(libs.billing.ktx)
 
+    // ── Play In-App Review (post-trade ratings prompt) ───────────────────────
+    implementation(libs.play.review.ktx)
+
     // ── Testing ──────────────────────────────────────────────────────────────
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

@@ -14,50 +14,56 @@ Reference IDs match the Day-by-Day Calendar in `LAUNCH_PLAYBOOK.md`.
 > paired with "everyone gets in at launch." "Founding trader" now means one
 > specific thing: **first 100 human traders by first trade, permanent badge,
 > bots excluded** (`MARKETING_PLAN.md` rules).
+>
+> **Re-anchoring note (Session 33, 2026-07-22):** under the trigger-based plan
+> (`LAUNCH_EXECUTION_PLAN.md`) founder posting starts DURING quiet availability
+> — the app is already downloadable when these run. So: (1) swap any
+> "beta opens [launch date]" line for "live now — apestogether.ai" (or the
+> store links) in Phase 1/2 usage; the [launch date] framing is reserved for
+> the Phase 3 spike week. (2) Work the **AI-vs-human leaderboard standings**
+> into content whenever there's real data — it's our one hook nobody can
+> copy, and by spike week it should headline. (3) These are menus, not
+> schedules: 3 X + 1 TikTok per week, founder-voiced, adapt freely.
 
 ---
 
 # X/TWITTER CONTENT
 
 ## #X-01 — Launch Thread (Day 1, PIN THIS)
+_Revised Session 33: hook sharpened (enemy first, product second), AI-vs-human
+angle added, closer updated for quiet-availability reality._
 ```
-I'm building @ApesTogetherApp — an app where skilled traders earn money from subscribers just by making trades they're already making.
+Every finfluencer says they beat the market.
 
-No content creation. No courses. No "guru" branding.
+So I built a leaderboard where they'd have to prove it — and put AI bots on it to make it interesting.
 
-Just verified performance tracked on-platform, and 85% of subscriber revenue goes to the trader.
+It's called @ApesTogetherApp. Here's how it works 🧵
 
-Here's why 🧵
-
-1/ Most investors under 40 get their stock ideas from social media.
-
-Almost none of those ideas come with proof the person can actually trade.
-
-The trust model is broken. We're fixing it with math.
-
-2/ On ApesTogether, every trade is logged at market price the moment it's made.
+1/ Every trade is logged in-app at live market price, the moment it's placed.
 
 No self-reported returns. No cherry-picked screenshots. No "I called it" with no proof.
 
 Your performance is your resume.
 
-3/ For traders: you keep 85% of what subscribers pay ($6.50 of every $9/mo subscription).
+2/ The leaderboard ranks everyone against the S&P 500 — humans and *disclosed* AI bots, on the same board.
 
-If 500 people subscribe to your strategy, that's $39,000/year — from trades you're already making.
+In the most botted corner of the internet, ours wear name tags. Beat the machine, publicly.
 
-Algorithms and AI bots are welcome. If it beats the S&P, we want it.
+3/ For traders: you keep 85% of what subscribers pay ($6.50 of every $9/mo).
 
-4/ For investors: browse a leaderboard ranked by verified, on-platform performance.
+500 subscribers = $39,000/year — from trades you're already making.
 
-Subscribe to the traders whose strategies match your style. Get a real-time push notification when they trade.
+No content creation. No courses. No "guru" branding. The trades ARE the content.
 
-Then decide for yourself what to do in your own brokerage.
+4/ For investors: subscribe to traders whose verified strategy matches your style. Real-time push when they trade.
 
-5/ We're launching the beta [launch date].
+Then decide for yourself, in your own brokerage. It's all virtual/paper on our side — a proof layer, not a brokerage.
 
-Sign up for the waitlist: apestogether.ai
+5/ Live now on iOS and Android — apestogether.ai
 
-Built in NYC. No VC money. No hype. Just receipts.
+The first 100 human traders get a permanent Founding Trader badge. The clock on your verified track record starts the day you join.
+
+Built solo in NYC. No VC. No hype. Just receipts.
 ```
 
 ## #X-02 — The Problem (Day 2)
@@ -510,42 +516,36 @@ No more waitlist. No more "coming soon."
 ApesTogether goes live. apestogether.ai
 ```
 
-## #X-LAUNCH — Launch Day Thread ([launch date])
+## #X-LAUNCH — Launch Day Thread ([launch date] — the Phase 3 spike)
+_Revised Session 33: by spike week we HAVE months of real leaderboard data —
+lead with it. Fill the [standings] slots with live numbers that morning._
 ```
-ApesTogether is LIVE on the App Store and Google Play.
+For [N] months, verified human traders and disclosed AI bots have been competing on one leaderboard.
 
-The anti-finfluencer platform. Every trade tracked. Every return verified. 85% of revenue to traders.
+Current standings: [e.g., "the AI is #4. Humans hold the top 3 — for now."]
 
-Here's what we built and why 🧵
+Today ApesTogether opens to everyone. 🧵
 
-1/ For investors:
-- Browse traders ranked by verified performance
-- Subscribe for $9/mo
-- Real-time push notification when they trade
-- Make your own decisions in your own brokerage
+1/ The premise: every finfluencer says they beat the market. None of them post their losses.
 
-No gurus. No hype. Just receipts.
+Here, every trade is logged at live market price the moment it's placed. Wins AND losses. The leaderboard is the whole argument.
 
-2/ For traders:
-- Trade in the app — every trade priced at live market
-- Build your track record on the leaderboard
-- Earn 85% of every subscriber's $9/mo
-- Algorithms and AI bots welcome
+2/ [Real proof point — e.g., "Our #1 trader is up X% vs the S&P's Y% since May — every one of their Z trades is public and timestamped."]
 
-3/ We built this because:
-- Most young investors get stock ideas from social media
-- Almost none of it comes with verifiable proof
-- Skilled traders can't monetize performance without becoming content creators
+No screenshots. No "trust me bro." Receipts by default.
 
-That's broken. This is the fix.
+3/ For traders: keep 85% of every $9/mo subscriber. [F]/100 Founding Trader badges still unclaimed — permanent, first-come, humans only.
 
-4/ Download now:
-🍎 [App Store link]
+Your verified track record starts the day you join. It can't be backfilled. That's the point.
+
+4/ For investors: subscribe to a verified strategy, get real-time push when they trade, decide for yourself in your own brokerage.
+
+(All trading on-platform is virtual — we're the proof layer, not a brokerage.)
+
+5/ 🍎 [App Store link]
 🤖 [Google Play link]
 
-Or learn more at apestogether.ai
-
-Built in NYC. No VC. No hype. Just math. 🦍
+apestogether.ai — built solo in NYC. No VC. No hype. Just math. 🦍
 ```
 
 ---
@@ -553,21 +553,21 @@ Built in NYC. No VC. No hype. Just math. 🦍
 # TIKTOK CONTENT
 
 ## #TT-01 — "What If Finfluencers Had to Prove It?" (Day 2)
-**Format:** Face-to-camera, 45-60s
+**Format:** Face-to-camera open (1 line), then screen recording of the real
+leaderboard. 30–45s. _Revised Session 33: hook moved to second 1 ("prove it"
+conflict), stat demoted, AI angle added, screen > face for retention._
 ```
-Most investors under 40 get their stock tips from social media.
+[Face, second 1] Every finfluencer claims they beat the market. None of them can prove it. So I built the proof.
 
-And almost none of those tips come with proof the person actually makes money.
+[Screen: leaderboard scroll] This is ApesTogether. Every trade on here was priced at live market the second it was placed. No screenshots. No editing. You literally cannot fake it.
 
-So I built an app where every single trade is tracked and priced at live market. No screenshots. No "trust me bro." Just math.
+[Screen: tap a trader] Wins AND losses, all public. If someone beats the S&P, you can see exactly how. If they don't — you can see that too.
 
-It's called ApesTogether. Traders earn 85% of subscription revenue just by making trades they're already making.
+[Screen: AI bot profile] And because it's finance social media, there ARE bots — ours just wear name tags. Disclosed AI funds compete against humans on the same board.
 
-No courses. No content grind. Just performance.
-
-Beta opens [launch date]. Link in bio.
+[Face] Traders keep 85% of subscriptions for trades they're already making. It's live now — link in bio.
 ```
-**Caption:** What if every finfluencer had to prove their returns? We built that. #investing #stockmarket #fintech #finfluencer
+**Caption:** Every finfluencer says they beat the market. Here's the leaderboard that checks. #investing #stockmarket #fintech #finfluencer #AI
 
 ## #TT-02 — "How We Verify Every Trade" (Day 4)
 **Format:** Screen recording + voiceover, 30-45s
@@ -965,25 +965,29 @@ Feedback welcome. Beta [launch date]. apestogether.ai
 ```
 
 ## #R-LAUNCH — r/wallstreetbets ([launch date])
-**Title:** "Built an app called ApesTogether where you earn from subscribers by sharing verified trades — live today"
+_Revised Session 33: WSB nukes ads and roasts corporate polish — lead with the
+AI-vs-human scoreboard (entertainment first), self-deprecate, plain links, no
+emoji badges. **Day-of: re-read the sub's self-promo rules; if the post gets
+removed, take it to the Daily Discussion thread as a comment instead.**_
+**Title:** "I put disclosed AI bots on a trading leaderboard against humans. Humans are currently [winning/losing]. Positions-or-ban, as an app."
 ```
 What's up apes,
 
-I built an app where if you beat the S&P 500, people subscribe to your trades for $9/month and you keep 85%.
+You invented positions-or-ban. I built the app version of it.
 
-Every trade verified at market price. No screenshots, no "trust me bro." Leaderboard ranked by actual returns.
+ApesTogether: every trade logged at live market price the moment it's placed. No screenshots, no "trust me bro," no deleting the losers. The leaderboard ranks everyone against SPY — including AI bots that are DISCLOSED as bots, because this is fintech social media and pretending there are no bots is the actual scam.
 
-Algorithms welcome. If your bot beats the market, it earns subscribers.
+Current standings: [real number — e.g., "the best AI fund is #6; the top 5 are all human. For now."]
 
-Subscribers get real-time push notifications when someone they follow buys or sells. Then you decide what to do in your own brokerage.
+If you consistently beat SPY: people can subscribe to your trades for $9/mo and you keep 85%. If you don't beat SPY, congrats, you'll fit right in with the rest of us — my own portfolio is on there too and it's [honest self-roast].
 
-Just went live:
-🍎 [App Store link]
-🤖 [Google Play link]
+It's paper trading by design — it's a receipts layer, not a brokerage. You get pushed when someone you follow trades, then do whatever you want with your own money.
 
-One person in NYC. No VC. No hype. Just math.
+Live today: [App Store link] / [Google Play link]
 
-Not financial advice. All trades shared for informational/educational purposes.
+One guy in NYC, no VC. First 100 humans to trade get a permanent Founding Trader badge — [F] left.
+
+Not financial advice. Everything's informational/educational.
 ```
 
 ## #R-LAUNCH-2 — r/stocks ([launch date])
@@ -1046,6 +1050,41 @@ Talk soon,
 Founder, ApesTogether
 apestogether.ai
 ```
+
+## #E-BUILDLOG-01 — Waitlist Nurture: Build Log #1 (Phase 1 — first sends AFTER both stores are quietly live)
+_Added Session 33 (gap #4: the waitlist has heard nothing for months — warm it
+BEFORE any launch blast). Send via Gmail multi-send per
+`LAUNCH_EXECUTION_PLAN.md` §1.2. Repeat monthly with fresh numbers as
+#E-BUILDLOG-02, -03…_
+
+**Subject:** You're early. Here's what that's worth. (ApesTogether build log #1)
+```
+Hey [first name / "there"],
+
+You joined the ApesTogether waitlist a while back and then heard nothing. That's on me — I've been heads-down building. Here's the honest update:
+
+What happened since you signed up:
+• The app is built — iOS and Android, fully native, both in final store review.
+• Every trade is priced at live market the moment it's placed. The leaderboard ranks everyone against the S&P — including disclosed AI bots competing right alongside humans.
+• Traders keep 85% of every $9/mo subscription.
+
+What happens next:
+No invite gates, no "limited spots" games. When the stores approve, you'll get one email with the download links — you're at the front of the line because you were here first.
+
+One thing worth knowing now: the first 100 human traders to place a trade get a permanent Founding Trader badge, and a verified track record can't be backdated — it starts the day you make your first trade. If you're planning to trade, being early is the entire advantage.
+
+Reply to this email with anything — I read all of them.
+
+[Your name]
+Founder, ApesTogether (built solo in NYC)
+apestogether.ai
+```
+
+**Trader-segment variant:** same email, but swap the subject to
+**"Your track record can't start until you do"** and move the Founding
+Trader paragraph to the top, adding: _"You told us you want to earn as a
+trader — so you should know [N] of the 100 founding badges are already
+spoken for."_ (real number only).
 
 ## #E-CAMPUS — University Finance Club Outreach
 **Subject:** Paper trading competition idea for [Club Name]

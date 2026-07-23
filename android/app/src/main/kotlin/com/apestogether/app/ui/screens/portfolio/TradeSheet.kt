@@ -57,6 +57,8 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.apestogether.app.data.models.Holding
+import com.apestogether.app.ui.components.findActivity
+import com.apestogether.app.util.ReviewPrompter
 import com.apestogether.app.ui.theme.AppBackground
 import com.apestogether.app.ui.theme.CardBackground
 import com.apestogether.app.ui.theme.CardBorder
@@ -300,6 +302,9 @@ fun TradeSheet(
                                         delay(if (pending) 1200 else 800)
                                         sheetState.hide()
                                         onDismiss()
+                                        // After the sheet is gone (mirrors iOS's 1s-delayed
+                                        // SKStoreReviewController call on the 3rd trade).
+                                        context.findActivity()?.let { ReviewPrompter.onSuccessfulTrade(it) }
                                     }
                                     is TradeOutcome.Error -> {
                                         error = outcome.message

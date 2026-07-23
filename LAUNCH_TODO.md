@@ -369,8 +369,8 @@ Tracked here so nothing is dropped; checked off as resolved. Detail/answers land
   - [ ] Play Billing Library `7.1.1` → **8.x** (breaking API changes — dedicated session; re-verify `BillingService.trialEligible` offer-filtering behavior after migration).
   - [ ] `ndk.debugSymbolLevel = "FULL"` (native-symbols warning).
   - **When:** separate from v7 on purpose — don't couple a billing-library migration to simple copy fixes. If the v6 review drags into August, fold v7's fixes into v8 instead and ship one update before 8/31.
-- **iOS Build 46** — *everything since Build 45 (uploaded to ASC 2026-07-10, NOT yet submitted for review)*: dynamic trial CTA (`SubscriptionManager.trialEligible` + `subscribeCtaText()`), founder-pill move, locked-holdings CTA fixes (equal-height plan pills, de-duped bullet, resizer bullet "Adjust the portfolio size instantly"), `LegalText.swift` 85/15.
-  - **When:** next Mac session — archive + upload; Build 46 **supersedes 45 as the App Store review submission** (45 never went to review, so nothing is lost). Same session: verify the ASC Slot-A subscription group carries the 7-day intro offer, and check the resizer bullet doesn't wrap at 240pt.
+- **iOS Build 47 — ✅ UPLOADED to ASC by USER (2026-07-22).** USER pulled master on the MacBook, bumped build 46→47, archived + uploaded. Carries everything since 45: dynamic trial CTA (`SubscriptionManager.trialEligible` + `subscribeCtaText()`), founder-pill move, locked-holdings CTA fixes (equal-height plan pills, de-duped bullet, resizer bullet "Adjust the portfolio size instantly"), `LegalText.swift` 85/15. ("Build 46" was never uploaded — 47 supersedes 45 directly.)
+  - **Still open before SUBMITTING 47 for App Store review:** (a) verify the ASC Slot-A subscription group carries the 7-day intro offer; (b) spot-check the resizer bullet at 240pt on a device/simulator; (c) create the Apple reviewer demo account (`reviewer@apestogether.ai`, with followed traders) and put its credentials in App Review notes; (d) then Submit for Review.
 - **OPEN:**
   - [ ] Attorney: §5.2(a) gross→net redraft — USER approved sending the before/after (2026-07-21) but is holding it until the attorney answers his current outstanding question; send as the follow-up.
 
@@ -391,12 +391,15 @@ Tracked here so nothing is dropped; checked off as resolved. Detail/answers land
 - **Product Hunt DEPRIORITIZED** (2026 research: 500+ launches/day, AI-tool audience drift, B2C converts poorly, skip-if-pre-testimonials guidance) — never the launch moment; optional side-beat later.
 - **12-item gap register** logged in MARKETING_PLAN — biggest: **no trader-supply pipeline** (journalists are name-listed, traders aren't; playbook's own "supply first" principle). Others: waitlist rot (needs monthly build-log nurture email), unsustainable posting cadence (adopted 3 X + 1 TikTok/wk floor), install-attribution hole ("how did you hear" onboarding survey), **Android in-app review prompt MISSING** (iOS has it in `TradeSheetView.swift`; → **added to v7 scope**), GEO comparison page unbuilt, press kit + App Preview video unstarted (now Phase-2 exit gates).
 - **PHASE 0 ACTION ITEMS (can start immediately, no launch dependency):**
-  - [ ] USER: **register social handles** (X `@ApesTogetherApp`, TikTok/IG `@apestogether`, LinkedIn, YouTube, Reddit joins) — squatting risk, overdue since Session 13; ~2h once.
-  - [ ] Cascade: draft the **25-trader named target list + personal DM template** (gap #2 — the critical path for everything downstream).
-  - [ ] Cascade: **waitlist nurture email #1** ("build log") — waitlist has heard nothing for months.
-  - [ ] Cascade: **"ApesTogether vs Dub vs eToro" comparison page** (GEO) + landing FAQ crawlability check.
-  - [ ] Cascade: **Android Play In-App Review prompt** post-trade (mirror iOS) — rides v7.
+  - [ ] USER: **register social handles** (X `@ApesTogetherApp`, TikTok/IG `@apestogether`, LinkedIn, YouTube, Reddit joins) — squatting risk, overdue since Session 13; ~2h once. Click-by-click: `LAUNCH_EXECUTION_PLAN.md` §0.1.
+  - [x] Cascade: **trader-recruitment pipeline** → `docs/TRADER_RECRUITMENT.md` (sourcing queries, 3 DM templates, follow-up rule, white-glove onboarding, 25-row tracker). USER fills the names Sat 7/26 per the day-by-day.
+  - [x] Cascade: **waitlist nurture email #1** → `LAUNCH_CONTENT.md` #E-BUILDLOG-01 (+ trader-segment variant). Send AFTER both stores quietly live + deliverability verified (`LAUNCH_EXECUTION_PLAN.md` §1.2).
+  - [x] Cascade: **Android Play In-App Review prompt** — `ReviewPrompter.kt` (3rd successful trade, mirrors iOS `TradeSheetView`), wired in `TradeSheet.kt`, `review-ktx 2.0.2` added. **Rides v7.**
+  - [ ] Cascade: **GEO comparison page** — HELD for USER approval (gap-plan list, chat 2026-07-22).
+- **NEW DOC: `docs/LAUNCH_EXECUTION_PLAN.md`** — Phases 0–4 click-by-click (handle registration, Build-47 ASC submission steps, v6 staged-rollout promotion, waitlist send mechanics, Phase-2 exit-gate table, spike-week run-of-show, post-spike engine) + **day-by-day calendar for 7/23–8/11** folding in every open ENG box (billing E2E, v7, v8-by-8/31, Build 47 submission, deliverability bug, attorney follow-up).
+- **Social content pass (Session 33, this model):** `LAUNCH_CONTENT.md` — added global re-anchoring banner (posts run during quiet availability → "live now" replaces "beta opens [date]"; AI-vs-human standings become the headline hook once real data exists); rewrote the 4 highest-stakes pieces (#X-01 pinned thread, #X-LAUNCH spike thread, #TT-01, #R-LAUNCH wsb — now leads with AI-vs-human standings, self-deprecating, includes removed-post fallback to the Daily thread). Remaining ~95 pieces: solid after the Session-25 rewrite; treat as menu per the banner.
 - **v7 scope now:** dynamic trial CTA + founder pill + **Play In-App Review prompt**.
+- **AWAITING USER APPROVAL (gap plans, presented in chat):** #3 cold-start seeding check · #6 referral-loop surfaces (v8/Build 48) · #7 "how did you hear about us" survey (v8/Build 48 + backend) · #8 press kit + `/press` page · #10 GEO comparison page · #11 store-featuring nominations (post-spike) · #12 KPI Friday cadence.
 
 ---
 
