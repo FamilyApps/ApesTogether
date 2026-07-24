@@ -126,6 +126,13 @@ def send_email(to_email, subject, body, html_body=None, bcc=True, reply_to=None)
             'personalizations': [personalizations],
             'from': {'email': from_email, 'name': FROM_NAME_DEFAULT},
             'content': content,
+            # Everything sent through this util is transactional. SendGrid's
+            # click tracking rewrites every link into an unreadable
+            # url4305.apestogether.ai redirect (especially ugly in the
+            # plain-text part), so it's off; open tracking stays default.
+            'tracking_settings': {
+                'click_tracking': {'enable': False, 'enable_text': False},
+            },
         }
         if reply_to:
             data['reply_to'] = {'email': reply_to}

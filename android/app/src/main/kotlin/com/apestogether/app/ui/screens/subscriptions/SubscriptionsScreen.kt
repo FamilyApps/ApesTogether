@@ -490,13 +490,16 @@ private fun SubscriptionCard(
                                 .padding(horizontal = 6.dp, vertical = 2.dp),
                         )
                     }
-                    subscription.expiresAt?.let { exp ->
-                        Text(
-                            text = "Renews ${formatShortDate(exp)}",
-                            color = TextMuted,
-                            fontSize = 11.sp,
-                        )
-                    }
+                }
+                // On its own line (iOS parity) — sharing the badges row made
+                // the date wrap mid-string next to the bell/switch column.
+                subscription.expiresAt?.let { exp ->
+                    Text(
+                        text = "Renews ${formatShortDate(exp)}",
+                        color = TextMuted,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                    )
                 }
             }
 

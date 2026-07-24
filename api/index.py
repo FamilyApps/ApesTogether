@@ -1504,6 +1504,12 @@ def profile(username):
     # Redirect to the redesigned public portfolio page
     return redirect(f'/p/{user_to_view.portfolio_slug}')
 
+@app.route('/portfolio/<slug>')
+def portfolio_alias(slug):
+    """Alias → /p/<slug>. Milestone emails sent before 2026-07-24 linked
+    /portfolio/<slug>, which 404'd; the canonical public page is /p/<slug>."""
+    return redirect(f'/p/{slug}', code=301)
+
 @app.route('/admin-panel')
 def admin_panel():
     """Serve the admin dashboard. Requires Google OAuth + TOTP verification."""

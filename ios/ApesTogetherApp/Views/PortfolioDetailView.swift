@@ -693,7 +693,7 @@ struct HoldingRow: View {
             VStack(alignment: .trailing, spacing: 4) {
                 // Top-right line: total value + (in muted text) % of portfolio.
                 HStack(spacing: 6) {
-                    Text("$\(String(format: "%.2f", holding.totalValue))")
+                    Text("$\(groupedDollars(holding.totalValue))")
                         .font(.subheadline.bold())
                         .foregroundColor(.textPrimary)
                     if let pct = holding.percentOfPortfolio(portfolioValue) {
@@ -722,14 +722,14 @@ struct HoldingRow: View {
     private var quantityAndAvgLine: String {
         let qtyPart = "\(holding.formattedQuantity) share\(holding.quantity == 1 ? "" : "s")"
         if holding.purchasePrice > 0 {
-            return "\(qtyPart) · $\(String(format: "%.2f", holding.purchasePrice)) avg"
+            return "\(qtyPart) · $\(groupedDollars(holding.purchasePrice)) avg"
         }
         return qtyPart
     }
 
     private func formattedSignedDollars(_ value: Double) -> String {
         let sign = value >= 0 ? "+" : "-"
-        return "\(sign)$\(String(format: "%.2f", abs(value)))"
+        return "\(sign)$\(groupedDollars(abs(value)))"
     }
 
     private func formattedPortfolioPct(_ pct: Double) -> String {
@@ -772,7 +772,7 @@ struct CashRow: View {
 
             VStack(alignment: .trailing, spacing: 4) {
                 HStack(spacing: 6) {
-                    Text("$\(String(format: "%.2f", cashBalance))")
+                    Text("$\(groupedDollars(cashBalance))")
                         .font(.subheadline.bold())
                         .foregroundColor(.textPrimary)
                     if let total = portfolioValue, total > 0 {
@@ -842,7 +842,7 @@ struct TradeRow: View {
                     .font(.subheadline)
                     .foregroundColor(.textSecondary)
             } else {
-                Text("\(formatQuantity(trade.quantity)) @ $\(String(format: "%.2f", trade.price ?? 0))")
+                Text("\(formatQuantity(trade.quantity)) @ $\(groupedDollars(trade.price ?? 0))")
                     .font(.subheadline)
                     .foregroundColor(.textSecondary)
             }
@@ -907,6 +907,18 @@ struct TradeRow: View {
             return result
         }
     }
+}
+
+/// "1234.5" → "1,234.50" — thousands separators for all dollar amounts in
+/// the holdings/cash/trades rows (values routinely cross $1,000 and read
+/// wrong without grouping). File-level so every row struct shares it.
+private func groupedDollars(_ value: Double) -> String {
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .decimal
+    formatter.minimumFractionDigits = 2
+    formatter.maximumFractionDigits = 2
+    formatter.locale = Locale(identifier: "en_US")
+    return formatter.string(from: NSNumber(value: value)) ?? String(format: "%.2f", value)
 }
 
 // MARK: - View Model
@@ -1326,7 +1338,7 @@ struct BlurredHoldingsTeaser: View {
                         .foregroundColor(.primaryAccent)
                 }
                 
-                Text("See every trade, in real time")
+                Text("See trades in real time")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(.textPrimary)
                 
@@ -1338,7 +1350,7 @@ struct BlurredHoldingsTeaser: View {
                 VStack(alignment: .leading, spacing: 6) {
                     benefitRow("Real-time buy & sell alerts")
                     benefitRow("Full position details")
-                    benefitRow("Adjust the portfolio size instantly")
+                    benefitRow("Adjust portfolio size instantly")
                 }
                 .frame(maxWidth: 240)
                 

@@ -65,7 +65,10 @@ def _send_milestone_email(influencer, milestone, total_subs, real_count, gifted_
     username = influencer.username or 'there'
 
     slug = influencer.portfolio_slug or ''
-    share_url = f"https://apestogether.ai/portfolio/{slug}" if slug else "https://apestogether.ai"
+    # /p/<slug> — the real public-portfolio web route AND the App Links /
+    # Universal Links path (AASA + assetlinks both register /p/*), so the tap
+    # opens the app when installed. /portfolio/<slug> was a 404.
+    share_url = f"https://apestogether.ai/p/{slug}" if slug else "https://apestogether.ai"
     # Deep link into the app's Share Performance screen
     app_deep_link = f"apestogether://share-performance"
 

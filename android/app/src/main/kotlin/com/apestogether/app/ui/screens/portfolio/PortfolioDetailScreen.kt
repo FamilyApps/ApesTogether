@@ -28,7 +28,9 @@ import androidx.compose.material.icons.automirrored.filled.CallMade
 import androidx.compose.material.icons.automirrored.filled.ShowChart
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Remove
@@ -41,6 +43,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
@@ -66,9 +69,12 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -500,11 +506,17 @@ private fun PortfolioBody(
                         }
 
                         holdings == null -> {
-                            // Non-subscriber teaser
+                            // Non-subscriber teaser — iOS-parity rich card
+                            // (blurred fake holdings + benefits + plan toggle
+                            // + trial-aware CTA).
                             BlurredHoldingsTeaser(
-                                ownerName = portfolio.owner.publicName,
-                                previewMessage = portfolio.previewMessage,
                                 acceptsNewSubscribers = portfolio.acceptsNewSubscribers != false,
+                                ownerName = portfolio.owner.publicName,
+                                selectedPlan = selectedPlan,
+                                onSelectPlan = viewModel::setPlan,
+                                trialEligible = trialEligible,
+                                subscriptionPrice = portfolio.subscriptionPrice,
+                                processing = subscribeState is SubscribeUiState.Processing,
                                 onSubscribe = {
                                     activity?.let {
                                         viewModel.subscribe(
@@ -1134,7 +1146,7 @@ private fun HoldingRow(
             // cost per share whenever purchasePrice is known.
             val sharesLabel = if (holding.quantity == 1.0) "share" else "shares"
             val avgPart = if (holding.purchasePrice > 0) {
-                " · $" + "%.2f".format(holding.purchasePrice) + " avg"
+                " · $" + formatLargeNumber(holding.purchasePrice) + " avg"
             } else ""
             Text(
                 text = holding.formattedQuantity + " " + sharesLabel + avgPart,
@@ -1156,7 +1168,7 @@ private fun HoldingRow(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "$" + "%.2f".format(holding.totalValue),
+                    text = "$" + formatLargeNumber(holding.totalValue),
                     color = TextPrimary,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
@@ -1239,7 +1251,7 @@ private fun CashRow(cashBalance: Double, portfolioValue: Double?) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "$" + "%.2f".format(cashBalance),
+                    text = "$" + formatLargeNumber(cashBalance),
                     color = TextPrimary,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
@@ -1366,7 +1378,7 @@ private fun TradeRow(trade: Trade) {
 
         Text(
             text = if (isPending) "${formatQuantity(trade.quantity)} shares"
-                   else "${formatQuantity(trade.quantity)} @ $" + "%.2f".format(trade.price ?: 0.0),
+                   else "${formatQuantity(trade.quantity)} @ $" + formatLargeNumber(trade.price ?: 0.0),
             color = TextSecondary,
             fontSize = 13.sp,
         )
@@ -1377,49 +1389,233 @@ private fun TradeRow(trade: Trade) {
 // Teasers + empty states
 // ─────────────────────────────────────────────────────────────────────────
 
+/**
+ * iOS-parity locked-holdings card ([BlurredHoldingsTeaser] in
+ * PortfolioDetailView.swift): blurred fake holdings behind an overlay with
+ * a bell icon, benefits list, Annual/Monthly toggle, trial-aware Subscribe
+ * CTA, and ToS/Privacy links. Note: Modifier.blur is a no-op below
+ * Android 12 — the 40% alpha still obscures the (fake) rows there.
+ */
 @Composable
 private fun BlurredHoldingsTeaser(
     ownerName: String,
-    previewMessage: String?,
+    selectedPlan: SubscriptionPlan,
+    onSelectPlan: (SubscriptionPlan) -> Unit,
+    trialEligible: Boolean,
+    subscriptionPrice: Double,
+    processing: Boolean,
     onSubscribe: () -> Unit,
     modifier: Modifier = Modifier,
-    // W7: hide the Subscribe button + show "not accepting" copy when the
+    // W7: hide the Subscribe UI + show "not accepting" copy when the
     // creator has paused new subscriptions.
     acceptsNewSubscribers: Boolean = true,
 ) {
-    Column(
+    val uriHandler = LocalUriHandler.current
+    // Same fake rows iOS blurs (ticker, value, gain, isPositive).
+    val fakeHoldings = listOf(
+        FakeHolding("AAPL", "$8,329", "+13.6%", true),
+        FakeHolding("NVDA", "$9,193", "+27.1%", true),
+        FakeHolding("TSLA", "$6,303", "-9.2%", false),
+        FakeHolding("AMZN", "$3,729", "+31.0%", true),
+        FakeHolding("MSFT", "$7,426", "+22.0%", true),
+    )
+    val priceText = when (selectedPlan) {
+        SubscriptionPlan.Annual -> "\$69/yr"
+        SubscriptionPlan.Monthly -> "\$${subscriptionPrice.toInt()}/mo"
+    }
+    val ctaText =
+        if (trialEligible) "Try Free for 7 Days, then $priceText" else "Subscribe for $priceText"
+
+    // ZStack equivalent: the Box sizes to its tallest child (the overlay
+    // CTA), and the shorter blurred backdrop centers behind it.
+    Box(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(CardBackground)
-            .border(0.5.dp, CardBorder, RoundedCornerShape(16.dp))
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .border(0.5.dp, CardBorder, RoundedCornerShape(16.dp)),
+        contentAlignment = Alignment.Center,
     ) {
-        Icon(Icons.Default.WorkspacePremium, null, tint = PrimaryAccent, modifier = Modifier.size(36.dp))
-        Text(
-            text = "$ownerName's holdings",
-            color = TextPrimary,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-        )
-        Text(
-            text = if (!acceptsNewSubscribers)
-                "$ownerName isn't accepting new subscribers right now."
-            else previewMessage ?: "Subscribe to see exactly what they're trading and get real-time alerts.",
-            color = TextSecondary,
-            fontSize = 13.sp,
-        )
-        if (acceptsNewSubscribers) {
-            Button(
-                onClick = onSubscribe,
-                colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
-                shape = RoundedCornerShape(12.dp),
-            ) {
-                Text("Subscribe", color = Color.White, fontWeight = FontWeight.Bold)
+        // Blurred fake holdings backdrop.
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .blur(6.dp)
+                .alpha(0.4f)
+                .padding(horizontal = 14.dp, vertical = 14.dp),
+        ) {
+            fakeHoldings.forEachIndexed { index, h ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(PrimaryAccent.copy(alpha = 0.1f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = h.ticker.take(2),
+                            color = PrimaryAccent,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(h.ticker, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text("42 shares", color = TextMuted, fontSize = 11.sp)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(h.value, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = h.gain,
+                            color = if (h.isPositive) Gains else Losses,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+                if (index != fakeHoldings.lastIndex) {
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.06f), thickness = 0.5.dp)
+                }
             }
         }
+
+        // Overlay CTA.
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(PrimaryAccent.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.NotificationsActive,
+                    contentDescription = null,
+                    tint = PrimaryAccent,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+
+            Text(
+                text = "See trades in real time",
+                color = TextPrimary,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+            )
+
+            if (!acceptsNewSubscribers) {
+                Text(
+                    text = "$ownerName isn't accepting new subscribers right now.",
+                    color = TextSecondary,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            } else {
+                // Benefits list — same three bullets as iOS.
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    BenefitRow("Real-time buy & sell alerts")
+                    BenefitRow("Full position details")
+                    BenefitRow("Adjust portfolio size instantly")
+                }
+
+                CompactPlanToggle(
+                    selected = selectedPlan,
+                    onSelect = onSelectPlan,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+
+                Button(
+                    onClick = onSubscribe,
+                    enabled = !processing,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = PrimaryAccent,
+                        disabledContainerColor = PrimaryAccent.copy(alpha = 0.5f),
+                    ),
+                    contentPadding = PaddingValues(vertical = 14.dp),
+                ) {
+                    if (processing) {
+                        CircularProgressIndicator(
+                            color = Color.White,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.WorkspacePremium,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(ctaText, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                // Legal links (Apple/Google both want these near the price).
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Terms of Use",
+                        color = TextSecondary,
+                        fontSize = 10.sp,
+                        modifier = Modifier.clickable {
+                            uriHandler.openUri("https://apestogether.ai/terms-of-service")
+                        },
+                    )
+                    Text("·", color = TextSecondary, fontSize = 10.sp)
+                    Text(
+                        "Privacy Policy",
+                        color = TextSecondary,
+                        fontSize = 10.sp,
+                        modifier = Modifier.clickable {
+                            uriHandler.openUri("https://apestogether.ai/privacy-policy")
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+private data class FakeHolding(
+    val ticker: String,
+    val value: String,
+    val gain: String,
+    val isPositive: Boolean,
+)
+
+@Composable
+private fun BenefitRow(text: String) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Default.CheckCircle,
+            contentDescription = null,
+            tint = PrimaryAccent,
+            modifier = Modifier.size(14.dp),
+        )
+        Text(text, color = TextPrimary, fontSize = 13.sp)
     }
 }
 
@@ -1454,7 +1650,7 @@ private fun formatPercent(value: Double, decimals: Int): String {
  *  HoldingRow.formattedSignedDollars. */
 private fun formatSignedDollars(value: Double): String {
     val sign = if (value >= 0) "+" else "-"
-    return sign + "$" + "%.2f".format(value.absoluteValue)
+    return sign + "$" + formatLargeNumber(value.absoluteValue)
 }
 
 private fun formatQuantity(quantity: Double): String {
