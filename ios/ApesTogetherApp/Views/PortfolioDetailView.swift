@@ -1218,6 +1218,15 @@ struct SectorAllocationCard: View {
         Color(hex: "a855f7"), Color(hex: "6366f1")
     ]
     
+    // Standard S&P/sector-ETF short forms for the three GICS names that
+    // don't fit the label column; everything else already fits. Mirror of
+    // the Android map in SectorAllocationCard — keep the two in sync.
+    private static let sectorAbbreviations: [String: String] = [
+        "Consumer Discretionary": "Cons Disc",
+        "Communication Services": "Comm Services",
+        "Consumer Staples": "Cons Staples",
+    ]
+    
     private var sortedSectors: [(String, Double)] {
         industryMix.sorted { $0.value > $1.value }.filter { $0.value >= 1.0 }
     }
@@ -1230,10 +1239,10 @@ struct SectorAllocationCard: View {
             
             ForEach(Array(sortedSectors.enumerated()), id: \.element.0) { index, sector in
                 HStack(spacing: 10) {
-                    Text(sector.0)
+                    Text(Self.sectorAbbreviations[sector.0] ?? sector.0)
                         .font(.system(size: 12))
                         .foregroundColor(.textSecondary)
-                        .frame(width: 90, alignment: .leading)
+                        .frame(width: 110, alignment: .leading)
                         .lineLimit(1)
                     
                     GeometryReader { geo in

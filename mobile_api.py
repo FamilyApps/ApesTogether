@@ -238,6 +238,42 @@ MAX_ORDER_NOTIONAL_USD = 10_000_000     # $ value cap on one order
 MAX_HOLDINGS_PER_PORTFOLIO = 200        # distinct tickers per portfolio
 
 
+# ── Mobile daily-active tracking ────────────────────────────────────────────
+# The web app logs UserActivity on login/dashboard views, but mobile users
+# previously left no daily-activity trail, making D1/D7/D30 retention
+# uncomputable for app users. This writes ONE UserActivity('mobile_active')
+# row per user per UTC day. The in-process memo skips the DB check entirely
+# on warm serverless instances; duplicate rows from cold-start races are
+# harmless because retention math uses DISTINCT (user, day).
+_dau_seen = {}  # user_id -> 'YYYY-MM-DD' last day we confirmed a ping
+
+
+def _log_mobile_active(user_id):
+    """Record that user_id was active today (at most one row/user/day)."""
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    if _dau_seen.get(user_id) == today:
+        return
+    try:
+        from models import db, UserActivity
+        day_start = datetime.strptime(today, '%Y-%m-%d')
+        exists = db.session.query(UserActivity.id).filter(
+            UserActivity.user_id == user_id,
+            UserActivity.activity_type == 'mobile_active',
+            UserActivity.timestamp >= day_start,
+        ).first()
+        if not exists:
+            db.session.add(UserActivity(user_id=user_id, activity_type='mobile_active'))
+            db.session.commit()
+        _dau_seen[user_id] = today
+    except Exception:
+        # Never let activity tracking break a real request
+        try:
+            from models import db
+            db.session.rollback()
+        except Exception:
+            pass
+
+
 def require_auth(f):
     """Decorator to require JWT authentication for mobile endpoints"""
     @wraps(f)
@@ -270,6 +306,7 @@ def require_auth(f):
             logger.warning(f"Invalid token: {e}")
             return jsonify({'error': 'invalid_token'}), 401
         
+        _log_mobile_active(g.user_id)
         return f(*args, **kwargs)
     return decorated
 
@@ -5659,6 +5696,7 @@ def platform_growth():
             'page_views': 0, 'unique_visitors': 0,
             'portfolio_clicks': 0,
             'apple_clicks': 0, 'android_clicks': 0,
+            'dau': 0, 'new_subs': 0,
         })
 
         # ── Signups by day ──
@@ -5726,6 +5764,58 @@ def platform_growth():
         except Exception:
             pass
 
+        # ── Human users + unified (user, day) activity map ──
+        # Powers the DAU line, DAU/WAU/MAU, and D1/D7/D30 retention cohorts.
+        # "Active" = any UserActivity row (web login/dashboard, mobile_active
+        # ping) OR any trade that day. Bots (created_by='system') excluded.
+        humans = {}  # user_id -> signup date
+        try:
+            for uid, signup_day in db.session.query(
+                User.id, cast(User.created_at, Date)
+            ).filter(
+                User.created_at.isnot(None),
+                func.coalesce(User.created_by, 'human') != 'system',
+            ).all():
+                humans[uid] = signup_day
+        except Exception:
+            pass
+
+        active_days = set()  # (user_id, date) pairs, human users only
+        try:
+            from models import UserActivity
+            for uid, day in db.session.query(
+                UserActivity.user_id, cast(UserActivity.timestamp, Date)
+            ).distinct().all():
+                if uid in humans and day is not None:
+                    active_days.add((uid, day))
+        except Exception:
+            pass
+        try:
+            for uid, day in db.session.query(
+                Transaction.user_id, cast(Transaction.timestamp, Date)
+            ).distinct().all():
+                if uid in humans and day is not None:
+                    active_days.add((uid, day))
+        except Exception:
+            pass
+
+        dau_by_day = {}
+        for _uid, day in active_days:
+            dau_by_day[day] = dau_by_day.get(day, 0) + 1
+        for day, n in dau_by_day.items():
+            daily[str(day)]['dau'] = n
+
+        # ── New subscriptions per day ──
+        try:
+            from models import MobileSubscription
+            for row in db.session.query(
+                cast(MobileSubscription.created_at, Date).label('day'),
+                func.count().label('n'),
+            ).group_by(cast(MobileSubscription.created_at, Date)).all():
+                daily[str(row.day)]['new_subs'] = row.n
+        except Exception:
+            pass
+
         # ── Build continuous daily series (fill gaps with zeros) ──
         # Always cover at least 1 year back so every time range filter works
         if True:
@@ -5742,6 +5832,7 @@ def platform_growth():
                 'page_views': 0, 'unique_visitors': 0,
                 'portfolio_clicks': 0,
                 'apple_clicks': 0, 'android_clicks': 0,
+                'dau': 0, 'new_subs': 0,
             }
             while current <= end:
                 d = str(current)
@@ -5750,7 +5841,138 @@ def platform_growth():
                 series.append(entry)
                 current += timedelta(days=1)
 
-        return jsonify({'series': series})
+        # ── Launch KPIs (blended over recent mature cohorts) ──
+        # Day-N retention = % of a signup cohort with any activity on calendar
+        # day signup+N (same definition the app stores use). Only cohorts old
+        # enough for day N to have fully elapsed are counted.
+        def _retention(day_n, lookback_days):
+            newest = today - timedelta(days=day_n + 1)
+            oldest = today - timedelta(days=lookback_days)
+            cohort = [u for u, s in humans.items() if oldest <= s <= newest]
+            if not cohort:
+                return {'rate': None, 'n': 0}
+            kept = sum(
+                1 for u in cohort
+                if (u, humans[u] + timedelta(days=day_n)) in active_days
+            )
+            return {'rate': round(kept / len(cohort) * 100, 1), 'n': len(cohort)}
+
+        kpis = {
+            'd1': _retention(1, 42),
+            'd7': _retention(7, 56),
+            'd30': _retention(30, 120),
+        }
+
+        # DAU/WAU/MAU + stickiness (avg DAU last 7 full days / MAU)
+        mau_users = {u for (u, day) in active_days if day > today - timedelta(days=30)}
+        wau_users = {u for (u, day) in active_days if day > today - timedelta(days=7)}
+        dau_7d_avg = round(sum(
+            dau_by_day.get(today - timedelta(days=i), 0) for i in range(1, 8)
+        ) / 7.0, 1)
+        kpis['dau_mau'] = {
+            'dau_7d_avg': dau_7d_avg,
+            'wau': len(wau_users),
+            'mau': len(mau_users),
+            'rate': round(dau_7d_avg / len(mau_users) * 100, 1) if mau_users else None,
+            'n': len(mau_users),
+        }
+
+        # ── Acquisition funnel, trailing 30 days ──
+        window_start = today - timedelta(days=30)
+        funnel = {'window_days': 30, 'visitors': 0, 'store_clicks': 0,
+                  'signups': 0, 'activated': 0, 'new_subscribers': 0}
+        try:
+            from models import PageView
+            funnel['visitors'] = db.session.query(
+                func.count(func.distinct(PageView.ip_hash))
+            ).filter(
+                PageView.page == '/',
+                cast(PageView.created_at, Date) > window_start,
+            ).scalar() or 0
+        except Exception:
+            pass
+        try:
+            from models import LinkClick
+            funnel['store_clicks'] = db.session.query(func.count()).select_from(
+                LinkClick
+            ).filter(cast(LinkClick.created_at, Date) > window_start).scalar() or 0
+        except Exception:
+            pass
+        recent_signups = [u for u, s in humans.items() if s > window_start]
+        funnel['signups'] = len(recent_signups)
+        if recent_signups:
+            try:
+                traded = {r[0] for r in db.session.query(
+                    func.distinct(Transaction.user_id)
+                ).filter(Transaction.user_id.in_(recent_signups)).all()}
+                funnel['activated'] = len(traded)
+            except Exception:
+                pass
+        try:
+            from models import MobileSubscription
+            funnel['new_subscribers'] = db.session.query(
+                func.count(func.distinct(MobileSubscription.subscriber_id))
+            ).filter(
+                cast(MobileSubscription.created_at, Date) > window_start
+            ).scalar() or 0
+        except Exception:
+            pass
+
+        kpis['visitor_signup'] = {
+            'rate': round(funnel['signups'] / funnel['visitors'] * 100, 1) if funnel['visitors'] else None,
+            'n': funnel['visitors'],
+        }
+        kpis['activation'] = {
+            'rate': round(funnel['activated'] / funnel['signups'] * 100, 1) if funnel['signups'] else None,
+            'n': funnel['signups'],
+        }
+
+        # ── Subscription snapshot (active count + estimated MRR) ──
+        subs = {'active': 0, 'mrr': 0.0, 'new_30d': funnel['new_subscribers']}
+        try:
+            from models import MobileSubscription, InAppPurchase
+            sub_rows = db.session.query(
+                InAppPurchase.product_id, InAppPurchase.price
+            ).join(
+                MobileSubscription,
+                MobileSubscription.in_app_purchase_id == InAppPurchase.id,
+            ).filter(MobileSubscription.status == 'active').all()
+            subs['active'] = len(sub_rows)
+            mrr = 0.0
+            for product_id, price in sub_rows:
+                p = float(price or 0)
+                mrr += p / 12.0 if 'annual' in (product_id or '') else p
+            subs['mrr'] = round(mrr, 2)
+        except Exception:
+            pass
+        kpis['subs'] = subs
+
+        # ── Weekly signup cohorts (last 12 weeks) with D1/D7/D30 ──
+        cohorts = []
+        try:
+            week_map = defaultdict(list)
+            for u, s in humans.items():
+                week_start = s - timedelta(days=s.weekday())  # Monday
+                if week_start > today - timedelta(weeks=12):
+                    week_map[week_start].append(u)
+            for week_start in sorted(week_map.keys()):
+                uids = week_map[week_start]
+                row = {'week': str(week_start), 'size': len(uids)}
+                for label, n in (('d1', 1), ('d7', 7), ('d30', 30)):
+                    mature = [u for u in uids if humans[u] + timedelta(days=n) < today]
+                    if not mature:
+                        row[label] = None
+                    else:
+                        kept = sum(
+                            1 for u in mature
+                            if (u, humans[u] + timedelta(days=n)) in active_days
+                        )
+                        row[label] = round(kept / len(mature) * 100, 1)
+                cohorts.append(row)
+        except Exception:
+            pass
+
+        return jsonify({'series': series, 'kpis': kpis, 'funnel': funnel, 'cohorts': cohorts})
     except Exception as e:
         logger.error(f"Platform growth error: {e}")
         return jsonify({'error': str(e)}), 500

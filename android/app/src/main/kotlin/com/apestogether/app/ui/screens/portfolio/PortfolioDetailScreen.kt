@@ -830,6 +830,14 @@ private fun SectorAllocationCard(
         Color(0xFF06B6D4), Color(0xFFF97316), Color(0xFF14B8A6),
         Color(0xFFA855F7), Color(0xFF6366F1),
     )
+    // Standard S&P/sector-ETF short forms for the three GICS names that
+    // don't fit the label column; everything else already fits. Mirror of
+    // the iOS map in SectorAllocationCard — keep the two in sync.
+    val sectorAbbreviations = mapOf(
+        "Consumer Discretionary" to "Cons Disc",
+        "Communication Services" to "Comm Services",
+        "Consumer Staples" to "Cons Staples",
+    )
     val sectors = industryMix.entries
         .sortedByDescending { it.value }
         .filter { it.value >= 1.0 }
@@ -858,12 +866,12 @@ private fun SectorAllocationCard(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    text = entry.key,
+                    text = sectorAbbreviations[entry.key] ?: entry.key,
                     color = TextSecondary,
                     fontSize = 12.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.width(90.dp),
+                    modifier = Modifier.width(110.dp),
                 )
                 Box(modifier = Modifier.weight(1f)) {
                     Box(

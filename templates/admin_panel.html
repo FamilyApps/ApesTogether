@@ -977,6 +977,8 @@ const METRICS = [
   { key: 'portfolio_clicks', label: 'Shared Portfolio Clicks', color: '#14b8a6' },
   { key: 'apple_clicks',     label: 'Apple Link Clicks',    color: '#a1a1aa' },
   { key: 'android_clicks',   label: 'Android Link Clicks',  color: '#22c55e' },
+  { key: 'dau',              label: 'Daily Active Users',   color: '#eab308' },
+  { key: 'new_subs',         label: 'New Subscriptions',    color: '#ef4444' },
 ];
 
 const RANGES = [
@@ -986,6 +988,171 @@ const RANGES = [
   { key: 'YTD', label: 'YTD', days: null },
   { key: '1Y', label: '1Y', days: 365 },
 ];
+
+// ── Launch KPIs: what "good" looks like, so off-track numbers are obvious.
+// Benchmarks: finance-app retention averages (Business of Apps / GetStream
+// aggregate: D1 ~27%, D7 ~18%, D30 ~8%), landing-page signup median 2–4%,
+// DAU/MAU 20%+ considered good for non-daily-utility apps. D7 ≥ 20% is the
+// Phase-2 launch gate from LAUNCH_EXECUTION_PLAN.md.
+const KPI_DEFS = [
+  { key: 'd7',  label: 'D7 Retention — launch gate', target: 20, targetLabel: '≥ 20%', benchmark: 'Finance-app avg 17–18%', minN: 5,
+    tip: '% of new users active again 7 days after signup. This gates the public launch date.' },
+  { key: 'd1',  label: 'D1 Retention', target: 25, targetLabel: '≥ 25%', benchmark: 'Finance-app avg ~27%', minN: 5,
+    tip: '% of new users who come back the day after signup. Weak D1 = onboarding problem.' },
+  { key: 'd30', label: 'D30 Retention', target: 8, targetLabel: '≥ 8%', benchmark: 'Finance-app avg ~8%', minN: 5,
+    tip: '% still active a month in. Weak D30 with good D7 = habit never formed.' },
+  { key: 'visitor_signup', label: 'Visitor → Signup (30d)', target: 2, targetLabel: '≥ 2%', benchmark: 'Landing-page median 2–4%', minN: 50,
+    tip: 'Unique landing-page visitors who created an account. Weak = landing page or offer problem.' },
+  { key: 'activation', label: 'Signup → First Trade (30d)', target: 40, targetLabel: '≥ 40%', benchmark: 'Internal target — core action', minN: 5,
+    tip: '% of new accounts that log at least one trade. Weak = first-run experience problem.' },
+  { key: 'dau_mau', label: 'Stickiness (DAU/MAU)', target: 20, targetLabel: '≥ 20%', benchmark: '20%+ considered good', minN: 5,
+    tip: 'Avg daily actives as a share of monthly actives. How habitual the app is.' },
+];
+
+const kpiStatus = (rate, def, n) => {
+  if (rate === null || rate === undefined || n < def.minN) return { color: 'var(--text-muted)', label: 'LOW DATA' };
+  if (rate >= def.target) return { color: 'var(--green)', label: 'ON TRACK' };
+  if (rate >= def.target * 0.7) return { color: '#f59e0b', label: 'WATCH' };
+  return { color: 'var(--red)', label: 'BELOW' };
+};
+
+const LaunchKpis = ({ kpis }) => {
+  if (!kpis) return null;
+  const subs = kpis.subs || {};
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 10 }}>
+        {KPI_DEFS.map(def => {
+          const k = kpis[def.key] || {};
+          const status = kpiStatus(k.rate, def, k.n || 0);
+          return (
+            <Card key={def.key} style={{ padding: '14px 16px', borderLeft: `3px solid ${status.color}` }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>{def.label}</span>
+                <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.5px', color: status.color,
+                  border: `1px solid ${status.color}`, borderRadius: 6, padding: '2px 6px' }}>{status.label}</span>
+              </div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: status.color }}>
+                {k.rate === null || k.rate === undefined ? '—' : `${k.rate}%`}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>
+                Target {def.targetLabel} · n={k.n || 0}{(k.n || 0) < def.minN ? ` (need ≥${def.minN})` : ''}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{def.benchmark}</div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.4 }}>{def.tip}</div>
+            </Card>
+          );
+        })}
+      </div>
+      {/* Subscription snapshot */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
+        <Card style={{ padding: '12px 14px' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Active Subscriptions</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--accent)' }}>{subs.active ?? '—'}</div>
+        </Card>
+        <Card style={{ padding: '12px 14px' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Est. MRR</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--green)' }}>${(subs.mrr ?? 0).toLocaleString()}</div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>Gross store price; annual plans / 12</div>
+        </Card>
+        <Card style={{ padding: '12px 14px' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>New Subscribers (30d)</div>
+          <div style={{ fontSize: 20, fontWeight: 700 }}>{subs.new_30d ?? '—'}</div>
+        </Card>
+        <Card style={{ padding: '12px 14px' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Trial → Paid</div>
+          <div style={{ fontSize: 13, fontWeight: 600, marginTop: 4, color: 'var(--text-secondary)' }}>See store consoles</div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>7-day trials convert ~40% median (RevenueCat). Below 30% = paywall/onboarding problem.</div>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+const FunnelView = ({ funnel }) => {
+  if (!funnel) return null;
+  const stages = [
+    { label: 'Unique Visitors', value: funnel.visitors, note: 'landing page' },
+    { label: 'Store-Link Clicks', value: funnel.store_clicks, note: 'App Store / Play taps' },
+    { label: 'New Accounts', value: funnel.signups, note: 'human signups' },
+    { label: 'First Trade', value: funnel.activated, note: 'activated' },
+    { label: 'New Subscribers', value: funnel.new_subscribers, note: 'paid or trial' },
+  ];
+  const max = Math.max(...stages.map(s => s.value || 0), 1);
+  return (
+    <Card style={{ padding: 16 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>Acquisition Funnel — last {funnel.window_days} days</div>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 12 }}>
+        Healthy: visitor→signup 2–4% · signup→first-trade ≥ 40% · signup→subscriber is the number to grow post-launch
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {stages.map((s, i) => {
+          const prev = i > 0 ? stages[i - 1].value : null;
+          const conv = prev > 0 ? (s.value / prev * 100).toFixed(1) : null;
+          return (
+            <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ width: 140, fontSize: 12, color: 'var(--text-secondary)', flexShrink: 0 }}>{s.label}</div>
+              <div style={{ flex: 1, height: 22, background: 'var(--bg-elevated)', borderRadius: 6, overflow: 'hidden' }}>
+                <div style={{ width: `${Math.max((s.value || 0) / max * 100, s.value > 0 ? 2 : 0)}%`, height: '100%',
+                  background: 'linear-gradient(90deg, var(--accent), #8b5cf6)', borderRadius: 6, transition: 'width .3s' }} />
+              </div>
+              <div style={{ width: 150, fontSize: 12, flexShrink: 0 }}>
+                <span style={{ fontWeight: 700 }}>{(s.value || 0).toLocaleString()}</span>
+                {conv !== null && <span style={{ color: 'var(--text-muted)', marginLeft: 6 }}>({conv}% of prev)</span>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+};
+
+const cohortCellColor = (v, target) => {
+  if (v === null || v === undefined) return 'var(--text-muted)';
+  if (v >= target) return 'var(--green)';
+  if (v >= target * 0.5) return '#f59e0b';
+  return 'var(--red)';
+};
+
+const CohortTable = ({ cohorts }) => {
+  if (!cohorts || !cohorts.length) return null;
+  const cols = [
+    { key: 'd1', label: 'D1', target: 25 },
+    { key: 'd7', label: 'D7', target: 20 },
+    { key: 'd30', label: 'D30', target: 8 },
+  ];
+  return (
+    <Card style={{ padding: 16 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>Weekly Signup Cohorts — retention</div>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>
+        Each row = users who signed up that week. Green meets target (D1 ≥ 25%, D7 ≥ 20%, D30 ≥ 8%); — = cohort not old enough yet. Tiny cohorts (&lt;5) are noise.
+      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+        <thead>
+          <tr style={{ color: 'var(--text-muted)', textAlign: 'left' }}>
+            <th style={{ padding: '6px 8px', fontWeight: 600 }}>Week of</th>
+            <th style={{ padding: '6px 8px', fontWeight: 600 }}>Signups</th>
+            {cols.map(c => <th key={c.key} style={{ padding: '6px 8px', fontWeight: 600 }}>{c.label}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {cohorts.slice().reverse().map(row => (
+            <tr key={row.week} style={{ borderTop: '1px solid var(--border)' }}>
+              <td style={{ padding: '6px 8px' }}>{row.week}</td>
+              <td style={{ padding: '6px 8px', fontWeight: 600 }}>{row.size}</td>
+              {cols.map(c => (
+                <td key={c.key} style={{ padding: '6px 8px', fontWeight: 600, color: cohortCellColor(row[c.key], c.target) }}>
+                  {row[c.key] === null || row[c.key] === undefined ? '—' : `${row[c.key]}%`}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
+  );
+};
 
 const PlatformGrowth = ({ api }) => {
   const [rawData, setRawData] = useState(null);
@@ -1043,10 +1210,13 @@ const PlatformGrowth = ({ api }) => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h2 style={{ fontSize: 20, fontWeight: 700 }}>Platform Growth</h2>
-          <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Toggle metrics below, hover to inspect, filter by time range</p>
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Launch gates up top — anything red or amber is worth a conversation</p>
         </div>
         <Btn small variant="secondary" onClick={load}>{Icons.refresh} Refresh</Btn>
       </div>
+
+      {/* Launch KPIs vs benchmarks */}
+      <LaunchKpis kpis={rawData?.kpis} />
 
       {/* Time range selector */}
       <div style={{ display: 'flex', gap: 6 }}>
@@ -1182,6 +1352,10 @@ const PlatformGrowth = ({ api }) => {
           })}
         </div>
       )}
+
+      {/* Acquisition funnel + retention cohorts */}
+      <FunnelView funnel={rawData?.funnel} />
+      <CohortTable cohorts={rawData?.cohorts} />
     </div>
   );
 };
