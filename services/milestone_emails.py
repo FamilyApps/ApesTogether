@@ -46,21 +46,41 @@ def check_subscription_milestones(influencer_user_id, new_subscriber_id):
 
     total_subs = real_count + gifted_count
 
-    # Check which milestone was just hit
-    for milestone in SUBSCRIBER_MILESTONES:
-        if total_subs == milestone:
-            _send_milestone_email(influencer, milestone, total_subs, real_count, gifted_count)
-            break
+    # Each milestone fires ONCE EVER per influencer, tracked in
+    # User.extra_data['milestones_sent']. The active-sub count alone is not a
+    # safe trigger: it re-crosses milestone boundaries whenever a sub expires
+    # and a new one arrives (or the same purchase is re-validated / restored),
+    # which sent duplicate "first subscriber" emails.
+    extra = dict(influencer.extra_data or {})
+    sent = set(extra.get('milestones_sent') or [])
+
+    unsent = [m for m in SUBSCRIBER_MILESTONES if total_subs >= m and m not in sent]
+    if not unsent:
+        return
+
+    # Send only the highest newly-reached milestone (a jump from e.g. 0 -> 12
+    # gifted subs shouldn't fire two congratulation emails at once).
+    milestone = max(unsent)
+    if _send_milestone_email(influencer, milestone, total_subs, real_count, gifted_count):
+        # Mark every milestone at or below the current count as consumed, so
+        # skipped-over ones can never fire late. Only mark on a successful
+        # send — a transient email failure retries at the next sub event.
+        extra['milestones_sent'] = sorted(sent | {m for m in SUBSCRIBER_MILESTONES if total_subs >= m})
+        influencer.extra_data = extra
+        db.session.commit()
 
 
 def _send_milestone_email(influencer, milestone, total_subs, real_count, gifted_count):
-    """Send the appropriate milestone congratulation email."""
+    """Send the appropriate milestone congratulation email.
+
+    Returns True if the email was accepted for delivery ('sent'), else False.
+    """
     from services.notification_utils import send_email
 
     email = influencer.email
     if not email:
         logger.warning(f"No email for influencer {influencer.id}, skipping milestone email")
-        return
+        return False
 
     username = influencer.username or 'there'
 
@@ -141,3 +161,4 @@ def _send_milestone_email(influencer, milestone, total_subs, real_count, gifted_
 
     result = send_email(email, subject, body)
     logger.info(f"Milestone email sent to {influencer.username}: {milestone} subscribers (result: {result.get('status')})")
+    return result.get('status') == 'sent'

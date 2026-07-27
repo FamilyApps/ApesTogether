@@ -11212,7 +11212,7 @@ def purge_deleted_accounts_cron():
     from datetime import timedelta
     from models import (db, User, Stock, Transaction, PortfolioSnapshot,
                         DeviceToken, PushNotificationLog, MobileSubscription,
-                        Subscription, FeaturePollVote)
+                        Subscription, FeaturePollVote, UserActivity)
 
     GRACE_DAYS = 30  # must match the deletion endpoints
     commit = str(request.args.get('commit', '')).lower() == 'true'
@@ -11246,6 +11246,9 @@ def purge_deleted_accounts_cron():
                 (PushNotificationLog.portfolio_owner_id == uid)
             ).delete(synchronize_session=False)
             FeaturePollVote.query.filter_by(user_id=uid).delete(synchronize_session=False)
+            # Activity trail (login/dashboard/mobile_active rows carry
+            # timestamps + IP/user-agent on web rows) — personal data, purge it.
+            UserActivity.query.filter_by(user_id=uid).delete(synchronize_session=False)
             MobileSubscription.query.filter(
                 (MobileSubscription.subscriber_id == uid) |
                 (MobileSubscription.subscribed_to_id == uid)
