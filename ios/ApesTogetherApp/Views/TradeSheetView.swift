@@ -5,16 +5,29 @@ struct TradeSheetView: View {
     let ticker: String
     let tradeType: TradeType
     let currentQuantity: Double
+    // General-buy mode (portfolio Buy button): ticker starts empty and is
+    // typed by the user, with a debounced price re-fetch on every change.
+    // Holding-row buy/sell paths pass a fixed ticker and leave this false.
+    var allowTickerEntry: Bool = false
     let onComplete: () -> Void
     
     @Environment(\.dismiss) private var dismiss
     @State private var quantity: String = ""
+    @State private var tickerInput: String = ""
     @State private var price: Double = 0
     @State private var isLoadingPrice = true
     @State private var isSubmitting = false
     @State private var errorMessage: String?
     @State private var showSuccess = false
     @State private var isPending = false
+    @State private var priceFetchTask: Task<Void, Never>?
+    @FocusState private var tickerFocused: Bool
+    
+    private var effectiveTicker: String {
+        allowTickerEntry
+            ? tickerInput.trimmingCharacters(in: .whitespaces).uppercased()
+            : ticker
+    }
     
     enum TradeType: String {
         case buy = "buy"
@@ -59,7 +72,7 @@ struct TradeSheetView: View {
                                 .foregroundColor(tradeType.color)
                         }
                         
-                        Text("\(tradeType.title) \(ticker)")
+                        Text(effectiveTicker.isEmpty ? tradeType.title : "\(tradeType.title) \(effectiveTicker)")
                             .font(.title2.bold())
                             .foregroundColor(.textPrimary)
                         
@@ -73,40 +86,76 @@ struct TradeSheetView: View {
                     
                     // Input fields
                     VStack(spacing: 16) {
-                        // Current price (auto-fetched)
+                        // Ticker — general-buy mode only.
+                        if allowTickerEntry {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Ticker")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(.textMuted)
+                                
+                                TextField("", text: $tickerInput, prompt: Text("AAPL").foregroundColor(.textSecondary))
+                                    .textInputAutocapitalization(.characters)
+                                    .autocorrectionDisabled()
+                                    .focused($tickerFocused)
+                                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                                    .foregroundColor(.textPrimary)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 14)
+                                    .background(Color.inputBackground)
+                                    .cornerRadius(12)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(Color.inputBorder, lineWidth: 1)
+                                    )
+                                    .onChange(of: tickerInput) { _, newValue in
+                                        let cleaned = String(
+                                            newValue.uppercased()
+                                                .filter { $0.isLetter || $0.isNumber || $0 == "." }
+                                                .prefix(10)
+                                        )
+                                        if cleaned != newValue { tickerInput = cleaned }
+                                        errorMessage = nil
+                                        schedulePriceFetch()
+                                    }
+                            }
+                        }
+                        
+                        // Market price (auto-fetched, read-only). Plain
+                        // label/value row — deliberately NOT field-styled so it
+                        // doesn't look editable (Robinhood/Webull/Public
+                        // convention; mirrors Android TradeSheet Option A).
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Market Price")
-                                .font(.caption.weight(.semibold))
-                                .foregroundColor(.textMuted)
-                            
                             HStack {
+                                Text("Market Price")
+                                    .font(.subheadline)
+                                    .foregroundColor(.textSecondary)
+                                Spacer()
                                 if isLoadingPrice {
                                     ProgressView()
                                         .tint(.primaryAccent)
                                         .scaleEffect(0.8)
-                                    Text("Fetching price...")
-                                        .font(.system(size: 16, weight: .medium))
+                                    Text("Fetching\u{2026}")
+                                        .font(.system(size: 14, weight: .medium))
                                         .foregroundColor(.textMuted)
                                 } else if price > 0 {
-                                    Text("$\(String(format: "%.2f", price))")
-                                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                                    Text("$\(grouped(price))")
+                                        .font(.system(size: 18, weight: .bold, design: .rounded))
                                         .foregroundColor(.primaryAccent)
+                                } else if effectiveTicker.isEmpty {
+                                    Text("\u{2014}")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.textMuted)
                                 } else {
                                     Text("Price unavailable")
-                                        .font(.system(size: 16, weight: .medium))
+                                        .font(.system(size: 14, weight: .medium))
                                         .foregroundColor(.losses)
                                 }
-                                Spacer()
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 14)
-                            .background(Color.cardBackground)
-                            .cornerRadius(12)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(price > 0 ? Color.primaryAccent.opacity(0.3) : Color.cardBorder, lineWidth: 1)
-                            )
+                            Text("Live price \u{2014} trades always execute at the current market price.")
+                                .font(.system(size: 11))
+                                .foregroundColor(.textMuted)
                         }
+                        .padding(.horizontal, 4)
                         
                         // Quantity
                         VStack(alignment: .leading, spacing: 6) {
@@ -135,7 +184,7 @@ struct TradeSheetView: View {
                                     .font(.subheadline)
                                     .foregroundColor(.textSecondary)
                                 Spacer()
-                                Text("$\(String(format: "%.2f", qty * price))")
+                                Text("$\(grouped(qty * price))")
                                     .font(.subheadline.bold())
                                     .foregroundColor(.textPrimary)
                             }
@@ -195,7 +244,7 @@ struct TradeSheetView: View {
                                     .tint(.white)
                                     .scaleEffect(0.8)
                             }
-                            Text(showSuccess ? (isPending ? "Queued for open" : "Done!") : "\(tradeType.title) \(ticker)")
+                            Text(showSuccess ? (isPending ? "Queued for open" : "Done!") : (effectiveTicker.isEmpty ? tradeType.title : "\(tradeType.title) \(effectiveTicker)"))
                                 .fontWeight(.bold)
                         }
                         .frame(maxWidth: .infinity)
@@ -206,7 +255,7 @@ struct TradeSheetView: View {
                         .foregroundColor(.white)
                         .cornerRadius(14)
                     }
-                    .disabled(isSubmitting || showSuccess)
+                    .disabled(isSubmitting || showSuccess || effectiveTicker.isEmpty)
                     .padding(.horizontal, 20)
                     
                     // Email trading CTA — opens Mail.app with pre-filled trade
@@ -238,16 +287,26 @@ struct TradeSheetView: View {
                 }
             }
             .onAppear {
-                fetchPrice()
+                if allowTickerEntry {
+                    isLoadingPrice = false
+                    // Delay so the sheet finishes presenting before requesting
+                    // focus — otherwise the keyboard often fails to appear.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                        tickerFocused = true
+                    }
+                } else {
+                    fetchPrice()
+                }
             }
         }
     }
     
     private func openEmailTrade() {
         let qty = quantity.isEmpty ? "___" : quantity
-        let subject = "\(tradeType.title.uppercased()) \(qty) \(ticker)"
+        let symbol = effectiveTicker.isEmpty ? "____" : effectiveTicker
+        let subject = "\(tradeType.title.uppercased()) \(qty) \(symbol)"
         let body = """
-        \(tradeType.title.uppercased()) \(qty) \(ticker)
+        \(tradeType.title.uppercased()) \(qty) \(symbol)
         
         Tip: Put one trade per line to submit multiple trades at once.
         Example:
@@ -273,17 +332,54 @@ struct TradeSheetView: View {
     private func fetchPrice() {
         isLoadingPrice = true
         Task {
-            do {
-                let response = try await APIService.shared.getStockPrice(ticker: ticker)
-                price = response.price
-            } catch {
-                price = 0
-            }
-            isLoadingPrice = false
+            await fetchPriceAsync(effectiveTicker)
         }
     }
     
+    /// Debounced re-fetch as the user types a ticker (general-buy mode).
+    private func schedulePriceFetch() {
+        priceFetchTask?.cancel()
+        let symbol = effectiveTicker
+        guard !symbol.isEmpty else {
+            price = 0
+            isLoadingPrice = false
+            return
+        }
+        isLoadingPrice = true
+        priceFetchTask = Task {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled else { return }
+            await fetchPriceAsync(symbol)
+        }
+    }
+    
+    private func fetchPriceAsync(_ symbol: String) async {
+        do {
+            let response = try await APIService.shared.getStockPrice(ticker: symbol)
+            // The user may have kept typing while the request was in flight —
+            // only apply the result if it still matches the current ticker.
+            guard symbol == effectiveTicker else { return }
+            price = response.price
+        } catch {
+            guard symbol == effectiveTicker else { return }
+            price = 0
+        }
+        isLoadingPrice = false
+    }
+    
+    private func grouped(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        return formatter.string(from: NSNumber(value: value)) ?? String(format: "%.2f", value)
+    }
+    
     private func submitTrade() {
+        guard !effectiveTicker.isEmpty else {
+            errorMessage = "Enter a ticker"
+            return
+        }
         guard let qty = Double(quantity), qty > 0 else {
             errorMessage = "Enter a valid quantity"
             return
@@ -304,7 +400,7 @@ struct TradeSheetView: View {
         Task {
             do {
                 let response = try await APIService.shared.executeTrade(
-                    ticker: ticker,
+                    ticker: effectiveTicker,
                     quantity: qty,
                     price: price,
                     type: tradeType.rawValue

@@ -2,6 +2,18 @@ import SwiftUI
 import Combine
 import Charts
 
+// Press-kit screenshot fixture (mirrors SHOW_FOUNDER_PILL_FIXTURE in Android
+// PortfolioDetailScreen.kt): flip the DEBUG value to true to force the
+// Founding Trader pill visible for capture — badges are humans-only by design,
+// so no admin/company account can ever show one. Compiled out of release.
+private var founderPillFixture: Bool {
+    #if DEBUG
+    return false  // set true to re-capture press-kit screenshots
+    #else
+    return false
+    #endif
+}
+
 struct PortfolioDetailView: View {
     let slug: String
     var initialPeriod: String? = nil
@@ -28,6 +40,9 @@ struct PortfolioDetailView: View {
         let ticker: String
         let type: TradeSheetView.TradeType
         let currentQuantity: Double
+        // Portfolio Buy button: empty ticker typed by the user, with the
+        // live-price estimate. Holding rows pass a fixed ticker.
+        var allowTickerEntry: Bool = false
     }
     
     var body: some View {
@@ -53,7 +68,7 @@ struct PortfolioDetailView: View {
                         // earned award) lives in the hero header under the
                         // portfolio value on the public view; the owner view
                         // has no hero, so owners still see their pill here.
-                        let isFounder = portfolio.owner.foundingTrader == true
+                        let isFounder = portfolio.owner.foundingTrader == true || founderPillFixture
                         let badges = portfolio.leaderboardBadges ?? []
                         if (isFounder && portfolio.isOwner) || !badges.isEmpty {
                             ScrollView(.horizontal, showsIndicators: false) {
@@ -176,7 +191,16 @@ struct PortfolioDetailView: View {
                         if portfolio.isOwner {
                             HStack(spacing: 12) {
                                 Button {
-                                    showAddStocks = true
+                                    // Single-ticker sheet with the live-price
+                                    // estimate (Android parity). The multi-add
+                                    // AddStocksView stays on the onboarding +
+                                    // empty-state "Add Your Stocks" paths only.
+                                    tradeSheet = TradeSheetInfo(
+                                        ticker: "",
+                                        type: .buy,
+                                        currentQuantity: 0,
+                                        allowTickerEntry: true
+                                    )
                                 } label: {
                                     HStack(spacing: 6) {
                                         Image(systemName: "plus.circle.fill")
@@ -428,6 +452,7 @@ struct PortfolioDetailView: View {
                 ticker: info.ticker,
                 tradeType: info.type,
                 currentQuantity: info.currentQuantity,
+                allowTickerEntry: info.allowTickerEntry,
                 onComplete: {
                     Task {
                         await viewModel.loadPortfolio(slug: slug)
@@ -1155,7 +1180,7 @@ struct PortfolioHeroCard: View {
             
             // Founding Trader — permanent status, so it belongs on the
             // identity block, separate from the earned medals row below.
-            if portfolio.owner.foundingTrader == true {
+            if portfolio.owner.foundingTrader == true || founderPillFixture {
                 FoundingTraderPill()
                     .padding(.top, 4)
             }
