@@ -229,7 +229,7 @@ fun TradeSheet(
                         Text("Fetching price…", color = TextMuted, fontSize = 14.sp)
                     }
                     price > 0 -> Text(
-                        "$" + "%.2f".format(price),
+                        "$" + "%,.2f".format(java.util.Locale.US, price),
                         color = PrimaryAccent,
                         fontSize = 22.sp,
                         fontWeight = FontWeight.Bold,
@@ -254,7 +254,7 @@ fun TradeSheet(
                 Spacer(Modifier.height(10.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Estimated total", color = TextSecondary, fontSize = 14.sp)
-                    Text("$" + "%.2f".format(qtyValue * price), color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text("$" + "%,.2f".format(java.util.Locale.US, qtyValue * price), color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
             }
 

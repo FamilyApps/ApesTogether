@@ -2793,7 +2793,11 @@ def notification_history():
                 'status': 'executed',
                 'created_at': _utc_iso(t.timestamp) if t.timestamp else None,
                 'title': f"{emoji} {trader_name} {action}",
-                'body': f"{trader_name} {verb} {qty_str} {t.ticker} @ ${price:,.2f}",
+                # No creator name here — both clients render trader_username on
+                # the row's sub-line, so including it in the body showed the
+                # name twice (standard feed convention: identity in the header,
+                # action line without it).
+                'body': f"{verb.capitalize()} {qty_str} {t.ticker} @ ${price:,.2f}",
             })
 
         return jsonify({

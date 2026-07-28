@@ -800,24 +800,32 @@ struct TradeRow: View {
     private var isBuy: Bool {
         trade.type.lowercased() == "buy"
     }
+    // Dividends are income, not a disposal — brokers (Robinhood, Fidelity,
+    // Schwab) render them as a cash credit, never sell-red.
+    private var isDividend: Bool {
+        trade.type.lowercased() == "dividend"
+    }
+    private var accent: Color {
+        (isBuy || isDividend) ? .gains : .losses
+    }
     private var isPending: Bool { trade.isPending }
     
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
                 Circle()
-                    .fill((isPending ? Color.textMuted : (isBuy ? Color.gains : Color.losses)).opacity(0.15))
+                    .fill((isPending ? Color.textMuted : accent).opacity(0.15))
                     .frame(width: 32, height: 32)
-                Image(systemName: isPending ? "clock.fill" : (isBuy ? "plus" : "minus"))
+                Image(systemName: isPending ? "clock.fill" : (isDividend ? "dollarsign" : (isBuy ? "plus" : "minus")))
                     .font(.caption.weight(.bold))
-                    .foregroundColor(isPending ? .textMuted : (isBuy ? .gains : .losses))
+                    .foregroundColor(isPending ? .textMuted : accent)
             }
             
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Text(trade.type.uppercased())
                         .font(.caption.weight(.bold))
-                        .foregroundColor(isBuy ? .gains : .losses)
+                        .foregroundColor(accent)
                     Text(trade.ticker)
                         .font(.subheadline.bold())
                         .foregroundColor(.textPrimary)

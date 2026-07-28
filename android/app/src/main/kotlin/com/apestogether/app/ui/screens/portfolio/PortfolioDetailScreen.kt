@@ -28,6 +28,7 @@ import androidx.compose.material.icons.automirrored.filled.CallMade
 import androidx.compose.material.icons.automirrored.filled.ShowChart
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.AttachMoney
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.NotificationsActive
@@ -1317,8 +1318,11 @@ private fun RecentTradesSection(
 @Composable
 private fun TradeRow(trade: Trade) {
     val isBuy = trade.type.equals("buy", ignoreCase = true)
+    // Dividends are income, not a disposal — brokers (Robinhood, Fidelity,
+    // Schwab) render them as a cash credit, never sell-red.
+    val isDividend = trade.type.equals("dividend", ignoreCase = true)
     val isPending = trade.isPending
-    val accent = if (isBuy) Gains else Losses
+    val accent = if (isBuy || isDividend) Gains else Losses
     val iconTint = if (isPending) TextMuted else accent
 
     Row(
@@ -1338,6 +1342,7 @@ private fun TradeRow(trade: Trade) {
             Icon(
                 imageVector = when {
                     isPending -> Icons.Filled.Schedule
+                    isDividend -> Icons.Filled.AttachMoney
                     isBuy -> Icons.Filled.Add
                     else -> Icons.Filled.Remove
                 },
