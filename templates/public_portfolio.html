@@ -292,9 +292,22 @@
 <div class="topbar">
     <a href="/" class="topbar-brand"><i class="fas fa-chart-line"></i> ApesTogether</a>
     <div class="topbar-actions">
-        <a href="{{ url_for('login') }}" class="btn-ghost">Log in</a>
-        <a href="{{ url_for('register') }}" class="btn-ghost" style="border-color:var(--accent);color:var(--accent);">Sign Up</a>
+        <!-- The web page is a read-only preview: accounts, subscriptions, and
+             trading all live in the mobile apps (Apple/Google sign-in only).
+             No links to the legacy web login/register — walled off. -->
+        <a href="/" class="btn-ghost" style="border-color:var(--accent);color:var(--accent);">Get the App</a>
     </div>
+</div>
+
+<!-- Android: open this portfolio directly in the installed app. App Links
+     don't fire when the URL is typed/opened inside the browser itself, so
+     this banner covers that path with an intent:// URL. Hidden on other
+     platforms. TODO at iOS launch: add the Smart App Banner meta tag
+     (apple-itunes-app app-id=…, app-argument=this URL) once the App Store ID
+     exists — Safari then renders the native “Open in app” banner. -->
+<div id="openInApp" style="display:none;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px;background:var(--accent-dim);border-bottom:1px solid rgba(16,185,129,0.2);">
+    <span style="font-size:13px;color:var(--text-primary);"><i class="fas fa-mobile-screen" style="color:var(--accent);margin-right:8px;"></i>ApesTogether is better in the app</span>
+    <a id="openInAppBtn" href="#" style="background:var(--accent);color:#fff;padding:6px 16px;border-radius:8px;font-size:13px;font-weight:600;white-space:nowrap;">Open</a>
 </div>
 
 <div class="container" style="padding-top:16px; padding-bottom:32px;">
@@ -312,10 +325,9 @@
                 &middot; {{ subscriber_count }} subscriber{{ 's' if subscriber_count != 1 }}
             </div>
             <div class="value-big">${{ "{:,.2f}".format(current_value) }}</div>
-            <div class="change {% if day_change >= 0 %}up{% else %}down{% endif %}">
-                <i class="fas fa-arrow-{% if day_change >= 0 %}up{% else %}down{% endif %}" style="font-size:12px;"></i>
-                ${{ "{:,.2f}".format(day_change|abs) }} ({{ "{:.2f}".format(day_change_pct|abs) }}%)
-            </div>
+            <!-- No day-change pill: the app hero shows value only, and the
+                 snapshot-based delta here was ~always $0.00 (stale vs. the
+                 just-computed live value). Period returns live on the chart. -->
         </div>
 
         <!-- Rankings pills -->
@@ -330,11 +342,13 @@
         </div>
         {% endif %}
 
-        <!-- Action buttons -->
+        <!-- Action buttons. No dollar amount on Subscribe: billing is
+             App Store / Play IAP now — the legacy per-user Stripe price
+             ($4) was stale and wrong. The store sheet shows the real price. -->
         <div class="actions-row">
             {% if not is_subscriber %}
-            <button class="btn-accent primary" onclick="showSubscriptionModal()">
-                <i class="fas fa-crown"></i> Subscribe &middot; ${{ "%.2f"|format(subscription_price) }}/mo
+            <button class="btn-accent primary" onclick="showAppModal()">
+                <i class="fas fa-crown"></i> Subscribe
             </button>
             {% endif %}
             <button class="btn-accent outline" onclick="sharePortfolio()">
@@ -367,13 +381,21 @@
             <div class="chart-header">
                 <h3>Performance</h3>
                 <div class="period-tabs" id="periodSelector">
-                    <button class="period-tab active" data-period="1D">1D</button>
-                    <button class="period-tab" data-period="5D">1W</button>
+                    <!-- Same period set + default as the apps (no MAX). -->
+                    <button class="period-tab" data-period="1D">1D</button>
+                    <button class="period-tab active" data-period="1W">1W</button>
                     <button class="period-tab" data-period="1M">1M</button>
                     <button class="period-tab" data-period="3M">3M</button>
                     <button class="period-tab" data-period="YTD">YTD</button>
                     <button class="period-tab" data-period="1Y">1Y</button>
-                    <button class="period-tab" data-period="MAX">MAX</button>
+                </div>
+            </div>
+            <!-- “Beating S&P by” header — mirrors the app chart card. -->
+            <div id="chartReturns" style="display:none;margin-bottom:10px;">
+                <div style="font-size:12px;color:var(--text-secondary);" id="beatingLabel"></div>
+                <div style="display:flex;justify-content:space-between;align-items:baseline;">
+                    <span id="beatingValue" style="font-size:24px;font-weight:800;"></span>
+                    <span style="font-size:12px;color:var(--text-secondary);" id="returnsDetail"></span>
                 </div>
             </div>
             <div class="chart-wrap">
@@ -387,10 +409,13 @@
     <div class="glass">
         <div class="glass-inner mix-section">
             <h3>Sector Allocation</h3>
+            {# Same GICS short forms the apps use (SectorAllocationCard on
+               Android/iOS) — the full names truncated mid-word here. #}
+            {% set sector_abbr = {'Consumer Discretionary': 'Cons Disc', 'Communication Services': 'Comm Services', 'Consumer Staples': 'Cons Staples'} %}
             {% for sector, pct in industry_mix|dictsort(by='value', reverse=true) %}
             {% if pct >= 1 %}
             <div class="mix-bar-row">
-                <div class="mix-bar-label">{{ sector }}</div>
+                <div class="mix-bar-label">{{ sector_abbr.get(sector, sector) }}</div>
                 <div class="mix-bar-track">
                     <div class="mix-bar-fill mix-c{{ loop.index0 % 11 }}" style="width:{{ pct }}%;"></div>
                 </div>
@@ -408,11 +433,9 @@
     <div class="glass" style="padding:0;">
         <div class="sub-alert success">
             <span><i class="fas fa-check-circle" style="margin-right:6px;"></i> Active Subscription &mdash; Full access to {{ username }}'s portfolio</span>
+            {# Unsubscribe stays for LEGACY Stripe subscribers only; the old
+               notification-preferences page link is gone (old webapp). #}
             <button class="btn-sm" onclick="confirmUnsubscribe()">Unsubscribe</button>
-        </div>
-        <div class="sub-alert info" style="border-top:1px solid var(--border-card);">
-            <span><i class="fas fa-bell" style="margin-right:6px;"></i> Trade notifications enabled</span>
-            <button class="btn-sm" onclick="window.location.href='/notification-preferences?portfolio_owner={{ portfolio_owner_id }}'">Settings</button>
         </div>
     </div>
     <!-- Subscriber holdings table -->
@@ -489,8 +512,8 @@
                 <div class="lock-icon"><i class="fas fa-lock"></i></div>
                 <h4>See Full Holdings</h4>
                 <p>Subscribe to view {{ username }}'s exact positions, trade alerts, and full history.</p>
-                <button class="btn-subscribe" onclick="showSubscriptionModal()">
-                    <i class="fas fa-crown"></i> Subscribe for ${{ "%.2f"|format(subscription_price) }}/mo
+                <button class="btn-subscribe" onclick="showAppModal()">
+                    <i class="fas fa-crown"></i> Subscribe in the App
                 </button>
             </div>
         </div>
@@ -502,12 +525,11 @@
         <div class="cta-banner">
             <h3>Track Your Own Portfolio</h3>
             <p>Join ApesTogether to compete on leaderboards and share your performance.</p>
+            <!-- Both CTAs go to the app landing page — the legacy web
+                 register + leaderboard pages are walled off. -->
             <div class="btn-row">
-                <a href="{{ url_for('register') }}" class="btn-accent primary" style="padding:12px 24px;border-radius:12px;text-decoration:none;">
-                    <i class="fas fa-rocket"></i> Get Started Free
-                </a>
-                <a href="{{ url_for('leaderboard.leaderboard_home') }}" class="btn-accent outline" style="padding:12px 24px;border-radius:12px;text-decoration:none;">
-                    <i class="fas fa-trophy"></i> Leaderboard
+                <a href="/" class="btn-accent primary" style="padding:12px 24px;border-radius:12px;text-decoration:none;">
+                    <i class="fas fa-rocket"></i> Get the App
                 </a>
             </div>
         </div>
@@ -523,47 +545,55 @@
     </div>
 </div>
 
-<!-- ── Subscription Modal ── -->
-<div id="subscriptionModal" class="payment-modal">
+<!-- ── Get-the-App Modal ──
+     Replaces the legacy Stripe card-payment modal. Subscriptions are billed
+     exclusively through App Store / Google Play IAP inside the apps; the web
+     page never charges and never shows a (stale) dollar price. -->
+<div id="appModal" class="payment-modal">
     <div class="payment-modal-content">
         <div class="payment-modal-header">
             <h4><i class="fas fa-crown" style="color:var(--gold);margin-right:8px;"></i>Subscribe to {{ username }}</h4>
-            <button class="btn-close-modal" onclick="closeSubscriptionModal()">&times;</button>
+            <button class="btn-close-modal" onclick="closeAppModal()">&times;</button>
         </div>
         <div class="payment-modal-body">
-            <div class="modal-price">${{ "%.2f"|format(subscription_price) }}<span>/month</span></div>
-            <div class="modal-billing">Billed monthly &middot; Cancel anytime</div>
             <ul class="modal-features">
                 <li><i class="fas fa-check-circle"></i> Full access to portfolio holdings</li>
                 <li><i class="fas fa-check-circle"></i> Real-time trade notifications</li>
                 <li><i class="fas fa-check-circle"></i> Complete transaction history</li>
                 <li><i class="fas fa-check-circle"></i> Performance analytics &amp; insights</li>
             </ul>
-            <div id="payment-request-button" style="margin-bottom:12px;"></div>
-            <div class="modal-divider">or pay with card</div>
-            <label class="card-label">Card Information</label>
-            <div id="card-element"></div>
-            <div id="card-errors" role="alert"></div>
-            <button id="submitPayment" class="btn-pay" onclick="processSubscription()">
-                <i class="fas fa-lock"></i> Subscribe Now
+            <div class="modal-billing">Subscriptions are managed in the ApesTogether app and billed securely through the App Store or Google Play.</div>
+            <button id="appModalOpen" class="btn-pay" style="display:none;margin-bottom:10px;" onclick="openInApp()">
+                <i class="fas fa-mobile-screen"></i> Open in the App
             </button>
-            <div class="secure-note"><i class="fas fa-shield-alt" style="margin-right:4px;"></i>Secure payment powered by Stripe</div>
+            <a href="/" class="btn-pay" style="text-decoration:none;">
+                <i class="fas fa-rocket"></i> Get the App
+            </a>
         </div>
     </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="https://js.stripe.com/v3/"></script>
 <script>
     let chart = null;
     const username = '{{ username }}';
     const slug = '{{ slug }}';
-    const portfolioOwnerId = {{ portfolio_owner_id|default(0) }};
-    const subscriptionPrice = {{ subscription_price|default(4.00) }};
-    const isLoggedIn = {{ 'true' if current_user.is_authenticated else 'false' }};
     const currentUrl = window.location.href;
-    let stripe, cardElement, paymentRequest;
-    if (isLoggedIn) { stripe = Stripe('{{ stripe_public_key }}'); }
+
+    /* ── Open-in-app (Android) ──
+       intent:// opens the installed app straight to this portfolio even from
+       within the browser (plain App Links only fire on cross-app taps).
+       Falls back to the landing page when the app isn't installed. */
+    const isAndroid = /android/i.test(navigator.userAgent);
+    const androidIntentUrl = 'intent://apestogether.ai/p/' + slug +
+        '#Intent;scheme=https;package=com.apestogether.app;' +
+        'S.browser_fallback_url=' + encodeURIComponent('https://apestogether.ai/') + ';end';
+    function openInApp() { window.location.href = androidIntentUrl; }
+    if (isAndroid) {
+        const banner = document.getElementById('openInApp');
+        banner.style.display = 'flex';
+        document.getElementById('openInAppBtn').href = androidIntentUrl;
+    }
 
     /* ── Share ── */
     function sharePortfolio() {
@@ -584,74 +614,14 @@
         }
     }
 
-    /* ── Subscription Modal ── */
-    function showSubscriptionModal() {
-        if (!isLoggedIn) {
-            sessionStorage.setItem('returnAfterLogin', currentUrl);
-            sessionStorage.setItem('initiateSubscription', portfolioOwnerId);
-            window.location.href = '/login?next=' + encodeURIComponent(currentUrl);
-            return;
-        }
-        document.getElementById('subscriptionModal').classList.add('show');
-        if (!cardElement) {
-            const elements = stripe.elements();
-            cardElement = elements.create('card', {
-                style: { base: { fontSize: '16px', color: '#f1f5f9', '::placeholder': { color: '#64748b' } } }
-            });
-            cardElement.mount('#card-element');
-            paymentRequest = stripe.paymentRequest({
-                country: 'US', currency: 'usd',
-                total: { label: "Subscribe to " + username + "'s Portfolio", amount: Math.round(subscriptionPrice * 100) },
-                requestPayerName: true, requestPayerEmail: true
-            });
-            paymentRequest.canMakePayment().then(r => {
-                if (r) {
-                    elements.create('paymentRequestButton', { paymentRequest }).mount('#payment-request-button');
-                    document.getElementById('payment-request-button').style.display = 'block';
-                } else {
-                    document.getElementById('payment-request-button').style.display = 'none';
-                }
-            });
-            paymentRequest.on('paymentmethod', async ev => {
-                try {
-                    const res = await fetch('/create-subscription', {
-                        method: 'POST', headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ payment_method_id: ev.paymentMethod.id, portfolio_owner_id: portfolioOwnerId })
-                    });
-                    const data = await res.json();
-                    if (data.error) { ev.complete('fail'); alert('Error: ' + data.error); return; }
-                    if (data.requiresAction) {
-                        const {error: e} = await stripe.confirmCardPayment(data.clientSecret);
-                        if (e) { ev.complete('fail'); alert('Error: ' + e.message); return; }
-                    }
-                    ev.complete('success'); window.location.reload();
-                } catch (e) { ev.complete('fail'); alert('Payment failed.'); }
-            });
-        }
+    /* ── Get-the-App Modal ── */
+    function showAppModal() {
+        if (isAndroid) document.getElementById('appModalOpen').style.display = 'flex';
+        document.getElementById('appModal').classList.add('show');
     }
-    function closeSubscriptionModal() { document.getElementById('subscriptionModal').classList.remove('show'); }
+    function closeAppModal() { document.getElementById('appModal').classList.remove('show'); }
 
-    async function processSubscription() {
-        const btn = document.getElementById('submitPayment');
-        const err = document.getElementById('card-errors');
-        btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...'; err.textContent = '';
-        try {
-            const {paymentMethod, error} = await stripe.createPaymentMethod({ type: 'card', card: cardElement });
-            if (error) { err.textContent = error.message; btn.disabled = false; btn.innerHTML = '<i class="fas fa-lock"></i> Subscribe Now'; return; }
-            const res = await fetch('/create-subscription', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ payment_method_id: paymentMethod.id, portfolio_owner_id: portfolioOwnerId })
-            });
-            const data = await res.json();
-            if (data.error) { err.textContent = data.error; btn.disabled = false; btn.innerHTML = '<i class="fas fa-lock"></i> Subscribe Now'; return; }
-            if (data.requiresAction) {
-                const {error: e} = await stripe.confirmCardPayment(data.clientSecret);
-                if (e) { err.textContent = e.message; btn.disabled = false; btn.innerHTML = '<i class="fas fa-lock"></i> Subscribe Now'; return; }
-            }
-            window.location.reload();
-        } catch (e) { err.textContent = 'Payment failed.'; btn.disabled = false; btn.innerHTML = '<i class="fas fa-lock"></i> Subscribe Now'; }
-    }
-
+    /* Legacy Stripe subscribers only — IAP subs are canceled in the app. */
     async function confirmUnsubscribe() {
         const end = new Date(); end.setMonth(end.getMonth() + 1);
         const endStr = end.toLocaleDateString('en-US', { year:'numeric', month:'2-digit', day:'2-digit' });
@@ -659,7 +629,7 @@
         try {
             const res = await fetch('/unsubscribe-from-portfolio', {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ portfolio_owner_id: portfolioOwnerId })
+                body: JSON.stringify({ portfolio_owner_id: {{ portfolio_owner_id|default(0) }} })
             });
             const data = await res.json();
             if (data.success) { alert('Canceled. Access until ' + endStr); window.location.reload(); }
@@ -677,17 +647,46 @@
     });
 
     function loadChart(period) {
-        fetch('/api/portfolio/' + portfolioOwnerId + '/performance/' + period)
+        // Same unified-calculator data the mobile apps chart — identical
+        // gains, identical shape (was the legacy per-user-id endpoint).
+        fetch('/api/public-portfolio/' + slug + '/performance/' + period)
             .then(r => r.json())
             .then(data => { if (!data.error) updateChart(data, period); })
             .catch(e => console.error('Chart error:', e));
     }
 
+    /* Axis/tooltip labels: raw dates from the backend can be ISO timestamps
+       (intraday) — render “10:30 AM” for 1D and “6/28” otherwise, exactly
+       like the app chart, instead of the raw string. */
+    function formatChartLabel(raw, period) {
+        const d = new Date(raw);
+        if (isNaN(d.getTime())) return raw;
+        if (period === '1D') {
+            return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        }
+        return (d.getMonth() + 1) + '/' + d.getDate();
+    }
+
     function updateChart(data, period) {
+        // “Beating S&P by” header — mirrors the app chart card.
+        const pr = data.portfolio_return, sr = data.sp500_return;
+        if (typeof pr === 'number' && typeof sr === 'number') {
+            const diff = pr - sr;
+            const beating = diff >= 0;
+            document.getElementById('chartReturns').style.display = 'block';
+            document.getElementById('beatingLabel').textContent = (beating ? 'Beating' : 'Trailing') + ' S&P by';
+            const bv = document.getElementById('beatingValue');
+            bv.textContent = (diff >= 0 ? '+' : '') + diff.toFixed(2) + '%';
+            bv.style.color = beating ? 'var(--accent)' : 'var(--red)';
+            document.getElementById('returnsDetail').innerHTML =
+                username + ' <span style="color:' + (pr >= 0 ? 'var(--accent)' : 'var(--red)') + ';font-weight:600;">' + (pr >= 0 ? '+' : '') + pr.toFixed(1) + '%</span>' +
+                ' &nbsp; S&P 500 <span style="color:' + (sr >= 0 ? 'var(--accent)' : 'var(--red)') + ';font-weight:600;">' + (sr >= 0 ? '+' : '') + sr.toFixed(1) + '%</span>';
+        }
+
         const ctx = document.getElementById('performanceChart').getContext('2d');
         if (chart) chart.destroy();
         if (!data.chart_data || data.chart_data.length === 0) return;
-        const labels = data.chart_data.map(i => i.date);
+        const labels = data.chart_data.map(i => formatChartLabel(i.date, period));
         const pData = data.chart_data.map(i => i.portfolio);
         const sData = data.chart_data.map(i => i.sp500);
 
@@ -737,7 +736,7 @@
         });
     }
 
-    loadChart('1D');
+    loadChart('1W');
 </script>
 </body>
 </html>

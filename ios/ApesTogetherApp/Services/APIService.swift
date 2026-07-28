@@ -196,6 +196,11 @@ class APIService {
         let _: EmptyResponse = try await delete("/auth/account")
     }
     
+    /// GDPR "Request My Data" — backend emails the export to the account address.
+    func requestDataExport() async throws -> DataExportResponse {
+        return try await post("/auth/data-export", body: [:])
+    }
+    
     // MARK: - Top Influencers
     
     func getTopInfluencers(industry: String = "all", limit: Int = 20) async throws -> TopInfluencersResponse {
@@ -435,3 +440,16 @@ enum APIError: LocalizedError, Equatable {
 }
 
 struct EmptyResponse: Decodable {}
+
+/// POST /auth/data-export — GDPR export emailed to the account address.
+struct DataExportResponse: Decodable {
+    let success: Bool?
+    let sentTo: String?
+    let error: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case success
+        case sentTo = "sent_to"
+        case error
+    }
+}

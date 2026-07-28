@@ -138,7 +138,7 @@ import kotlin.math.floor
  * Renders the same content matrix the iOS view does, depending on
  * [PortfolioResponse.isOwner] and [PortfolioResponse.isSubscribed]:
  *
- *   1. Hero card (non-owner only) — avatar, name, account-age + subscriber
+ *   1. Hero card (all viewers) — avatar, name, account-age + subscriber
  *      count, total portfolio value.
  *   2. Leaderboard badges (when present) — horizontal scroll of medal pills.
  *   3. Performance chart card — uses [PerformanceChartCard]. The chart's
@@ -317,32 +317,28 @@ private fun PortfolioBody(
                 ) {
                     val portfolio = state.portfolio
 
-                    // Hero (non-owner only). Top padding is intentionally tight
-                    // (8dp instead of 16) so the chart + Subscribe CTA both fit
-                    // above the fold on shorter Android screens.
-                    if (!portfolio.isOwner) {
-                        PortfolioHeroCard(
-                            portfolio = portfolio,
-                            modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp),
-                        )
-                    }
+                    // Hero — identity block (avatar, name, member-for +
+                    // subscriber count, value, Founding Trader pill) for BOTH
+                    // owner and public views, so the Portfolio tab leads with
+                    // who you are and what the account is worth. Top padding
+                    // is intentionally tight (8dp instead of 16) so the chart
+                    // still fits above the fold on shorter Android screens.
+                    PortfolioHeroCard(
+                        portfolio = portfolio,
+                        modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp),
+                    )
 
                     // Badges — period-based leaderboard medals only. The
                     // Founding Trader pill (permanent STATUS, not an earned
-                    // award) lives in the hero header under the portfolio
-                    // value on the public view; the owner view has no hero,
-                    // so owners still see their pill here.
-                    val isFounder = portfolio.owner.foundingTrader == true ||
-                        (BuildConfig.DEBUG && SHOW_FOUNDER_PILL_FIXTURE)
+                    // award) lives in the hero header above.
                     val badges = portfolio.leaderboardBadges.orEmpty()
-                    if ((isFounder && portfolio.isOwner) || badges.isNotEmpty()) {
+                    if (badges.isNotEmpty()) {
                         Row(
                             modifier = Modifier
                                 .horizontalScroll(rememberScrollState())
                                 .padding(horizontal = 16.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            if (isFounder && portfolio.isOwner) FoundingTraderPill()
                             badges.forEach { LeaderboardBadgePill(badge = it) }
                         }
                     }

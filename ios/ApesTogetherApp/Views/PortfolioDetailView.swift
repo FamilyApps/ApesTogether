@@ -58,24 +58,20 @@ struct PortfolioDetailView: View {
                     } else if let portfolio = viewModel.portfolio {
                         
                         // ── Hero Header ──
-                        if !portfolio.isOwner {
-                            PortfolioHeroCard(portfolio: portfolio)
-                                .padding(.horizontal, 16)
-                        }
+                        // Hero — identity block (avatar, name, member-for +
+                        // subscriber count, value, Founding Trader pill) for
+                        // BOTH owner and public views, so the Portfolio tab
+                        // leads with who you are and what the account is worth.
+                        PortfolioHeroCard(portfolio: portfolio)
+                            .padding(.horizontal, 16)
                         
                         // ── Badges: period-based leaderboard medals only.
                         // The Founding Trader pill (permanent STATUS, not an
-                        // earned award) lives in the hero header under the
-                        // portfolio value on the public view; the owner view
-                        // has no hero, so owners still see their pill here.
-                        let isFounder = portfolio.owner.foundingTrader == true || founderPillFixture
+                        // earned award) lives in the hero header above.
                         let badges = portfolio.leaderboardBadges ?? []
-                        if (isFounder && portfolio.isOwner) || !badges.isEmpty {
+                        if !badges.isEmpty {
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 8) {
-                                    if isFounder && portfolio.isOwner {
-                                        FoundingTraderPill()
-                                    }
                                     ForEach(badges) { badge in
                                         LeaderboardBadgePill(badge: badge)
                                     }

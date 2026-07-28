@@ -23,6 +23,33 @@ struct SettingsView: View {
     @State private var preferFractional = true
     @State private var preferFractionalLoaded = false
     
+    // GDPR data export: idle → sending → sent/failed. The backend emails the
+    // export to the account address.
+    enum DataExportState { case idle, sending, sent, failed }
+    @State private var dataExportState: DataExportState = .idle
+    
+    private var dataExportLabel: String {
+        switch dataExportState {
+        case .idle: return "Request My Data"
+        case .sending: return "Sending…"
+        case .sent: return "Sent — check your email"
+        case .failed: return "Failed — tap to retry"
+        }
+    }
+    
+    private func requestDataExport() {
+        guard dataExportState == .idle || dataExportState == .failed else { return }
+        dataExportState = .sending
+        Task {
+            do {
+                let response = try await APIService.shared.requestDataExport()
+                dataExportState = (response.success == true) ? .sent : .failed
+            } catch {
+                dataExportState = .failed
+            }
+        }
+    }
+    
     private var personalURL: String {
         if let slug = authManager.currentUser?.portfolioSlug {
             return "https://apestogether.ai/p/\(slug)"
@@ -52,11 +79,16 @@ struct SettingsView: View {
                                     SettingsRow(label: "Username", value: user.username)
                                     AccentDivider()
                                 }
-                                SettingsLinkRow(
+                                // One tap → the backend assembles the full
+                                // export and emails it to the account address
+                                // (was a bare mailto: to support that a human
+                                // had to fulfill by hand).
+                                SettingsNavRow(
                                     icon: "square.and.arrow.down",
-                                    label: "Request My Data",
-                                    url: "mailto:support@apestogether.ai?subject=Data%20Request"
-                                )
+                                    label: dataExportLabel
+                                ) {
+                                    requestDataExport()
+                                }
                                 AccentDivider()
                                 SettingsNavRow(
                                     icon: "trash",

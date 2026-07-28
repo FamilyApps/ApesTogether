@@ -303,6 +303,14 @@ data class SubscriptionSlotResponse(
     val error: String? = null,
 )
 
+/** POST auth/data-export — GDPR export emailed to the account address. */
+@Serializable
+data class DataExportResponse(
+    val success: Boolean = false,
+    @SerialName("sent_to") val sentTo: String? = null,
+    val error: String? = null,
+)
+
 @Serializable
 data class Subscriber(
     val id: Int,

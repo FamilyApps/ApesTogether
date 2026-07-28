@@ -3377,6 +3377,122 @@ def get_current_user():
         return jsonify({'error': 'failed_to_get_user'}), 500
 
 
+@mobile_api.route('/auth/data-export', methods=['POST'])
+@require_auth
+@rate_limit(2)
+def request_data_export():
+    """GDPR "Request My Data": assemble everything we hold about the user and
+    email it to their registered address as pretty-printed JSON.
+
+    Replaces the old flow where Settings just opened a mailto: to support and
+    a human had to compile the export by hand. Rate-limited hard (2/hr) — the
+    export walks several tables.
+    """
+    import json as _json
+    from models import User, Stock, Transaction, Subscription, PortfolioSnapshot
+
+    try:
+        user = User.query.get(g.user_id)
+        if not user:
+            return jsonify({'error': 'user_not_found'}), 404
+        if not user.email:
+            return jsonify({'error': 'no_email_on_file'}), 400
+
+        def _iso(dt):
+            return dt.isoformat() if dt else None
+
+        export = {
+            'generated_at': datetime.utcnow().isoformat() + 'Z',
+            'profile': {
+                'id': user.id,
+                'username': user.username,
+                'public_name': getattr(user, 'public_name', None),
+                'email': user.email,
+                'created_at': _iso(user.created_at),
+                'portfolio_slug': user.portfolio_slug,
+                'founding_trader': bool(getattr(user, 'founding_trader', False)),
+                'cash_proceeds': float(getattr(user, 'cash_proceeds', 0.0) or 0.0),
+            },
+            'holdings': [
+                {
+                    'ticker': s.ticker,
+                    'quantity': float(s.quantity or 0),
+                    'purchase_price': float(s.purchase_price or 0),
+                    'created_at': _iso(getattr(s, 'created_at', None)),
+                }
+                for s in Stock.query.filter_by(user_id=user.id).all()
+            ],
+            'transactions': [
+                {
+                    'ticker': t.ticker,
+                    'type': getattr(t, 'transaction_type', None),
+                    'quantity': float(t.quantity or 0),
+                    'price': float(t.price or 0),
+                    'timestamp': _iso(t.timestamp),
+                }
+                for t in Transaction.query.filter_by(user_id=user.id)
+                    .order_by(Transaction.timestamp.asc()).all()
+            ],
+            'subscriptions_made': [
+                {
+                    'creator_user_id': sub.subscribed_to_id,
+                    'status': sub.status,
+                    'started': _iso(getattr(sub, 'start_date', None) or getattr(sub, 'created_at', None)),
+                    'ends': _iso(getattr(sub, 'end_date', None)),
+                }
+                for sub in Subscription.query.filter_by(subscriber_id=user.id).all()
+            ],
+            'subscribers': [
+                {
+                    'status': sub.status,
+                    'started': _iso(getattr(sub, 'start_date', None) or getattr(sub, 'created_at', None)),
+                    # Subscriber identities are the SUBSCRIBERS' personal data,
+                    # not the creator's — counts/status only.
+                }
+                for sub in Subscription.query.filter_by(subscribed_to_id=user.id).all()
+            ],
+        }
+
+        snapshots = PortfolioSnapshot.query.filter_by(user_id=user.id)
+        first = snapshots.order_by(PortfolioSnapshot.date.asc()).first()
+        last = snapshots.order_by(PortfolioSnapshot.date.desc()).first()
+        export['portfolio_snapshots'] = {
+            'count': snapshots.count(),
+            'first_date': _iso(first.date) if first else None,
+            'last_date': _iso(last.date) if last else None,
+            'note': 'Daily valuation snapshots. The full series is available on request to support@apestogether.ai.',
+        }
+
+        body = (
+            f"Hi {user.username},\n\n"
+            "Attached below is a copy of the personal data ApesTogether holds for your account, "
+            "as requested from Settings.\n\n"
+            "If anything looks wrong, or you'd like this data corrected or deleted, reply to this "
+            "email or use Delete Account in Settings.\n\n"
+            "— ApesTogether\n\n"
+            "----------------------------------------\n\n"
+            + _json.dumps(export, indent=2)
+        )
+
+        from services.notification_utils import send_email
+        result = send_email(
+            to_email=user.email,
+            subject='Your ApesTogether data export',
+            body=body,
+            reply_to='support@apestogether.ai',
+        )
+        if result.get('status') == 'failed':
+            logger.error(f"Data export email failed for user {user.id}: {result.get('error')}")
+            return jsonify({'error': 'email_send_failed'}), 502
+
+        logger.info(f"Data export sent for user {user.id}")
+        return jsonify({'success': True, 'sent_to': user.email})
+
+    except Exception as e:
+        logger.error(f"Data export error for user {g.user_id}: {e}")
+        return jsonify({'error': 'export_failed'}), 500
+
+
 def _cancel_google_purchases(purchases, revoke=False):
     """Cancel — or revoke with a prorated refund — Google InAppPurchase rows.
 

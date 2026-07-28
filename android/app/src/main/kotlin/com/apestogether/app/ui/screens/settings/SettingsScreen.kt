@@ -179,10 +179,19 @@ fun SettingsScreen(
                     SettingsRow(label = "Username", value = u.username)
                     Divider()
                 }
+                // One tap → the backend assembles the full export and emails
+                // it to the account address (was a bare mailto: to support
+                // that a human had to fulfill by hand).
+                val exportState by viewModel.dataExportState.collectAsState()
                 NavRow(
                     icon = Icons.Default.Download,
-                    label = "Request My Data",
-                    onClick = { openMailTo(context, "support@apestogether.ai", subject = "Data Request") },
+                    label = when (exportState) {
+                        DataExportState.Sending -> "Sending\u2026"
+                        DataExportState.Sent -> "Sent \u2014 check your email"
+                        DataExportState.Failed -> "Failed \u2014 tap to retry"
+                        DataExportState.Idle -> "Request My Data"
+                    },
+                    onClick = { viewModel.requestDataExport() },
                 )
                 Divider()
                 NavRow(
@@ -591,6 +600,8 @@ private fun openMailTo(context: Context, address: String, subject: String? = nul
 // ViewModel
 // ─────────────────────────────────────────────────────────────────────────
 
+enum class DataExportState { Idle, Sending, Sent, Failed }
+
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val authRepository: AuthRepository,
@@ -662,6 +673,26 @@ class SettingsViewModel @Inject constructor(
             }.onFailure {
                 _acceptsNewSubscribers.value = previous
             }
+        }
+    }
+
+    // ── GDPR data export ──
+    private val _dataExportState = MutableStateFlow(DataExportState.Idle)
+    val dataExportState: StateFlow<DataExportState> = _dataExportState.asStateFlow()
+
+    /** POST auth/data-export — the backend emails the export to the user. */
+    fun requestDataExport() {
+        if (_dataExportState.value == DataExportState.Sending ||
+            _dataExportState.value == DataExportState.Sent
+        ) return
+        _dataExportState.value = DataExportState.Sending
+        viewModelScope.launch {
+            runCatching { apiService.requestDataExport() }
+                .onSuccess {
+                    _dataExportState.value =
+                        if (it.success) DataExportState.Sent else DataExportState.Failed
+                }
+                .onFailure { _dataExportState.value = DataExportState.Failed }
         }
     }
 

@@ -5,6 +5,7 @@ import com.apestogether.app.data.models.AddStocksResponse
 import com.apestogether.app.data.models.AuthRequest
 import com.apestogether.app.data.models.AuthResponse
 import com.apestogether.app.data.models.ChartResponse
+import com.apestogether.app.data.models.DataExportResponse
 import com.apestogether.app.data.models.EmptyResponse
 import com.apestogether.app.data.models.LeaderboardResponse
 import com.apestogether.app.data.models.NotificationHistoryResponse
@@ -65,6 +66,10 @@ interface ApiService {
 
     @DELETE("auth/account")
     suspend fun deleteAccount(): EmptyResponse
+
+    /** GDPR "Request My Data" — backend emails the export to the account address. */
+    @POST("auth/data-export")
+    suspend fun requestDataExport(): DataExportResponse
 
     // ── Device registration (FCM) ────────────────────────────────────────
     @POST("device/register")

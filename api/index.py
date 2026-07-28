@@ -4799,38 +4799,15 @@ def delete_account_info():
 @app.route('/register', methods=['GET', 'POST'])
 @limiter.limit("5 per minute")
 def register():
-    """User registration page"""
-    if request.method == 'POST':
-        username = request.form.get('username')
-        email = request.form.get('email')
-        password = request.form.get('password')
-        
-        # Check if user already exists
-        existing_user = User.query.filter((User.username == username) | (User.email == email)).first()
-        if existing_user:
-            flash('Username or email already exists', 'danger')
-            return redirect(url_for('register'))
-        
-        # Create new user
-        new_user = User(username=username, email=email)
-        new_user.set_password(password)
-        
-        try:
-            db.session.add(new_user)
-            db.session.commit()
-            
-            # Log the user in
-            session['user_id'] = new_user.id
-            session['email'] = new_user.email
-            session['username'] = new_user.username
-            
-            flash('Registration successful!', 'success')
-            return redirect(url_for('dashboard'))
-        except Exception as e:
-            db.session.rollback()
-            flash(f'Error creating account: {str(e)}', 'danger')
-    
-    return render_template_with_defaults('register.html')
+    """WALLED OFF — email/password registration is forbidden.
+
+    Accounts may only be created in the mobile apps via Sign in with Apple or
+    Google (identity-verified, keeps trader quality high). The legacy web
+    signup form allowed anyone to register with a bare email while the webapp
+    was in testing; every old link now lands on the app landing page instead.
+    Web login (OAuth + admin) remains available at /login.
+    """
+    return redirect('/')
 
 @app.route('/logout')
 def logout():
@@ -12756,27 +12733,104 @@ def delete_account():
 
 @app.route('/api/public-portfolio/<slug>/performance/<period>')
 def public_portfolio_performance(slug, period):
-    """Get performance data for a public portfolio (no authentication required)"""
+    """Chart data for the public /p/<slug> page — no authentication required.
+
+    IMPORTANT: this must mirror the mobile chart endpoint
+    (mobile_api.get_portfolio_chart) step for step: same unified
+    performance_calculator, same period-level S&P benchmark, same snapshot
+    fallback. The page previously used the legacy PortfolioPerformanceCalculator,
+    which produced different gains than the apps — web and app must always
+    show identical numbers for the same portfolio.
+    """
     try:
-        from models import User
-        from portfolio_performance import PortfolioPerformanceCalculator
-        
-        # Find user by portfolio slug
+        from models import User, MarketData
+
+        if period in ('1W', '7D'):
+            period = '5D'
+        if period not in ('1D', '5D', '1M', '3M', 'YTD', '1Y'):
+            return jsonify({'error': 'Invalid period. Must be one of: 1D, 1W, 1M, 3M, YTD, 1Y'}), 400
+
         user = User.query.filter_by(portfolio_slug=slug).first()
-        
-        if not user:
+        if not user or user.deleted_at:
             return jsonify({'error': 'Portfolio not found'}), 404
-        
-        # Check if user account is deleted (GDPR)
-        if user.deleted_at:
-            return jsonify({'error': 'Portfolio not available'}), 404
-        
-        # Get performance data using the existing calculator
-        calculator = PortfolioPerformanceCalculator()
-        data = calculator.get_performance_data(user.id, period)
-        
-        return jsonify(data)
-    
+
+        chart_data = []
+        portfolio_return = 0.0
+        sp500_return = 0.0
+
+        try:
+            from performance_calculator import calculate_portfolio_performance, get_period_dates, _sp500_benchmark_cache
+            _sp500_benchmark_cache.clear()
+
+            start_date, end_date = get_period_dates(period, user_id=user.id)
+            result = calculate_portfolio_performance(
+                user.id, start_date, end_date,
+                include_chart_data=True, period=period
+            )
+            if result and result.get('chart_data'):
+                chart_data = result['chart_data']
+                portfolio_return = result.get('portfolio_return', 0.0)
+
+            # Period-level S&P 500 return (full period range, not the user's
+            # first snapshot date) — identical to the mobile endpoint.
+            period_start, period_end = get_period_dates(period)
+            if period in ('1D', '5D'):
+                sp_records = MarketData.query.filter(
+                    MarketData.ticker == 'SPY_INTRADAY',
+                    MarketData.date >= period_start,
+                    MarketData.date <= period_end,
+                    MarketData.timestamp.isnot(None)
+                ).order_by(MarketData.timestamp.asc()).all()
+                if not sp_records or len(sp_records) < 2:
+                    sp_records = MarketData.query.filter(
+                        MarketData.ticker == 'SPY_SP500',
+                        MarketData.date >= period_start,
+                        MarketData.date <= period_end
+                    ).order_by(MarketData.date.asc()).all()
+            else:
+                sp_records = MarketData.query.filter(
+                    MarketData.ticker == 'SPY_SP500',
+                    MarketData.date >= period_start,
+                    MarketData.date <= period_end
+                ).order_by(MarketData.date.asc()).all()
+
+            if sp_records and len(sp_records) >= 2:
+                base_val = float(sp_records[0].close_price)
+                end_val = float(sp_records[-1].close_price)
+                if base_val > 0:
+                    sp500_return = round(((end_val - base_val) / base_val) * 100, 2)
+        except Exception as e:
+            logger.warning(f"Unified calculator failed for public chart (user {user.id}): {e}")
+
+        # Fallback: generate basic chart from snapshots (same as mobile)
+        if not chart_data:
+            try:
+                from leaderboard_utils import generate_chart_from_snapshots
+                chart_result = generate_chart_from_snapshots(user.id, period)
+                if chart_result:
+                    labels = chart_result.get('labels', [])
+                    datasets = chart_result.get('datasets', [])
+                    portfolio_vals = datasets[0]['data'] if len(datasets) > 0 else []
+                    sp500_vals = datasets[1]['data'] if len(datasets) > 1 else []
+                    for i, label in enumerate(labels):
+                        chart_data.append({
+                            'date': label,
+                            'portfolio': portfolio_vals[i] if i < len(portfolio_vals) else None,
+                            'sp500': sp500_vals[i] if i < len(sp500_vals) else 0
+                        })
+                    portfolio_return = chart_result.get('portfolio_return', 0.0)
+                    if sp500_return == 0.0:
+                        sp500_return = chart_result.get('sp500_return', 0.0)
+            except Exception as e:
+                logger.warning(f"Public chart snapshot fallback failed: {e}")
+
+        return jsonify({
+            'portfolio_return': round(portfolio_return, 2),
+            'sp500_return': round(sp500_return, 2),
+            'chart_data': chart_data,
+            'period': period,
+        })
+
     except Exception as e:
         logger.error(f"Public portfolio performance error: {str(e)}")
         return jsonify({'error': 'Performance calculation failed'}), 500
