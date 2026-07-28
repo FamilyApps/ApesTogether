@@ -92,12 +92,7 @@ fun AcquisitionSurveyHost() {
                         color = TextPrimary,
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        "One tap — it helps us know where to show up.",
-                        color = TextSecondary,
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(top = 4.dp, bottom = 14.dp),
+                        modifier = Modifier.padding(bottom = 14.dp),
                     )
                     SURVEY_OPTIONS.chunked(2).forEach { rowOptions ->
                         Row(

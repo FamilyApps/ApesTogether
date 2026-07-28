@@ -425,14 +425,8 @@ private fun PortfolioBody(
                         )
                     }
 
-                    // Sector allocation
-                    portfolio.industryMix?.takeIf { it.isNotEmpty() }?.let { mix ->
-                        SectorAllocationCard(
-                            industryMix = mix,
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                        )
-                    }
-
+                    // Buy/Sell above the sector card: core actions shouldn't
+                    // require scrolling past an informational chart.
                     if (portfolio.isOwner) {
                         OwnerBuySellRow(
                             onBuy = {
@@ -444,6 +438,14 @@ private fun PortfolioBody(
                                 )
                             },
                             onSell = { showSellPicker = true },
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                        )
+                    }
+
+                    // Sector allocation
+                    portfolio.industryMix?.takeIf { it.isNotEmpty() }?.let { mix ->
+                        SectorAllocationCard(
+                            industryMix = mix,
                             modifier = Modifier.padding(horizontal = 16.dp),
                         )
                     }

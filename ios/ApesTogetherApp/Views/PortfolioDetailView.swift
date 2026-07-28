@@ -181,13 +181,9 @@ struct PortfolioDetailView: View {
                                 .padding(.horizontal, 16)
                         }
                         
-                        // ── Sector Allocation ──
-                        if let mix = portfolio.industryMix, !mix.isEmpty {
-                            SectorAllocationCard(industryMix: mix)
-                                .padding(.horizontal, 16)
-                        }
-                        
                         // ── Buy / Sell Buttons ──
+                        // Above the sector card: core actions shouldn't
+                        // require scrolling past an informational chart.
                         if portfolio.isOwner {
                             HStack(spacing: 12) {
                                 Button {
@@ -236,6 +232,12 @@ struct PortfolioDetailView: View {
                                 }
                             }
                             .padding(.horizontal, 16)
+                        }
+                        
+                        // ── Sector Allocation ──
+                        if let mix = portfolio.industryMix, !mix.isEmpty {
+                            SectorAllocationCard(industryMix: mix)
+                                .padding(.horizontal, 16)
                         }
                         
                         // ── Phase D: Portfolio Resizer Card (subscriber-only) ──

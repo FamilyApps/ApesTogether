@@ -34,11 +34,6 @@ struct AcquisitionSurveyView: View {
                 Text("How did you hear about us?")
                     .font(.system(size: 17, weight: .bold))
                     .foregroundColor(.textPrimary)
-
-                Text("One tap — it helps us know where to show up.")
-                    .font(.system(size: 13))
-                    .foregroundColor(.textSecondary)
-                    .padding(.top, 4)
                     .padding(.bottom, 14)
 
                 let rows = Self.options.chunked(into: 2)
