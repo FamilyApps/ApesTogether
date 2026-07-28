@@ -527,13 +527,6 @@ struct SubscriptionCard: View {
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(.textPrimary)
                     
-                    // Status + renewal date only — the pattern every major
-                    // subscription list uses (Apple/Google settings, Netflix,
-                    // Spotify): name, status, next date. The "Trader
-                    // Subscription X" IAP slot name is store plumbing, not
-                    // user information — it crowded the row until the date
-                    // truncated, and the App Store shows the product name
-                    // anyway when managing.
                     HStack(spacing: 8) {
                         StatusBadge(
                             text: subscription.status.capitalized,
@@ -546,6 +539,19 @@ struct SubscriptionCard: View {
                                 .lineLimit(1)
                                 .truncationMode(.tail)
                         }
+                    }
+                    
+                    // IAP slot name on its own tiny line — needed as a
+                    // reference when a billing issue comes up (the App Store
+                    // lists generic "Trader Subscription A/B/C" entries with
+                    // no creator name). A third line can't crowd the status
+                    // row into truncating, which is why it was pulled off
+                    // that row in the first place.
+                    if let label = subscription.slotLabel {
+                        Text("Trader Subscription \(label)")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.textMuted)
+                            .lineLimit(1)
                     }
                 }
                 

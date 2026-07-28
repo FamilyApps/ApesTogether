@@ -473,12 +473,6 @@ private fun SubscriptionCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                // Status + renewal date only — the pattern every major
-                // subscription list uses (Apple/Google settings, Netflix,
-                // Spotify): name, status, next date. The "Trader Subscription
-                // X" IAP slot name is store plumbing, not user information —
-                // it crowded the row until the date truncated, and Play/App
-                // Store show the product name anyway when managing.
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     StatusBadge(
                         text = subscription.status.replaceFirstChar { it.uppercase() },
@@ -495,6 +489,20 @@ private fun SubscriptionCard(
                             modifier = Modifier.weight(1f, fill = false),
                         )
                     }
+                }
+                // IAP slot name on its own tiny line — needed as a reference
+                // when a billing issue comes up (Play lists generic "Trader
+                // Subscription A/B/C" entries with no creator name). A third
+                // line can't crowd the status row into truncating, which is
+                // why it was pulled off that row in the first place.
+                subscription.slotLabel?.let { label ->
+                    Text(
+                        text = "Trader Subscription $label",
+                        color = TextMuted,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                    )
                 }
             }
 

@@ -3387,9 +3387,16 @@ def request_data_export():
     Replaces the old flow where Settings just opened a mailto: to support and
     a human had to compile the export by hand. Rate-limited hard (2/hr) — the
     export walks several tables.
+
+    Sections are fault-isolated: one table failing (e.g. a migration gap)
+    degrades that section to an error note instead of killing the export.
     """
     import json as _json
-    from models import User, Stock, Transaction, Subscription, PortfolioSnapshot
+    from models import (
+        User, Stock, Transaction, Subscription, PortfolioSnapshot,
+        MobileSubscription, TaxpayerProfile, XeroPayoutRecord, DeviceToken,
+        SMSNotification, FeaturePollVote,
+    )
 
     try:
         user = User.query.get(g.user_id)
@@ -3433,35 +3440,137 @@ def request_data_export():
                 for t in Transaction.query.filter_by(user_id=user.id)
                     .order_by(Transaction.timestamp.asc()).all()
             ],
-            'subscriptions_made': [
-                {
-                    'creator_user_id': sub.subscribed_to_id,
-                    'status': sub.status,
-                    'started': _iso(getattr(sub, 'start_date', None) or getattr(sub, 'created_at', None)),
-                    'ends': _iso(getattr(sub, 'end_date', None)),
-                }
-                for sub in Subscription.query.filter_by(subscriber_id=user.id).all()
-            ],
-            'subscribers': [
-                {
-                    'status': sub.status,
-                    'started': _iso(getattr(sub, 'start_date', None) or getattr(sub, 'created_at', None)),
-                    # Subscriber identities are the SUBSCRIBERS' personal data,
-                    # not the creator's — counts/status only.
-                }
-                for sub in Subscription.query.filter_by(subscribed_to_id=user.id).all()
-            ],
         }
 
-        snapshots = PortfolioSnapshot.query.filter_by(user_id=user.id)
-        first = snapshots.order_by(PortfolioSnapshot.date.asc()).first()
-        last = snapshots.order_by(PortfolioSnapshot.date.desc()).first()
-        export['portfolio_snapshots'] = {
-            'count': snapshots.count(),
-            'first_date': _iso(first.date) if first else None,
-            'last_date': _iso(last.date) if last else None,
-            'note': 'Daily valuation snapshots. The full series is available on request to support@apestogether.ai.',
-        }
+        def _section(name, builder):
+            """Fault-isolate each table walk — a failing section degrades to a
+            note instead of failing the whole export."""
+            try:
+                export[name] = builder()
+            except Exception as sec_err:
+                logger.warning(f"Data export section '{name}' failed for user {user.id}: {sec_err}")
+                export[name] = {'error': 'This section could not be generated. Contact support@apestogether.ai for a manual copy.'}
+
+        # App Store / Google Play subscriptions (the real billing) plus any
+        # legacy web-era Stripe rows.
+        _section('subscriptions_made', lambda: [
+            {
+                'creator_user_id': sub.subscribed_to_id,
+                'status': sub.status,
+                'store_slot': sub.slot,
+                'started': _iso(sub.created_at),
+                'expires': _iso(sub.expires_at),
+                'push_notifications_enabled': bool(sub.push_notifications_enabled),
+                'copy_scale_target_dollars': sub.target_dollars,
+            }
+            for sub in MobileSubscription.query.filter_by(subscriber_id=user.id).all()
+        ] + [
+            {
+                'creator_user_id': sub.subscribed_to_id,
+                'status': sub.status,
+                'source': 'legacy_web',
+                'started': _iso(getattr(sub, 'start_date', None) or getattr(sub, 'created_at', None)),
+                'ends': _iso(getattr(sub, 'end_date', None)),
+            }
+            for sub in Subscription.query.filter_by(subscriber_id=user.id).all()
+        ])
+
+        # Subscriber identities are the SUBSCRIBERS' personal data, not the
+        # creator's — status/dates only.
+        _section('subscribers', lambda: [
+            {'status': sub.status, 'started': _iso(sub.created_at), 'expires': _iso(sub.expires_at)}
+            for sub in MobileSubscription.query.filter_by(subscribed_to_id=user.id).all()
+        ] + [
+            {'status': sub.status, 'source': 'legacy_web',
+             'started': _iso(getattr(sub, 'start_date', None) or getattr(sub, 'created_at', None))}
+            for sub in Subscription.query.filter_by(subscribed_to_id=user.id).all()
+        ])
+
+        # W-9 / taxpayer profile. The full TIN is intentionally NOT stored on
+        # our servers (only its last 4) — it lives in our accounting system
+        # (Xero) as the 1099 system of record. Say so explicitly.
+        def _tax_section():
+            tp = TaxpayerProfile.query.filter_by(user_id=user.id).first()
+            if not tp:
+                return {'status': 'not_submitted', 'note': 'No W-9 information on file.'}
+            return {
+                'status': tp.status,
+                'legal_name': tp.legal_name,
+                'business_name': tp.business_name,
+                'tax_classification': tp.tax_classification,
+                'tin_type': tp.tin_type,
+                'tin_last4': tp.tin_last4,
+                'address': {
+                    'line1': tp.address_line1,
+                    'line2': tp.address_line2,
+                    'city': tp.city,
+                    'state': tp.state,
+                    'postal_code': tp.postal_code,
+                    'country': tp.country,
+                },
+                'certified_at': _iso(tp.certified_at),
+                'submitted_at': _iso(tp.submitted_at),
+                'note': 'Your full SSN/EIN is never stored on ApesTogether servers — only its last 4 digits. The full TIN is held in our accounting system (Xero) solely for IRS 1099 reporting.',
+            }
+        _section('tax_w9', _tax_section)
+
+        # Creator payout history (earnings are the user's data too).
+        _section('payouts', lambda: [
+            {
+                'period': f"{_iso(p.period_start)} to {_iso(p.period_end)}",
+                'subscriber_count': p.total_subscriber_count,
+                'payout_amount': round((p.influencer_payout or 0) + (p.bonus_payout or 0), 2),
+                'payment_status': p.payment_status,
+                'paid_at': _iso(p.paid_at),
+            }
+            for p in XeroPayoutRecord.query.filter_by(portfolio_user_id=user.id)
+                .order_by(XeroPayoutRecord.period_start.asc()).all()
+        ])
+
+        # Registered devices — metadata only, never the raw push token (it's a
+        # credential, not user information).
+        _section('devices', lambda: [
+            {
+                'platform': d.platform,
+                'app_version': d.app_version,
+                'os_version': d.os_version,
+                'active': bool(d.is_active),
+                'registered_at': _iso(d.created_at),
+                'last_notified_at': _iso(d.last_used_at),
+            }
+            for d in DeviceToken.query.filter_by(user_id=user.id).all()
+        ])
+
+        # Legacy web SMS settings (phone number is PII — must be included).
+        def _sms_section():
+            sms = SMSNotification.query.filter_by(user_id=user.id).first()
+            if not sms:
+                return {'note': 'No phone number on file.'}
+            return {
+                'phone_number': sms.phone_number,
+                'verified': bool(sms.is_verified),
+                'sms_enabled': bool(sms.sms_enabled),
+                'added_at': _iso(sms.created_at),
+            }
+        _section('sms_settings', _sms_section)
+
+        # Feature-poll votes.
+        _section('poll_votes', lambda: [
+            {'poll_id': v.poll_id, 'choice': v.selected_option, 'voted_at': _iso(v.voted_at)}
+            for v in FeaturePollVote.query.filter_by(user_id=user.id).all()
+        ])
+
+        def _snapshot_section():
+            snapshots = PortfolioSnapshot.query.filter_by(user_id=user.id)
+            first = snapshots.order_by(PortfolioSnapshot.date.asc()).first()
+            last = snapshots.order_by(PortfolioSnapshot.date.desc()).first()
+            return {
+                'count': snapshots.count(),
+                'first_date': _iso(first.date) if first else None,
+                'last_date': _iso(last.date) if last else None,
+                'note': 'Daily valuation snapshots. The full series is available on request to support@apestogether.ai.',
+            }
+        _section('portfolio_snapshots', _snapshot_section)
 
         body = (
             f"Hi {user.username},\n\n"

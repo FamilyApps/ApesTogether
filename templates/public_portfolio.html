@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ username }}'s Portfolio - ApesTogether</title>
+    <link rel="icon" type="image/png" href="/static/images/logo.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <!-- Social / OG Meta -->
     <meta property="og:title" content="{{ username }} on ApesTogether{% if leaderboard_positions %} — {% for p, pos in leaderboard_positions.items() %}#{{ pos }} {{ p }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}">
@@ -290,7 +291,9 @@
 
 <!-- ── Top bar ── -->
 <div class="topbar">
-    <a href="/" class="topbar-brand"><i class="fas fa-chart-line"></i> ApesTogether</a>
+    <!-- Real brand mark (same asset as the landing page nav) — was a
+         generic FontAwesome chart icon. -->
+    <a href="/" class="topbar-brand"><img src="/static/images/logo.png" alt="ApesTogether" style="height:26px;width:26px;vertical-align:middle;"> ApesTogether</a>
     <div class="topbar-actions">
         <!-- The web page is a read-only preview: accounts, subscriptions, and
              trading all live in the mobile apps (Apple/Google sign-in only).
@@ -330,13 +333,15 @@
                  just-computed live value). Period returns live on the chart. -->
         </div>
 
-        <!-- Rankings pills -->
-        {% if leaderboard_positions %}
+        <!-- Rankings: top-3 medals only, matching the app hero badges (the
+             app never shows off-podium ranks like #6/#14). -->
+        {% set medals = {1: '🥇', 2: '🥈', 3: '🥉'} %}
+        {% if leaderboard_positions and (leaderboard_positions.values()|list|min) <= 3 %}
         <div class="rankings-row">
-            {% for period, position in leaderboard_positions.items() %}
+            {% for period, position in leaderboard_positions.items() if position <= 3 %}
             <div class="rank-pill">
                 <span class="period">{{ period }}</span>
-                <span class="pos">#{{ position }}</span>
+                <span class="pos">{{ medals[position] }} #{{ position }}</span>
             </div>
             {% endfor %}
         </div>
@@ -538,7 +543,9 @@
 
 <!-- ── Footer ── -->
 <div class="site-footer">
-    <div>&copy; 2025 ApesTogether. All rights reserved.</div>
+    {# Match the sitewide footer (landing/press/compare) exactly — 2026
+       launch year, Family Apps LLC as the legal entity. #}
+    <div>&copy; 2026 Family Apps LLC. All rights reserved.</div>
     <div style="margin-top:6px;">
         <a href="{{ url_for('terms_of_service') }}">Terms</a> &middot;
         <a href="{{ url_for('privacy_policy') }}">Privacy</a>
