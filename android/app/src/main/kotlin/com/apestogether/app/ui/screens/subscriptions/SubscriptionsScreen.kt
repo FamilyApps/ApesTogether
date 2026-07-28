@@ -473,30 +473,21 @@ private fun SubscriptionCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                // Status + renewal date only — the pattern every major
+                // subscription list uses (Apple/Google settings, Netflix,
+                // Spotify): name, status, next date. The "Trader Subscription
+                // X" IAP slot name is store plumbing, not user information —
+                // it crowded the row until the date truncated, and Play/App
+                // Store show the product name anyway when managing.
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     StatusBadge(
                         text = subscription.status.replaceFirstChar { it.uppercase() },
                         color = if (subscription.status == "active") Gains else TextSecondary,
                     )
-                    subscription.slotLabel?.let { label ->
-                        Text(
-                            text = "Trader Subscription $label",
-                            color = TextMuted,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(CardBorder.copy(alpha = 0.3f))
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
-                        )
-                    }
-                    // Shares the badges row (a dedicated line left the card
-                    // needlessly tall). weight + single-line ellipsis means it
-                    // truncates under squeeze instead of wrapping mid-date —
-                    // the failure the dedicated line was originally added for.
                     subscription.expiresAt?.let { exp ->
+                        val verb = if (subscription.status == "active") "Renews" else "Ended"
                         Text(
-                            text = "Renews ${formatShortDate(exp)}",
+                            text = "$verb ${formatShortDate(exp)}",
                             color = TextMuted,
                             fontSize = 11.sp,
                             maxLines = 1,

@@ -527,27 +527,20 @@ struct SubscriptionCard: View {
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(.textPrimary)
                     
+                    // Status + renewal date only — the pattern every major
+                    // subscription list uses (Apple/Google settings, Netflix,
+                    // Spotify): name, status, next date. The "Trader
+                    // Subscription X" IAP slot name is store plumbing, not
+                    // user information — it crowded the row until the date
+                    // truncated, and the App Store shows the product name
+                    // anyway when managing.
                     HStack(spacing: 8) {
                         StatusBadge(
                             text: subscription.status.capitalized,
                             color: subscription.status == "active" ? .gains : .textSecondary
                         )
-                        if let label = subscription.slotLabel {
-                            Text("Trader Subscription \(label)")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.textMuted)
-                                .lineLimit(1)
-                                .fixedSize(horizontal: true, vertical: false)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.cardBorder.opacity(0.3))
-                                .cornerRadius(4)
-                        }
-                        // Shares the badge row (a dedicated line left the card
-                        // needlessly tall — Android parity). Single-line
-                        // truncation, never a mid-date wrap.
                         if let expires = subscription.expiresAt {
-                            Text("Renews \(formatDate(expires))")
+                            Text("\(subscription.status == "active" ? "Renews" : "Ended") \(formatDate(expires))")
                                 .font(.system(size: 11))
                                 .foregroundColor(.textMuted)
                                 .lineLimit(1)

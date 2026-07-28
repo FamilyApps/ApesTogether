@@ -48,6 +48,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -118,6 +120,17 @@ fun TradeSheet(
     var error by remember { mutableStateOf<String?>(null) }
     var success by remember { mutableStateOf(false) }
     var pending by remember { mutableStateOf(false) }
+    val tickerFocus = remember { FocusRequester() }
+
+    // General buy opens with an empty ticker — focus it (keyboard up) so the
+    // user can type immediately instead of tapping the field first. Delayed so
+    // the sheet finishes its enter animation before the keyboard appears.
+    LaunchedEffect(Unit) {
+        if (tickerEditable) {
+            delay(400)
+            runCatching { tickerFocus.requestFocus() }
+        }
+    }
 
     // Auto-fetch the market price whenever the ticker changes. Debounce when the
     // user is typing a new ticker so we don't fire a request per keystroke.
@@ -203,7 +216,9 @@ fun TradeSheet(
                     },
                     singleLine = true,
                     placeholder = { Text("AAPL", color = TextMuted) },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(tickerFocus),
                 )
                 Spacer(Modifier.height(16.dp))
             }
