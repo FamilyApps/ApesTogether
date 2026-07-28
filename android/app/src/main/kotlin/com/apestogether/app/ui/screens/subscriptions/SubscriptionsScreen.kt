@@ -490,16 +490,20 @@ private fun SubscriptionCard(
                                 .padding(horizontal = 6.dp, vertical = 2.dp),
                         )
                     }
-                }
-                // On its own line (iOS parity) — sharing the badges row made
-                // the date wrap mid-string next to the bell/switch column.
-                subscription.expiresAt?.let { exp ->
-                    Text(
-                        text = "Renews ${formatShortDate(exp)}",
-                        color = TextMuted,
-                        fontSize = 11.sp,
-                        maxLines = 1,
-                    )
+                    // Shares the badges row (a dedicated line left the card
+                    // needlessly tall). weight + single-line ellipsis means it
+                    // truncates under squeeze instead of wrapping mid-date —
+                    // the failure the dedicated line was originally added for.
+                    subscription.expiresAt?.let { exp ->
+                        Text(
+                            text = "Renews ${formatShortDate(exp)}",
+                            color = TextMuted,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                    }
                 }
             }
 

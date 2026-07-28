@@ -208,35 +208,39 @@ fun TradeSheet(
                 Spacer(Modifier.height(16.dp))
             }
 
-            // Market price (auto-fetched).
-            FieldLabel("Market Price")
-            Box(
+            // Market price (auto-fetched, read-only). Deliberately NOT styled
+            // like an input field — the old bordered box read as editable and
+            // invited taps. Plain label/value row matches how Robinhood,
+            // Webull, and Public render it on their order tickets.
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(CardBackground)
-                    .border(
-                        1.dp,
-                        if (price > 0) PrimaryAccent.copy(alpha = 0.3f) else CardBorder,
-                        RoundedCornerShape(12.dp),
-                    )
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                Text("Market Price", color = TextSecondary, fontSize = 14.sp)
                 when {
                     loadingPrice -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = PrimaryAccent, strokeWidth = 2.dp)
+                        CircularProgressIndicator(modifier = Modifier.size(14.dp), color = PrimaryAccent, strokeWidth = 2.dp)
                         Spacer(Modifier.width(8.dp))
-                        Text("Fetching price…", color = TextMuted, fontSize = 14.sp)
+                        Text("Fetching…", color = TextMuted, fontSize = 14.sp)
                     }
                     price > 0 -> Text(
                         "$" + "%,.2f".format(java.util.Locale.US, price),
                         color = PrimaryAccent,
-                        fontSize = 22.sp,
+                        fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                     )
                     else -> Text("Price unavailable", color = Losses, fontSize = 14.sp)
                 }
             }
+            Text(
+                text = "Live price — trades always execute at the current market price.",
+                color = TextMuted,
+                fontSize = 11.sp,
+                modifier = Modifier.fillMaxWidth(),
+            )
             Spacer(Modifier.height(16.dp))
 
             // Quantity.

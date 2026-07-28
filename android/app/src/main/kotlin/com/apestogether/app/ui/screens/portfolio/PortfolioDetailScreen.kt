@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import com.apestogether.app.BuildConfig
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.CallMade
@@ -331,7 +332,8 @@ private fun PortfolioBody(
                     // award) lives in the hero header under the portfolio
                     // value on the public view; the owner view has no hero,
                     // so owners still see their pill here.
-                    val isFounder = portfolio.owner.foundingTrader == true
+                    val isFounder = portfolio.owner.foundingTrader == true ||
+                        (BuildConfig.DEBUG && SHOW_FOUNDER_PILL_FIXTURE)
                     val badges = portfolio.leaderboardBadges.orEmpty()
                     if ((isFounder && portfolio.isOwner) || badges.isNotEmpty()) {
                         Row(
@@ -667,13 +669,21 @@ private fun PortfolioHeroCard(
 
         // Founding Trader — permanent status, so it belongs on the identity
         // block, separate from the earned leaderboard medals row below.
-        if (portfolio.owner.foundingTrader == true) {
+        if (portfolio.owner.foundingTrader == true ||
+            (BuildConfig.DEBUG && SHOW_FOUNDER_PILL_FIXTURE)
+        ) {
             Box(modifier = Modifier.padding(top = 4.dp)) {
                 FoundingTraderPill()
             }
         }
     }
 }
+
+// Press-kit screenshot fixture: flip to true in a DEBUG build to force the
+// Founding Trader pill visible (badges are humans-only by design — admin and
+// company accounts can never earn one, so there's no real account to shoot
+// with). Ignored in release builds (every use is gated by BuildConfig.DEBUG).
+private const val SHOW_FOUNDER_PILL_FIXTURE = false
 
 private fun formatAccountAge(days: Int): String {
     if (days >= 365) {

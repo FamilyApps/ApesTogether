@@ -543,11 +543,16 @@ struct SubscriptionCard: View {
                                 .background(Color.cardBorder.opacity(0.3))
                                 .cornerRadius(4)
                         }
-                    }
-                    if let expires = subscription.expiresAt {
-                        Text("Renews \(formatDate(expires))")
-                            .font(.system(size: 11))
-                            .foregroundColor(.textMuted)
+                        // Shares the badge row (a dedicated line left the card
+                        // needlessly tall — Android parity). Single-line
+                        // truncation, never a mid-date wrap.
+                        if let expires = subscription.expiresAt {
+                            Text("Renews \(formatDate(expires))")
+                                .font(.system(size: 11))
+                                .foregroundColor(.textMuted)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
                     }
                 }
                 
