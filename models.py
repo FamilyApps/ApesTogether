@@ -947,12 +947,20 @@ class FeaturePoll(db.Model):
 
 
 class FeaturePollVote(db.Model):
-    """A user's vote on a feature poll."""
+    """A user's vote on a feature poll.
+
+    Privacy: user_id is linked only while the poll is ACTIVE — it exists to
+    enforce one-vote-per-user and to show "you voted X" in the app. When a
+    poll is deactivated, mobile_api._anonymize_closed_poll_votes() sets
+    user_id = NULL so only the anonymous tally remains (closed-poll opinions
+    aren't kept as personal data, and don't appear in GDPR data exports).
+    Migration: scripts/migrations/2026_07_28_anonymize_poll_votes.sql
+    """
     __tablename__ = 'feature_poll_vote'
     
     id = db.Column(db.Integer, primary_key=True)
     poll_id = db.Column(db.Integer, db.ForeignKey('feature_poll.id'), nullable=False)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)  # NULL = anonymized (poll closed)
     selected_option = db.Column(db.String(300), nullable=False)
     voted_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     

@@ -698,16 +698,13 @@ def get_subscriptions():
                 'slot_label': _slot_label(sub.slot) if sub.slot else None
             })
         
+        # Privacy: creators must never learn WHO subscribes to them — only
+        # counts and status. Identity redacted deliberately (neither app ever
+        # rendered it; both decode `subscriber` as an optional → null).
         subscribers = []
         for sub in received_subs:
-            subscriber = User.query.get(sub.subscriber_id)
             subscribers.append({
                 'id': sub.id,
-                'subscriber': {
-                    'id': subscriber.id,
-                    'username': subscriber.username,
-                    'display_name': subscriber.public_name
-                } if subscriber else None,
                 'status': sub.status,
                 'created_at': sub.created_at.isoformat()
             })
@@ -3444,9 +3441,13 @@ def request_data_export():
 
         def _section(name, builder):
             """Fault-isolate each table walk — a failing section degrades to a
-            note instead of failing the whole export."""
+            note instead of failing the whole export. Builders may return None
+            to omit their section entirely (no data of that category exists —
+            don't imply we collect it)."""
             try:
-                export[name] = builder()
+                result = builder()
+                if result is not None:
+                    export[name] = result
             except Exception as sec_err:
                 logger.warning(f"Data export section '{name}' failed for user {user.id}: {sec_err}")
                 export[name] = {'error': 'This section could not be generated. Contact support@apestogether.ai for a manual copy.'}
@@ -3541,11 +3542,14 @@ def request_data_export():
             for d in DeviceToken.query.filter_by(user_id=user.id).all()
         ])
 
-        # Legacy web SMS settings (phone number is PII — must be included).
+        # Legacy web-era SMS alerts stored a real phone number (Twilio).
+        # The mobile apps never collect one (push = device tokens), so the
+        # section is omitted entirely when there's no row — don't imply we
+        # collect phone numbers from app users.
         def _sms_section():
             sms = SMSNotification.query.filter_by(user_id=user.id).first()
             if not sms:
-                return {'note': 'No phone number on file.'}
+                return None
             return {
                 'phone_number': sms.phone_number,
                 'verified': bool(sms.is_verified),
@@ -3554,11 +3558,22 @@ def request_data_export():
             }
         _section('sms_settings', _sms_section)
 
-        # Feature-poll votes.
-        _section('poll_votes', lambda: [
-            {'poll_id': v.poll_id, 'choice': v.selected_option, 'voted_at': _iso(v.voted_at)}
-            for v in FeaturePollVote.query.filter_by(user_id=user.id).all()
-        ])
+        # Feature-poll votes stay user-linked only while a poll is ACTIVE
+        # (one-vote-per-user + "you voted X" in the app). Votes on closed
+        # polls are anonymized (user link severed), so they can't appear
+        # here — and the section is omitted when there's nothing linked.
+        def _poll_section():
+            votes = FeaturePollVote.query.filter_by(user_id=user.id).all()
+            if not votes:
+                return None
+            return {
+                'votes': [
+                    {'poll_id': v.poll_id, 'choice': v.selected_option, 'voted_at': _iso(v.voted_at)}
+                    for v in votes
+                ],
+                'note': 'Votes are linked to your account only while the poll is open (to enforce one vote per user). When a poll closes, the link is removed and only the anonymous tally remains.',
+            }
+        _section('poll_votes', _poll_section)
 
         def _snapshot_section():
             snapshots = PortfolioSnapshot.query.filter_by(user_id=user.id)
@@ -5168,12 +5183,28 @@ def list_polls():
         return jsonify({'error': 'list_failed'}), 500
 
 
+def _anonymize_closed_poll_votes(db, FeaturePoll, FeaturePollVote):
+    """Sever the user link on votes belonging to inactive polls.
+
+    The user_id exists only to enforce one-vote-per-user and show "you voted
+    X" while a poll is OPEN. Once closed, only the anonymous tally matters —
+    keeping the link would make opinions permanent personal data (and force
+    us to disclose them in GDPR exports). Called on every deactivation path.
+    Requires migration 2026_07_28_anonymize_poll_votes.sql (user_id nullable).
+    """
+    inactive_ids = db.session.query(FeaturePoll.id).filter_by(active=False)
+    return db.session.query(FeaturePollVote).filter(
+        FeaturePollVote.poll_id.in_(inactive_ids),
+        FeaturePollVote.user_id.isnot(None),
+    ).update({'user_id': None}, synchronize_session=False)
+
+
 @mobile_api.route('/admin/poll/toggle', methods=['POST'])
 @require_admin_2fa
 @with_db_retry
 def toggle_poll():
     """Activate or deactivate a poll. Activating one deactivates all others."""
-    from models import db, FeaturePoll
+    from models import db, FeaturePoll, FeaturePollVote
 
     data = request.get_json()
     if not data:
@@ -5193,7 +5224,10 @@ def toggle_poll():
             # Deactivate all others first
             FeaturePoll.query.filter(FeaturePoll.id != poll_id).filter_by(active=True).update({'active': False})
         poll.active = active
+        anonymized = _anonymize_closed_poll_votes(db, FeaturePoll, FeaturePollVote)
         db.session.commit()
+        if anonymized:
+            logger.info(f"Anonymized {anonymized} votes on closed polls")
         return jsonify({'success': True, 'poll_id': poll.id, 'active': poll.active})
     except Exception as e:
         db.session.rollback()
@@ -5228,6 +5262,9 @@ def create_poll():
             active=True,
         )
         db.session.add(poll)
+        db.session.flush()
+        from models import FeaturePollVote
+        _anonymize_closed_poll_votes(db, FeaturePoll, FeaturePollVote)
         db.session.commit()
         return jsonify({'success': True, 'poll_id': poll.id})
     except Exception as e:
