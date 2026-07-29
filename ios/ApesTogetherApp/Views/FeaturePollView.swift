@@ -15,11 +15,9 @@ struct FeaturePollView: View {
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(.textSecondary)
                         Spacer()
-                        if poll.totalVotes > 0 {
-                            Text("\(poll.totalVotes) vote\(poll.totalVotes == 1 ? "" : "s")")
-                                .font(.system(size: 11))
-                                .foregroundColor(.textSecondary.opacity(0.7))
-                        }
+                        // Deliberately NO "N votes" counter: only humans vote, so
+                        // an exact total would disclose the platform's human-user
+                        // count. Percentages only.
                     }
                     
                     Text(poll.question)
@@ -29,10 +27,17 @@ struct FeaturePollView: View {
                     
                     VStack(spacing: 8) {
                         ForEach(poll.options, id: \.self) { option in
+                            let result = poll.results.first(where: { $0.option == option })
+                            // New server: `percent` present. Old server: derive from votes/total.
+                            let percentage: Double = {
+                                if let p = result?.percent { return p }
+                                let v = result?.votes ?? 0
+                                let t = poll.totalVotes ?? 0
+                                return t > 0 ? Double(v) / Double(t) * 100 : 0
+                            }()
                             PollOptionRow(
                                 option: option,
-                                votes: poll.results.first(where: { $0.option == option })?.votes ?? 0,
-                                totalVotes: poll.totalVotes,
+                                percentage: percentage,
                                 isSelected: viewModel.selectedOption == option,
                                 hasVoted: viewModel.hasVoted,
                                 onTap: {
@@ -67,16 +72,10 @@ struct FeaturePollView: View {
 
 struct PollOptionRow: View {
     let option: String
-    let votes: Int
-    let totalVotes: Int
+    let percentage: Double
     let isSelected: Bool
     let hasVoted: Bool
     let onTap: () -> Void
-    
-    private var percentage: Double {
-        guard totalVotes > 0 else { return 0 }
-        return Double(votes) / Double(totalVotes) * 100
-    }
     
     var body: some View {
         Button(action: onTap) {

@@ -1784,22 +1784,28 @@ def twilio_inbound():
 
 @app.route('/api/email/inbound', methods=['POST'])
 def email_inbound():
-    """DISABLED (security audit 2026-07-28): trade-by-email authenticated solely
-    on the SMTP From: header, which is trivially spoofable — anyone who knew a
-    user's signup email could execute or cancel trades in their account.
-    SendGrid Inbound Parse does not authenticate senders for us.
+    """Handle inbound emails from SendGrid for trade execution.
 
-    The founder copy-trade pipeline is unaffected: GAS posts to
-    /admin/bot/email-trade with X-Cron-Secret (verified server-side).
-    The mobile apps execute trades via authenticated API calls.
+    Security (2026-07-28): the SMTP From: header alone is NOT authentication —
+    it's trivially spoofable, and anyone can POST directly to this URL
+    pretending to be SendGrid. Gate: the request must carry
+    ?token=$EMAIL_INBOUND_TOKEN (set the SendGrid Inbound Parse destination to
+    https://apestogether.ai/api/email/inbound?token=<secret>). If the env var
+    is unset the endpoint stays CLOSED (503) — fail-safe.
 
-    Re-enable only behind DKIM+SPF verification of the sender domain AND a
-    per-user signed command token. Legacy web-era feature; webapp is walled off.
+    Combined with the From-address account match below, an attacker now needs
+    BOTH the URL secret AND a victim's signup email. Residual risk accepted:
+    anyone with the secret can still trade as any known email — treat the
+    token as a crown-jewel secret. Per-user signed subaddresses are the next
+    hardening step if this feature opens to all users.
     """
-    return '', 410
+    from hmac import compare_digest as _cd
+    expected = os.environ.get('EMAIL_INBOUND_TOKEN')
+    if not expected:
+        return '', 503  # closed until a token is configured
+    if not _cd(request.args.get('token') or '', expected):
+        return '', 403
 
-def _email_inbound_legacy():
-    """Handle inbound emails from SendGrid for trade execution"""
     try:
         from services.trading_email import handle_inbound_email
         
@@ -11329,6 +11335,7 @@ def auto_create_bots_cron():
                     username = username + str(_rnd.randint(100, 999))
                     email = f"{username.replace('-', '.').replace('_', '.')}@apestogether.ai"
                 
+                from mobile_api import _founding_trader_house_pill
                 user = User(
                     username=username, email=email,
                     portfolio_slug=_generate_portfolio_slug(),
@@ -11336,6 +11343,7 @@ def auto_create_bots_cron():
                     extra_data={
                         'industry': ind, 'bot_active': True,
                         'bot_created_at': datetime.utcnow().isoformat(),
+                        'founding_trader': _founding_trader_house_pill(),
                         'trading_style': strat, 'strategy_profile': profile,
                     }
                 )

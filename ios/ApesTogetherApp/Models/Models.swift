@@ -446,14 +446,18 @@ struct PollData: Codable, Identifiable {
     let id: Int
     let question: String
     let options: [String]
-    let totalVotes: Int
+    // Server no longer sends exact counts (privacy: only humans vote, so the
+    // total would disclose the human-user count). Optional so both old and new
+    // server responses decode; new responses carry per-option `percent`.
+    let totalVotes: Int?
     let results: [PollOptionResult]
     let userVoted: String?
 }
 
 struct PollOptionResult: Codable, Identifiable {
     let option: String
-    let votes: Int
+    let votes: Int?       // legacy: only in old server responses
+    let percent: Double?  // nil when absent (old server)
     
     var id: String { option }
 }

@@ -765,10 +765,17 @@ def _get_accepts_new_subscribers(user) -> bool:
 # User.extra_data['founding_trader'] = {'rank': N, 'first_trade_at': iso,
 # 'awarded_at': iso} (JSON — no migration needed).
 #
-# NEVER awarded to: bots (role='agent'), copytrade bots, admins
-# (role='admin'), or company-owned accounts (founder + app-store reviewer,
-# via User.is_company_owned) — house accounts occupying scarce slots would be
+# RANKED badges (consuming the 100 slots): humans only — never bots, admins,
+# or company-owned accounts; house accounts occupying scarce slots would be
 # exactly the manufactured scarcity the marketing plan rejects.
+#
+# RANKLESS pill (2026-07-28, user decision): every house account (role='agent'
+# bots + company-owned) ALSO carries extra_data['founding_trader'] =
+# {'rank': None, 'house': true, ...} so the gold pill renders identically on
+# their leaderboard rows and profiles. Without this, badge ABSENCE was a
+# reliable bot discriminator (bots never earned badges, so any badgeless
+# leaderboard row was almost certainly a bot — and counting badgeless rows
+# approximated the platform's bot count). Rankless pills consume NO cap slots.
 FOUNDING_TRADER_CAP = 100
 
 # Process-lifetime short-circuit: once the cap is confirmed reached, skip the
@@ -782,6 +789,14 @@ def _has_founding_trader_badge(user) -> bool:
         return bool((getattr(user, 'extra_data', None) or {}).get('founding_trader'))
     except Exception:
         return False
+
+
+def _founding_trader_house_pill() -> dict:
+    """Rankless pill payload for house accounts — renders the gold pill so
+    badge presence never discriminates bots from humans (see header comment).
+    Consumes no cap slot; 'rank': None by design."""
+    return {'rank': None, 'house': True,
+            'awarded_at': datetime.utcnow().isoformat() + 'Z'}
 
 
 def _award_founding_trader_badges():
@@ -830,19 +845,22 @@ def _award_founding_trader_badges():
         user = users_by_id.get(row.user_id)
         if not user:
             continue
-        # Existing holders keep their slot + rank untouched (irrevocable).
-        if _has_founding_trader_badge(user):
-            holders += 1
-            continue
-        # Eligibility: humans only, alive, never company-owned/bot/admin.
+        # House accounts NEVER consume human slots — bots/admins and
+        # company-owned accounts skip slot accounting entirely, even when they
+        # carry a rankless anti-discriminator pill.
         if user.role != 'user':
             continue  # excludes 'agent' bots and 'admin'
-        if user.deleted_at is not None:
-            continue
         if user.is_company_owned:
             continue  # founder accounts + app-store reviewer/QA accounts
         if _is_copytrade_bot(user):
             continue  # belt-and-braces: copytrade bots are role='agent' anyway
+        # Existing holders keep their slot + rank untouched (irrevocable).
+        # Counted even if the user was later deleted — slots never recycle.
+        if _has_founding_trader_badge(user):
+            holders += 1
+            continue
+        if user.deleted_at is not None:
+            continue
         holders += 1
         extra = dict(user.extra_data or {})
         extra['founding_trader'] = {
@@ -859,11 +877,25 @@ def _award_founding_trader_badges():
             f"user={user.id} ({user.username})"
         )
 
-    if awarded:
+    # Anti-discriminator backfill: every house account (agents + company-owned)
+    # carries the rankless pill so badge absence never marks an account as a
+    # bot. Idempotent; house accounts are few hundred rows at most.
+    from sqlalchemy import or_ as _or
+    pilled = 0
+    for house in User.query.filter(
+            _or(User.role == 'agent', User.is_company_owned == True)).all():  # noqa: E712
+        if not _has_founding_trader_badge(house):
+            extra = dict(house.extra_data or {})
+            extra['founding_trader'] = _founding_trader_house_pill()
+            house.extra_data = extra
+            flag_modified(house, 'extra_data')
+            pilled += 1
+
+    if awarded or pilled:
         db.session.commit()
     if holders >= FOUNDING_TRADER_CAP:
         _founding_trader_cap_reached = True
-    return {'awarded': awarded, 'total_holders': holders,
+    return {'awarded': awarded, 'house_pilled': pilled, 'total_holders': holders,
             'cap': FOUNDING_TRADER_CAP,
             'cap_reached': holders >= FOUNDING_TRADER_CAP}
 
@@ -4966,7 +4998,8 @@ def bot_create_user():
             extra_data={
                 'industry': industry,
                 'bot_active': True,
-                'bot_created_at': datetime.utcnow().isoformat()
+                'bot_created_at': datetime.utcnow().isoformat(),
+                'founding_trader': _founding_trader_house_pill(),
             }
         )
         db.session.add(user)
@@ -11320,6 +11353,7 @@ def bot_batch_seed():
                     'industry': ind,
                     'bot_active': True,
                     'bot_created_at': datetime.utcnow().isoformat(),
+                    'founding_trader': _founding_trader_house_pill(),
                     'trading_style': strat,
                     'strategy_profile': profile,
                 }
@@ -11650,6 +11684,7 @@ def bot_auto_create_run():
                 extra_data={
                     'industry': ind, 'bot_active': True,
                     'bot_created_at': datetime.utcnow().isoformat(),
+                    'founding_trader': _founding_trader_house_pill(),
                     'trading_style': strat, 'strategy_profile': profile,
                 }
             )
