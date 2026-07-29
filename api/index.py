@@ -1786,18 +1786,23 @@ def twilio_inbound():
 def email_inbound():
     """Handle inbound emails from SendGrid for trade execution.
 
-    Security (2026-07-28): the SMTP From: header alone is NOT authentication —
-    it's trivially spoofable, and anyone can POST directly to this URL
-    pretending to be SendGrid. Gate: the request must carry
-    ?token=$EMAIL_INBOUND_TOKEN (set the SendGrid Inbound Parse destination to
-    https://apestogether.ai/api/email/inbound?token=<secret>). If the env var
-    is unset the endpoint stays CLOSED (503) — fail-safe.
+    Two independent gates (2026-07-28/29 security audit):
 
-    Combined with the From-address account match below, an attacker now needs
-    BOTH the URL secret AND a victim's signup email. Residual risk accepted:
-    anyone with the secret can still trade as any known email — treat the
-    token as a crown-jewel secret. Per-user signed subaddresses are the next
-    hardening step if this feature opens to all users.
+    1. URL token — the request must carry ?token=$EMAIL_INBOUND_TOKEN (the
+       SendGrid Inbound Parse destination embeds it). Stops attackers POSTing
+       directly to this URL pretending to be SendGrid. Fails CLOSED (503)
+       when the env var is unset.
+
+    2. SPF/DKIM sender authentication — the From: header alone is trivially
+       forgeable over SMTP, and gate 1 does nothing about a spoofed email
+       that arrives THROUGH SendGrid. SendGrid's parse payload includes the
+       verification results it computed on receipt: `dkim` (e.g.
+       "{@gmail.com : pass}"), `SPF`, and `envelope`. We require EITHER a
+       DKIM pass whose signing domain aligns with the From domain (attackers
+       cannot sign as gmail.com), OR an SPF pass with an envelope-from in the
+       From domain (mail genuinely left that domain's servers). Every major
+       provider (Gmail/Outlook/Yahoo/iCloud) DKIM-signs, so real users pass;
+       self-hosted domains with neither SPF nor DKIM are rejected by policy.
     """
     from hmac import compare_digest as _cd
     expected = os.environ.get('EMAIL_INBOUND_TOKEN')
@@ -1822,6 +1827,38 @@ def email_inbound():
         email_match = re.search(r'<(.+?)>', from_email)
         if email_match:
             from_email = email_match.group(1)
+
+        # ── Gate 2: sender authentication (anti-spoofing) ──────────────
+        from_domain = from_email.rsplit('@', 1)[-1].strip().lower()
+
+        # DKIM: "{@gmail.com : pass}" — signing domain must align with the
+        # From domain (exact or org-domain suffix, DMARC-style relaxed).
+        dkim_raw = (request.form.get('dkim') or '').lower()
+        dkim_ok = False
+        for m in re.finditer(r'@([a-z0-9.-]+)\s*:\s*pass', dkim_raw):
+            d = m.group(1)
+            if d == from_domain or from_domain.endswith('.' + d) or d.endswith('.' + from_domain):
+                dkim_ok = True
+                break
+
+        # SPF: pass + envelope-from aligned with the From domain.
+        spf_ok = False
+        if (request.form.get('SPF') or request.form.get('spf') or '').strip().lower() == 'pass':
+            try:
+                env_from = (json.loads(request.form.get('envelope') or '{}').get('from') or '')
+                env_domain = env_from.rsplit('@', 1)[-1].strip().lower()
+                spf_ok = (env_domain == from_domain
+                          or env_domain.endswith('.' + from_domain)
+                          or from_domain.endswith('.' + env_domain))
+            except Exception:
+                spf_ok = False
+
+        if not (dkim_ok or spf_ok):
+            logger.warning(
+                f"Email trade REJECTED (sender auth failed): from={from_email} "
+                f"dkim={dkim_raw!r} spf={request.form.get('SPF')!r}"
+            )
+            return '', 200  # swallow silently: no bounce oracle for attackers
         
         # Handle the email (parse, execute trade, send confirmations)
         result = handle_inbound_email(from_email, subject or '', body or '')
