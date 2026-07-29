@@ -776,6 +776,13 @@ def _get_accepts_new_subscribers(user) -> bool:
 # reliable bot discriminator (bots never earned badges, so any badgeless
 # leaderboard row was almost certainly a bot — and counting badgeless rows
 # approximated the platform's bot count). Rankless pills consume NO cap slots.
+#
+# SUNSET (2026-07-28, user decision): house pills are only awarded while the
+# founding era is OPEN — i.e. until the 100th RANKED human badge is claimed.
+# That's both the semantic end of "founding" AND the moment the pill stops
+# being needed as an anti-discriminator: once human #101+ are badgeless too,
+# badge absence no longer implies "bot". Pills already granted are permanent
+# (same irrevocability as human badges); only NEW grants stop.
 FOUNDING_TRADER_CAP = 100
 
 # Process-lifetime short-circuit: once the cap is confirmed reached, skip the
@@ -797,6 +804,33 @@ def _founding_trader_house_pill() -> dict:
     Consumes no cap slot; 'rank': None by design."""
     return {'rank': None, 'house': True,
             'awarded_at': datetime.utcnow().isoformat() + 'Z'}
+
+
+def _founding_trader_era_open() -> bool:
+    """True while the 100 ranked human slots are NOT yet all claimed.
+
+    Gates NEW house-pill grants (see SUNSET note above). Counts only RANKED
+    badges (rank non-null) — rankless house pills never close the era. One
+    cheap COUNT per bot-creation call; bots are created rarely (admin/cron).
+    Fails OPEN on error: a stray pill on a post-era bot is harmless, a missing
+    pill during the era re-opens the bot discriminator."""
+    global _founding_trader_cap_reached
+    if _founding_trader_cap_reached:
+        return False
+    try:
+        from models import db
+        from sqlalchemy import text
+        n = db.session.execute(text(
+            'SELECT COUNT(*) FROM "user" '
+            "WHERE (metadata->'founding_trader'->>'rank') IS NOT NULL"
+        )).scalar() or 0
+        if n >= FOUNDING_TRADER_CAP:
+            _founding_trader_cap_reached = True
+            return False
+        return True
+    except Exception as e:
+        logger.warning(f"founding-era check failed (failing open): {e}")
+        return True
 
 
 def _award_founding_trader_badges():
@@ -879,17 +913,20 @@ def _award_founding_trader_badges():
 
     # Anti-discriminator backfill: every house account (agents + company-owned)
     # carries the rankless pill so badge absence never marks an account as a
-    # bot. Idempotent; house accounts are few hundred rows at most.
+    # bot. Idempotent; house accounts are few hundred rows at most. Stops
+    # granting once the founding era closes (see SUNSET note); existing pills
+    # are never touched.
     from sqlalchemy import or_ as _or
     pilled = 0
-    for house in User.query.filter(
-            _or(User.role == 'agent', User.is_company_owned == True)).all():  # noqa: E712
-        if not _has_founding_trader_badge(house):
-            extra = dict(house.extra_data or {})
-            extra['founding_trader'] = _founding_trader_house_pill()
-            house.extra_data = extra
-            flag_modified(house, 'extra_data')
-            pilled += 1
+    if holders < FOUNDING_TRADER_CAP:
+        for house in User.query.filter(
+                _or(User.role == 'agent', User.is_company_owned == True)).all():  # noqa: E712
+            if not _has_founding_trader_badge(house):
+                extra = dict(house.extra_data or {})
+                extra['founding_trader'] = _founding_trader_house_pill()
+                house.extra_data = extra
+                flag_modified(house, 'extra_data')
+                pilled += 1
 
     if awarded or pilled:
         db.session.commit()
@@ -4999,7 +5036,9 @@ def bot_create_user():
                 'industry': industry,
                 'bot_active': True,
                 'bot_created_at': datetime.utcnow().isoformat(),
-                'founding_trader': _founding_trader_house_pill(),
+                # House pill only while the founding era is open (see SUNSET note)
+                **({'founding_trader': _founding_trader_house_pill()}
+                   if _founding_trader_era_open() else {}),
             }
         )
         db.session.add(user)
@@ -11353,7 +11392,9 @@ def bot_batch_seed():
                     'industry': ind,
                     'bot_active': True,
                     'bot_created_at': datetime.utcnow().isoformat(),
-                    'founding_trader': _founding_trader_house_pill(),
+                    # House pill only while the founding era is open (see SUNSET note)
+                    **({'founding_trader': _founding_trader_house_pill()}
+                       if _founding_trader_era_open() else {}),
                     'trading_style': strat,
                     'strategy_profile': profile,
                 }
@@ -11684,7 +11725,9 @@ def bot_auto_create_run():
                 extra_data={
                     'industry': ind, 'bot_active': True,
                     'bot_created_at': datetime.utcnow().isoformat(),
-                    'founding_trader': _founding_trader_house_pill(),
+                    # House pill only while the founding era is open (see SUNSET note)
+                    **({'founding_trader': _founding_trader_house_pill()}
+                       if _founding_trader_era_open() else {}),
                     'trading_style': strat, 'strategy_profile': profile,
                 }
             )

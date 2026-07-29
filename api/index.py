@@ -11335,7 +11335,7 @@ def auto_create_bots_cron():
                     username = username + str(_rnd.randint(100, 999))
                     email = f"{username.replace('-', '.').replace('_', '.')}@apestogether.ai"
                 
-                from mobile_api import _founding_trader_house_pill
+                from mobile_api import _founding_trader_house_pill, _founding_trader_era_open
                 user = User(
                     username=username, email=email,
                     portfolio_slug=_generate_portfolio_slug(),
@@ -11343,7 +11343,10 @@ def auto_create_bots_cron():
                     extra_data={
                         'industry': ind, 'bot_active': True,
                         'bot_created_at': datetime.utcnow().isoformat(),
-                        'founding_trader': _founding_trader_house_pill(),
+                        # House pill only while the founding era is open
+                        # (see SUNSET note in mobile_api.py)
+                        **({'founding_trader': _founding_trader_house_pill()}
+                           if _founding_trader_era_open() else {}),
                         'trading_style': strat, 'strategy_profile': profile,
                     }
                 )
