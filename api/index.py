@@ -12621,7 +12621,6 @@ def public_portfolio_view(slug):
             <h1>Something Went Wrong</h1>
             <p>We encountered an error loading this portfolio.</p>
             <p><a href="/">Return to Home</a></p>
-            <p style="color: #666; font-size: 12px;">Error: {str(e)}</p>
         </body></html>
         """, 500
 

@@ -3438,6 +3438,8 @@ def request_data_export():
                     .order_by(Transaction.timestamp.asc()).all()
             ],
         }
+        if getattr(user, 'phone_number', None):
+            export['profile']['phone_number'] = user.phone_number
 
         def _section(name, builder):
             """Fault-isolate each table walk — a failing section degrades to a
