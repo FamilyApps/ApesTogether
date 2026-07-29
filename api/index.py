@@ -199,14 +199,16 @@ def verify_cron_request(secret_env_var='CRON_SECRET'):
         logger.error(f"{secret_env_var} not configured")
         return jsonify({'error': 'Server configuration error'}), 500
     
+    from hmac import compare_digest
     auth_header = request.headers.get('Authorization', '')
     cron_secret = request.headers.get('X-Cron-Secret', '')
     
-    is_bearer = auth_header.startswith('Bearer ') and auth_header[7:] == expected_token
-    is_cron_header = cron_secret and cron_secret == expected_token
-    is_vercel_cron = request.headers.get('x-vercel-cron') == '1'
+    # NOTE: the x-vercel-cron header is NOT authentication — any client can set
+    # it. Only the shared secret authorizes a cron call.
+    is_bearer = auth_header.startswith('Bearer ') and compare_digest(auth_header[7:], expected_token)
+    is_cron_header = bool(cron_secret) and compare_digest(cron_secret, expected_token)
     
-    if is_bearer or is_cron_header or is_vercel_cron:
+    if is_bearer or is_cron_header:
         return None  # Authorized
     
     logger.warning(f"Unauthorized {request.method} cron attempt on {request.path}")
@@ -1727,7 +1729,8 @@ def init_database():
             provided_key = auth_header[7:]
         expected_key = os.environ.get('SECRET_KEY', '')
         
-        if not provided_key or provided_key != expected_key:
+        from hmac import compare_digest
+        if not provided_key or not expected_key or not compare_digest(provided_key, expected_key):
             return jsonify({'error': 'Unauthorized'}), 403
         
         # Import all models
@@ -1781,6 +1784,21 @@ def twilio_inbound():
 
 @app.route('/api/email/inbound', methods=['POST'])
 def email_inbound():
+    """DISABLED (security audit 2026-07-28): trade-by-email authenticated solely
+    on the SMTP From: header, which is trivially spoofable — anyone who knew a
+    user's signup email could execute or cancel trades in their account.
+    SendGrid Inbound Parse does not authenticate senders for us.
+
+    The founder copy-trade pipeline is unaffected: GAS posts to
+    /admin/bot/email-trade with X-Cron-Secret (verified server-side).
+    The mobile apps execute trades via authenticated API calls.
+
+    Re-enable only behind DKIM+SPF verification of the sender domain AND a
+    per-user signed command token. Legacy web-era feature; webapp is walled off.
+    """
+    return '', 410
+
+def _email_inbound_legacy():
     """Handle inbound emails from SendGrid for trade execution"""
     try:
         from services.trading_email import handle_inbound_email

@@ -459,7 +459,10 @@ data class PollData(
     val id: Int,
     val question: String,
     val options: List<String>,
-    @SerialName("total_votes") val totalVotes: Int,
+    // Server no longer sends exact counts (privacy: only humans vote, so the
+    // total leaks the human-user count). Kept as optional legacy fields so old
+    // server responses still decode; new responses carry per-option `percent`.
+    @SerialName("total_votes") val totalVotes: Int = 0,
     val results: List<PollOptionResult>,
     @SerialName("user_voted") val userVoted: String? = null,
 )
@@ -467,7 +470,8 @@ data class PollData(
 @Serializable
 data class PollOptionResult(
     val option: String,
-    val votes: Int,
+    val votes: Int = 0,          // legacy: only in old server responses
+    val percent: Double = -1.0,  // -1 = field absent (old server)
 )
 
 @Serializable

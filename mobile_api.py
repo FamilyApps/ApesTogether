@@ -1364,7 +1364,8 @@ def google_rtdn_notifications():
     # already blocked (we re-fetch from the Play API), but this stops abuse of
     # the open endpoint. No token configured → allow (back-compat).
     _rtdn_token = os.environ.get('RTDN_WEBHOOK_TOKEN')
-    if _rtdn_token and request.args.get('token') != _rtdn_token:
+    from hmac import compare_digest as _cd
+    if _rtdn_token and not _cd(request.args.get('token') or '', _rtdn_token):
         return jsonify({'error': 'forbidden'}), 403
 
     try:
@@ -4407,14 +4408,24 @@ def get_active_poll():
         vote_counts = {r.selected_option: r.cnt for r in vote_rows}
         total_votes = sum(vote_counts.values())
 
-        results = [{'option': o, 'votes': vote_counts.get(o, 0)} for o in options]
+        # Privacy (2026-07-28): public results are percentages ONLY. Only humans
+        # vote, so an exact total discloses the platform's human-user count (and
+        # per-option counts let anyone recompute it). Admin endpoints keep exact
+        # counts. Apps read `percent` (added in the same release as this change;
+        # `votes`/`total_votes` were removed from this response at that time).
+        results = [
+            {
+                'option': o,
+                'percent': round(vote_counts.get(o, 0) / total_votes * 100, 1) if total_votes else 0.0,
+            }
+            for o in options
+        ]
 
         return jsonify({
             'poll': {
                 'id': poll.id,
                 'question': poll.question,
                 'options': options,
-                'total_votes': total_votes,
                 'results': results,
                 'user_voted': user_vote.selected_option if user_vote else None,
             }
@@ -4724,10 +4735,11 @@ def require_cron_secret(f):
     Does NOT accept X-Admin-Key alone — that's intentional to isolate cron auth."""
     @wraps(f)
     def decorated(*args, **kwargs):
+        from hmac import compare_digest
         # Path 1: Cron secret (for automated systems)
         cron_secret = request.headers.get('X-Cron-Secret')
         expected = os.environ.get('CRON_SECRET')
-        if cron_secret and expected and cron_secret == expected:
+        if cron_secret and expected and compare_digest(cron_secret, expected):
             return f(*args, **kwargs)
         
         # Path 2: Admin session with 2FA (for manual triggering)
@@ -4749,10 +4761,11 @@ def require_admin_or_cron(f):
       - Valid admin session with 2FA (admin panel browser)"""
     @wraps(f)
     def decorated(*args, **kwargs):
+        from hmac import compare_digest
         # Path 1: Cron secret
         cron_secret = request.headers.get('X-Cron-Secret')
         expected_cron = os.environ.get('CRON_SECRET')
-        if cron_secret and expected_cron and cron_secret == expected_cron:
+        if cron_secret and expected_cron and compare_digest(cron_secret, expected_cron):
             return f(*args, **kwargs)
         
         # Path 2: Admin session with 2FA
@@ -4762,7 +4775,7 @@ def require_admin_or_cron(f):
         # Path 3: API key + OTP
         admin_key = request.headers.get('X-Admin-Key')
         expected_key = os.environ.get('ADMIN_API_KEY')
-        if admin_key and expected_key and admin_key == expected_key:
+        if admin_key and expected_key and compare_digest(admin_key, expected_key):
             totp_secret = os.environ.get('ADMIN_TOTP_SECRET')
             if totp_secret:
                 otp_code = request.headers.get('X-Admin-OTP')
@@ -4783,11 +4796,12 @@ def require_admin_key(f):
     Kept temporarily in case any code references it."""
     @wraps(f)
     def decorated(*args, **kwargs):
+        from hmac import compare_digest
         # Path 1: API key auth (for bot scripts, cron jobs)
         admin_key = request.headers.get('X-Admin-Key')
         expected_key = os.environ.get('ADMIN_API_KEY')
         
-        if admin_key and expected_key and admin_key == expected_key:
+        if admin_key and expected_key and compare_digest(admin_key, expected_key):
             return f(*args, **kwargs)
         
         # Path 2: Flask session auth (for admin dashboard SPA)
@@ -4849,11 +4863,12 @@ def require_admin_2fa(f):
     """
     @wraps(f)
     def decorated(*args, **kwargs):
+        from hmac import compare_digest
         # Check identity via API key OR session
         admin_key = request.headers.get('X-Admin-Key')
         expected_key = os.environ.get('ADMIN_API_KEY')
         
-        has_key_auth = admin_key and expected_key and admin_key == expected_key
+        has_key_auth = admin_key and expected_key and compare_digest(admin_key, expected_key)
         has_session_auth = _is_admin_session()  # Checks email == ADMIN_EMAIL AND admin_2fa_verified == True
         
         if not has_key_auth and not has_session_auth:

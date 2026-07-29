@@ -82,14 +82,9 @@ fun FeaturePoll(modifier: Modifier = Modifier) {
             )
             Spacer(Modifier.width(6.dp))
             Text("Quick Poll", color = TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            // Deliberately NO "N votes" counter: only humans vote, so an exact
+            // total would disclose the platform's human-user count. Percentages only.
             Spacer(Modifier.weight(1f))
-            if (poll.totalVotes > 0) {
-                Text(
-                    "${poll.totalVotes} vote" + if (poll.totalVotes == 1) "" else "s",
-                    color = TextSecondary.copy(alpha = 0.7f),
-                    fontSize = 11.sp,
-                )
-            }
         }
 
         // Question
@@ -98,11 +93,16 @@ fun FeaturePoll(modifier: Modifier = Modifier) {
         // Options
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             poll.options.forEach { option ->
-                val votes = poll.results.firstOrNull { it.option == option }?.votes ?: 0
+                val result = poll.results.firstOrNull { it.option == option }
+                // New server: `percent` present. Old server: derive from votes/total.
+                val fraction = when {
+                    result != null && result.percent >= 0.0 -> (result.percent / 100.0).toFloat()
+                    poll.totalVotes > 0 && result != null -> result.votes.toFloat() / poll.totalVotes.toFloat()
+                    else -> 0f
+                }
                 PollOptionRow(
                     option = option,
-                    votes = votes,
-                    totalVotes = poll.totalVotes,
+                    fraction = fraction,
                     isSelected = state.selectedOption == option,
                     hasVoted = state.hasVoted,
                     onTap = { viewModel.vote(poll.id, option) },
@@ -123,13 +123,11 @@ fun FeaturePoll(modifier: Modifier = Modifier) {
 @Composable
 private fun PollOptionRow(
     option: String,
-    votes: Int,
-    totalVotes: Int,
+    fraction: Float,
     isSelected: Boolean,
     hasVoted: Boolean,
     onTap: () -> Unit,
 ) {
-    val percentage = if (totalVotes > 0) votes.toFloat() / totalVotes.toFloat() else 0f
     val borderColor = if (isSelected) PrimaryAccent.copy(alpha = 0.4f) else TextSecondary.copy(alpha = 0.2f)
     val barColor = if (isSelected) PrimaryAccent.copy(alpha = 0.15f) else TextSecondary.copy(alpha = 0.08f)
 
@@ -143,7 +141,7 @@ private fun PollOptionRow(
                     Modifier.drawBehind {
                         drawRoundRect(
                             color = barColor,
-                            size = Size(size.width * percentage, size.height),
+                            size = Size(size.width * fraction, size.height),
                             cornerRadius = CornerRadius(8.dp.toPx()),
                         )
                     }
@@ -167,7 +165,7 @@ private fun PollOptionRow(
         if (hasVoted) {
             Spacer(Modifier.width(8.dp))
             Text(
-                "${(percentage * 100).toInt()}%",
+                "${(fraction * 100).toInt()}%",
                 color = if (isSelected) PrimaryAccent else TextSecondary,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
