@@ -270,10 +270,17 @@ struct InfluencerRow: View {
             
             // User info
             VStack(alignment: .leading, spacing: 4) {
-                Text(entry.user.publicName)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundColor(.textPrimary)
-                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Text(entry.user.publicName)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.textPrimary)
+                        .lineLimit(1)
+                    // Founding Trader — circled symbol only (matches the
+                    // leaderboard rows; the wordy pill is hero-card-only).
+                    if entry.user.foundingTrader == true {
+                        FounderBadgeCircle()
+                    }
+                }
                 
                 // Industry tags
                 if !entry.topIndustries.isEmpty {
@@ -323,6 +330,20 @@ struct InfluencerRow: View {
     }
     
     private func shortenIndustry(_ name: String) -> String {
+        // GICS sector names first (exact match, returned WITHOUT the generic
+        // prefix-truncation below — "Comm Services" must never become
+        // "Comm Ser…"). Same S&P short forms as SectorAllocationCard; keep
+        // the three maps (here, there, Android) in sync.
+        let gicsShort: [String: String] = [
+            "Consumer Discretionary": "Cons Disc",
+            "Communication Services": "Comm Services",
+            "Consumer Staples": "Cons Staples",
+            "Real Estate": "Real Estate",
+        ]
+        if let short = gicsShort[name] {
+            return short
+        }
+        
         let map: [String: String] = [
             "AUTO MANUFACTURERS": "Auto",
             "CONSUMER ELECTRONICS": "Tech",

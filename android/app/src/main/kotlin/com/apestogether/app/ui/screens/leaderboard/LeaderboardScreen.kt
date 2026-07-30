@@ -557,8 +557,9 @@ private fun LeaderboardCard(
                         )
                     }
                     // Founding Trader — one of the first 100 human traders.
-                    // Compact chip on the stats line (not next to the name)
-                    // so long usernames never truncate because of it.
+                    // Circled symbol only (no text): the full "FOUNDER" chip
+                    // crowded the stats line and truncated on narrow rows.
+                    // The wordy pill lives on the portfolio hero card.
                     if (entry.user.foundingTrader == true) {
                         FoundingTraderChip()
                     }
@@ -690,35 +691,29 @@ private fun RankBadge(rank: Int, rankChange: Int?) {
 }
 
 /**
- * Compact gold "FOUNDER" chip for leaderboard rows. Mirrors the iOS chip in
- * LeaderboardView.swift. Sized to sit inline with [SubBadge] on the stats
- * line: 10dp icon + 8sp caps text inside a 1dp-padded pill ≈ 14dp tall,
- * matching the SubBadge line height so the row height doesn't change.
+ * Founding Trader marker for list rows: the medal symbol in a small gold
+ * circle, NO text — the wordy "Founding Trader" pill (PortfolioDetailScreen's
+ * FoundingTraderPill) is reserved for the portfolio hero card where there's
+ * room. 14dp diameter sits inline with [SubBadge] on the stats line without
+ * changing the row height. Mirrors iOS FounderBadgeCircle. A copy lives in
+ * TopInfluencersScreen.kt (private-per-file pattern) — keep them in sync.
  */
 @Composable
 private fun FoundingTraderChip() {
     val gold = Color(0xFFFFD700)
-    Row(
+    Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(7.dp))
-            .background(gold.copy(alpha = 0.14f))
-            .border(0.5.dp, gold.copy(alpha = 0.45f), RoundedCornerShape(7.dp))
-            .padding(horizontal = 5.dp, vertical = 1.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
+            .size(14.dp)
+            .clip(CircleShape)
+            .background(gold.copy(alpha = 0.15f))
+            .border(0.5.dp, gold.copy(alpha = 0.45f), CircleShape),
+        contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector = Icons.Default.WorkspacePremium,
             contentDescription = "Founding Trader",
             tint = gold,
-            modifier = Modifier.size(10.dp),
-        )
-        Text(
-            text = "FOUNDER",
-            color = gold,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.5.sp,
-            style = tightTextStyle(8.sp),
+            modifier = Modifier.size(9.dp),
         )
     }
 }

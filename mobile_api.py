@@ -3484,7 +3484,9 @@ def request_data_export():
                 'email': user.email,
                 'created_at': _iso(user.created_at),
                 'portfolio_slug': user.portfolio_slug,
-                'founding_trader': bool(getattr(user, 'founding_trader', False)),
+                # Lives in extra_data, NOT a column — getattr(user, ...) was
+                # always False here (data-export bug, fixed 2026-07-29).
+                'founding_trader': _has_founding_trader_badge(user),
                 'cash_proceeds': float(getattr(user, 'cash_proceeds', 0.0) or 0.0),
             },
             'holdings': [
@@ -4216,7 +4218,10 @@ def get_top_influencers():
                     'id': user.id,
                     'username': user.username,
                     'display_name': user.public_name,
-                    'portfolio_slug': user.portfolio_slug
+                    'portfolio_slug': user.portfolio_slug,
+                    # Founding Trader — clients render a circled gold symbol
+                    # on the Top Creators row (same as leaderboard rows).
+                    'founding_trader': _has_founding_trader_badge(user)
                 },
                 'subscriber_count': sub_totals[uid],
                 'unique_stocks': (stats.unique_stocks_count if stats else 0) or 0,

@@ -549,12 +549,13 @@ struct LeaderboardCard: View {
                             }
                             
                             // Founding Trader — one of the first 100 human
-                            // traders. Compact chip on the stats line (not
-                            // next to the name) so long usernames never
-                            // truncate because of it. Mirrors Android's
+                            // traders. Circled symbol only (no text): the
+                            // full "FOUNDER" chip crowded the stats line and
+                            // truncated on narrow rows. The wordy pill lives
+                            // on the portfolio hero card. Mirrors Android's
                             // FoundingTraderChip in LeaderboardScreen.kt.
                             if entry.user.foundingTrader == true {
-                                founderChip
+                                FounderBadgeCircle()
                             }
                         }
                     }
@@ -617,29 +618,6 @@ struct LeaderboardCard: View {
                     lineWidth: isExpanded ? 1 : 0.5
                 )
         )
-    }
-    
-    // MARK: - Founding Trader Chip
-    /// Compact gold "FOUNDER" chip sized to sit inline with the 10pt stats
-    /// line (subscribers + trades/wk) without changing the row height.
-    private var founderChip: some View {
-        let gold = Color(hex: "FFD700")
-        return HStack(spacing: 2) {
-            Image(systemName: "medal.fill")
-                .font(.system(size: 8))
-            Text("FOUNDER")
-                .font(.system(size: 8, weight: .bold))
-                .tracking(0.5)
-        }
-        .foregroundColor(gold)
-        .padding(.horizontal, 5)
-        .padding(.vertical, 1)
-        .background(gold.opacity(0.14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 7)
-                .stroke(gold.opacity(0.45), lineWidth: 0.5)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 7))
     }
     
     // MARK: - Rank Badge
@@ -896,6 +874,32 @@ class LeaderboardViewModel: ObservableObject {
         }
         
         isLoading = false
+    }
+}
+
+// MARK: - Founder Badge Circle
+
+/// Founding Trader marker for list rows: the medal symbol in a small gold
+/// circle, NO text — the wordy "Founding Trader" pill (PortfolioDetailView's
+/// FoundingTraderPill) is reserved for the portfolio hero card where there's
+/// room. Used on Leaderboard rows and Top Creators rows (both here and in
+/// TopInfluencersView). Mirrors Android's FounderBadgeCircle.
+struct FounderBadgeCircle: View {
+    var size: CGFloat = 14
+    private let gold = Color(hex: "FFD700")
+    
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(gold.opacity(0.15))
+            Circle()
+                .stroke(gold.opacity(0.45), lineWidth: 0.5)
+            Image(systemName: "medal.fill")
+                .font(.system(size: size * 0.55))
+                .foregroundColor(gold)
+        }
+        .frame(width: size, height: size)
+        .accessibilityLabel("Founding Trader")
     }
 }
 

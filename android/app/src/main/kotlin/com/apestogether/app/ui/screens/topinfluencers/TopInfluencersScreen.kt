@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -404,14 +405,25 @@ private fun InfluencerRow(entry: InfluencerEntry, onClick: () -> Unit) {
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text(
-                text = entry.user.publicName,
-                color = TextPrimary,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Text(
+                    text = entry.user.publicName,
+                    color = TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                // Founding Trader — circled symbol only (matches the
+                // leaderboard rows; the wordy pill is hero-card-only).
+                if (entry.user.foundingTrader == true) {
+                    FounderBadgeCircle()
+                }
+            }
 
             if (entry.topIndustries.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -523,6 +535,16 @@ private fun EmptyState(modifier: Modifier = Modifier) {
 
 /** Mirror of iOS [InfluencerRow.shortenIndustry]. */
 private fun shortenIndustry(name: String): String {
+    // GICS sector names first (exact match, returned WITHOUT the generic
+    // prefix-truncation below — "Comm Services" must never become
+    // "Comm Ser…"). Same S&P short forms as SectorAllocationCard; keep
+    // the maps (here, iOS, sector cards) in sync.
+    when (name) {
+        "Consumer Discretionary" -> return "Cons Disc"
+        "Communication Services" -> return "Comm Services"
+        "Consumer Staples" -> return "Cons Staples"
+        "Real Estate" -> return "Real Estate"
+    }
     val map = linkedMapOf(
         "AUTO MANUFACTURERS" to "Auto",
         "CONSUMER ELECTRONICS" to "Tech",
@@ -542,6 +564,32 @@ private fun shortenIndustry(name: String): String {
     val upper = name.uppercase()
     map.entries.firstOrNull { (key, _) -> key in upper }?.let { return it.value }
     return if (name.length > 10) name.take(8) + "…" else name
+}
+
+/**
+ * Founding Trader marker for list rows: the medal symbol in a small gold
+ * circle, NO text. Copy of LeaderboardScreen's FoundingTraderChip
+ * (private-per-file pattern) — keep them in sync. Mirrors iOS
+ * FounderBadgeCircle in LeaderboardView.swift.
+ */
+@Composable
+private fun FounderBadgeCircle() {
+    val gold = Color(0xFFFFD700)
+    Box(
+        modifier = Modifier
+            .size(14.dp)
+            .clip(CircleShape)
+            .background(gold.copy(alpha = 0.15f))
+            .border(0.5.dp, gold.copy(alpha = 0.45f), CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = Icons.Default.WorkspacePremium,
+            contentDescription = "Founding Trader",
+            tint = gold,
+            modifier = Modifier.size(9.dp),
+        )
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
