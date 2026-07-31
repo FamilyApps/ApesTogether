@@ -1626,8 +1626,11 @@ def get_portfolio(slug):
         ).count()
         response['avg_trades_per_week'] = round(recent_trade_count / 4.3, 1)
         
-        # Load all stocks once (reuse for value calc, holdings, and count)
-        all_stocks = Stock.query.filter_by(user_id=owner.id).all()
+        # Load all stocks once (reuse for value calc, holdings, and count).
+        # ABC ticker order — without it holdings render in insertion order,
+        # which reads as a hodgepodge. Sorted here (not in the clients) so
+        # every consumer (iOS, Android, web) gets it for free.
+        all_stocks = Stock.query.filter_by(user_id=owner.id).order_by(Stock.ticker).all()
         response['num_stocks'] = len(all_stocks)
         
         # Single bulk API call for ALL stock prices (premium tier: 150 calls/min)

@@ -32,6 +32,29 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def format_trade_push_title(trader_username: str, action: str) -> str:
+    """Trade-alert push title. Shared by the send path and the
+    PushNotificationLog rows so the two can never drift apart."""
+    action_emoji = "\U0001F7E2" if action.upper() == "BUY" else "\U0001F534"
+    return f"{action_emoji} {trader_username} {action.upper()}"
+
+
+def format_trade_push_body(action: str, ticker: str, quantity: float,
+                           price: float, position_pct=None, scaled: bool = False) -> str:
+    """Trade-alert push body. `scaled` marks a quantity already converted to
+    the subscriber's scale (MobileSubscription.scale_factor) — flagged in the
+    text so it isn't mistaken for the creator's actual trade size."""
+    from services.notification_utils import format_qty
+    qty_str = format_qty(quantity)
+    if position_pct is not None and action.upper() == 'SELL':
+        body = f"{qty_str} {ticker} ({position_pct:.0f}% of position) @ ${price:.2f}"
+    else:
+        body = f"{qty_str} {ticker} @ ${price:.2f}"
+    if scaled:
+        body += " (your scale)"
+    return body
+
+
 class PushNotificationService:
     """Service for sending push notifications via Firebase Cloud Messaging"""
     
@@ -99,10 +122,13 @@ class PushNotificationService:
         quantity: float,
         price: float,
         portfolio_slug: Optional[str] = None,
-        position_pct: Optional[float] = None
+        position_pct: Optional[float] = None,
+        scaled: bool = False
     ) -> Dict[str, Any]:
         """
-        Send a trade alert notification to subscribers
+        Send a trade alert notification to subscribers. `quantity` may already
+        be converted to the recipients' subscription scale — pass scaled=True
+        so the body says so.
         
         Returns:
             Dict with 'success_count', 'failure_count', 'failed_tokens'
@@ -115,12 +141,8 @@ class PushNotificationService:
             return {'success_count': 0, 'failure_count': 0, 'failed_tokens': []}
         
         # Format the notification
-        action_emoji = "🟢" if action.upper() == "BUY" else "🔴"
-        title = f"{action_emoji} {trader_username} {action.upper()}"
-        if position_pct is not None and action.upper() == 'SELL':
-            body = f"{quantity} {ticker} ({position_pct:.0f}% of position) @ ${price:.2f}"
-        else:
-            body = f"{quantity} {ticker} @ ${price:.2f}"
+        title = format_trade_push_title(trader_username, action)
+        body = format_trade_push_body(action, ticker, quantity, price, position_pct, scaled)
         
         # Data payload for app to handle
         data = {
@@ -132,6 +154,8 @@ class PushNotificationService:
             'price': str(price),
             'timestamp': datetime.utcnow().isoformat(),
         }
+        if scaled:
+            data['scaled'] = 'true'
         if position_pct is not None:
             data['position_pct'] = str(position_pct)
         if portfolio_slug:
@@ -377,12 +401,13 @@ def send_trade_alert(
     quantity: float,
     price: float,
     portfolio_slug: Optional[str] = None,
-    position_pct: Optional[float] = None
+    position_pct: Optional[float] = None,
+    scaled: bool = False
 ) -> Dict[str, Any]:
     """Send trade alert to multiple devices"""
     service = get_push_service()
     return service.send_trade_notification(
-        device_tokens, trader_username, action, ticker, quantity, price, portfolio_slug, position_pct
+        device_tokens, trader_username, action, ticker, quantity, price, portfolio_slug, position_pct, scaled
     )
 
 
@@ -420,14 +445,18 @@ def notify_subscribers_of_trade(
     if not active_subs:
         return {'success_count': 0, 'failure_count': 0, 'no_subscribers': True}
     
-    # Get device tokens for all subscribers with notifications enabled
-    subscriber_ids = [
-        sub.subscriber_id for sub in active_subs 
-        if sub.push_notifications_enabled
-    ]
+    # Per-subscriber scale: a subscriber who set a scale for this creator
+    # gets THEIR proportional quantity in the alert (price and position_pct
+    # are scale-invariant). Group by effective scale so each group is one
+    # multicast — no-scale subscribers all share the None group.
+    from services.notification_utils import scaled_quantity
+    scale_by_user = {}
+    for sub in active_subs:
+        if sub.push_notifications_enabled:
+            scale_by_user[sub.subscriber_id] = getattr(sub, 'scale_factor', None)
     
     device_tokens = DeviceToken.query.filter(
-        DeviceToken.user_id.in_(subscriber_ids),
+        DeviceToken.user_id.in_(list(scale_by_user.keys())),
         DeviceToken.is_active == True
     ).all()
     
@@ -438,45 +467,58 @@ def notify_subscribers_of_trade(
     # portfolio's public-facing name in push titles, not the internal handle.
     trader_name = getattr(trader, 'public_name', None) or trader.username
 
-    # Send notifications
-    tokens = [dt.token for dt in device_tokens]
-    result = service.send_trade_notification(
-        device_tokens=tokens,
-        trader_username=trader_name,
-        action=action,
-        ticker=ticker,
-        quantity=quantity,
-        price=price,
-        portfolio_slug=trader.portfolio_slug,
-        position_pct=position_pct
-    )
-    
-    # Log notifications
+    token_groups: Dict[Optional[float], list] = {}
     for dt in device_tokens:
-        status = 'sent' if dt.token not in result.get('failed_tokens', []) else 'failed'
-        log = PushNotificationLog(
-            user_id=dt.user_id,
-            portfolio_owner_id=trader_user_id,
-            device_token_id=dt.id,
-            title=f"{'🟢' if action.upper() == 'BUY' else '🔴'} {trader_name} {action.upper()}",
-            body=f"{quantity} {ticker} ({position_pct:.0f}% of position) @ ${price:.2f}" if position_pct is not None and action.upper() == 'SELL' else f"{quantity} {ticker} @ ${price:.2f}",
-            data_payload={
-                'type': 'trade_alert',
-                'ticker': ticker,
-                'action': action,
-                'quantity': str(quantity),
-                'price': str(price)
-            },
-            status=status
+        eff_qty, was_scaled = scaled_quantity(quantity, scale_by_user.get(dt.user_id))
+        key = round(eff_qty, 6) if was_scaled else None
+        token_groups.setdefault(key, []).append(dt)
+    
+    # Send one multicast per scale group and aggregate the results
+    agg = {'success_count': 0, 'failure_count': 0, 'failed_tokens': []}
+    for key, group_tokens in token_groups.items():
+        group_qty = key if key is not None else quantity
+        group_scaled = key is not None
+        result = service.send_trade_notification(
+            device_tokens=[dt.token for dt in group_tokens],
+            trader_username=trader_name,
+            action=action,
+            ticker=ticker,
+            quantity=group_qty,
+            price=price,
+            portfolio_slug=trader.portfolio_slug,
+            position_pct=position_pct,
+            scaled=group_scaled
         )
-        db.session.add(log)
+        agg['success_count'] += result.get('success_count', 0)
+        agg['failure_count'] += result.get('failure_count', 0)
+        agg['failed_tokens'].extend(result.get('failed_tokens', []))
         
-        # Mark token as inactive if it failed
-        if dt.token in result.get('failed_tokens', []):
-            dt.is_active = False
-        else:
-            dt.last_used_at = datetime.utcnow()
+        # Log notifications (body mirrors exactly what this group was sent)
+        for dt in group_tokens:
+            status = 'sent' if dt.token not in result.get('failed_tokens', []) else 'failed'
+            log = PushNotificationLog(
+                user_id=dt.user_id,
+                portfolio_owner_id=trader_user_id,
+                device_token_id=dt.id,
+                title=format_trade_push_title(trader_name, action),
+                body=format_trade_push_body(action, ticker, group_qty, price, position_pct, group_scaled),
+                data_payload={
+                    'type': 'trade_alert',
+                    'ticker': ticker,
+                    'action': action,
+                    'quantity': str(group_qty),
+                    'price': str(price)
+                },
+                status=status
+            )
+            db.session.add(log)
+            
+            # Mark token as inactive if it failed
+            if dt.token in result.get('failed_tokens', []):
+                dt.is_active = False
+            else:
+                dt.last_used_at = datetime.utcnow()
     
     db.session.commit()
     
-    return result
+    return agg

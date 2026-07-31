@@ -164,13 +164,42 @@ def send_email(to_email, subject, body, html_body=None, bcc=True, reply_to=None)
         return {'status': 'failed', 'error': str(e)}
 
 
-def format_trade_notification(username, action, ticker, quantity, price, position_pct=None):
+def format_qty(quantity):
+    """Display-format a share quantity: whole numbers without decimals,
+    fractional ones to at most 4 decimals with trailing zeros trimmed
+    (scaled quantities are rarely whole)."""
+    q = round(float(quantity), 4)
+    if q == int(q):
+        return f"{int(q)}"
+    return f"{q:.4f}".rstrip('0').rstrip('.')
+
+
+def scaled_quantity(quantity, scale_factor):
+    """Return (effective_quantity, was_scaled) for a subscriber.
+
+    `scale_factor` is MobileSubscription.scale_factor — target_dollars /
+    target_portfolio_value, frozen when the subscriber set their scale.
+    None / 0 / 1.0 all mean "no scale": show the creator's real quantity.
+    """
+    try:
+        sf = float(scale_factor) if scale_factor is not None else None
+    except (TypeError, ValueError):
+        sf = None
+    if sf is None or sf <= 0 or abs(sf - 1.0) < 1e-9:
+        return quantity, False
+    return quantity * sf, True
+
+
+def format_trade_notification(username, action, ticker, quantity, price, position_pct=None, scaled=False):
     """
     Build the rich trade notification message.
     Example: "TraderJoe just sold 15 shares of AAPL (25% of their position) at $182.50 per share"
+    When `scaled` is True the quantity is the subscriber's scaled amount, and
+    the message says so — without the note it would misstate the creator's
+    actual trade size.
     """
     action_word = 'bought' if action.lower() == 'buy' else 'sold'
-    qty_str = f"{int(quantity)}" if quantity == int(quantity) else f"{quantity}"
+    qty_str = format_qty(quantity)
 
     if position_pct is not None and action.lower() == 'sell':
         pct_str = f"{int(position_pct)}" if position_pct == int(position_pct) else f"{position_pct:.1f}"
@@ -178,6 +207,8 @@ def format_trade_notification(username, action, ticker, quantity, price, positio
     else:
         msg = f"{username} just {action_word} {qty_str} shares of {ticker} at ${price:,.2f} per share"
 
+    if scaled:
+        msg += " (quantity scaled to your portfolio size)"
     return msg
 
 
@@ -252,13 +283,17 @@ def send_trade_confirmation_email(user, action, ticker, quantity, price, positio
     return send_email(user.email, subject, body, html_body=html_body)
 
 
-def send_trade_notification_to_subscriber(subscriber_email, trader_username, action, ticker, quantity, price, position_pct=None):
+def send_trade_notification_to_subscriber(subscriber_email, trader_username, action, ticker, quantity, price, position_pct=None, scale_factor=None):
     """
     Send trade alert email to a subscriber about a trader's activity.
+    When the subscriber has set a scale for this creator, quantity is
+    converted to THEIR proportional amount (position_pct and per-share
+    price are scale-invariant and stay as-is).
     """
-    msg = format_trade_notification(trader_username, action, ticker, quantity, price, position_pct)
-    emoji = "🟢" if action.lower() == 'buy' else "🔴"
-    qty_str = f"{int(quantity)}" if quantity == int(quantity) else f"{quantity}"
+    quantity, scaled = scaled_quantity(quantity, scale_factor)
+    msg = format_trade_notification(trader_username, action, ticker, quantity, price, position_pct, scaled=scaled)
+    emoji = "\U0001F7E2" if action.lower() == 'buy' else "\U0001F534"
+    qty_str = format_qty(quantity)
 
     subject = f"{emoji} {trader_username} {action.upper()} {qty_str} {ticker}"
 
@@ -313,6 +348,7 @@ def notify_subscribers_via_email(db, trader_user_id, action, ticker, quantity, p
 
         result = send_trade_notification_to_subscriber(
             subscriber.email, trader_name, action, ticker, quantity, price, position_pct,
+            scale_factor=getattr(sub, 'scale_factor', None),
         )
         if result['status'] == 'sent':
             sent += 1

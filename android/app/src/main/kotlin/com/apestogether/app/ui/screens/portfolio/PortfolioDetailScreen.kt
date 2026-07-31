@@ -1157,21 +1157,29 @@ private fun HoldingRow(
             verticalArrangement = Arrangement.spacedBy(3.dp),
         ) {
             Text(holding.ticker, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            // Mirrors iOS `quantityAndAvgLine`: "{qty} shares · $X.XX avg".
-            // Uses the model's `formattedQuantity` (up to 5 decimals, trimmed)
-            // — NOT the 2-decimal `formatQuantity()` — and appends the average
-            // cost per share whenever purchasePrice is known.
+            // Quantity with the average cost ALWAYS on its own line below it
+            // (mirrors iOS HoldingRow). These used to share one "·"-separated
+            // line, which rendered avg beside qty on some rows and wrapped/
+            // ellipsized on others. Uses the model's `formattedQuantity`
+            // (up to 5 decimals, trimmed) — NOT the 2-decimal
+            // `formatQuantity()`. Avg only renders when purchasePrice is known.
             val sharesLabel = if (holding.quantity == 1.0) "share" else "shares"
-            val avgPart = if (holding.purchasePrice > 0) {
-                " · $" + formatLargeNumber(holding.purchasePrice) + " avg"
-            } else ""
             Text(
-                text = holding.formattedQuantity + " " + sharesLabel + avgPart,
+                text = holding.formattedQuantity + " " + sharesLabel,
                 color = TextSecondary,
                 fontSize = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (holding.purchasePrice > 0) {
+                Text(
+                    text = "$" + formatLargeNumber(holding.purchasePrice) + " avg",
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
 
         Spacer(Modifier.width(8.dp))

@@ -674,10 +674,11 @@ struct SellPickerSheet: View {
 
 // MARK: - Holding Row
 
-/// Two-line holdings card.
+/// Holdings card.
 ///
-/// Top row:    [TICKER badge]  TICKER                                 $TotalValue   X.X% port
-///             quantity shares · $X.XX avg                            +$X.XX (+X.X%)
+/// Left column: [TICKER badge]  TICKER          right:   $TotalValue   X.X% port
+///              quantity shares                          +$X.XX (+X.X%)
+///              $X.XX avg
 ///
 /// `portfolioValue` is the OWNER's total portfolio value, used to compute
 /// the position's share of the portfolio. It's optional; if nil the
@@ -702,12 +703,20 @@ struct HoldingRow: View {
                 Text(holding.ticker)
                     .font(.headline)
                     .foregroundColor(.textPrimary)
-                // Quantity + average cost on the same subtitle line so both
-                // pieces of info stay co-located. Cost basis only renders
-                // when we actually have it (purchasePrice > 0).
-                Text(quantityAndAvgLine)
+                // Quantity with the average cost ALWAYS on its own line
+                // below it. These used to share one "·"-separated Text,
+                // which wrapped only when width ran out — so avg rendered
+                // beside qty on some rows and under it on others. Cost
+                // basis only renders when we actually have it
+                // (purchasePrice > 0).
+                Text("\(holding.formattedQuantity) share\(holding.quantity == 1 ? "" : "s")")
                     .font(.caption)
                     .foregroundColor(.textSecondary)
+                if holding.purchasePrice > 0 {
+                    Text("$\(groupedDollars(holding.purchasePrice)) avg")
+                        .font(.caption)
+                        .foregroundColor(.textSecondary)
+                }
             }
             .padding(.leading, 4)
             
@@ -740,14 +749,6 @@ struct HoldingRow: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-    }
-
-    private var quantityAndAvgLine: String {
-        let qtyPart = "\(holding.formattedQuantity) share\(holding.quantity == 1 ? "" : "s")"
-        if holding.purchasePrice > 0 {
-            return "\(qtyPart) · $\(groupedDollars(holding.purchasePrice)) avg"
-        }
-        return qtyPart
     }
 
     private func formattedSignedDollars(_ value: Double) -> String {
