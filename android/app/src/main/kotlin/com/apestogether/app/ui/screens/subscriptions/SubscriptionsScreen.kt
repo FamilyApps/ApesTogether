@@ -508,25 +508,31 @@ private fun SubscriptionCard(
 
             Spacer(Modifier.width(8.dp))
 
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Icon(
-                    imageVector = if (subscription.pushNotificationsEnabled) Icons.Default.Notifications
-                    else Icons.Default.NotificationsOff,
-                    contentDescription = null,
-                    tint = if (subscription.pushNotificationsEnabled) PrimaryAccent else TextMuted,
-                    modifier = Modifier.size(14.dp),
-                )
-                Switch(
-                    checked = subscription.pushNotificationsEnabled,
-                    onCheckedChange = onTogglePush,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = AppBackground,
-                        checkedTrackColor = PrimaryAccent,
-                        uncheckedThumbColor = TextMuted,
-                        uncheckedTrackColor = CardBorder,
-                        uncheckedBorderColor = CardBorder,
-                    ),
-                )
+            // Notification toggle — active subs only. An expired sub sends
+            // no alerts regardless of the setting, so the toggle is dead
+            // weight there (a Resubscribe CTA will take this spot once the
+            // IAP re-purchase flow is wired up).
+            if (subscription.status == "active") {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(
+                        imageVector = if (subscription.pushNotificationsEnabled) Icons.Default.Notifications
+                        else Icons.Default.NotificationsOff,
+                        contentDescription = null,
+                        tint = if (subscription.pushNotificationsEnabled) PrimaryAccent else TextMuted,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Switch(
+                        checked = subscription.pushNotificationsEnabled,
+                        onCheckedChange = onTogglePush,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = AppBackground,
+                            checkedTrackColor = PrimaryAccent,
+                            uncheckedThumbColor = TextMuted,
+                            uncheckedTrackColor = CardBorder,
+                            uncheckedBorderColor = CardBorder,
+                        ),
+                    )
+                }
             }
         }
 
