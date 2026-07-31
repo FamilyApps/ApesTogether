@@ -107,7 +107,11 @@ struct TradeSheetView: View {
                                         RoundedRectangle(cornerRadius: 12)
                                             .stroke(Color.inputBorder, lineWidth: 1)
                                     )
-                                    .onChange(of: tickerInput) { _, newValue in
+                                    // Single-parameter onChange — the two-param
+                                    // form is iOS 17+ and the app targets 16.0
+                                    // (broke the Build 49 archive). Matches
+                                    // every other onChange in the codebase.
+                                    .onChange(of: tickerInput) { newValue in
                                         let cleaned = String(
                                             newValue.uppercased()
                                                 .filter { $0.isLetter || $0.isNumber || $0 == "." }
