@@ -2291,6 +2291,37 @@ def admin_recompute_user_snapshots():
     if (end_date - start_date).days > 31:
         return jsonify({'error': 'range too large (max 31 days) — serverless timeout guard'}), 400
 
+    # Ledger-completeness guard (added after this route halved Wolff's 8/5-8/6
+    # snapshots on 2026-08-07): historical recompute replays the Transaction
+    # ledger, so it produces garbage for bots whose seeding never wrote full
+    # Transaction rows (e.g. copy-trade bots skipped by the integrity audit).
+    # Detect that the same way /admin/debug-user-snapshots does — replay
+    # max_cash_deployed and compare to the live value. Refuse unless &force=true.
+    from models import Transaction
+    replay_cash = 0.0
+    replay_max_cash = 0.0
+    for txn in Transaction.query.filter_by(user_id=user.id).order_by(Transaction.timestamp.asc()).all():
+        val = (txn.quantity or 0) * (txn.price or 0)
+        if txn.transaction_type in ('buy', 'initial'):
+            if replay_cash >= val:
+                replay_cash -= val
+            else:
+                replay_max_cash += val - replay_cash
+                replay_cash = 0
+        elif txn.transaction_type in ('sell', 'dividend'):
+            replay_cash += val
+    if (user.max_cash_deployed or 0) > 0 and replay_max_cash < user.max_cash_deployed * 0.95 \
+            and request.args.get('force') != 'true':
+        return jsonify({
+            'error': 'Transaction ledger is INCOMPLETE for this user — replaying it '
+                     'would reconstruct only a fraction of the true holdings, so a '
+                     'historical recompute would corrupt the snapshots. Add &force=true '
+                     'only if you are certain this is what you want.',
+            'max_cash_deployed_current': round(user.max_cash_deployed, 2),
+            'max_cash_deployed_replayed': round(replay_max_cash, 2),
+            'ledger_explains_pct': round(replay_max_cash / user.max_cash_deployed * 100, 1),
+        }), 409
+
     from portfolio_performance import PortfolioPerformanceCalculator
     calculator = PortfolioPerformanceCalculator()
 
@@ -2324,6 +2355,72 @@ def admin_recompute_user_snapshots():
         'mode': 'EXECUTED' if execute else 'PREVIEW — add &execute=true to write',
         'period': f'{start} to {end}',
         'days': results,
+    })
+
+
+@app.route('/admin/set-snapshot-values')
+@admin_required
+def admin_set_snapshot_values():
+    """
+    Directly set fields on a single PortfolioSnapshot row. Surgical restore
+    tool for snapshots corrupted by a bad recompute (first use: restoring
+    Wolff's 2026-08-05/06 EOD values after the incomplete-ledger recompute
+    halved them — the correct totals were known from the recompute preview).
+
+    Only the fields you pass are changed.
+
+    Usage:
+      /admin/set-snapshot-values?username=X&date=2026-08-05
+          &total_value=21283.13&stock_value=18600.81[&cash_proceeds=NN]
+          [&execute=true]
+    """
+    from models import db, User, PortfolioSnapshot
+    from datetime import date as _date
+
+    username = request.args.get('username')
+    date_str = request.args.get('date')
+    execute = request.args.get('execute') == 'true'
+
+    if not username or not date_str:
+        return jsonify({'error': 'username and date required'}), 400
+    user = User.query.filter_by(username=username).first()
+    if not user:
+        return jsonify({'error': f'User {username} not found'}), 404
+    try:
+        target_date = _date.fromisoformat(date_str)
+    except ValueError:
+        return jsonify({'error': 'date must be YYYY-MM-DD'}), 400
+
+    snapshot = PortfolioSnapshot.query.filter_by(user_id=user.id, date=target_date).first()
+    if not snapshot:
+        return jsonify({'error': f'No snapshot for {username} on {date_str}'}), 404
+
+    settable = ('total_value', 'stock_value', 'cash_proceeds', 'max_cash_deployed', 'cash_flow')
+    changes = {}
+    for field in settable:
+        raw = request.args.get(field)
+        if raw is None:
+            continue
+        try:
+            changes[field] = float(raw)
+        except ValueError:
+            return jsonify({'error': f'{field} must be a number'}), 400
+    if not changes:
+        return jsonify({'error': f'pass at least one of {settable}'}), 400
+
+    before = {f: (round(getattr(snapshot, f), 2) if getattr(snapshot, f) is not None else None)
+              for f in settable}
+    if execute:
+        for field, value in changes.items():
+            setattr(snapshot, field, value)
+        db.session.commit()
+
+    return jsonify({
+        'user': {'id': user.id, 'username': user.username},
+        'date': date_str,
+        'mode': 'EXECUTED' if execute else 'PREVIEW — add &execute=true to write',
+        'before': before,
+        'changes': changes,
     })
 
 
