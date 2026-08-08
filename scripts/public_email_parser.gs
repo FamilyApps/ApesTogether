@@ -540,7 +540,7 @@ function backfillMissedTrades() {
         const payload = {
           bot_username: config.WOLFF_BOT_USERNAME,
           trades: trades,
-          source: 'public_email_backfill',
+          source: 'public_backfill',  // ≤20 chars — stock_transaction.price_source is varchar(20)
           notes: (body || '').substring(0, 500),
           email_subject: subject,
           email_received_at: msg.getDate().toISOString(),

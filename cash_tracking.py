@@ -125,7 +125,9 @@ def process_transaction(db, user_id, ticker, quantity, price, transaction_type, 
     else:
         raise ValueError(f"Invalid transaction_type: {transaction_type}")
     
-    # Create transaction record
+    # Create transaction record. price_source is clamped to its varchar(20)
+    # column — an over-long tag (e.g. 'public_email_backfill', 21 chars,
+    # 2026-08-07) must degrade to truncation, not fail the whole trade.
     transaction = Transaction(
         user_id=user_id,
         ticker=ticker,
@@ -133,7 +135,7 @@ def process_transaction(db, user_id, ticker, quantity, price, transaction_type, 
         price=price,
         transaction_type=transaction_type,
         timestamp=timestamp or datetime.utcnow(),
-        price_source=price_source
+        price_source=(price_source[:20] if price_source else price_source)
     )
     db.session.add(transaction)
     
