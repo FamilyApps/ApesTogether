@@ -1812,38 +1812,29 @@ def register_cash_tracking_routes(app, db):
             # ---- Email if drift found ----
             if drift_users and send_email:
                 try:
-                    import smtplib
-                    from email.mime.text import MIMEText
+                    # SendGrid-first via the shared admin-alert helper — the
+                    # old direct-SMTP path here NEVER sent in prod because
+                    # SMTP_USER/SMTP_PASS were never configured on Vercel
+                    # (discovered 2026-08-08; only SENDGRID_API_KEY exists).
+                    from mobile_api import _send_admin_alert_email
 
-                    notify_email = _os.environ.get('ADMIN_NOTIFY_EMAIL', 'bobford00@gmail.com')
-                    smtp_user = _os.environ.get('SMTP_USER')
-                    smtp_pass = _os.environ.get('SMTP_PASS')
-
-                    if smtp_user and smtp_pass:
-                        body = (
-                            f"Cash-tracking drift detected on {timestamp_str}.\n\n"
-                            f"{len(drift_users)} of {scanned} users have drift > ${threshold:.2f} "
-                            f"between user.max_cash_deployed/cash_proceeds and replay-derived "
-                            f"target values.\n\n"
-                            "===== Prompt-ready summary (paste to AI) =====\n\n"
-                            f"{prompt}\n\n"
-                            "===== Full JSON =====\n"
-                            f"{drift_users}\n"
-                        )
-                        msg = MIMEText(body)
-                        msg['Subject'] = f'[ApesTogether] Cash-tracking drift: {len(drift_users)} users affected'
-                        msg['From'] = smtp_user
-                        msg['To'] = notify_email
-
-                        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-                            server.login(smtp_user, smtp_pass)
-                            server.send_message(msg)
+                    body = (
+                        f"Cash-tracking drift detected on {timestamp_str}.\n\n"
+                        f"{len(drift_users)} of {scanned} users have drift > ${threshold:.2f} "
+                        f"between user.max_cash_deployed/cash_proceeds and replay-derived "
+                        f"target values.\n\n"
+                        "===== Prompt-ready summary (paste to AI) =====\n\n"
+                        f"{prompt}\n\n"
+                        "===== Full JSON =====\n"
+                        f"{drift_users}\n"
+                    )
+                    subject = f'[ApesTogether] Cash-tracking drift: {len(drift_users)} users affected'
+                    if _send_admin_alert_email(subject, body):
                         response['email_sent'] = True
-                        logger.info(f"Drift alert email sent to {notify_email}: {len(drift_users)} users")
+                        logger.info(f"Drift alert email sent: {len(drift_users)} users")
                     else:
                         response['email_sent'] = False
-                        response['email_error'] = 'SMTP not configured'
-                        logger.warning("Drift detected but SMTP_USER/SMTP_PASS not set")
+                        response['email_error'] = 'no working email transport'
                 except Exception as ee:
                     response['email_sent'] = False
                     response['email_error'] = str(ee)

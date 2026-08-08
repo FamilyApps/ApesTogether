@@ -7751,23 +7751,58 @@ def check_email_parser_heartbeat(alert=True):
     return result
 
 
-def _notify_admin_parser_down(age_min, last_hb):
-    """Email the admin that the Gmail trade parser has stopped running."""
+def _send_admin_alert_email(subject, body):
+    """Send an operational alert email to the admin.
+
+    Primary transport: SendGrid via services.notification_utils.send_email —
+    the ONLY transport actually configured in production (SENDGRID_API_KEY).
+    Legacy fallback: Gmail SMTP if SMTP_USER/SMTP_PASS are ever set (they are
+    NOT in the current Vercel env — discovered 2026-08-08; the old SMTP-only
+    path meant unroutable-trade alerts silently no-oped in prod).
+
+    Returns True if an email was handed to a transport successfully.
+    """
+    admin_email = (
+        os.environ.get('ADMIN_NOTIFY_EMAIL')
+        or os.environ.get('ADMIN_EMAIL')
+        or 'bobford00@gmail.com'
+    )
+
+    # Primary: SendGrid (production transport)
+    try:
+        from services.notification_utils import send_email as sendgrid_send
+        result = sendgrid_send(admin_email, subject, body, bcc=False)
+        if result.get('status') == 'sent':
+            return True
+        logger.warning(f"Admin alert via SendGrid not sent: {result}")
+    except Exception as e:
+        logger.error(f"Admin alert via SendGrid failed: {e}")
+
+    # Fallback: legacy Gmail SMTP (only if configured)
     try:
         import smtplib
         from email.mime.text import MIMEText
-
-        admin_email = (
-            os.environ.get('ADMIN_NOTIFY_EMAIL')
-            or os.environ.get('ADMIN_EMAIL')
-            or 'bobford00@gmail.com'
-        )
         smtp_user = os.environ.get('SMTP_USER')
         smtp_pass = os.environ.get('SMTP_PASS')
         if not smtp_user or not smtp_pass:
-            logger.warning(f"PARSER DOWN (no SMTP configured): heartbeat {age_min:.0f} min stale")
-            return
+            logger.error(f"Admin alert NOT DELIVERED (no working email transport): {subject}")
+            return False
+        msg = MIMEText(body)
+        msg['Subject'] = subject
+        msg['From'] = smtp_user
+        msg['To'] = admin_email
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
+        return True
+    except Exception as e:
+        logger.error(f"Admin alert via SMTP fallback failed: {e}")
+        return False
 
+
+def _notify_admin_parser_down(age_min, last_hb):
+    """Email the admin that the Gmail trade parser has stopped running."""
+    try:
         body = f"""ApesTogether ALERT — the Public.com email parser has STOPPED.
 
 Last heartbeat: {last_hb} UTC ({age_min:.0f} minutes ago; expected every 5 min).
@@ -7788,14 +7823,9 @@ RECOVERY (5 minutes):
 
 This alert repeats every {PARSER_ALERT_COOLDOWN_HOURS}h until the heartbeat resumes.
 """
-        msg = MIMEText(body)
-        msg['Subject'] = f'[ApesTogether] ALERT: trade email parser DOWN ({age_min:.0f} min, copy-trading stopped)'
-        msg['From'] = smtp_user
-        msg['To'] = admin_email
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.login(smtp_user, smtp_pass)
-            server.send_message(msg)
-        logger.info("Admin notified: email parser heartbeat stale")
+        subject = f'[ApesTogether] ALERT: trade email parser DOWN ({age_min:.0f} min, copy-trading stopped)'
+        if _send_admin_alert_email(subject, body):
+            logger.info("Admin notified: email parser heartbeat stale")
     except Exception as e:
         logger.error(f"Failed to send parser-down alert: {e}")
 
@@ -8723,27 +8753,9 @@ def _notify_admin_unroutable_trades(batch_id, trades, reason='no_anchor_30min', 
                 in the email body for forensics.
     """
     try:
-        import smtplib
         import json as _json
-        from email.mime.text import MIMEText
-
-        # Fallback chain: ADMIN_NOTIFY_EMAIL → ADMIN_EMAIL → hardcoded admin inbox.
-        admin_email = (
-            os.environ.get('ADMIN_NOTIFY_EMAIL')
-            or os.environ.get('ADMIN_EMAIL')
-            or 'bobford00@gmail.com'
-        )
-        smtp_user = os.environ.get('SMTP_USER')
-        smtp_pass = os.environ.get('SMTP_PASS')
 
         tickers = ', '.join(t.ticker for t in trades)
-
-        if not smtp_user or not smtp_pass:
-            logger.warning(
-                f"UNROUTABLE TRADES (no SMTP configured) batch={batch_id} "
-                f"reason={reason}: {tickers}"
-            )
-            return
 
         body = f"""Unroutable Trade Alert - ApesTogether
 
@@ -8781,16 +8793,8 @@ Or inspect/list pending trades:
 GET /admin/bot/pending-trades?status=unroutable
 """
 
-        msg = MIMEText(body)
-        msg['Subject'] = f'[ApesTogether] Unroutable trades ({reason}): {tickers}'
-        msg['From'] = smtp_user
-        msg['To'] = admin_email
-
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.login(smtp_user, smtp_pass)
-            server.send_message(msg)
-
-        logger.info(f"Admin notified about unroutable trades batch={batch_id} reason={reason}")
+        if _send_admin_alert_email(f'[ApesTogether] Unroutable trades ({reason}): {tickers}', body):
+            logger.info(f"Admin notified about unroutable trades batch={batch_id} reason={reason}")
     except Exception as e:
         logger.error(f"Failed to send admin notification: {e}")
 

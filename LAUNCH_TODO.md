@@ -62,6 +62,7 @@ The authoritative, deduplicated checklist of **everything** required for public 
 - [x] **6 iOS screenshots DONE (Session 21, 2026-07-03)** — real app captures composited @ **1290×2796** (6.9") via `scripts/compose_appstore_screenshots_v2.ps1` → `~/Downloads/AppStore_Screenshots_v2` (`01_leaderboard`…`06_earnings`); captions/disclaimers from `docs/ASO_STRATEGY.md`. Upload straight into ASC Media Manager (PNGs are outputs, not committed). **Still:** app icon; app-preview video optional.
 - [ ] Age rating **17+**, Privacy nutrition labels, Export-compliance answers.
 - [ ] In-App Events drafted; review-prompt after follow + 3rd session.
+- [ ] **App Review Information (ASC → app → App Review Information):** Sign-in required = YES → demo creds `apestogether.review@gmail.com` + its password (same creds already entered in Play App access, 2026-08-08) + review note: *"Tap 'Sign in with Google' and use the demo credentials. A subscription to a creator portfolio (Wolff's Flagship Fund) is pre-provisioned so the paid experience is visible. Sign in with Apple also works but creates a fresh unsubscribed account. All trading is simulated (paper) — no real brokerage services."* Contact info: phone + email.
 - [ ] Visual-verify charts every period; verify pending-trade render on device.
 - [ ] **Submit for review.**
 - [x] FCM push, Apple/Google sign-in, billing verified on-device (§C).
