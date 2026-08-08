@@ -53,7 +53,12 @@ def add_datatables(response):
 @admin_bp.route('/')
 @admin_required
 def admin_dashboard():
-    """Admin dashboard showing system overview"""
+    """DEPRECATED (2026-08-08): old admin dashboard replaced by /admin-panel.
+    The /admin/* tool endpoints below remain active."""
+    return redirect('/admin-panel')
+
+def _admin_dashboard_legacy():
+    """Old admin dashboard body — unreachable, kept for reference."""
     # Get counts for dashboard
     user_count = User.query.count()
     stock_count = Stock.query.count()
