@@ -98,7 +98,7 @@ The authoritative, deduplicated checklist of **everything** required for public 
 - [x] Hero/nav CTAs, waitlist segmentation, trust bar, © 2026, real screenshot.
 
 ### 8. 📣 Marketing / Launch execution  *(deferred until Android is "fairly bug-free", then run `docs/LAUNCH_PLAYBOOK.md`)*
-- [ ] **Now:** register + lock social handles (X `@ApesTogetherApp`, TikTok/IG `@apestogether`, LinkedIn, YouTube, Reddit) + UTM bio links.
+- [ ] **Now:** register + lock social handles (X `@ApesTogetherApp`, TikTok/IG `@apestogether`, LinkedIn, YouTube, Reddit) + UTM bio links. **NOTE (2026-08-07):** the "Follow Us" footer sections on `landing.html`/`compare.html`/`press.html` were REMOVED (they linked to unregistered handles — squatting/phishing risk). Restore the footer links in all three templates once the handles actually exist.
 - [ ] Press kit (screenshots, bio, one-pager) — playbook Day 16.
 - [ ] Content calendar X/TikTok/LinkedIn/Reddit (`docs/LAUNCH_CONTENT.md`); influencer + journalist outreach incl. WSJ exclusive (`docs/LAUNCH_OUTREACH.md`); email sequences; $2-bill stunt (launch week); stand up KPI tracker.
 
