@@ -2236,6 +2236,97 @@ def admin_debug_user_snapshots():
     })
 
 
+@app.route('/admin/recompute-user-snapshots')
+@admin_required
+def admin_recompute_user_snapshots():
+    """
+    Force-recompute a user's daily snapshots over a date range — including
+    dates that ALREADY have a snapshot row.
+
+    Needed after backfilling historical transactions (first use: the
+    2026-08-05 Wolff rebalance, replayed on 08-07 after a GAS outage): the
+    EOD snapshots for the intervening days were computed from pre-backfill
+    holdings, and the gap-filling backfill tools deliberately skip dates
+    that already have a row. create_daily_snapshot() is create-or-update and
+    reconstructs holdings + cash from the transaction ledger for historical
+    dates, so it picks up backfilled trades.
+
+    Usage:
+      /admin/recompute-user-snapshots?username=X&start=2026-08-05&end=2026-08-07
+      (preview; add &execute=true to write)
+    """
+    # Local import shadows the legacy inline module-scope db/User on purpose —
+    # create_daily_snapshot works on the models.db session, so rollbacks and
+    # queries here must target that same session (same pattern as the
+    # neighboring admin audit routes).
+    from models import db, User, PortfolioSnapshot
+    from datetime import date as _date, timedelta as _timedelta
+
+    username = request.args.get('username')
+    user_id = request.args.get('user_id')
+    start = request.args.get('start')
+    end = request.args.get('end')
+    execute = request.args.get('execute') == 'true'
+
+    if username:
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': f'User {username} not found'}), 404
+    elif user_id:
+        user = User.query.get(int(user_id))
+        if not user:
+            return jsonify({'error': f'User id {user_id} not found'}), 404
+    else:
+        return jsonify({'error': 'username or user_id required'}), 400
+
+    if not start or not end:
+        return jsonify({'error': 'start and end required (YYYY-MM-DD)'}), 400
+    try:
+        start_date = _date.fromisoformat(start)
+        end_date = _date.fromisoformat(end)
+    except ValueError:
+        return jsonify({'error': 'dates must be YYYY-MM-DD'}), 400
+    if end_date < start_date:
+        return jsonify({'error': 'end before start'}), 400
+    if (end_date - start_date).days > 31:
+        return jsonify({'error': 'range too large (max 31 days) — serverless timeout guard'}), 400
+
+    from portfolio_performance import PortfolioPerformanceCalculator
+    calculator = PortfolioPerformanceCalculator()
+
+    results = []
+    d = start_date
+    while d <= end_date:
+        if d.weekday() < 5:  # weekdays only — no snapshots on weekends
+            existing = PortfolioSnapshot.query.filter_by(user_id=user.id, date=d).first()
+            before = round(existing.total_value, 2) if existing else None
+            row = {
+                'date': d.isoformat(),
+                'had_snapshot': existing is not None,
+                'total_value_before': before,
+            }
+            if execute:
+                try:
+                    calculator.create_daily_snapshot(user.id, d)
+                    refreshed = PortfolioSnapshot.query.filter_by(user_id=user.id, date=d).first()
+                    after = round(refreshed.total_value, 2) if refreshed else None
+                    row['total_value_after'] = after
+                    if before is not None and after is not None:
+                        row['delta'] = round(after - before, 2)
+                except Exception as e:
+                    db.session.rollback()
+                    row['error'] = str(e)
+            results.append(row)
+        d += _timedelta(days=1)
+
+    return jsonify({
+        'user': {'id': user.id, 'username': user.username},
+        'mode': 'EXECUTED' if execute else 'PREVIEW — add &execute=true to write',
+        'period': f'{start} to {end}',
+        'days': results,
+    })
+
+
 @app.route('/admin/audit-snapshot-cash-drift')
 @admin_required
 def admin_audit_snapshot_cash_drift():
