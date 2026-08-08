@@ -60,7 +60,13 @@ struct TradeSheetView: View {
             ZStack {
                 Color.appBackground.ignoresSafeArea()
                 
-                VStack(spacing: 24) {
+                VStack(spacing: 0) {
+                    // Scrollable form — the action area below is pinned OUTSIDE
+                    // the scroll view, so when the keyboard appears it compresses
+                    // this (scrollable) region instead of shoving the submit
+                    // button off screen / under the keyboard.
+                    ScrollView {
+                    VStack(spacing: 24) {
                     // Header
                     VStack(spacing: 8) {
                         ZStack {
@@ -181,19 +187,27 @@ struct TradeSheetView: View {
                                 )
                         }
                         
-                        // Estimated total
-                        if let qty = Double(quantity), qty > 0, price > 0 {
-                            HStack {
-                                Text("Estimated total")
-                                    .font(.subheadline)
-                                    .foregroundColor(.textSecondary)
-                                Spacer()
+                        // Estimated total — the row is ALWAYS present (an
+                        // em-dash placeholder until qty & price are known) so
+                        // its appearance can't reflow the sheet mid-typing,
+                        // which used to shove the submit button under the
+                        // keyboard.
+                        HStack {
+                            Text("Estimated total")
+                                .font(.subheadline)
+                                .foregroundColor(.textSecondary)
+                            Spacer()
+                            if let qty = Double(quantity), qty > 0, price > 0 {
                                 Text("$\(grouped(qty * price))")
                                     .font(.subheadline.bold())
                                     .foregroundColor(.textPrimary)
+                            } else {
+                                Text("\u{2014}")
+                                    .font(.subheadline.bold())
+                                    .foregroundColor(.textMuted)
                             }
-                            .padding(.horizontal, 4)
                         }
+                        .padding(.horizontal, 4)
                     }
                     .padding(.horizontal, 20)
                     
@@ -203,8 +217,14 @@ struct TradeSheetView: View {
                             .foregroundColor(.losses)
                             .padding(.horizontal, 20)
                     }
+                    }
+                    .padding(.bottom, 12)
+                    }
+                    .scrollDismissesKeyboard(.interactively)
                     
-                    Spacer()
+                    // Pinned action area — lives below the ScrollView, so the
+                    // keyboard slides it up rather than covering it. The
+                    // submit button is always fully visible.
                     
                     // Quick quantity buttons (for sell)
                     if tradeType == .sell && currentQuantity > 0 {
@@ -236,6 +256,7 @@ struct TradeSheetView: View {
                             }
                         }
                         .padding(.horizontal, 20)
+                        .padding(.bottom, 10)
                     }
                     
                     // Submit button
@@ -275,6 +296,7 @@ struct TradeSheetView: View {
                         }
                         .foregroundColor(.primaryAccent)
                     }
+                    .padding(.top, 10)
                     .padding(.bottom, 16)
                 }
             }
