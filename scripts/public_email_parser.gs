@@ -467,6 +467,164 @@ function reprocessSince() {
 }
 
 /**
+ * One-shot BACKFILL for trade emails missed during an ingestion outage
+ * (e.g. the 2026-08-05 Wolff rebalance, missed while the trigger was dead
+ * after a Google password change).
+ *
+ * Differences from the normal flow — all deliberate:
+ *   - Explicit bot (WOLFF_BOT_USERNAME script property), NOT 'auto' routing:
+ *     auto-deferred BUYs expire 30 min after email_received_at, so a
+ *     days-late replay would land every BUY in the unroutable pile.
+ *   - Derives the ACTUAL fill price from the email ("You bought $X of TKR" +
+ *     "Quantity: N shares" → price = X/N). The normal parser omits price and
+ *     the API fetches the CURRENT price — correct live, wrong days later.
+ *   - suppress_notifications: true — no stale "just bought" alerts.
+ *   - Timestamps stay historical: email_received_at = message.getDate().
+ *
+ * USAGE:
+ *   1. Set AFTER_DATE / BEFORE_DATE to bracket the missed day(s).
+ *   2. Run with DRY_RUN = true and check the log (parsed trades + prices).
+ *   3. Set DRY_RUN = false and run again to submit.
+ * Server-side message-id dedupe makes re-runs harmless.
+ */
+function backfillMissedTrades() {
+  const DRY_RUN = true;              // ← flip to false after checking the log
+  const AFTER_DATE = '2026/08/04';   // Gmail after: (exclusive-ish, day before)
+  const BEFORE_DATE = '2026/08/06';  // Gmail before: (day after the outage)
+
+  const config = getConfig();
+  if (!config.CRON_SECRET) { Logger.log('ERROR: CRON_SECRET not configured'); return; }
+  if (!config.WOLFF_BOT_USERNAME) { Logger.log('ERROR: WOLFF_BOT_USERNAME not configured'); return; }
+
+  const threads = GmailApp.search(
+    `from:mail.public.com after:${AFTER_DATE} before:${BEFORE_DATE}`, 0, 50);
+  Logger.log(`Found ${threads.length} threads in window`);
+
+  const seenIds = new Set();
+  let submitted = 0, skipped = 0, failed = 0;
+
+  for (const thread of threads) {
+    for (const msg of thread.getMessages()) {
+      const msgId = msg.getId();
+      if (seenIds.has(msgId)) continue;
+      seenIds.add(msgId);
+
+      const sender = String(msg.getFrom() || '');
+      const subject = String(msg.getSubject() || '');
+      if (!/[@.]public\.com/i.test(sender) || /^\s*(fwd?|re)\s*:/i.test(subject)
+          || /dividend/i.test(subject)) {
+        Logger.log(`Skipping: "${subject}" from ${sender}`);
+        skipped++;
+        continue;
+      }
+
+      const body = msg.getPlainBody();
+      const trades = parseTradesWithFillPrices(body, msg.getBody());
+      if (trades.length === 0) {
+        Logger.log(`NO TRADES PARSED: "${subject}" (${msg.getDate()}) — body: ${(body || '').substring(0, 200)}`);
+        skipped++;
+        continue;
+      }
+
+      const missingPrice = trades.filter(t => !t.price);
+      Logger.log(`--- "${subject}" (${msg.getDate()}) ---`);
+      Logger.log(`  Parsed: ${JSON.stringify(trades)}`);
+      if (missingPrice.length > 0) {
+        Logger.log(`  WARNING: no fill price derived for ${missingPrice.map(t => t.ticker).join(', ')} — server would use TODAY's price`);
+      }
+      if (DRY_RUN) continue;
+
+      try {
+        const payload = {
+          bot_username: config.WOLFF_BOT_USERNAME,
+          trades: trades,
+          source: 'public_email_backfill',
+          notes: (body || '').substring(0, 500),
+          email_subject: subject,
+          email_received_at: msg.getDate().toISOString(),
+          email_message_id: msgId,
+          suppress_notifications: true,
+        };
+        const resp = UrlFetchApp.fetch(`${config.API_BASE_URL}/admin/bot/email-trade`, {
+          method: 'post',
+          contentType: 'application/json',
+          headers: { 'X-Cron-Secret': config.CRON_SECRET },
+          payload: JSON.stringify(payload),
+          muteHttpExceptions: true,
+        });
+        const result = JSON.parse(resp.getContentText());
+        if (result.status === 'paused') {
+          Logger.log('  ABORTING: email-trade ingestion is PAUSED server-side — unpause and re-run.');
+          return;
+        }
+        if (result.status === 'duplicate') {
+          Logger.log('  Already processed server-side; skipped (idempotent).');
+          skipped++;
+        } else if (resp.getResponseCode() === 200 && result.success) {
+          submitted++;
+          Logger.log(`  Submitted: ${result.trades_executed}/${result.trades_submitted} executed`);
+          if (result.results) {
+            for (const r of result.results) {
+              if (r.error) Logger.log(`    ERROR ${r.ticker}: ${r.error}`);
+              else Logger.log(`    OK ${r.ticker}: ${r.action} ${r.quantity} @ $${r.price}`);
+            }
+          }
+        } else {
+          failed++;
+          Logger.log(`  API Error (${resp.getResponseCode()}): ${JSON.stringify(result)}`);
+        }
+      } catch (e) {
+        failed++;
+        Logger.log(`  ERROR submitting: ${e.message}`);
+      }
+    }
+  }
+
+  Logger.log(`\n=== BACKFILL ${DRY_RUN ? 'DRY RUN' : 'COMPLETE'}: ${seenIds.size} emails, ${submitted} submitted, ${skipped} skipped, ${failed} failed ===`);
+}
+
+/**
+ * Like parseTradesFromEmail, but derives the fill price for Public's summary
+ * format: "You bought $1,234.56 of TKR" + "Quantity: 12.345 shares"
+ * → price = 1234.56 / 12.345. Backfill-only; the live path keeps omitting
+ * price so trades execute at the moment's market price.
+ */
+function parseTradesWithFillPrices(plainBody, htmlBody) {
+  const trades = [];
+  const text = plainBody || htmlBody || '';
+  let match;
+
+  // "You bought $X of TKR" ... "Quantity: N shares" → price = X / N
+  const summaryPattern = /You\s+(bought|sold)\s+\$([\d,.]+)\s+of\s+([A-Z]{1,5}(?:\.[A-Z]{1,2})?)/gi;
+  while ((match = summaryPattern.exec(text)) !== null) {
+    const action = match[1].toLowerCase() === 'bought' ? 'buy' : 'sell';
+    const amount = parseFloat(match[2].replace(/,/g, ''));
+    const ticker = match[3].toUpperCase();
+    const qtyMatch = text.substring(match.index).match(/Quantity:\s*([\d,.]+)\s*shares?/i);
+    const quantity = qtyMatch ? parseFloat(qtyMatch[1].replace(/,/g, '')) : null;
+    if (quantity && !trades.some(t => t.ticker === ticker && t.action === action)) {
+      const price = amount > 0 ? Math.round((amount / quantity) * 10000) / 10000 : null;
+      trades.push({ action, ticker, quantity, price });
+    }
+  }
+
+  // "You bought TKR at $X per share" ... "Quantity: N shares" — price explicit
+  const perSharePattern = /You\s+(bought|sold)\s+([A-Z]{1,5}(?:\.[A-Z]{1,2})?)\s+at\s+\$?([\d,.]+)\s+per\s+share/gi;
+  while ((match = perSharePattern.exec(text)) !== null) {
+    const action = match[1].toLowerCase() === 'bought' ? 'buy' : 'sell';
+    const ticker = match[2].toUpperCase();
+    const price = parseFloat(match[3].replace(/,/g, ''));
+    if (!trades.some(t => t.ticker === ticker && t.action === action)) {
+      const qtyMatch = text.substring(match.index).match(/Quantity:\s*([\d,.]+)\s*shares?/i);
+      const quantity = qtyMatch ? parseFloat(qtyMatch[1].replace(/,/g, '')) : 1;
+      trades.push({ action, ticker, quantity, price });
+    }
+  }
+
+  return trades;
+}
+
+/**
  * Diagnose: show all trade emails since a date and what the parser extracts.
  * Does NOT submit anything or mark anything — read-only.
  * Change the SINCE_DATE below before running.
