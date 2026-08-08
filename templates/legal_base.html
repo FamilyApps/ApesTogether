@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}ApesTogether{% endblock %}</title>
+    <meta name="description" content="ApesTogether legal information. Operated by Family Apps LLC.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/landing.css?v=13">
+    <style>
+        /* ── LEGAL DOCUMENT SHELL ──
+           The legal text below is attorney-drafted and rendered verbatim inside a
+           light "document" card. These rules style the existing wrapper markup and
+           shim the handful of Bootstrap utility classes the documents use. */
+        .legal-wrap { padding: 100px 0 60px; }
+        .legal-wrap .row, .legal-wrap .col-lg-10 { display: block; width: 100%; }
+        .legal-wrap .col-lg-10 {
+            background: #ffffff; color: #1f2937;
+            max-width: 900px; margin: 0 auto;
+            border-radius: 16px; padding: clamp(24px, 5vw, 56px);
+            box-shadow: 0 8px 40px rgba(0,0,0,0.45);
+        }
+        .legal-wrap .col-lg-10 h1 { color: #111827; font-size: clamp(1.5rem, 4vw, 2.1rem); font-weight: 800; letter-spacing: -0.01em; }
+        .legal-wrap .col-lg-10 a { color: #0a8f6d; text-decoration: underline; }
+        .legal-wrap .col-lg-10 a:hover { color: #066a50; }
+        /* Bootstrap utility shims used by the legal documents */
+        .legal-wrap .mt-4 { margin-top: 1.5rem; }
+        .legal-wrap .mb-1 { margin-bottom: 0.25rem; }
+        .legal-wrap .mb-2 { margin-bottom: 0.5rem; }
+        .legal-wrap .mb-4 { margin-bottom: 1.5rem; }
+        .legal-wrap .text-muted { color: #6b7280; }
+        .legal-wrap .alert { padding: 12px 16px; border-radius: 10px; margin: 14px 0; line-height: 1.55; }
+        .legal-wrap .alert-success { background: #d1e7dd; color: #0f5132; border: 1px solid #a3cfbb; }
+        .legal-wrap .alert-warning { background: #fff3cd; color: #664d03; border: 1px solid #ffe69c; }
+        .legal-wrap .table-responsive { overflow-x: auto; }
+    </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="lp-nav">
+    <div class="container">
+        <a href="/" class="nav-brand">
+            <img src="/static/images/logo.png" alt="ApesTogether" style="height:28px; width:28px;">
+            <span>ApesTogether</span>
+        </a>
+        <button class="mobile-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')" aria-label="Menu">&#9776;</button>
+        <div class="nav-links">
+            <a href="/#how-it-works">How It Works</a>
+            <a href="/#earn">Earn</a>
+            <a href="/#faq">FAQ</a>
+            <a href="/#waitlist-anchor" class="btn-sm" style="color:#000 !important;">Join the Beta</a>
+        </div>
+    </div>
+</nav>
+
+<div class="legal-wrap">
+{% block content %}{% endblock %}
+</div>
+
+<!-- FOOTER -->
+<footer class="lp-footer">
+    <div class="container">
+        <div class="footer-top">
+            <div class="footer-brand">
+                <div class="name"><img src="/static/images/logo.png" alt="ApesTogether" style="height:22px; width:22px; vertical-align:middle; margin-right:6px;">ApesTogether</div>
+                <div class="tl">Verified performance. Transparent trades. Real time.</div>
+            </div>
+            <div class="footer-cols">
+                <div class="footer-col">
+                    <h5>Product</h5>
+                    <a href="/#how-it-works">How It Works</a>
+                    <a href="/#earn">Earn</a>
+                    <a href="/compare">Compare</a>
+                    <a href="/press">Press</a>
+                    <a href="/#faq">FAQ</a>
+                </div>
+                <div class="footer-col">
+                    <h5>Legal</h5>
+                    <a href="/terms-of-service">Terms of Service</a>
+                    <a href="/privacy-policy">Privacy Policy</a>
+                </div>
+                <div class="footer-col">
+                    <h5>Contact</h5>
+                    <a href="mailto:support@apestogether.ai">support@apestogether.ai</a>
+                </div>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <p class="footer-disc">
+                ApesTogether does not provide financial advice. All trades and performance data are shared for informational purposes only.
+                Past performance does not guarantee future results. Users are solely responsible for their own investment decisions.
+                ApesTogether is operated by Family Apps LLC.
+            </p>
+            <p class="footer-copy">&copy; 2026 Family Apps LLC. All rights reserved.</p>
+        </div>
+    </div>
+</footer>
+
+<script>
+// ── Analytics: pageview tracking (mirrors landing.html) ──
+(function() {
+    var params = new URLSearchParams(window.location.search);
+    fetch('/api/track/pageview', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            page: window.location.pathname,
+            referrer: document.referrer || '',
+            utm_source: params.get('utm_source') || '',
+            utm_medium: params.get('utm_medium') || '',
+            utm_campaign: params.get('utm_campaign') || ''
+        })
+    }).catch(function(){});
+})();
+</script>
+</body>
+</html>

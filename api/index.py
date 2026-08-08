@@ -460,12 +460,31 @@ try:
     # truly fresh TCP connection, since PgBouncer may have blacklisted our socket.
     app._last_request_had_db_error = False
     
+    # Legacy web-app pages retired for mobile-first launch (Aug 2026).
+    # Routes stay registered (so url_for() still resolves) but requests are
+    # redirected to the landing page before any view logic runs.
+    LEGACY_WEB_PATHS = frozenset([
+        '/dashboard', '/explore', '/onboarding', '/save_onboarding',
+        '/subscriptions', '/update_username', '/unsubscribe-from-portfolio',
+        '/add_stock', '/sell_stock',
+        '/settings/notifications', '/settings/portfolio-sharing',
+        '/settings/regenerate-portfolio-slug', '/settings/gdpr',
+        '/settings/delete-account',
+        '/cancel-subscription', '/resubscribe', '/create-payment-intent',
+        '/create-subscription', '/payment-confirmation', '/subscription-success',
+    ])
+    LEGACY_WEB_PREFIXES = ('/delete_stock/', '/profile/', '/create-checkout-session/')
+
     # Add a before_request handler to ensure session and current_user are properly initialized
     @app.before_request
     def handle_before_request():
         # Skip session processing for static files and favicon
         if request.path.startswith('/static/') or request.path == '/favicon.png':
             return  # Skip session processing for static files
+
+        # Retired legacy web-app pages → landing page
+        if request.path in LEGACY_WEB_PATHS or request.path.startswith(LEGACY_WEB_PREFIXES):
+            return redirect('/', code=302)
         
         # CRITICAL: Remove any leftover DB session from previous requests.
         # On Vercel serverless, the module persists between requests but the
@@ -1446,44 +1465,6 @@ def save_onboarding():
         flash('No stocks were entered.', 'warning')
     
     return redirect(url_for('dashboard'))
-
-@app.route('/stock-comparison')
-def stock_comparison():
-    """Stock comparison page with mock data"""
-    try:
-        # Generate mock data for the last 30 days
-        from datetime import datetime, timedelta
-        import random
-        
-        dates = []
-        tsla_prices = []
-        sp500_prices = []
-        
-        # Start with base prices
-        tsla_base = 240.0
-        spy_base = 500.0
-        
-        # Generate 30 days of mock data
-        for i in range(30):
-            day = datetime.now() - timedelta(days=30-i)
-            dates.append(day.strftime('%Y-%m-%d'))
-            
-            # Add some random variation
-            tsla_change = random.uniform(-10, 10)
-            spy_change = random.uniform(-5, 5)
-            
-            tsla_base += tsla_change
-            spy_base += spy_change
-            
-            tsla_prices.append(round(tsla_base, 2))
-            sp500_prices.append(round(spy_base, 2))
-
-        # Return the mock data
-        return render_template_with_defaults('stock_comparison.html', dates=dates, tsla_prices=tsla_prices, sp500_prices=sp500_prices)
-        
-    except Exception as e:
-        flash(f"Error generating mock stock comparison data: {e}", "danger")
-        return render_template_with_defaults('stock_comparison.html', dates=[], tsla_prices=[], sp500_prices=[])
 
 @app.route('/profile/<username>')
 @login_required

@@ -96,6 +96,8 @@ The authoritative, deduplicated checklist of **everything** required for public 
 ### 7. 🌐 Website / Landing
 - [ ] Refresh landing screenshot (old pricing); OG-image test (opengraph.xyz); live waitlist counter.
 - [x] Hero/nav CTAs, waitlist segmentation, trust bar, © 2026, real screenshot.
+- [ ] **PRE-LAUNCH: redesign public share pages** `/p/<slug>` (+ `/portfolio/<slug>` alias) — the apps' Share button links here and the page is still the vintage Bootstrap design; re-skin to landing design before launch (2026-08-07 audit).
+- [x] **Legacy web cleanup (2026-08-07):** old logged-in web app (`/dashboard`, `/explore`, settings, Stripe-era pages) 302→`/` via `before_request` shim (routes stay registered so `url_for` resolves); `/stock-comparison` mock page DELETED; `/terms-of-service` + `/privacy-policy` re-skinned via new `templates/legal_base.html` (landing nav/footer + white document card — attorney text untouched). Verified privacy policy links only `/delete-account`/mailto (no `/settings/gdpr`).
 
 ### 8. 📣 Marketing / Launch execution  *(deferred until Android is "fairly bug-free", then run `docs/LAUNCH_PLAYBOOK.md`)*
 - [ ] **Now:** register + lock social handles (X `@ApesTogetherApp`, TikTok/IG `@apestogether`, LinkedIn, YouTube, Reddit) + UTM bio links. **NOTE (2026-08-07):** the "Follow Us" footer sections on `landing.html`/`compare.html`/`press.html` were REMOVED (they linked to unregistered handles — squatting/phishing risk). Restore the footer links in all three templates once the handles actually exist.
