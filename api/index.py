@@ -12072,6 +12072,19 @@ def collect_intraday_data():
         if auth_error:
             return auth_error
         
+        # Dead-man's switch for the Gmail trade parser (scripts/public_email_parser.gs).
+        # Runs BEFORE the weekend/market-hours early returns so the watchdog
+        # covers all of Mon-Fri, not just market hours. Emails admin when the
+        # Apps Script heartbeat goes stale (e.g. Google password change revoked
+        # its Gmail grant - the 2026-08-05 Wolff rebalance outage).
+        try:
+            from mobile_api import check_email_parser_heartbeat
+            hb = check_email_parser_heartbeat(alert=True)
+            if hb.get('status') != 'ok':
+                logger.warning(f"Email parser heartbeat check: {hb}")
+        except Exception as hb_err:
+            logger.error(f"Parser heartbeat check failed: {hb_err}")
+        
         from models import User, PortfolioSnapshotIntraday
         from portfolio_performance import PortfolioPerformanceCalculator
         import time

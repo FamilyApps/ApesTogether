@@ -7647,6 +7647,167 @@ def _set_email_trade_paused(paused: bool) -> bool:
     return bool(paused)
 
 
+# ---------------------------------------------------------------------------
+# Email-parser dead-man's switch (added 2026-08-08 after the 8/5 outage)
+#
+# The Gmail Apps Script (scripts/public_email_parser.gs) calls
+# /admin/bot/process-pending-trades at the end of EVERY 5-minute poll — even
+# runs with zero trade emails. We record that as a liveness heartbeat here.
+# The /api/cron/collect-intraday-data Vercel cron (every 15 min, Mon–Fri)
+# checks staleness and emails the admin when the parser has gone quiet
+# (e.g. a Google password change revoked the script's Gmail OAuth grant —
+# exactly what killed the 2026-08-05 Wolff rebalance ingestion).
+# Storage: admin user's extra_data JSON (same pattern as email_trade_paused —
+# DB-backed, so it works across all serverless instances).
+# ---------------------------------------------------------------------------
+
+PARSER_HEARTBEAT_STALE_MINUTES = 30   # trigger runs every 5 min → 6 misses
+PARSER_ALERT_COOLDOWN_HOURS = 6       # re-alert cadence until it's fixed
+
+
+def _record_parser_heartbeat():
+    """Best-effort: persist 'the Apps Script parser is alive' timestamp.
+    Must never fail the calling endpoint."""
+    try:
+        from models import db, User
+        from sqlalchemy.orm.attributes import flag_modified
+        admin_email = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
+        admin = User.query.filter_by(email=admin_email).first()
+        if not admin:
+            return
+        extra = dict(admin.extra_data or {})
+        extra['email_parser_last_heartbeat'] = datetime.utcnow().isoformat()
+        admin.extra_data = extra
+        flag_modified(admin, 'extra_data')
+        db.session.commit()
+    except Exception as e:
+        logger.warning(f"parser heartbeat record failed: {e}")
+        try:
+            from models import db
+            db.session.rollback()
+        except Exception:
+            pass
+
+
+def check_email_parser_heartbeat(alert=True):
+    """Return parser-liveness status; optionally email the admin when stale.
+
+    Called by the collect-intraday-data cron (alert=True) and by the
+    /admin/bot/parser-heartbeat status endpoint (alert=False).
+    """
+    from models import db, User
+    from sqlalchemy.orm.attributes import flag_modified
+
+    admin_email = os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
+    admin = User.query.filter_by(email=admin_email).first()
+    extra = dict(admin.extra_data or {}) if admin else {}
+    last_hb_raw = extra.get('email_parser_last_heartbeat')
+
+    if not last_hb_raw:
+        # Never seen a heartbeat (pre-first-deploy window) — don't alert,
+        # we can't distinguish "not rolled out yet" from "broken".
+        return {'status': 'no_heartbeat_yet', 'last_heartbeat': None, 'age_minutes': None}
+
+    try:
+        last_hb = datetime.fromisoformat(last_hb_raw)
+    except (TypeError, ValueError):
+        return {'status': 'unparseable_heartbeat', 'last_heartbeat': last_hb_raw, 'age_minutes': None}
+
+    age_min = (datetime.utcnow() - last_hb).total_seconds() / 60.0
+    stale = age_min > PARSER_HEARTBEAT_STALE_MINUTES
+    result = {
+        'status': 'stale' if stale else 'ok',
+        'last_heartbeat': last_hb_raw,
+        'age_minutes': round(age_min, 1),
+        'stale_threshold_minutes': PARSER_HEARTBEAT_STALE_MINUTES,
+    }
+    if not (stale and alert and admin):
+        return result
+
+    # Throttle: at most one alert email per cooldown window.
+    last_alert_raw = extra.get('email_parser_last_alert')
+    if last_alert_raw:
+        try:
+            last_alert = datetime.fromisoformat(last_alert_raw)
+            if (datetime.utcnow() - last_alert) < timedelta(hours=PARSER_ALERT_COOLDOWN_HOURS):
+                result['alert'] = 'throttled'
+                return result
+        except (TypeError, ValueError):
+            pass
+
+    logger.critical(
+        f"EMAIL PARSER DOWN: no Apps Script heartbeat for {age_min:.0f} min "
+        f"(last: {last_hb_raw}). Wolff/Grok copy-trading is NOT ingesting."
+    )
+    _notify_admin_parser_down(age_min, last_hb_raw)
+    try:
+        extra['email_parser_last_alert'] = datetime.utcnow().isoformat()
+        admin.extra_data = extra
+        flag_modified(admin, 'extra_data')
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+    result['alert'] = 'sent'
+    return result
+
+
+def _notify_admin_parser_down(age_min, last_hb):
+    """Email the admin that the Gmail trade parser has stopped running."""
+    try:
+        import smtplib
+        from email.mime.text import MIMEText
+
+        admin_email = (
+            os.environ.get('ADMIN_NOTIFY_EMAIL')
+            or os.environ.get('ADMIN_EMAIL')
+            or 'bobford00@gmail.com'
+        )
+        smtp_user = os.environ.get('SMTP_USER')
+        smtp_pass = os.environ.get('SMTP_PASS')
+        if not smtp_user or not smtp_pass:
+            logger.warning(f"PARSER DOWN (no SMTP configured): heartbeat {age_min:.0f} min stale")
+            return
+
+        body = f"""ApesTogether ALERT — the Public.com email parser has STOPPED.
+
+Last heartbeat: {last_hb} UTC ({age_min:.0f} minutes ago; expected every 5 min).
+Wolff/Grok trades are NOT being copied until this is fixed.
+
+Most likely cause: the bobford00@gmail.com Google password was changed,
+which revokes the Apps Script's Gmail OAuth grant (this is what killed
+the 2026-08-05 Wolff rebalance ingestion).
+
+RECOVERY (5 minutes):
+1. Go to https://script.google.com logged in as bobford00@gmail.com
+2. Open the trade-parser project -> run checkForTradeEmails() manually
+3. Re-authorize when prompted (Review permissions -> Allow)
+4. Check Executions: the 5-min trigger should show 'Completed' again
+5. If trades were missed, use backfillMissedTrades() in the script
+   (set the date window, DRY_RUN=true first) — it replays with actual
+   fill prices and suppress_notifications=true.
+
+This alert repeats every {PARSER_ALERT_COOLDOWN_HOURS}h until the heartbeat resumes.
+"""
+        msg = MIMEText(body)
+        msg['Subject'] = f'[ApesTogether] ALERT: trade email parser DOWN ({age_min:.0f} min, copy-trading stopped)'
+        msg['From'] = smtp_user
+        msg['To'] = admin_email
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
+        logger.info("Admin notified: email parser heartbeat stale")
+    except Exception as e:
+        logger.error(f"Failed to send parser-down alert: {e}")
+
+
+@mobile_api.route('/admin/bot/parser-heartbeat', methods=['GET'])
+@require_admin_or_cron
+@with_db_retry
+def parser_heartbeat_status():
+    """Read-only liveness status of the Gmail Apps Script trade parser."""
+    return jsonify(check_email_parser_heartbeat(alert=False))
+
+
 def _email_already_processed(message_id):
     """Return the existing ProcessedEmailTrade for message_id, or None.
 
@@ -8093,6 +8254,11 @@ def bot_process_pending_trades():
     """
     from models import db, User, Stock, PendingTrade, Transaction
     from datetime import timedelta
+
+    # Liveness heartbeat: the Apps Script calls this endpoint at the end of
+    # EVERY 5-minute poll (even zero-email runs). Record it BEFORE any early
+    # return so the dead-man's switch sees a paused-but-alive parser as alive.
+    _record_parser_heartbeat()
 
     # Maintenance switch (see bot_email_trade): while paused, leave pending
     # trades untouched so a personal-brokerage liquidation isn't routed into a

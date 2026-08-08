@@ -17,6 +17,24 @@
  *      bots up by User.username; display names 404.
  * 4. Run setupTrigger() once to create the time-based trigger
  * 5. The script will check for new emails every 5 minutes
+ *
+ * ⚠ GOOGLE PASSWORD CHANGES KILL THIS SCRIPT (2026-08-05 outage):
+ * Changing the bobford00@gmail.com password revokes this script's Gmail
+ * OAuth grant — the trigger then fails silently on every run and trades
+ * stop being copied. After ANY password change on that account:
+ *   1. Open script.google.com as bobford00 → run checkForTradeEmails()
+ *   2. Re-authorize when prompted → verify Executions shows 'Completed'
+ *   3. Backfill missed days with backfillMissedTrades() (DRY_RUN first)
+ *
+ * SERVER-SIDE DEAD-MAN'S SWITCH (added 2026-08-08): the backend records a
+ * heartbeat every time this script's end-of-run process-pending-trades call
+ * lands. If no heartbeat for >30 min, the collect-intraday-data Vercel cron
+ * (every 15 min, Mon–Fri) emails the admin with recovery steps, repeating
+ * every 6 h until fixed. No changes to THIS script are needed for that.
+ * Status check: GET /api/mobile/admin/bot/parser-heartbeat (X-Admin-Key).
+ * ALSO RECOMMENDED (one-time, manual): in the Apps Script editor → Triggers
+ * → pencil icon on the checkForTradeEmails trigger → Failure notification
+ * settings → "Notify me immediately".
  */
 
 // ── Configuration ──────────────────────────────────────────────────────────
