@@ -7870,9 +7870,21 @@ def bot_email_trade():
                 except Exception as e:
                     db.session.rollback()
                     results.append({'ticker': ticker, 'error': str(e)})
-            db.session.commit()
 
             executed = [r for r in results if r.get('status') == 'executed']
+            # Ledger the message atomically with the trades — without this,
+            # explicit-path submissions were never recorded and a re-POST of
+            # the same email would double-execute. Only ledger when something
+            # actually executed, so a fully-failed email (e.g. bad bot name)
+            # stays retryable.
+            if executed:
+                _stage_processed_email(
+                    email_message_id, status='executed',
+                    subject=email_subject, received_at=email_received_at,
+                    trades_count=len(executed),
+                )
+            db.session.commit()
+
             return jsonify({
                 'success': True,
                 'bot_username': bot_username,
