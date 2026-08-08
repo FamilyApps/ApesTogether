@@ -7440,13 +7440,19 @@ def _parse_email_received_at(iso_str):
         return None
 
 
-def _execute_single_bot_trade(bot, action, ticker, quantity, price, source, timestamp):
+def _execute_single_bot_trade(bot, action, ticker, quantity, price, source, timestamp,
+                              suppress_notifications=False):
     """Execute a single buy/sell for a copytrade bot.
 
     Applies the bot's trade_multiplier (privacy multiplier), fetches the price
     from AlphaVantage if missing, runs the trade through
     cash_tracking.process_transaction (single source of truth for
     subscriber push/email fan-out), and updates the Stock row.
+
+    suppress_notifications skips the subscriber push/email fan-out — used by
+    historical backfills (e.g. replaying Public emails missed during an
+    ingestion outage), where alerting subscribers about days-old trades
+    would only mislead them.
 
     Returns a result dict suitable for inclusion in an API response. Does
     NOT commit — caller is responsible for db.session.commit/rollback.
@@ -7508,6 +7514,7 @@ def _execute_single_bot_trade(bot, action, ticker, quantity, price, source, time
             timestamp=timestamp,
             position_before_qty=position_before_for_tx,
             price_source=source or 'copytrade',
+            suppress_notifications=suppress_notifications,
         )
 
         if action == 'buy':
@@ -7752,6 +7759,10 @@ def bot_email_trade():
     notes = data.get('notes', '')
     email_subject = data.get('email_subject', '')
     email_message_id = data.get('email_message_id', '')
+    # Historical backfill flag (explicit-bot path only): execute the trades
+    # with their original timestamps but WITHOUT the subscriber alert fan-out
+    # — days-old "just bought" pushes would be misinformation.
+    suppress_notifications = bool(data.get('suppress_notifications'))
 
     # Email received-at: cluster key + Transaction timestamp + skip-marker
     # context. Falls back to wall-clock if GAS didn't send it (older GAS).
@@ -7853,6 +7864,7 @@ def bot_email_trade():
                     r = _execute_single_bot_trade(
                         bot, action, ticker, quantity, price,
                         source=source, timestamp=email_received_at,
+                        suppress_notifications=suppress_notifications,
                     )
                     results.append(r)
                 except Exception as e:
