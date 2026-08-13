@@ -50,25 +50,16 @@ struct EarnNudgeView: View {
                 
                 if userHasStocks {
                     // Already a creator → jump straight into the portfolio
-                    // they just subscribed to.
-                    VStack(spacing: 12) {
-                        Button {
-                            onViewPortfolio()
-                        } label: {
-                            Text(subscribedToUsername.isEmpty
-                                 ? "View Portfolio"
-                                 : "View \(subscribedToUsername)'s Portfolio")
-                        }
-                        .buttonStyle(PrimaryButtonStyle())
-                        
-                        Button {
-                            onSkip()
-                        } label: {
-                            Text("Done")
-                                .font(.subheadline)
-                                .foregroundColor(.textSecondary)
-                        }
+                    // they just subscribed to. Single CTA on purpose: every
+                    // new subscriber wants to see what they just bought.
+                    Button {
+                        onViewPortfolio()
+                    } label: {
+                        Text(subscribedToUsername.isEmpty
+                             ? "View Portfolio"
+                             : "View \(subscribedToUsername)'s Portfolio")
                     }
+                    .buttonStyle(PrimaryButtonStyle())
                     .padding(.horizontal, 40)
                     .padding(.bottom, 50)
                 } else {

@@ -114,6 +114,16 @@ struct ContentView: View {
 struct MainTabView: View {
     @State private var selectedTab = 0
     @State private var showAcquisitionSurvey = false
+    // Deep-link portfolio presentation. This is the ONLY listener for
+    // .navigateToPortfolio — post-subscribe View-Portfolio, referral links
+    // and push taps all funnel through it (they silently dropped before).
+    @State private var deepLinkPortfolio: DeepLinkPortfolio?
+    
+    struct DeepLinkPortfolio: Identifiable {
+        let slug: String
+        let period: String?
+        var id: String { slug }
+    }
     
     init() {
         // Configure tab bar appearance
@@ -155,6 +165,19 @@ struct MainTabView: View {
                 .tag(3)
         }
         .accentColor(.primaryAccent)
+        .sheet(item: $deepLinkPortfolio) { link in
+            NavigationView {
+                PortfolioDetailView(slug: link.slug, initialPeriod: link.period)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .navigateToPortfolio)) { notification in
+            if let slug = notification.userInfo?["slug"] as? String, !slug.isEmpty {
+                deepLinkPortfolio = DeepLinkPortfolio(
+                    slug: slug,
+                    period: notification.userInfo?["period"] as? String
+                )
+            }
+        }
         // One-shot "How did you hear about us?" survey — delayed so it never
         // races the leaderboard load; UserDefaults-gated (once per install).
         .overlay {
