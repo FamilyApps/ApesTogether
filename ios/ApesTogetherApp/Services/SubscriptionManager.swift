@@ -54,6 +54,11 @@ class SubscriptionManager: ObservableObject {
     
     func loadProducts() async {
         do {
+            if let storefront = await Storefront.current {
+                print("[SubscriptionManager] storefront country=\(storefront.countryCode) id=\(storefront.id)")
+            } else {
+                print("[SubscriptionManager] storefront=nil (no store account reachable)")
+            }
             products = try await Product.products(for: productIds)
             print("[SubscriptionManager] Loaded \(products.count) products: \(products.map { $0.id })")
             if products.isEmpty {
