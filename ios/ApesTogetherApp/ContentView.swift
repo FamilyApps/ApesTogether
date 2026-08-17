@@ -95,6 +95,16 @@ struct ContentView: View {
                 deepLinkManager.completeOnboarding()
             }
         }
+        .onChange(of: deepLinkManager.pendingPortfolioSlug) { newValue in
+            // Universal link tapped while ALREADY signed in — the
+            // auth-transition consumer above never fires in that case
+            // (isAuthenticated doesn't change), so consume the slug here.
+            // Without this, a signed-in user tapping a shared portfolio
+            // link just lands on the default tab.
+            guard newValue != nil, authManager.isAuthenticated,
+                  let pending = deepLinkManager.consumePendingSlug() else { return }
+            authManager.navigateToPortfolio(slug: pending.slug, period: pending.period)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .openPortfolio)) { notification in
             if let slug = notification.userInfo?["slug"] as? String {
                 let period = notification.userInfo?["period"] as? String
