@@ -178,6 +178,15 @@ struct MainTabView: View {
         .sheet(item: $deepLinkPortfolio) { link in
             NavigationView {
                 PortfolioDetailView(slug: link.slug, initialPeriod: link.period)
+                    // Deep-link sheets have no back button (the view is
+                    // normally PUSHED from the leaderboard) — without this
+                    // the user is stuck with only the swipe-down gesture.
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarLeading) {
+                            Button("Done") { deepLinkPortfolio = nil }
+                                .foregroundColor(.primaryAccent)
+                        }
+                    }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToPortfolio)) { notification in
