@@ -479,7 +479,11 @@ private fun SubscriptionCard(
                         color = if (subscription.status == "active") Gains else TextSecondary,
                     )
                     subscription.expiresAt?.let { exp ->
-                        val verb = if (subscription.status == "active") "Renews" else "Ended"
+                        // Canceled-but-still-running subs say "Ends", not
+                        // "Renews" — they won't renew (autoRenew == false).
+                        val verb = if (subscription.status == "active") {
+                            if (subscription.autoRenew == false) "Ends" else "Renews"
+                        } else "Ended"
                         Text(
                             text = "$verb ${formatShortDate(exp)}",
                             color = TextMuted,

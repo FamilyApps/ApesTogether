@@ -689,6 +689,9 @@ def get_subscriptions():
                     'portfolio_slug': owner.portfolio_slug
                 } if owner else None,
                 'status': sub.status,
+                # Display-only: False = user canceled but period still running
+                # ("Ends <date>"); None/True = renewing ("Renews <date>").
+                'auto_renew': sub.auto_renew,
                 'creator_deleted': creator_deleted,
                 'expires_at': sub.expires_at.isoformat() if sub.expires_at else None,
                 'push_notifications_enabled': sub.push_notifications_enabled,

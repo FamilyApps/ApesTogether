@@ -999,6 +999,13 @@ class MobileSubscription(db.Model):
     # Notification preferences
     push_notifications_enabled = db.Column(db.Boolean, default=True)
 
+    # Store auto-renew state (display only — `status` gates access). False
+    # after the user cancels but before the period ends, so clients can say
+    # "Ends <date>" instead of "Renews <date>". NULL = unknown (legacy rows,
+    # or no renewal-status notification yet) — clients treat as renewing.
+    # Migration: scripts/migrations/2026_08_16_auto_renew.sql
+    auto_renew = db.Column(db.Boolean, nullable=True)
+
     # ── Phase D: portfolio resizer ──────────────────────────────────────
     # When the subscriber sets a personal "investment size" for this
     # subscription, all three columns are populated together. NULL on any

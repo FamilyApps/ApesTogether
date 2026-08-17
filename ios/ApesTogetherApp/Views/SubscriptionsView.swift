@@ -533,7 +533,9 @@ struct SubscriptionCard: View {
                             color: subscription.status == "active" ? .gains : .textSecondary
                         )
                         if let expires = subscription.expiresAt {
-                            Text("\(subscription.status == "active" ? "Renews" : "Ended") \(formatDate(expires))")
+                            // Canceled-but-still-running subs say "Ends", not
+                            // "Renews" — they won't renew (autoRenew == false).
+                            Text("\(subscription.status == "active" ? (subscription.autoRenew == false ? "Ends" : "Renews") : "Ended") \(formatDate(expires))")
                                 .font(.system(size: 11))
                                 .foregroundColor(.textMuted)
                                 .lineLimit(1)
@@ -846,6 +848,7 @@ class SubscriptionsViewModel: ObservableObject {
                     id: updated.id,
                     portfolioOwner: updated.portfolioOwner,
                     status: updated.status,
+                    autoRenew: updated.autoRenew,
                     expiresAt: updated.expiresAt,
                     pushNotificationsEnabled: enabled,
                     slot: updated.slot,

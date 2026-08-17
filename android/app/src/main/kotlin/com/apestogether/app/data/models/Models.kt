@@ -275,6 +275,9 @@ data class SubscriptionMade(
     val id: Int,
     @SerialName("portfolio_owner") val portfolioOwner: PortfolioOwner? = null,
     val status: String,
+    // Display-only: false = canceled but the paid period is still running
+    // ("Ends <date>"); null/true = renewing ("Renews <date>").
+    @SerialName("auto_renew") val autoRenew: Boolean? = null,
     @SerialName("expires_at") val expiresAt: String? = null,
     @SerialName("push_notifications_enabled") val pushNotificationsEnabled: Boolean,
     // Per-creator store slot (1..N) + its letter label ("A".."T"). The store

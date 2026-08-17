@@ -308,6 +308,10 @@ struct SubscriptionMade: Codable, Identifiable {
     let id: Int
     let portfolioOwner: PortfolioOwner?
     let status: String
+    // Display-only: false = canceled but the paid period is still running
+    // ("Ends <date>"); nil/true = renewing ("Renews <date>"). Optional for
+    // legacy responses.
+    let autoRenew: Bool?
     let expiresAt: String?
     let pushNotificationsEnabled: Bool
     // Per-creator store slot (1..N) + its letter label ("A".."T"). The store

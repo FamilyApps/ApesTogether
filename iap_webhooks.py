@@ -53,7 +53,8 @@ APPLE_BUNDLE_ID = os.environ.get('APPLE_BUNDLE_ID', 'com.apestogether.ApesTogeth
 
 # Apple notificationType buckets. DID_CHANGE_RENEWAL_STATUS (auto-renew toggle)
 # is intentionally absent: turning auto-renew off does NOT revoke access until
-# the period actually EXPIRES, so we leave the status alone for it.
+# the period actually EXPIRES, so we leave the status alone for it — but we DO
+# persist its auto_renew flag so clients can show "Ends <date>" post-cancel.
 _APPLE_ACTIVE_TYPES = {'SUBSCRIBED', 'DID_RENEW', 'OFFER_REDEEMED', 'DID_CHANGE_RENEWAL_PREF',
                        'RENEWAL_EXTENDED', 'GRACE_PERIOD'}
 _APPLE_EXPIRED_TYPES = {'EXPIRED', 'GRACE_PERIOD_EXPIRED'}
@@ -130,7 +131,7 @@ def verify_apple_jws(signed_payload: str) -> dict:
 
 def _apply_update(db, platform: str, original_transaction_id: str = None,
                   purchase_token: str = None, new_status: str = None,
-                  expires_date: datetime = None) -> int:
+                  expires_date: datetime = None, auto_renew: bool = None) -> int:
     """Update existing InAppPurchase rows (+ their MobileSubscriptions) that
     match the store identifier. Returns the number of purchases updated.
 
@@ -165,6 +166,8 @@ def _apply_update(db, platform: str, original_transaction_id: str = None,
                 s.status = 'active' if new_status == 'active' else 'expired'
             if expires_date:
                 s.expires_at = expires_date
+            if auto_renew is not None:
+                s.auto_renew = auto_renew
         count += 1
 
     if count:
@@ -318,10 +321,20 @@ def handle_apple_notification(db, signed_payload: str) -> dict:
         new_status = 'active'
     # else (DID_CHANGE_RENEWAL_STATUS, PRICE_INCREASE, etc.): leave status as-is.
 
+    # Display-only auto-renew flag (never gates access): a cancel/re-enable
+    # arrives as DID_CHANGE_RENEWAL_STATUS; any active-bucket type implies
+    # renewals are on.
+    auto_renew = None
+    if notification_type == 'DID_CHANGE_RENEWAL_STATUS':
+        auto_renew = (subtype == 'AUTO_RENEW_ENABLED')
+    elif notification_type in _APPLE_ACTIVE_TYPES:
+        auto_renew = True
+
     updated = _apply_update(
         db, platform='apple',
         original_transaction_id=original_transaction_id,
         new_status=new_status, expires_date=expires_date,
+        auto_renew=auto_renew,
     )
 
     # If a refund/revoke landed and the period revenue was already posted to
@@ -332,7 +345,7 @@ def handle_apple_notification(db, signed_payload: str) -> dict:
 
     return {'type': notification_type, 'subtype': subtype,
             'original_transaction_id': original_transaction_id,
-            'status': new_status, 'updated': updated}
+            'status': new_status, 'auto_renew': auto_renew, 'updated': updated}
 
 
 # ---------------------------------------------------------------------------
@@ -404,7 +417,9 @@ def handle_google_rtdn(db, body: dict) -> dict:
             renewal_recorded = bool(created)
 
     updated = _apply_update(db, platform='google', purchase_token=token,
-                            new_status=new_status, expires_date=expires_date)
+                            new_status=new_status, expires_date=expires_date,
+                            auto_renew=(result.get('auto_renew_status')
+                                        if result.get('valid') else None))
     return {'type': notification_type, 'product_id': product_id,
             'status': new_status, 'renewal_recorded': renewal_recorded,
             'updated': updated}
