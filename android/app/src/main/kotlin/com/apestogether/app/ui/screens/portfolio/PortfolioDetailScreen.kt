@@ -102,6 +102,7 @@ import com.apestogether.app.ui.components.CompactPlanToggle
 import com.apestogether.app.ui.components.PerformanceChartCard
 import com.apestogether.app.ui.components.SubscribeStatusBanner
 import com.apestogether.app.ui.components.SubscribeUiState
+import com.apestogether.app.ui.components.SubscriptionTermsFootnote
 import com.apestogether.app.ui.components.findActivity
 import com.apestogether.app.ui.theme.AppBackground
 import com.apestogether.app.ui.theme.CardBackground
@@ -920,7 +921,9 @@ private fun SubscribeAndShareRow(
     // Trial copy only while Play confirms this account can still redeem
     // the 7-day intro offer (BillingService.trialEligible) — slots B+ and
     // trial-used accounts bill immediately, so the button must say so.
-    trialEligible: Boolean = true,
+    // Default FALSE: never promise a trial Play hasn't confirmed (8/18 Play
+    // rejection — see BillingService.trialEligible).
+    trialEligible: Boolean = false,
     // W7: hide the Subscribe button (Share-only) when the creator isn't
     // accepting new subscribers. The notice copy is rendered by the caller.
     showSubscribe: Boolean = true,
@@ -934,8 +937,9 @@ private fun SubscribeAndShareRow(
     val ctaText =
         if (trialEligible) "Try Free for 7 Days, then $priceText" else "Subscribe for $priceText"
 
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
     Row(
-        modifier = modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         if (showSubscribe) {
@@ -999,6 +1003,16 @@ private fun SubscribeAndShareRow(
             Spacer(Modifier.width(5.dp))
             Text("Share", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         }
+    }
+
+    // Play Subscriptions-policy disclosure — must sit with the offer itself
+    // (v11 production rejection 8/18/26).
+    if (showSubscribe) {
+        SubscriptionTermsFootnote(
+            trialEligible = trialEligible,
+            priceText = priceText,
+        )
+    }
     }
 }
 
@@ -1596,6 +1610,14 @@ private fun BlurredHoldingsTeaser(
                         Text(ctaText, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     }
                 }
+
+                // Play Subscriptions-policy disclosure — must sit with the
+                // offer itself (v11 production rejection 8/18/26).
+                SubscriptionTermsFootnote(
+                    trialEligible = trialEligible,
+                    priceText = priceText,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
 
                 // Legal links (Apple/Google both want these near the price).
                 Row(

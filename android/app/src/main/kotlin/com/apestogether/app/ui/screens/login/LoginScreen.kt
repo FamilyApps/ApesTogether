@@ -36,11 +36,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -165,13 +167,29 @@ fun LoginScreen(onSignedIn: () -> Unit) {
             }
         }
 
-        if (!error.isNullOrBlank()) {
+        // Cancellation is user-initiated — quiet inline note. Every OTHER
+        // failure gets a modal dialog: the Play v11 review (8/18/26) flagged
+        // this screen for "unresponsive UI elements" — on reviewer devices
+        // sign-in fails silently-ish (e.g. no Google account →
+        // NoCredentialException with no system UI) and small red text reads
+        // as a dead button. Failures must be impossible to miss.
+        val isCancellation = error == "Sign-in cancelled"
+        if (isCancellation) {
             Spacer(Modifier.height(16.dp))
             Text(
                 text = error.orEmpty(),
                 color = MaterialTheme.colorScheme.error,
                 fontSize = 13.sp,
                 textAlign = TextAlign.Center,
+            )
+        } else if (!error.isNullOrBlank()) {
+            AlertDialog(
+                onDismissRequest = { viewModel.clearError() },
+                confirmButton = {
+                    TextButton(onClick = { viewModel.clearError() }) { Text("OK") }
+                },
+                title = { Text("Sign-in failed") },
+                text = { Text(error.orEmpty()) },
             )
         }
 
@@ -221,4 +239,6 @@ class LoginViewModel @Inject constructor(
             if (result.isSuccess) _signedIn.value = true
         }
     }
+
+    fun clearError() = authRepository.clearError()
 }

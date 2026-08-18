@@ -108,20 +108,31 @@ class AuthRepository @Inject constructor(
             // build almost always means the APK's signing SHA-1 is not registered as an Android
             // OAuth client for com.apestogether.app in the Firebase/GCP project — Google's servers
             // reject the request before any account picker is shown.
+            // Dev-facing detail (e.g. unregistered signing SHA-1 — the usual
+            // NoCredentialException cause on fresh builds) goes to the LOG ONLY;
+            // users get an actionable, jargon-free message (Play v11 review
+            // 8/18/26 flagged the login page as "unresponsive" — failures must
+            // be loud and comprehensible).
             android.util.Log.e("AuthRepository", "Google sign-in failed: type=${e.type} msg=${e.message}", e)
             _error.value = when (e) {
                 is GetCredentialCancellationException -> "Sign-in cancelled"
                 is NoCredentialException ->
-                    "No Google credential available. If you have a Google account on this device, this build's signing SHA-1 is likely not registered for Google Sign-In (com.apestogether.app) in Firebase."
-                else -> "Sign-in failed (${e.type})"
+                    "Couldn't find a Google account to sign in with. Add a Google account to this device (Settings → Accounts) and try again."
+                else -> "Google sign-in didn't complete. Please check your connection and try again."
             }
             Result.failure(e)
         } catch (e: Exception) {
-            _error.value = e.message ?: "Sign-in failed"
+            android.util.Log.e("AuthRepository", "Sign-in failed post-credential", e)
+            _error.value = "Sign-in failed. Please check your connection and try again."
             Result.failure(e)
         } finally {
             _isLoading.value = false
         }
+    }
+
+    /** Clear the surfaced sign-in error (dialog dismissed). */
+    fun clearError() {
+        _error.value = null
     }
 
     suspend fun refreshUserData(): Result<User> {

@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.apestogether.app.data.billing.SubscriptionPlan
@@ -236,6 +237,39 @@ fun SubscribeStatusBanner(
         }
         SubscribeUiState.Idle, SubscribeUiState.Processing -> Unit
     }
+}
+
+/**
+ * Google Play Subscriptions-policy disclosure, rendered directly under every
+ * Subscribe CTA (v11 production rejection, 8/18/26: "Terms of trial offer or
+ * introductory pricing are unclear"). Google requires that the offer itself
+ * states when the trial ends, the post-trial price, and how to cancel — not
+ * just the payment cart. Keep this next to the CTA on ALL subscribe surfaces
+ * (leaderboard expanded card, portfolio subscribe row, blurred-holdings
+ * teaser). Apple 3.1.2 wants equivalent copy, so iOS mirrors this too.
+ */
+@Composable
+fun SubscriptionTermsFootnote(
+    trialEligible: Boolean,
+    priceText: String,
+    modifier: Modifier = Modifier,
+) {
+    val text = if (trialEligible) {
+        "7-day free trial, then $priceText. Auto-renews until canceled. " +
+            "Cancel anytime in Google Play \u2192 Subscriptions; cancel before the " +
+            "trial ends and you won't be charged."
+    } else {
+        "Auto-renews at $priceText until canceled. " +
+            "Cancel anytime in Google Play \u2192 Subscriptions."
+    }
+    Text(
+        text = text,
+        color = TextMuted,
+        fontSize = 10.sp,
+        lineHeight = 13.sp,
+        textAlign = TextAlign.Center,
+        modifier = modifier.fillMaxWidth(),
+    )
 }
 
 /** Walks the [Context] chain to find the host [Activity], or null if not on one. */

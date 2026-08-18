@@ -88,6 +88,7 @@ import com.apestogether.app.ui.components.CompactPlanToggle
 import com.apestogether.app.ui.components.SparklineView
 import com.apestogether.app.ui.components.SubscribeStatusBanner
 import com.apestogether.app.ui.components.SubscribeUiState
+import com.apestogether.app.ui.components.SubscriptionTermsFootnote
 import com.apestogether.app.ui.components.findActivity
 import com.apestogether.app.ui.theme.AppBackground
 import com.apestogether.app.ui.theme.CardBackground
@@ -951,6 +952,13 @@ private fun ExpandedDetail(
                         )
                     }
                 }
+
+                // Play Subscriptions-policy disclosure — must sit with the
+                // offer itself (v11 production rejection 8/18/26).
+                SubscriptionTermsFootnote(
+                    trialEligible = trialEligible,
+                    priceText = priceText,
+                )
 
                 SubscribeStatusBanner(
                     state = subscribeState,

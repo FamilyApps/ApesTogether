@@ -73,12 +73,17 @@ class BillingService @Inject constructor(
     /** Keyed by product ID — empty until [queryProducts] succeeds. */
     val productDetails: StateFlow<Map<String, ProductDetails>> = _productDetails.asStateFlow()
 
-    private val _trialEligible = MutableStateFlow(true)
+    private val _trialEligible = MutableStateFlow(false)
     /**
      * Whether THIS Google account can still redeem the 7-day free trial.
      * Drives the Subscribe CTA copy ("Try Free for 7 Days…" vs "Subscribe
-     * for…"). Defaults to true (the common case: a brand-new user) and is
-     * corrected by [queryProducts] once Play answers.
+     * for…"). Defaults to FALSE and flips true only after [queryProducts]
+     * confirms Play is actually offering the trial to this account — the
+     * UI must never promise a free trial the purchase cart can't show
+     * (Play Subscriptions-policy rejection, v11 production review 8/18:
+     * reviewer's billing env failed with ITEM_UNAVAILABLE, the old
+     * default-true left "Try Free for 7 Days" on the CTA with no cart
+     * behind it — flagged as unclear/misleading trial terms).
      *
      * Why checking the Slot-A pair is sufficient: Play pre-filters
      * `subscriptionOfferDetails` to offers the CURRENT account is eligible
