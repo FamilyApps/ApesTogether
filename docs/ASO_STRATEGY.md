@@ -367,9 +367,21 @@ ApesTogether is informational and educational. ApesTogether and the
 creators on the ApesTogether platform are not investment advisers and do
 not provide investment advice. Past performance does not guarantee future
 results. All trades on the platform are virtual using real market data.
+
+Terms of Use: https://apestogether.ai/terms-of-service
+Privacy Policy: https://apestogether.ai/privacy-policy
 ```
 
-Char count: ~2,700. Last paragraph is the **Apple 5.2.1 / state-securities
+Char count: ~2,800. The closing **Terms of Use / Privacy Policy link block is
+APPLE-REQUIRED, DO NOT DROP** — added 8/18/26 after an automated App Review
+rejection of the 1.0 submission: *"offers auto-renewable subscriptions but
+does not include a functional link to the Terms of Use (EULA) in the app's
+metadata"* (Guideline 3.1.2 / Schedule 2). Apps with auto-renewable subs must
+link the ToU in the App Description (or upload a custom EULA in ASC — we use
+the description-link route with the attorney ToS). Must be present in EVERY
+localization's description (en-US + es-MX). Harmless on Play; optional there.
+
+Last paragraph before the links is the **Apple 5.2.1 / state-securities
 required disclaimer** per `LAUNCH_PLAYBOOK.md:243` — do not drop it. Reworked
 (Session 23) to frame the product as a **best-AI-models vs best-humans**
 competition throughout (opening, HOW IT WORKS, leaderboard, trader benefits),
