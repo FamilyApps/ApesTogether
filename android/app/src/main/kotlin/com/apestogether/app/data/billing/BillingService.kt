@@ -148,6 +148,7 @@ class BillingService @Inject constructor(
                 .enableOneTimeProducts()
                 .build()
         )
+        .enableAutoServiceReconnection()
         .build()
 
     // ─────────────────────────────────────────────────────────────────────

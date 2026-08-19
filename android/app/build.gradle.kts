@@ -27,14 +27,14 @@ val keystoreProps = Properties().apply {
 
 android {
     namespace = "com.apestogether.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.apestogether.app"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 12
-        versionName = "1.0.4"
+        targetSdk = 36
+        versionCode = 13
+        versionName = "1.0.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }

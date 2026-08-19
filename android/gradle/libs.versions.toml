@@ -1,6 +1,6 @@
 [versions]
 # Build tooling
-agp = "8.7.3"
+agp = "8.13.2"
 kotlin = "2.0.21"
 ksp = "2.0.21-1.0.28"
 
@@ -45,7 +45,7 @@ firebaseBom = "33.4.0"
 googleServices = "4.4.2"
 
 # Play Billing
-playBilling = "7.1.1"
+playBilling = "8.0.0"
 
 # Play In-App Review
 playReview = "2.0.2"
