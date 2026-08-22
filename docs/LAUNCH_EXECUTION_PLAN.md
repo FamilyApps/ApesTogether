@@ -275,29 +275,31 @@ launch week. Decide when the date is picked._
 
 ---
 
-# DAY-BY-DAY — next two weeks (start 2026-07-23)
+# DAY-BY-DAY — from publish day (rewritten 2026-08-21; supersedes the 7/23 calendar)
 
-_Assumes Play verdict lands within ~a week; slide the dependent rows if
-it doesn't. ENG = engineering box from LAUNCH_TODO; MKT = this plan._
+_State at rewrite: Android v13 APPROVED, awaiting USER's Publish click
+(managed publishing). iOS Build 50 resubmitted 8/21 after the 2.1a
+server-side fix. `/get-app` CTA redirect deployed. ENG = LAUNCH_TODO;
+MKT = this plan; SECTOR = MARKETING_PLAN §Unified Sector-Supply Plan._
 
 | Day | Items |
 |---|---|
-| **Wed 7/23** | ENG: Play Billing E2E on Pixel (LAUNCH_TODO steps 1–2: monthly-with-trial, annual-slot-B-no-trial, backend rows, cancel) · ENG: sideload debug build — verify founder pill, CTA flip, NEW review prompt on 3rd trade · MKT: review Cascade's 7 gap plans (chat) + approve/reject. |
-| **Thu 7/24** | MKT §0.1: register ALL social handles (one sitting, ~2h) · ENG: create `reviewer@apestogether.ai` demo account (§0.3.1). |
-| **Fri 7/25** | ENG §0.3: ASC checks (Slot-A intro offer, resizer on SE sim) → **submit Build 47 for App Store review** · ENG: test `notifications@` deliverability (headers check). |
-| **Sat 7/26** | MKT: fill `TRADER_RECRUITMENT.md` tracker — 25 named candidates (USER browses with Cascade's sourcing queries; ~90 min). |
-| **Sun 7/27** | Rest. Optional: first founder X post (intro thread #X-01, revised version). |
-| **Mon 7/28** | MKT: founder cadence starts — X post #1 · ENG: Play verdict watch (daily from here). Attorney answered? → send §5.2(a) before/after. |
-| **Tue 7/29** | MKT: 3 trader DMs (start of daily rhythm) · ENG: if verdict in → §1.1 promote v6 (staged 20%). |
-| **Wed 7/30** | MKT: X post #2 + 3 DMs · ENG: v7 AAB build → Internal smoke (needs v6 promoted first). |
-| **Thu 7/31** | MKT: TikTok #1 (+ IG/YT cross-post) + 3 DMs · ENG: v6 rollout 20%→100% if vitals clean; v7 → Production. |
-| **Fri 8/1** | MKT: X post #3 + 3 DMs + weekly metrics note in LAUNCH_TODO · ENG: waitlist email #1 send (§1.2) once both stores live. |
-| **Sat–Sun 8/2–3** | Light: reply to everything; plan week's 3 posts. |
-| **Week of 8/4** | Phase 1 rhythm (3 posts + 5×3 DMs + Friday metrics) · ENG: **v8 compliance build session** (targetSdk 36 + Billing 8 — book a full day; deadline 8/31) · Apple verdict watch → iOS live quietly. |
-| **Week of 8/11** | Phase 1 rhythm · first #E-TESTIMONIAL sends (day-14 users) · v8 to Internal → Production. |
+| **Fri 8/22** | ENG: verify SIWA on TestFlight (post-`db_retry`-deploy sanity) · **click "Publish 2 changes" in Play Console — quiet availability begins** · install from the real listing on the Pixel → sign-in + `adb shell pm get-app-links com.apestogether.app` (App Links autoVerify, ENG §0.6) · **day-1 real-card money test**: self-subscribe to a HUMAN creator, verify payout accrual row · pull bot sector distribution from admin dashboard → fill the SECTOR table. |
+| **Sat 8/23** | MKT §0.1: register ALL social handles (one sitting, ~2h) → tell Cascade to restore the footer "Follow Us" links · optional: browse Cascade's sourcing queries and start filling `TRADER_RECRUITMENT.md` tracker. |
+| **Sun 8/24** | Rest. Optional: first founder X post (#X-01 pinned thread, re-anchored "live now" version). |
+| **Mon 8/25** | ENG (Cascade): bot top-up batch per the SECTOR table gaps · MKT: fill tracker to 25 named trader candidates (~90 min) · iOS verdict watch (daily from here). |
+| **Tue 8/26** | MKT: founder cadence starts — X post #1 + first 3 trader DMs (daily rhythm) · ENG: `notifications@` deliverability diagnosis (blocks waitlist email #1). |
+| **Wed 8/27** | MKT: 3 DMs · ENG (Cascade): OG previews Tier 1+2 (`/og/<slug>.png`) — the share-link preview IS the ad. |
+| **Thu 8/28** | MKT: TikTok #1 (+ IG/YT cross-post) + 3 DMs · ENG: if iOS approved → release Build 50, set `IOS_APP_STORE_ID` on Vercel (flips `/get-app` iOS routing), add Smart App Banner meta. |
+| **Fri 8/29** | MKT: X post #2 + 3 DMs + first weekly metrics note in LAUNCH_TODO (installs/signups/subs/traders + bots-vs-humans ratio) · ENG: waitlist email #1 (§1.2) once BOTH stores live + deliverability verified. |
+| **Sat–Sun 8/30–31** | Light: reply to everything; plan week's 3 posts. NOTE: v13 already satisfied the Aug-31 targetSdk-36/Billing-8 deadline — nothing due. |
+| **Week of 9/1** | Phase 1 rhythm (3 X + 1 TikTok + 5×3 DMs + Friday metrics) · ENG: remaining money E2E (Xero bill gen, W-9 hold/release, Android cancel-path) · Build 51 scope: terms footnote parity + referral surfaces. |
+| **Week of 9/8** | Phase 1 rhythm · first #E-TESTIMONIAL sends (day-14 users) · human-arrival bot triggers per SECTOR rules as traders commit. |
 
-Then: Phase 1 rhythm until its exit criteria, Phase 2 gates review every
-Friday, and the Phase 3 date gets picked only when §2.1 is all green.
+Then: Phase 1 rhythm until its exit criteria (≥10 committed traders),
+Phase 2 gates review every Friday, and the Phase 3 date gets picked only
+when §2.1 is all green. Phase-duration targets below still govern — the
+Nov 10–19 ideal launch window holds if Phase 1 exits by ~early October.
 
 ---
 

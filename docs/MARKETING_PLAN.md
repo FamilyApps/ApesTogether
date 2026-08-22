@@ -337,3 +337,72 @@ Compliance guardrails (playbook §11) · messaging rules (§2) · no-paid-
 reviews / no-fabrication bright lines · open-access verdict · Founding
 Trader rules · content library + outreach templates (re-dated) · WSJ-
 exclusive-first press strategy · $2-bill stunt (parked for Phase 3 week).
+
+---
+
+# Unified Sector-Supply Plan — bots + human creators (Session 42, 2026-08-21)
+
+The leaderboard is the storefront; this section governs what stocks it.
+Principle: **supply follows demand, bots follow humans.** Bots are
+scaffolding — they make the board look alive and give every human creator
+a race to run in; humans are the product. All bot creation goes through
+the admin panel batch tools (`generate_bot_batch` honors per-sector
+`industry=`); sector vocabulary = `bot_personas.INDUSTRY_WEIGHTS` (9
+industries: Tech 20 / Finance 14 / Consumer 14 / Healthcare 12 / Energy 10 /
+ETF 10 / Industrial 8 / Real Estate 8 / General 4).
+
+## Current state (~12 live bots)
+
+Pull the ACTUAL sector distribution from the admin bot dashboard before
+any top-up (LAUNCH_TODO next-session list has this as a USER step) and
+record it here:
+
+| Sector | Live bots (fill in) | Phase-1 target | Notes |
+|---|---|---|---|
+| Technology | ? | 3–4 | Highest retail attention; AI names are the content hook |
+| Consumer | ? | 2–3 | Meme-adjacent tickers; r/wsb audience overlap |
+| ETF | ? | 2 | The "boring benchmark" bots humans love to beat |
+| Finance | ? | 2 | |
+| Healthcare | ? | 2 | Biotech catalysts post-Layer-A/B signals |
+| Energy | ? | 1–2 | Wave-3 human-recruitment sector — keep a bot to race |
+| Industrial | ? | 1 | |
+| Real Estate | ? | 1 | Rates signals landed (Layer A) — bot is now credible |
+| General | ? | 0–1 | |
+| **Total** | **~12** | **~18–20** | Top-up once, at Phase-1 start |
+
+## Standing rules
+
+1. **Baseline top-up (once, at quiet launch):** bring every major sector
+   to the Phase-1 target above (~18–20 total). No further calendar-driven
+   bot creation.
+2. **Human-arrival trigger:** when a human creator joins a sector with <2
+   bots, spin up 2 same-sector bots within a week — every human gets
+   peers to beat. The DM hook writes itself ("our Energy AI is up X% —
+   think you can beat it?").
+3. **Demand trigger:** if portfolio-view analytics show a sector drawing
+   views with no supply, add 1–2 bots there.
+4. **Ceiling:** bots ≤ 2× human creators once ≥5 humans exist. A board
+   that is mostly house pills reads as a ghost town to exactly the
+   audience we court. Pause bot creation, never cull (track records are
+   the moat — deleting one destroys real history).
+5. **AI-vs-human framing:** every bot carries the house pill (already
+   shipped) and bots NEVER outnumber the front-page narrative — content
+   always leads with the AI-vs-human standings, where humans beating bots
+   is the story we want told.
+
+## Human recruitment waves (sector-sequenced)
+
+- **Wave 1 (Phase 1, weeks 1–4): generalists + Tech/momentum.** Biggest
+  finfluencer supply (X/StockTwits swing traders). Source + DM templates:
+  `TRADER_RECRUITMENT.md`. Founding Trader badge (100 cap) is the offer.
+- **Wave 2 (Phase 2): dividend/value + options-adjacent swing traders.**
+  r/dividends and fintwit value crowd — calm counterweight cohort; their
+  audiences skew subscriber (demand side), not just creator.
+- **Wave 3 (post-spike): sector specialists.** Energy/uranium X niche,
+  biotech catalyst traders, REIT/rates accounts — recruited AGAINST the
+  same-sector bot's public record (rule 2's race framing).
+
+Cross-refs: recruitment mechanics + tracker `TRADER_RECRUITMENT.md` ·
+phase gates §Trigger-Based Sequencing above · bot tooling
+`bot_personas.py`/`bot_agent.py` · weekly KPI check includes
+bots-vs-humans ratio (rule 4).

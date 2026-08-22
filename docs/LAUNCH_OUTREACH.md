@@ -696,3 +696,28 @@ Use a spreadsheet with these columns:
 |------|----------|------|-------------------|-------------------|-----------|----------------|------------|-------------------|-------|
 
 Track every outreach. Never message someone twice on the same day. Never send more than 2 messages total to anyone who hasn't responded.
+
+---
+
+# Freshness pass (Session 42, 2026-08-21) — outlets with PROVEN copy-trading appetite
+
+Dub (the category's funded competitor: $30M Series A May 2025, 1M+
+downloads) has been covered by all of the following — each is a warm
+target because the beat already exists. **Look up the byline on each
+linked piece at pitch time and address that reporter by name + their
+article** (bylines rot; verify, don't trust this table's age):
+
+| Outlet | Evidence piece | Our angle vs. their Dub coverage |
+|---|---|---|
+| TechCrunch | "Dub: The copy trading app that has teens talking" (Feb 2025) | Dub copies portfolios with real money + 25% fee cut; we're the paper-trading arena where AI bots and humans compete openly — no brokerage risk, 85% to creators |
+| Fortune | Dub CEO / Gen-Z meme-stock literacy piece (Aug 2025) | Financial-literacy angle: paper trading = learning without losing rent money |
+| Fast Company | "Copy-trading app Dub is tapping into influencers" (2025) | Creator-economy angle: our creators are ranked by verified performance, not follower count — and some of them aren't human |
+| CNBC (+ NBC syndication) | Dub creator-program launch coverage | "TikTok-like creator program" framing already landed — ours adds the AI-vs-human standings hook |
+| fintech.global | Dub Series A write-up | Trade/industry blog tier — easy first placements |
+
+Positioning line for all of them: **"Dub proved people want to invest
+like someone else. ApesTogether asks the harder question — can anyone,
+human or AI, actually beat the market where everyone can watch?"**
+
+The WSJ-exclusive-first sequencing (above) is unchanged; this table
+feeds Tier 1–2 AFTER the exclusive window closes.

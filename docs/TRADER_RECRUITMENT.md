@@ -127,3 +127,30 @@ A trader who gets this treatment tells their Discord about it.
 **Status codes:** `DM'd` → `replied` → `installed` → `traded` (✅ counts
 toward the 25) → `dead` (after follow-up silence). Weekly Friday review
 alongside the metrics note.
+
+---
+
+# Session 42 additions (2026-08-21)
+
+## Sector sequencing
+
+Recruitment now follows MARKETING_PLAN §"Unified Sector-Supply Plan":
+Wave 1 = generalists + Tech/momentum (weeks 1–4) · Wave 2 = dividend/value
++ options-adjacent (Phase 2) · Wave 3 = sector specialists recruited
+AGAINST the same-sector bot's record ("our Energy AI is up X% — beat it").
+Tag each tracker row with the wave.
+
+## Starter named candidates (VERIFY before DM — activity, size 2k–50k, no
+pump-and-dump smell; sourced via web search 8/21, freshness not guaranteed)
+
+| Handle | Platform | Profile notes | Wave |
+|---|---|---|---|
+| @SwingThat (Harrison) | StockTwits | Swing trader, ~10.8k followers, posts calls publicly | 1 |
+| @MadMaverick (The Swing Scout) | StockTwits | Day/swing watchlists, sells $7/wk picks — already monetizing, slots pitch = upgrade | 1 |
+| @SwingtheBull (Andrew) | StockTwits | ~2.1k followers, penny/crypto lean — screen for quality | 1 |
+
+These three are seeds from one search pass — the 25-row tracker still
+fills from the sourcing queries above (USER browsing required: follower
+counts, recency, and vibe can't be judged reliably by search). Rule
+reminder: the pitch is the Founding Trader badge + 85%-of-net slots —
+NEVER pay for posts without disclosure, NEVER pay for reviews.
