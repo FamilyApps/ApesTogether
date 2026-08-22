@@ -1954,6 +1954,23 @@ def index():
         waitlist_count = 0
     return render_template('landing.html', waitlist_count=waitlist_count)
 
+@app.route('/get-app')
+def get_app():
+    """UA-aware store redirect — the single target for every 'Get the App' CTA.
+
+    Android -> Play listing (live). iOS -> App Store listing once
+    IOS_APP_STORE_ID is set on Vercel (Apple assigns the ID at first
+    approval); until then iOS falls through to the landing page, same as
+    desktop. Adding the env var flips iOS routing with no deploy.
+    """
+    ua = (request.headers.get('User-Agent') or '').lower()
+    if 'android' in ua:
+        return redirect('https://play.google.com/store/apps/details?id=com.apestogether.app')
+    ios_app_id = os.environ.get('IOS_APP_STORE_ID', '').strip()
+    if ios_app_id and any(k in ua for k in ('iphone', 'ipad', 'ipod')):
+        return redirect(f'https://apps.apple.com/us/app/id{ios_app_id}')
+    return redirect('/')
+
 @app.route('/compare')
 def compare():
     """GEO/SEO comparison page: ApesTogether vs Dub vs eToro"""

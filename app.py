@@ -139,6 +139,17 @@ def index():
 def register():
     return render_template('register.html')
 
+@app.route('/get-app')
+def get_app():
+    # UA-aware store redirect — mirrors the production route in api/index.py.
+    ua = (request.headers.get('User-Agent') or '').lower()
+    if 'android' in ua:
+        return redirect('https://play.google.com/store/apps/details?id=com.apestogether.app')
+    ios_app_id = os.environ.get('IOS_APP_STORE_ID', '').strip()
+    if ios_app_id and any(k in ua for k in ('iphone', 'ipad', 'ipod')):
+        return redirect(f'https://apps.apple.com/us/app/id{ios_app_id}')
+    return redirect('/')
+
 @app.route('/compare')
 def compare():
     # GEO/SEO comparison page — mirrors the production route in api/index.py.

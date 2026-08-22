@@ -298,7 +298,7 @@
         <!-- The web page is a read-only preview: accounts, subscriptions, and
              trading all live in the mobile apps (Apple/Google sign-in only).
              No links to the legacy web login/register — walled off. -->
-        <a href="/" class="btn-ghost" style="border-color:var(--accent);color:var(--accent);">Get the App</a>
+        <a href="/get-app" class="btn-ghost" style="border-color:var(--accent);color:var(--accent);">Get the App</a>
     </div>
 </div>
 
@@ -530,10 +530,11 @@
         <div class="cta-banner">
             <h3>Track Your Own Portfolio</h3>
             <p>Join ApesTogether to compete on leaderboards and share your performance.</p>
-            <!-- Both CTAs go to the app landing page — the legacy web
-                 register + leaderboard pages are walled off. -->
+            <!-- CTAs go through /get-app (UA-aware store redirect: Android →
+                 Play, iOS → App Store once IOS_APP_STORE_ID is set, else
+                 landing). Legacy web register/leaderboard stay walled off. -->
             <div class="btn-row">
-                <a href="/" class="btn-accent primary" style="padding:12px 24px;border-radius:12px;text-decoration:none;">
+                <a href="/get-app" class="btn-accent primary" style="padding:12px 24px;border-radius:12px;text-decoration:none;">
                     <i class="fas fa-rocket"></i> Get the App
                 </a>
             </div>
@@ -573,7 +574,7 @@
             <button id="appModalOpen" class="btn-pay" style="display:none;margin-bottom:10px;" onclick="openInApp()">
                 <i class="fas fa-mobile-screen"></i> Open in the App
             </button>
-            <a href="/" class="btn-pay" style="text-decoration:none;">
+            <a href="/get-app" class="btn-pay" style="text-decoration:none;">
                 <i class="fas fa-rocket"></i> Get the App
             </a>
         </div>
