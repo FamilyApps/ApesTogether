@@ -3344,45 +3344,58 @@ def get_auth_token():
         if not oauth_id:
             return jsonify({'error': 'oauth_id_not_found'}), 400
         
-        # Find or create user
-        user = User.query.filter_by(oauth_provider=provider, oauth_id=oauth_id).first()
-        
-        if not user and email:
-            # Check if user exists with this email
-            user = User.query.filter_by(email=email).first()
-            if user:
-                # Link OAuth to existing account
-                user.oauth_provider = provider
-                user.oauth_id = oauth_id
+        # Find or create user. ALL DB touches live in one closure run through
+        # db_retry: this endpoint was the only sign-in-critical one without
+        # retry protection, and a stale serverless connection here 500'd on
+        # the App Review device -> "loaded indefinitely" -> iOS rejection
+        # 8/21/26 (Guideline 2.1a). Re-running the whole block after a
+        # connection reset is safe: a retry after a successful commit just
+        # finds the user on the lookup instead of re-creating it.
+        def _find_or_create_user():
+            user = User.query.filter_by(oauth_provider=provider, oauth_id=oauth_id).first()
+
+            if not user and email:
+                # Check if user exists with this email
+                user = User.query.filter_by(email=email).first()
+                if user:
+                    # Link OAuth to existing account
+                    user.oauth_provider = provider
+                    user.oauth_id = oauth_id
+                    db.session.commit()
+
+            if not user:
+                # Create new user
+                if not email:
+                    return None  # caller maps to email_required_for_new_user
+
+                username = email.split('@')[0]
+                # Ensure unique username
+                base_username = username
+                counter = 1
+                while User.query.filter_by(username=username).first():
+                    username = f"{base_username}{counter}"
+                    counter += 1
+
+                user = User(
+                    email=email,
+                    username=username,
+                    oauth_provider=provider,
+                    oauth_id=oauth_id,
+                    portfolio_slug=_generate_portfolio_slug()
+                )
+                db.session.add(user)
                 db.session.commit()
-        
-        if not user:
-            # Create new user
-            if not email:
-                return jsonify({'error': 'email_required_for_new_user'}), 400
-            
-            username = email.split('@')[0]
-            # Ensure unique username
-            base_username = username
-            counter = 1
-            while User.query.filter_by(username=username).first():
-                username = f"{base_username}{counter}"
-                counter += 1
-            
-            user = User(
-                email=email,
-                username=username,
-                oauth_provider=provider,
-                oauth_id=oauth_id,
-                portfolio_slug=_generate_portfolio_slug()
-            )
-            db.session.add(user)
-            db.session.commit()
-        
-        # Generate slug for existing users who don't have one
-        if not user.portfolio_slug:
-            user.portfolio_slug = _generate_portfolio_slug()
-            db.session.commit()
+
+            # Generate slug for existing users who don't have one
+            if not user.portfolio_slug:
+                user.portfolio_slug = _generate_portfolio_slug()
+                db.session.commit()
+
+            return user
+
+        user = db_retry(_find_or_create_user)
+        if user is None:
+            return jsonify({'error': 'email_required_for_new_user'}), 400
         
         # A soft-deleted account cannot authenticate. We do NOT auto-restore it
         # (that would mask a malicious deletion); the user must contact support.
@@ -3422,19 +3435,28 @@ def get_current_user():
     from models import db, User, Stock
     
     try:
-        user = User.query.get(g.user_id)
+        # Retried as one unit for the same reason as get_auth_token above:
+        # this runs on every app launch (refreshUserData), so a stale
+        # connection here strands a signed-in user on a dead screen.
+        def _load_user_and_stocks():
+            user = User.query.get(g.user_id)
+            if not user:
+                return None, 0
+
+            # Generate slug if missing
+            if not user.portfolio_slug:
+                user.portfolio_slug = _generate_portfolio_slug()
+                db.session.commit()
+
+            # num_stocks lets clients tell "creator" users (who have added their
+            # own holdings) from pure-subscriber users. Used by the post-subscribe
+            # nudge to skip the "Add Your Stocks" pitch for users who already have.
+            num_stocks = Stock.query.filter_by(user_id=user.id).count()
+            return user, num_stocks
+
+        user, num_stocks = db_retry(_load_user_and_stocks)
         if not user:
             return jsonify({'error': 'user_not_found'}), 404
-        
-        # Generate slug if missing
-        if not user.portfolio_slug:
-            user.portfolio_slug = _generate_portfolio_slug()
-            db.session.commit()
-        
-        # num_stocks lets clients tell "creator" users (who have added their
-        # own holdings) from pure-subscriber users. Used by the post-subscribe
-        # nudge to skip the "Add Your Stocks" pitch for users who already have.
-        num_stocks = Stock.query.filter_by(user_id=user.id).count()
         
         return jsonify({
             'id': user.id,
