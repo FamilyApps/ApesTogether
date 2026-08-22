@@ -351,24 +351,31 @@ the admin panel batch tools (`generate_bot_batch` honors per-sector
 industries: Tech 20 / Finance 14 / Consumer 14 / Healthcare 12 / Energy 10 /
 ETF 10 / Industrial 8 / Real Estate 8 / General 4).
 
-## Current state (~12 live bots)
+## Current state — ACTUALS recorded 2026-08-21 (USER admin-panel pull)
 
-Pull the ACTUAL sector distribution from the admin bot dashboard before
-any top-up (LAUNCH_TODO next-session list has this as a USER step) and
-record it here:
+12 live bots = 10 strategy bots + 2 copytrade bots (CoastHillBear
+"Diversified" + marblethehill72 Technology — the "—"-strategy pair the
+drift checks skip):
 
-| Sector | Live bots (fill in) | Phase-1 target | Notes |
-|---|---|---|---|
-| Technology | ? | 3–4 | Highest retail attention; AI names are the content hook |
-| Consumer | ? | 2–3 | Meme-adjacent tickers; r/wsb audience overlap |
-| ETF | ? | 2 | The "boring benchmark" bots humans love to beat |
-| Finance | ? | 2 | |
-| Healthcare | ? | 2 | Biotech catalysts post-Layer-A/B signals |
-| Energy | ? | 1–2 | Wave-3 human-recruitment sector — keep a bot to race |
-| Industrial | ? | 1 | |
-| Real Estate | ? | 1 | Rates signals landed (Layer A) — bot is now credible |
-| General | ? | 0–1 | |
-| **Total** | **~12** | **~18–20** | Top-up once, at Phase-1 start |
+| Sector | Live bots | Phase-1 target | Gap | Who |
+|---|---|---|---|---|
+| Technology | 4 (3 strategy + 1 copytrade) | 3–4 | ✓ full | fund.finance2024 (social_momentum), zen1889 (sector_rotation), chart1658 (value), marblethehill72 (copytrade) |
+| Consumer | **0** | 2–3 | **+2–3 ⚠ priority** | — (meme-adjacent sector EMPTY; r/wsb audience overlap) |
+| ETF | **0** | 2 | **+2 ⚠ priority** | — (the "boring benchmark" bots humans love to beat) |
+| Finance | 1 | 2 | +1 | moon-cash2021 (earnings) |
+| Healthcare | 3 | 2 | ✓ over — no action | candle3873 (balanced), divi51 (insider_follower), panther3765 (news_reactor) |
+| Energy | 1 | 1–2 | +1 optional | panther2585 (dividend_growth) |
+| Industrial | **0** | 1 | +1 | — |
+| Real Estate | 1 | 1 | ✓ | panther59wizard (swing) |
+| General | 1 | 0–1 | ✓ | apex1575 (momentum) |
+| Diversified (copytrade) | 1 | n/a | — | CoastHillBear |
+| **Total** | **12** | **18–20** | **+6–8** | |
+
+**TOP-UP BATCH SPEC (execute Mon 8/25 per the day-by-day):** 3 Consumer +
+2 ETF + 1 Finance + 1 Industrial (+1 Energy if going to 20). Vary
+strategy archetypes within each sector batch (momentum/value/swing mix —
+`generate_bot_batch(count, industry=...)` already diversifies unless
+`strategy=` is pinned). No Healthcare, Tech, or General additions.
 
 ## Standing rules
 

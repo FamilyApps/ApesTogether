@@ -154,3 +154,69 @@ fills from the sourcing queries above (USER browsing required: follower
 counts, recency, and vibe can't be judged reliably by search). Rule
 reminder: the pitch is the Founding Trader badge + 85%-of-net slots —
 NEVER pay for posts without disclosure, NEVER pay for reviews.
+
+---
+
+# THE 30-MINUTE CANDIDATE HUNT — foolproof protocol (Session 42b)
+
+Run this as a timed session. Goal: **5 tracker rows per 30 minutes.**
+Stop at 30 minutes even mid-scroll — consistency beats marathon sessions.
+The core insight: you're looking for people who ALREADY post their trades
+publicly for free. They're doing the creator job with no pay. We offer
+them money (85% of net) + a verified track record. Easiest sell in the app.
+
+## Route A — X (15 min)
+
+1. Go to `x.com/explore`, click the search bar, paste ONE of these
+   verbatim (rotate per session), press Enter, then click the **Latest** tab:
+   - `("entry" OR "stop loss" OR "trimmed" OR "added to") ($NVDA OR $TSLA OR $PLTR OR $SMCI) min_faves:10`
+   - `"swing trade" ("PT hit" OR "took profits" OR "stopped out") min_faves:10`
+   - `"my portfolio" ("YTD" OR "this month") ($SPY OR stocks) min_faves:25`
+   - Wave-3 sector variants: swap the tickers — Energy `($XOM OR $OXY OR $CCJ OR $FSLR)` · Biotech `($XBI OR "FDA" OR "PDUFA")` · Dividends `("dividend" OR $SCHD OR $JEPI)`
+2. Scroll. When a post shows a SPECIFIC trade (ticker + entry/exit/result),
+   click the author's profile and run the 60-second checklist below.
+
+## Route B — StockTwits (10 min)
+
+1. Go to `stocktwits.com` → Trending (top nav) → open any trending
+   ticker's stream.
+2. Scan for posts with specific entries/exits (not just "🚀🚀"), click
+   author → same checklist. Their follower count is on the profile.
+
+## Route C — Reddit (5 min, secondary)
+
+`r/swingtrading`, `r/stocks`, `r/Dividends` → sort **Top → This Week** →
+open position-update / DD posts → click the poster's history: do they
+post trades regularly? DM via Reddit chat (mention their specific post).
+
+## The 60-second checklist — ALL gates + ≥2 bonuses = tracker row
+
+**GATES (every one must pass):**
+- [ ] Followers: 1k–50k on X · 500–25k on StockTwits (big enough to
+      bring an audience, small enough to answer a DM)
+- [ ] Posted a SPECIFIC trade (ticker + entry/exit/size/%) in the last 7 days
+- [ ] Trades US stocks/ETFs (crypto-only, options-only, forex = skip;
+      the app is stock-only)
+- [ ] Posts LOSSES too (scroll 2 weeks — any red? all-green = fake)
+- [ ] Account age > 6 months
+
+**INSTANT DISQUALIFIERS (any one = close tab):**
+- "Guaranteed"/"can't lose"/"get rich" language
+- Sub-$1 low-float pumps with rocket-emoji spam
+- "DM me for signals" / WhatsApp/Telegram funnel links (scam pattern)
+- Majority-affiliate-link content
+
+**BONUSES (need ≥2):**
+- Already monetizing (Discord/Patreon/paid watchlist) — understands
+  paying subscribers; our slots are a new revenue line, not a weird ask
+- Posts brokerage P/L screenshots — verifiable-track-record instinct
+  IS our pitch ("stop screenshotting, get it verified")
+- Replies to their commenters (replies to comments → will reply to DMs)
+- Clear sector identity ("I only trade energy") → tag Wave 3
+
+## Close the loop
+
+For each pass: add a tracker row (handle · platform · followers · sector
+· wave · date). Next day: send DM template (top of this doc) — max 3/day,
+personalize the first line with their most recent specific trade. Log
+status per the status codes. Friday: review alongside the metrics note.
