@@ -413,3 +413,69 @@ Cross-refs: recruitment mechanics + tracker `TRADER_RECRUITMENT.md` ·
 phase gates §Trigger-Based Sequencing above · bot tooling
 `bot_personas.py`/`bot_agent.py` · weekly KPI check includes
 bots-vs-humans ratio (rule 4).
+
+---
+
+# Premium social memberships — VERDICT (researched Session 42b, 2026-08-21)
+
+_Question: which paid platform subscriptions are worth it for OUR strategy
+(founder-led X cadence + trader DM outreach + TikTok/IG video + press)?
+Researched against 2026 pricing/limits + third-party reach data._
+
+## BUY NOW (before cadence starts Tue 8/26)
+
+- **X Premium, $8/mo, on the FOUNDER'S account (the one posting + DMing).**
+  This is the one clear buy — X is our primary channel and every leg of
+  the strategy runs through it:
+  - **DM throughput (the trader hunt):** measured safe send rate is
+    ~30 DMs/day verified vs **~7/day unverified** before the spam
+    classifier throttles. Our 3-DMs/day plan is safe either way, but
+    unverified leaves zero headroom for replies (replies COUNT against
+    the cap) and DM-heavy weeks.
+  - **Cold-DM credibility:** checkmark = "real business" signal on
+    exactly the message type we're sending (stranger outreach with a
+    money pitch). Marginal but it's the margin that matters.
+  - **Reach:** X's published ranking code gives paid accounts ~4×
+    in-network / ~2× out-of-network boosts; Buffer's 18.8M-post analysis
+    (71k accounts) measured ~10× median reach vs free — median FREE
+    account engagement is now literally 0. Founder cadence without
+    Premium is posting into a void.
+  - Unverified posting caps (50 posts + 200 replies/day, May 2026
+    change) won't bind at our volume — reach + DMs are the reasons.
+
+## BUY LATER (trigger-based)
+
+- **X Premium+, $40/mo — upgrade ONLY for the spike window (~Oct 20 →
+  launch+2wks).** Data shows Premium+ often ~2× standard-Premium reach
+  (highest reply prioritization) — worth $40/mo precisely when reach
+  peaks in value (press pitches out, launch week, $2-bill stunt).
+  Downgrade after if metrics don't hold. NOT worth it at
+  zero-follower stage — the multiplier needs a base to multiply.
+- **X Premium on the @ApesTogetherApp brand handle** — only once the
+  brand account posts on its own cadence (post-spike). Founder-led
+  content outperforms brand accounts at our stage; don't pay twice.
+- **Meta Verified (IG), ~$15/mo — trigger: impersonation.** Reach
+  benefit was REMOVED from later creator rollouts (Meta's own docs);
+  real value = human support + impersonator takedowns. Fintech clone
+  scams are a matter of WHEN, not if, post-traction — buy the day the
+  first fake "ApesTogether" IG appears, or at Phase 3 if IG becomes a
+  real channel. Not before.
+
+## DON'T BUY
+
+- **X Verified Organizations ($1k/mo):** enterprise product; zero
+  incremental value over founder Premium at our stage.
+- **LinkedIn Premium ($40–70/mo):** LinkedIn confirms NO algorithmic
+  reach benefit from Premium; our trader ICP lives on X/StockTwits/Reddit,
+  not LinkedIn; journalists get pitched by email. Nothing to buy.
+- **LinkedIn Sales Navigator ($99+/mo):** prospecting filters for an ICP
+  we don't hunt on LinkedIn. No.
+- **Reddit Premium:** ad-free + cosmetics only — no reach, no outreach
+  value. Reddit cred comes from account history + honest posts, not paid.
+- **StockTwits paid plans:** consumer DATA subscriptions (for reading,
+  not reaching). Rooms/follows/DMs need no subscription. No.
+- **TikTok:** no relevant paid subscription exists for creators/brands.
+
+**Net: $8/mo now → ~$48/mo for one month around the spike → back to $8–16.**
+Rule reminder: none of this changes the content rules — no paid reviews,
+no undisclosed paid posts, FTC #ad on anything sponsored.

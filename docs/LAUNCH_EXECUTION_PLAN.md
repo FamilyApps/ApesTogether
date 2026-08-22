@@ -285,7 +285,7 @@ MKT = this plan; SECTOR = MARKETING_PLAN §Unified Sector-Supply Plan._
 | Day | Items |
 |---|---|
 | **Fri 8/22** | ENG: verify SIWA on TestFlight (post-`db_retry`-deploy sanity) · **click "Publish 2 changes" in Play Console — quiet availability begins** · install from the real listing on the Pixel → sign-in + `adb shell pm get-app-links com.apestogether.app` (App Links autoVerify, ENG §0.6) · **day-1 real-card money test**: self-subscribe to a HUMAN creator, verify payout accrual row · pull bot sector distribution from admin dashboard → fill the SECTOR table. |
-| **Sat 8/23** | MKT §0.1: register ALL social handles (one sitting, ~2h) → tell Cascade to restore the footer "Follow Us" links · optional: browse Cascade's sourcing queries and start filling `TRADER_RECRUITMENT.md` tracker. |
+| **Sat 8/23** | MKT §0.1: register ALL social handles (one sitting, ~2h) → tell Cascade to restore the footer "Follow Us" links · **buy X Premium ($8/mo) on the founder account** (verdict: MARKETING_PLAN §Premium social memberships) · optional: browse Cascade's sourcing queries and start filling `TRADER_RECRUITMENT.md` tracker. |
 | **Sun 8/24** | Rest. Optional: first founder X post (#X-01 pinned thread, re-anchored "live now" version). |
 | **Mon 8/25** | ENG (Cascade): bot top-up batch per the SECTOR table gaps · MKT: fill tracker to 25 named trader candidates (~90 min) · iOS verdict watch (daily from here). |
 | **Tue 8/26** | MKT: founder cadence starts — X post #1 + first 3 trader DMs (daily rhythm) · ENG: `notifications@` deliverability diagnosis (blocks waitlist email #1). |
@@ -293,13 +293,23 @@ MKT = this plan; SECTOR = MARKETING_PLAN §Unified Sector-Supply Plan._
 | **Thu 8/28** | MKT: TikTok #1 (+ IG/YT cross-post) + 3 DMs · ENG: if iOS approved → release Build 50, set `IOS_APP_STORE_ID` on Vercel (flips `/get-app` iOS routing), add Smart App Banner meta. |
 | **Fri 8/29** | MKT: X post #2 + 3 DMs + first weekly metrics note in LAUNCH_TODO (installs/signups/subs/traders + bots-vs-humans ratio) · ENG: waitlist email #1 (§1.2) once BOTH stores live + deliverability verified. |
 | **Sat–Sun 8/30–31** | Light: reply to everything; plan week's 3 posts. NOTE: v13 already satisfied the Aug-31 targetSdk-36/Billing-8 deadline — nothing due. |
-| **Week of 9/1** | Phase 1 rhythm (3 X + 1 TikTok + 5×3 DMs + Friday metrics) · ENG: remaining money E2E (Xero bill gen, W-9 hold/release, Android cancel-path) · Build 51 scope: terms footnote parity + referral surfaces. |
-| **Week of 9/8** | Phase 1 rhythm · first #E-TESTIMONIAL sends (day-14 users) · human-arrival bot triggers per SECTOR rules as traders commit. |
+| **Week of 9/1** | Phase 1 rhythm (3 X + 1 TikTok + 5×3 DMs + Friday metrics) · ENG: remaining money E2E (Xero bill gen, W-9 hold/release, Android cancel-path) · Build 51 scope: terms footnote parity + referral surfaces + share-email spruce-up · Cascade: brand-spelling sweep + UGC scrub + disclaimers audit + landing refresh (screenshot/OG test/waitlist counter) · nudge attorney on ToS §5.2(a) · verify AV `no_calls` post-top-up + drift cron + cold-start ping. |
+| **Week of 9/8** | Phase 1 rhythm · first #E-TESTIMONIAL sends (day-14 users) · human-arrival bot triggers per SECTOR rules as traders commit · USER 15-min security pass: Vercel log review + `CRON_SECRET` rotation · Firebase cleanup (audit who deleted the fingerprints, delete stray iOS Firebase app, resolve SHA-1 dup warning). |
+| **Mid-Sep (Phase 2 start)** | ENG: load-test `/api/mobile/feed` @100 concurrent (pre-spike gate) · Settings v1.1 screens (Payment History / Tax Info / FAQ — Build 52 + v14) · recapture 6 Play screenshots on the real Pixel · Cascade research write-up: external AI stock-picking model APIs (LAUNCH_TODO §2#3) · MKT: press kit assembly + App Preview video (optional) + In-App Events draft. |
+| **~Fri 10/3 (first monthly close)** | Verify Xero revenue post + payout sync · ghost/bonus-subscriber tracking vs month-end payouts · first real payout check-run email review. |
+| **Mid-Oct (T-21)** | Press pitches out (LAUNCH_OUTREACH) · Apple featuring nomination (T-45 was late Sep — submit if metrics green) · consider X Premium+ upgrade for the spike window · KPI tracker stood up. |
+| **Nov 10–19** | SPIKE (playbook launch week; $2-bill stunt; manual iOS release timed here if held). |
+| **Dec (post-spike)** | Phase 4 engine · Trader API UC-A build decision (D-1..D-6 in `TRADER_API_SCOPING.md`; rate-limiter dep already shipped) → outbound trade-event feed UC-B after · UC-D stays compliance-gated (start legal review when UC-A ships) · CI hardening batch (S-4 pip-audit/Dependabot, branch protection, SHA-pin Actions) · SQLAlchemy consolidation + legacy OAuth shim removal + orphan-row delete · DMARC → `p=reject` · web FOUNDER chip + N/100 counter (at ~20+ claimed). |
+| **Jan 2027** | 1099-NEC filing via Track1099 from Xero (decision logged Session 21; W-9s + 6010 bills already feed it). |
 
 Then: Phase 1 rhythm until its exit criteria (≥10 committed traders),
 Phase 2 gates review every Friday, and the Phase 3 date gets picked only
 when §2.1 is all green. Phase-duration targets below still govern — the
 Nov 10–19 ideal launch window holds if Phase 1 exits by ~early October.
+
+_Dropped/moot (so they stop resurfacing): Play pre-registration + Apple
+pre-order (moot — we publish 8/22 instead of pre-launching); Waitlist 2.0
++ invite gate (rejected, Session 26)._
 
 ---
 
