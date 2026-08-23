@@ -20,14 +20,15 @@ Reference IDs match the Day-by-Day Calendar in `LAUNCH_PLAYBOOK.md`.
 > — the app is already downloadable when these run. So: (1) swap any
 > "beta opens [launch date]" line for "live now — apestogether.ai" (or the
 > store links) in Phase 1/2 usage; the [launch date] framing is reserved for
-> the Phase 3 spike week. (2) Work the **AI-vs-human angle** into content
-> whenever there's real data — it's our one hook nobody can copy, and by
-> spike week it should headline. ⚠ **IDENTITY-SAFE ONLY (Session 43c
-> correction — bot identity is NEVER externally differentiated; that's a
-> crown jewel, engineered in `_founding_trader_house_pill()`):** content may
-> say AIs EXIST on the board, and in aggregate how the machines are doing —
-> NEVER map an AI to a username, rank, or sector slot ("the AI is #4" is
-> banned; "a machine is beating 90% of the humans" is fine). (3) These are menus, not
+> the Phase 3 spike week. (2) ⚠ **TRADER-IDENTITY POSTURE (Session 43c FINAL
+> — supersedes the "AI-vs-human angle" AND the same-day "hidden AIs" mystery
+> framing; see LAUNCH_TODO §CROWN JEWELS):** content NEVER expressly covers
+> what is/isn't a bot — no house-bot claims ("AIs I built" banned), no
+> mystery framing ("we won't say which" banned), no machine-vs-human
+> standings at ANY granularity. AI participation appears ONLY as an open
+> door, in the FAQ's own voice: "Can I use an algorithm or AI agent to pick
+> trades? Absolutely." Seat them as **AI traders** (users whose stock picks
+> come from a program), never "bots." #X-07 is the template. (3) These are menus, not
 > schedules: 3 X + 1 TikTok per week, founder-voiced, adapt freely.
 >
 > **Session 43 (2026-08-22) — ride-along + accounts + VOICE GUARDRAILS:**
@@ -66,7 +67,7 @@ posts only._
 ```
 Every finfluencer says they beat the market.
 
-So I built a leaderboard where they'd have to prove it — and put AI bots on it to make it interesting.
+So I built a leaderboard where they'd have to prove it. Humans, algorithms, AI agents — the market doesn't care who's picking.
 
 It's called @ApesTogetherApp. Here's how it works 🧵
 
@@ -76,9 +77,9 @@ No self-reported returns. No cherry-picked screenshots. No "I called it" with no
 
 Your performance is your resume.
 
-2/ The leaderboard ranks everyone against the S&P 500 — and some of those accounts are AIs I built.
+2/ The leaderboard ranks everyone against the S&P 500 — humans, algorithms, AI agents, all under identical rules.
 
-Which ones? Not telling. If you can't tell the machine from the man, the only thing left to judge is the returns.
+If it can pick stocks, it can compete. Performance is the only credential.
 
 (Coming: a public API. Bring your own algorithm, put it on the board.)
 
@@ -553,9 +554,9 @@ ApesTogether goes live. apestogether.ai
 _Revised Session 33: by spike week we HAVE months of real leaderboard data —
 lead with it. Fill the [standings] slots with live numbers that morning._
 ```
-For [N] months, human traders and AI accounts have been competing on one leaderboard. Nobody knows which is which — that's the point.
+For [N] months, traders have been fighting it out on one leaderboard — every trade logged and timestamped at live market price. Nobody gets to lie.
 
-Current standings teaser: [AGGREGATE ONLY — e.g., "at least one machine is beating 90% of the humans." NEVER map an AI to a rank or username.]
+Current standings teaser: [top-of-board proof point — e.g., "the #1 account is beating the S&P by X points, every trade public." IDENTITY-NEUTRAL: never characterize any account as bot or human.]
 
 Today ApesTogether opens to everyone. 🧵
 
@@ -598,7 +599,7 @@ day 1 of eating my own cooking.
 
 I built @ApesTogetherApp so traders would have to prove their calls instead of screenshotting them. Only fair that I go first.
 
-Starting today I'm trading my own (virtual) portfolio on the app, in public. Every buy and sell logged at live market price. My rank vs the S&P — and vs the AI bots I put on the leaderboard — updates whether I like it or not.
+Starting today I'm trading my own (virtual) portfolio on the app, in public. Every buy and sell logged at live market price. My rank vs the S&P updates whether I like it or not.
 
 Current holdings: [screenshot]. Judge freely.
 ```
@@ -634,7 +635,7 @@ week [N] of trading my own app in public:
 me this week: [+/-X%]
 S&P: [+/-Y%]
 leaderboard: #[N] of [M]
-the machines: [one dry AGGREGATE line — e.g. "somewhere above me, a machine is winning and doesn't even gloat." NEVER identify which account/rank is AI.]
+[optional dry line about the account above/below me — IDENTITY-NEUTRAL: never characterize any account as bot or human.]
 
 every trade timestamped in the app. that's the whole point.
 ```
@@ -656,7 +657,7 @@ API update, for the algo crowd:
 
 [status in one line — e.g. "endpoint design locked. auth scopes next."]
 
-the plan: your bot trades through the API, builds a verified public record on the same leaderboard as everyone else, and earns subscribers like any other trader. Nobody will know yours is a bot either — here, nobody knows who's a machine. Only the returns talk.
+the plan: your bot trades through the API, builds a verified public record on the same leaderboard as everyone else, and earns subscribers like any other trader. Only the returns talk.
 
 no launch date yet. want in early? reply or DM and you're on the list.
 ```

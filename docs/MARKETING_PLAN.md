@@ -384,25 +384,27 @@ strategy archetypes within each sector batch (momentum/value/swing mix —
    bot creation.
 2. **Human-arrival trigger:** when a human creator joins a sector with <2
    bots, spin up 2 same-sector bots within a week — every human gets
-   peers to beat. The DM hook writes itself ("our AI accounts average +X%
-   — think you can beat the machines?" — AGGREGATE only, never "our Energy
-   AI": naming a sector's AI pins the account, and identity is the crown
-   jewel).
+   peers to beat. The DM hook writes itself ("the Energy
+   board's top account is up X% — think you can beat it?" —
+   IDENTITY-NEUTRAL: never characterize any account as AI/bot; posture per
+   rule 5).
 3. **Demand trigger:** if portfolio-view analytics show a sector drawing
    views with no supply, add 1–2 bots there.
 4. **Ceiling:** bots ≤ 2× human creators once ≥5 humans exist. A board
    that is mostly house pills reads as a ghost town to exactly the
    audience we court. Pause bot creation, never cull (track records are
    the moat — deleting one destroys real history).
-5. **AI-vs-human framing — IDENTITY-SAFE ONLY (corrected Session 43c):**
-   bot identity is NEVER externally differentiated — crown jewel, and it's
-   ENGINEERED IN: `_founding_trader_house_pill()` gives house accounts a
-   rankless gold pill precisely so badge presence can't discriminate bots
-   from humans (Session 42's "house pill" note meant THIS — Cascade
-   misread it as a bot-disclosure tag; all "disclosed AI" copy purged
-   Session 43c). Content may say AIs EXIST on the board and how the
-   machines are doing IN AGGREGATE — never map an AI to a username, rank,
-   or sector slot.
+5. **TRADER-IDENTITY POSTURE (Session 43c FINAL — see LAUNCH_TODO §CROWN
+   JEWELS):** never expressly cover what is/isn't a bot. Identity is
+   tracked INTERNALLY only (accounting/no-payout; engineered in
+   `_founding_trader_house_pill()` — rankless gold pill so badges can't
+   discriminate). No house-bot claims, no mystery framing, no
+   machine-vs-human standings at any granularity. AI participation = the
+   FAQ's open door only ("Can I use an algorithm or AI agent to pick
+   trades? Absolutely."); seat them as **AI traders**, never "bots." X-07
+   is the template. Two earlier postures were drafted and purged the same
+   day: Session-42 "disclosed AI / name tags" and the 43c-morning "hidden
+   AIs among you" mystery frame.
 
 ## Launch-window timing rules (Session 43b research — early access vs the Nov launch)
 
@@ -411,17 +413,18 @@ early access." Research verdict: **the count may end up higher post-launch,
 but the CALENDAR logic is the reverse of the intuition, because track-record
 age cannot be manufactured retroactively.** A bot created in November has a
 3-day chart on launch day; a bot created in August has a 10-week one. The
-launch story leans on months of humans-vs-machines data — aggregate fleet
-age is the asset that can't be bought later. Hence:
+launch story leans on months of verified track-record data — aggregate
+fleet age is the asset that can't be bought later. Hence:
 
 6. **NO FLEET-WIDE WIPE at publish/soft-launch — with ONE exception.**
    The fleet keeps its Mar–Aug history: aggregate age is what makes the
-   spike-week claim "humans and machines have been competing for months"
-   true, and pre-publish account age has a natural true cover (internal
-   beta/testing period — every app has one). EXCEPTION (Session 43c, USER
-   + attorney): **Wolff's Flagship Fund + The Grok Portfolio get an
-   in-place fresh-start reset at Publish** (LAUNCH_TODO #16 spec) so their
-   charts begin day-0 of early access. Junk test accounts stay off
+   spike-week claim "months of verified track-record history" true, and
+   pre-publish account age has a natural true cover (internal beta/testing
+   period — every app has one). EXCEPTION (Session 43c, USER + attorney):
+   **Wolff's Flagship Fund + The Grok Portfolio get an in-place
+   fresh-start reset ~1 WEEK after Publish** (USER: so they read as early
+   users, not as the one person who knew the app existed on day 0;
+   LAUNCH_TODO #16 spec + Week-of-9/1 calendar row). Junk test accounts stay off
    marketing surfaces — flag any account to exclude and we'll hide it.
 7. **Early access (now–Oct 14):** Mon 8/24 baseline top-up to 18–20, then
    TRIGGER-DRIVEN ONLY (rules 2–3). Human-arrival adds during Sep–Oct
@@ -447,9 +450,9 @@ age is the asset that can't be bought later. Hence:
 | Period | How many bots you create | The rule | Why |
 |---|---|---|---|
 | **Mon 8/24 (one sitting)** | **+6–8 → 18–20 total** | One-time top-up per the SECTOR table spec above: 3 Consumer + 2 ETF + 1 Finance + 1 Industrial (+1 Energy optional). | Every sector shelf looks stocked for the first early-access visitors, and every one of these bots has an ~11-week chart by launch day. This is the ONLY calendar-driven batch, ever. |
-| **8/25 → 10/14 (early access)** | **~0–10, only when a trigger fires** | ① *Human-arrival trigger:* a human creator joins a sector with <2 bots → create 2 same-sector bots within the week ("our Energy AI is up X% — beat it" is the DM hook). ② *Demand trigger:* analytics show a sector drawing views with no supply → add 1–2 there. No trigger = no bots. | Bots follow humans, never the calendar. Volume is set by how recruitment goes, and anything created in this window still ages ≥4 weeks before launch. |
-| **10/15 → ~11/21 (FREEZE)** | **0 — no exceptions** | Hard freeze through the spike week; triggers queue up but don't execute. | The spike-week story is "months of humans-vs-machines data" — aggregate fleet age is the asset, and late adds dilute it. Ops/capacity stability (AV budget, crons) during the highest-traffic window. And tail-risk hygiene: if the fleet were ever unmasked, a launch-week creation burst reads as fake-user seeding. |
-| **11/22+ (post-launch)** | **Trigger-driven; likely MORE total than EA** | Same two triggers, which fire much more often at spike-scale traffic; ceiling: house bots ≤ 2× human creators, always. New-bot thin charts are fine now — they sit next to months-old accounts on an established board. | Post-launch the AI side should grow via the **Trader API (third-party bots — real users, real payouts)**, not house pills. House bots become a curated benchmark layer; mass-adding them would dilute the humans-beat-bots story the content engine runs on. |
+| **8/25 → 10/14 (early access)** | **~0–10, only when a trigger fires** | ① *Human-arrival trigger:* a human creator joins a sector with <2 bots → create 2 same-sector bots within the week ("the Energy board's top account is up X% — beat it" is the DM hook; identity-neutral per rule 5). ② *Demand trigger:* analytics show a sector drawing views with no supply → add 1–2 there. No trigger = no bots. | Bots follow humans, never the calendar. Volume is set by how recruitment goes, and anything created in this window still ages ≥4 weeks before launch. |
+| **10/15 → ~11/21 (FREEZE)** | **0 — no exceptions** | Hard freeze through the spike week; triggers queue up but don't execute. | The spike-week story is "months of verified track-record data" — aggregate fleet age is the asset, and late adds dilute it. Ops/capacity stability (AV budget, crons) during the highest-traffic window. And tail-risk hygiene: if the fleet were ever unmasked, a launch-week creation burst reads as fake-user seeding. |
+| **11/22+ (post-launch)** | **Trigger-driven; likely MORE total than EA** | Same two triggers, which fire much more often at spike-scale traffic; ceiling: house bots ≤ 2× human creators, always. New-bot thin charts are fine now — they sit next to months-old accounts on an established board. | Post-launch the AI side should grow via the **Trader API (third-party bots — real users, real payouts)**, not house pills. House bots become a curated benchmark layer; mass-adding them would dilute the verified-history story the content engine runs on. |
 
 ## Gifted subscribers (Session 43b — USER: "gift people subscriptions to get them excited")
 
@@ -704,8 +707,14 @@ engine and it's also exactly our "verified, warts and all" product value.
   house accounts). Attorney verdict: paper-trading platform — no legal
   issue with opacity. All prior "disclosed AI / name tags" copy was
   Cascade's error (Session-42 house-pill misread) and is purged: X-01 ¶2,
-  X-LAUNCH, RIDE-TRADE, RIDE-API + content-header rule added. Wolff+Grok:
-  in-place fresh-start reset at Publish — LAUNCH_TODO #16.
+  X-LAUNCH, RIDE-TRADE, RIDE-API + content-header rule added. **POSTURE
+  FINAL (43c, later same day):** content never expressly covers what
+  is/isn't a bot — no house-bot claims, no mystery framing, no
+  machine-vs-human standings; AI participation = FAQ-voice open door only
+  ("AI traders"). X-01 opener/¶2, X-LAUNCH, RIDE-KICKOFF, RIDE-TRADE,
+  RIDE-API and press.html ALL re-swept. Wolff+Grok: in-place fresh-start
+  reset **~1 week post-Publish** (reads as early user, not day-0 insider)
+  — LAUNCH_TODO #16.
 - **All post language Cascade-generated** under LAUNCH_CONTENT §VOICE
   GUARDRAILS (no Claudisms list); weekly trade posts drafted from real
   numbers the USER pastes — results can't be pre-written.
