@@ -156,6 +156,27 @@ Week 1 building @ApesTogetherApp in public:
 That's literally what we built. More next week.
 ```
 
+## #X-ORIGIN — the 6-year receipt (slot: week 2–3, or as a quote-tweet of the pinned X-01)
+_Session 43c: USER posted this exact product idea on r/wallstreetbets ~2020 —
+a few "build it" replies, then mods deleted it. That's an origin-story
+receipt, and it's maximally on-brand: the receipts app has a 6-year-old
+receipt for itself. Retrieval: mod-removed posts stay visible to their
+AUTHOR — screenshot from the logged-in profile view; reveddit.com is the
+fallback. ⚠ FORK WARNING: the screenshot shows the Reddit username →
+publicly welds the personal Reddit account to founder identity. Posting
+this = choosing fork (a) in LAUNCH_TODO #17 — and note the weld already
+exists regardless: any "anonymous" review from that account was always one
+profile-scroll from unmasking._
+```
+6 years ago I posted this idea on r/wallstreetbets.
+
+a few people said "build it." then the mods deleted it.
+
+[screenshot]
+
+it took me 6 years. it's live — apestogether.ai
+```
+
 ## #X-07 — AI/Bots Welcome (Day 8)
 ```
 Most trading platforms treat bots as something to hide.
@@ -1028,11 +1049,23 @@ Learn more: apestogether.ai
 > warm up in each target sub for 1–2 weeks before posting. (2) ALWAYS
 > disclose founder status in the first line. (3) Never post the same link
 > twice in a sub; if a mod removes it, thank them and move on. (4) Read
-> each sub's self-promo rules the same day you post. Targets in order:
+> each sub's self-promo rules the same day you post. Self-post order:
 > r/SideProject (R-03) → r/startups (R-01) → r/EntrepreneurRideAlong (R-04
 > monthly) → r/algotrading (R-02, API angle) → WSB at spike only (R-LAUNCH).
-> r/Daytrading + r/dividends are comment-participation recruitment channels
-> (waves 1–2), not self-post targets.
+> Full purpose map below.
+
+### SUBREDDIT MAP (Session 43c deep dive — one purpose per sub; USER's suggestions r/investing, r/RealDayTrading, r/traders folded in)
+
+| Tier | Subs | Character | Purpose | Never |
+|---|---|---|---|---|
+| **Self-post (ride-along)** | r/SideProject · r/EntrepreneurRideAlong · r/startups (its Share-Your-Startup thread) · r/indiehackers | builder subs; promo tolerated when disclosed + numbers-honest | R-01/R-03/R-04 as planned — disclosed founder, warts-on numbers | undisclosed promo; posting outside sanctioned threads in r/startups |
+| **Self-post (API angle)** | r/algotrading | technical, promo-wary, but loves infra/design discussion | R-02 as "building this, want feedback" + UC-A waitlist capture (now building from wk 9/8) | marketing language, launch hype |
+| **Recruitment mining** | r/Daytrading · r/swingtrading · r/options · r/StockMarket · r/dividends | P&L-screenshot culture = the creator ICP posting proof already | comment participation (90/10 reps) + DM-sourcing for the tracker; waves 1–2 | self-posts — these subs eat app promos alive |
+| **Launch-week listing** | r/androidapps · r/iosapps | app-discovery subs with sanctioned promo formats | one listing post each at spike week, per each sub's promo template | anything pre-launch |
+| **Spike only** | r/wallstreetbets | deletes app promos on sight — the USER's own ~2020 idea post was mod-deleted (see #X-ORIGIN) | R-LAUNCH at spike + culture fluency + the $2-bill stunt | early promo; arguing with mods; reposting after removal |
+| **AVOID for promo** | r/investing · r/stocks | strict no-self-promo AND index-orthodoxy audiences philosophically hostile to "beat the market" apps | lurk for objection/language mining only (X-02 already mines their claim culture) | self-posts, "helpful" product mentions, link drops |
+| **Long-game respect** | r/RealDayTrading | small, wiki-driven, zero-tolerance promo — but its verified-track-record ETHOS is exactly ours | genuine participation only; if the app is ever named there it must be by someone else, organically | founder-initiated mentions, EVER — one strike kills the account's standing |
+| **Warm-up reps** | r/traders + misc small trading subs | low-moderation, low-signal | safe practice ground for the 90/10 comment reps before the big subs | expecting reach from them |
 
 ## #R-04 — r/EntrepreneurRideAlong (monthly, first post ~week of 9/8)
 **Title:** "Solo dev, no funding, went live against a $30M-funded competitor — month [N] numbers"

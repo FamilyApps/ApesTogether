@@ -1195,9 +1195,15 @@ def register_cash_tracking_routes(app, db):
 
         if seeded_baseline < 0.01:
             derived = max(0.0, cost_basis - replay_max_cash)
-            if derived > 0.01:
+            if derived > 0.01 and sell_count == 0:
                 seeded_baseline = round(derived, 2)
                 seeded_source = f'cost_basis_derived (cost_basis={cost_basis:.2f}, replay_max={replay_max_cash:.2f})'
+            elif derived > 0.01:
+                seeded_source = (
+                    f'cost_basis heuristic skipped: sell_count={sell_count} — realized proceeds can be '
+                    f'redeployed, so cost_basis exceeding replay_max is not evidence of seeding '
+                    f'(cost_basis={cost_basis:.2f}, replay_max={replay_max_cash:.2f})'
+                )
             else:
                 seeded_source = 'none (regular user, no seeded baseline)'
 
