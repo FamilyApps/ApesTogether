@@ -162,11 +162,13 @@ a few "build it" replies, then mods deleted it. That's an origin-story
 receipt, and it's maximally on-brand: the receipts app has a 6-year-old
 receipt for itself. Retrieval: mod-removed posts stay visible to their
 AUTHOR — screenshot from the logged-in profile view; reveddit.com is the
-fallback. ⚠ FORK WARNING: the screenshot shows the Reddit username →
-publicly welds the personal Reddit account to founder identity. Posting
-this = choosing fork (a) in LAUNCH_TODO #17 — and note the weld already
-exists regardless: any "anonymous" review from that account was always one
-profile-scroll from unmasking._
+fallback. ⚠ FORK WARNING (corrected 43c — USER is right: mod-removed
+posts are NOT visible to others browsing the profile; only the author sees
+them, plus possibly reveddit/Pushshift archives for a determined sleuth):
+the identity weld does NOT already exist — POSTING this screenshot is what
+creates it, since the username is visible in it. Cropping the username
+guts the receipt's credibility. So #X-ORIGIN is only usable under fork
+(a); publishing it IS the fork decision (LAUNCH_TODO #17)._
 ```
 6 years ago I posted this idea on r/wallstreetbets.
 
