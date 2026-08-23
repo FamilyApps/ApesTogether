@@ -53,6 +53,11 @@ Reference IDs match the Day-by-Day Calendar in `LAUNCH_PLAYBOOK.md`.
 ## #X-01 — Launch Thread (Day 1, PIN THIS)
 _Revised Session 33: hook sharpened (enemy first, product second), AI-vs-human
 angle added, closer updated for quiet-availability reality._
+_Revised Session 43b: "live now" → EARLY ACCESS framing (public term for the
+Aug–Nov soft-launch window; "launch" = the Nov announcement). Sets bug
+expectations honestly + makes the Founding-Trader-first-100 mechanic read as
+the early-access program it is. "Beta" allowed in dev-flavored #RIDE-BUILD
+posts only._
 ```
 Every finfluencer says they beat the market.
 
@@ -82,7 +87,7 @@ No content creation. No courses. No "guru" branding. The trades ARE the content.
 
 Then decide for yourself, in your own brokerage. It's all virtual/paper on our side — a proof layer, not a brokerage.
 
-5/ Live now on iOS and Android — apestogether.ai
+5/ Early access is open — iOS and Android, apestogether.ai
 
 The first 100 human traders get a permanent Founding Trader badge. The clock on your verified track record starts the day you join.
 
@@ -108,7 +113,7 @@ They have no way to monetize that skill besides their own portfolio.
 
 We're building a platform where they can. No content grind. No courses. Just trades.
 
-An API for running your bot on the leaderboard is on the roadmap. apestogether.ai — live now.
+An API for running your bot on the leaderboard is on the roadmap. apestogether.ai — early access is open.
 ```
 
 ## #X-04 — The Trust Gap (Day 4)

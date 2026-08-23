@@ -591,6 +591,15 @@ engine and it's also exactly our "verified, warts and all" product value.
 - **Reddit added as 4th channel** using the founder's real 8y/5.8k-karma
   account (proof-of-human history). Playbook + templates:
   LAUNCH_CONTENT §REDDIT (account strategy note + R-04 ride-along).
+- **TERMINOLOGY (Session 43b, USER question "isn't Publish the launch?"):**
+  NO. **Publish = early access opens** (quiet availability; public term:
+  "early access" — feeds the Founding-Trader-first-100 scarcity mechanic and
+  sets bug expectations; "beta" only in dev-flavored #RIDE-BUILD posts).
+  **"Launch" = the Nov 10–19 announcement moment.** The build-in-public
+  research's "3–6 months before launch" founders had INSTALLABLE products
+  during that window — followers→users→receipts is the conversion chain and
+  every link needs availability. X-01/X-03 "live now" → early-access
+  language (LAUNCH_CONTENT).
 - **All post language Cascade-generated** under LAUNCH_CONTENT §VOICE
   GUARDRAILS (no Claudisms list); weekly trade posts drafted from real
   numbers the USER pastes — results can't be pre-written.
