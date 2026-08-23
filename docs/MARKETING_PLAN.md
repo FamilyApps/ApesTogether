@@ -479,3 +479,115 @@ Researched against 2026 pricing/limits + third-party reach data._
 **Net: $8/mo now → ~$48/mo for one month around the spike → back to $8–16.**
 Rule reminder: none of this changes the content rules — no paid reviews,
 no undisclosed paid posts, FTC #ad on anything sponsored.
+
+---
+
+# Prizes & performance bonuses — RESEARCH VERDICT (Session 43, 2026-08-22; decision PENDING USER)
+
+**Question:** cash prizes for beating the S&P? Bonus payments for hitting
+subscriber counts?
+
+**Competitor landscape (researched):**
+- **Dub:** pays creators ROYALTIES (licensing/rev-share, individually
+  negotiated) — no performance prizes. Premium creators are diligence-vetted.
+- **eToro:** Popular/Pro Investor program pays **1.5% of assets-under-copy**
+  (rev share) with tier gates (min equity, min copiers, risk score <7 —
+  note: they CAP allowed risk to qualify, the opposite of prize-chasing).
+  Their trading competitions ($2.5k/$1k/$500) are one-off MARKETING EVENTS
+  on virtual accounts, never the creator-comp engine.
+- **Pattern:** nobody structures core creator pay as performance prizes.
+  Prizes appear only as acquisition campaigns.
+
+**Legal (the hard stop):**
+- **SEC v. Forcerank:** fantasy-stock app with entry fees + cash payouts
+  tied to stock performance = illegal **security-based swaps** (Dodd-Frank).
+  $50k fine, shut down. "It's skill-based" was not a defense. ⇒ NEVER
+  charge entry + pay on securities performance.
+- Free-entry skill contests are generally lawful (no consideration = no
+  lottery), but state patchwork applies (AZ/MD/CO/ND restrictions, NY/FL
+  bonding >$5k, fixed prizes independent of entrant count, published rules,
+  1099s for $600+). A one-off free contest is doable WITH attorney review.
+- Sub-count bonuses = ordinary commercial incentive (like TikTok creator
+  funds) — legal, no contest law implications.
+
+**Product/messaging analysis:**
+- Performance prizes select for VARIANCE, not skill — the known failure
+  mode of trading competitions (winner = biggest YOLO, not best strategy).
+  That directly degrades what subscribers pay for ("professional-level
+  strategies") and what the moat is (credible 30-day+ track records).
+- The leaderboard ALREADY pays for beating the S&P: rank → subs → 85% rev
+  share. A prize duplicates that loop and converts positive-sum ("every
+  ape who beats the market wins") into zero-sum PvP — the exact
+  "apes together" damage the USER flagged.
+- We ALREADY have a cash supply-side lever: **gifted bonus subscribers**
+  (`AdminSubscription.bonus_subscriber_count` pays $6.50/sub from company
+  funds) — quieter and steerable, no contest framing.
+
+**RECOMMENDATION:**
+1. **NO standing cash prizes for beating the S&P.** (Legal risk + variance
+   incentive + undermines rev-share purity.)
+2. **NO sub-count cash bonuses at launch** — rev share already pays per
+   sub; use gifted bonus subs case-by-case in recruitment offers instead.
+3. **YES to STATUS rewards (free, zero risk, on-message):** "Market
+   Beater" badge (beat SPY N consecutive months — Founding Trader chip
+   infra is the template), Ape of the Month featured placement,
+   leaderboard seasons. Status = competition; money = rev share.
+4. **MAYBE later:** one-off launch-window virtual-trading competition
+   (free entry, small fixed prizes, attorney-reviewed rules) as a Phase 3
+   acquisition event — the eToro pattern. Not before attorney sign-off.
+
+---
+
+# Founder ride-along / build-in-public — VERDICT (Session 43; decision PENDING USER)
+
+**Research says (68-app + 20-founder cohort data, 2026):** build-in-public
+works as a TRUST AMPLIFIER, not a traffic channel; every >$1M app pairing
+it ran a second channel. It converts when (a) the audience contains your
+buyers, (b) there's a conversion funnel, (c) 6–24 months of consistency.
+Failure posts outperform wins; specificity beats journey-narration; links
+go in the first reply; 2026 audiences discount MRR-screenshot theater.
+
+**Fit for us: STRONG, with one reframe.** Don't "post as though still
+building" — we ARE still building (Build 51, referral surfaces, Settings
+v1.1, **the Trader API**) and the David-vs-Goliath frame is literally
+true (solo founder vs Dub's $30M raise — already in LAUNCH_PLAYBOOK's
+competitor table). No pretense needed; pretense is also the thing 2026
+audiences have learned to smell.
+
+**The killer variant — TRADE-along, not just build-along:** founder runs
+his own portfolio ON the app as creator #1 and posts the verified chart.
+"I built an app where anyone can prove they beat Wall Street. Watch me
+try in public." That's simultaneously product demo, proof-of-concept,
+content engine (every trade = a post), and the aspirational pitch
+(anyone can do this) — and it's the content ONLY we can generate.
+Disclose founder status on the leaderboard profile; founder account is
+company-owned so it takes NO payouts (`is_company_owned` already
+handles this) and should be excluded from Founding Trader + any prizes.
+
+**Execution:** this is NOT a new workstream — it's the CONTENT of the
+existing 3-posts/wk cadence (X-01 pinned thread already frames it).
+Weekly rhythm: 1 build update (what shipped, incl. API progress —
+dev-audience catnip), 1 trade/portfolio update (the ride-along), 1
+leaderboard/AI-vs-human beat. Losses get posted — that's the credibility
+engine and it's also exactly our "verified, warts and all" product value.
+
+---
+
+# Trader API in social language — GAP FOUND (Session 43)
+
+Audit result: the Trader API (UC-A) appears ONLY in eng docs
+(`TRADER_API_SCOPING.md`, LAUNCH_TODO §2/§11, EXECUTION_PLAN Dec row).
+**ZERO mentions in LAUNCH_CONTENT, LAUNCH_OUTREACH, or the content
+calendar.** USER is right — for the AI-trading audience the API promise
+is a hook nobody else in copy-trading has: "your algo can compete on a
+public leaderboard against humans AND frontier AI models."
+
+**Placement (pending USER ok):** ① one bullet in the pinned X-01 thread
+("API coming: run your own bot on the leaderboard — waitlist in bio") ②
+a recurring monthly "API progress" build-update post (see ride-along
+rhythm) ③ HN/r/algotrading angle at Phase 3 (dev audience = the one
+place build-in-public converts hardest) ④ press positioning line for the
+AI-vs-human story. **Rules:** promise direction, never dates (UC-A is a
+Dec decision); collect emails via a simple API waitlist segment on the
+existing waitlist (zero build); UC-D (real-brokerage mirroring) is NEVER
+promised publicly — compliance-gated.
