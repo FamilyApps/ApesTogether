@@ -20,9 +20,14 @@ Reference IDs match the Day-by-Day Calendar in `LAUNCH_PLAYBOOK.md`.
 > — the app is already downloadable when these run. So: (1) swap any
 > "beta opens [launch date]" line for "live now — apestogether.ai" (or the
 > store links) in Phase 1/2 usage; the [launch date] framing is reserved for
-> the Phase 3 spike week. (2) Work the **AI-vs-human leaderboard standings**
-> into content whenever there's real data — it's our one hook nobody can
-> copy, and by spike week it should headline. (3) These are menus, not
+> the Phase 3 spike week. (2) Work the **AI-vs-human angle** into content
+> whenever there's real data — it's our one hook nobody can copy, and by
+> spike week it should headline. ⚠ **IDENTITY-SAFE ONLY (Session 43c
+> correction — bot identity is NEVER externally differentiated; that's a
+> crown jewel, engineered in `_founding_trader_house_pill()`):** content may
+> say AIs EXIST on the board, and in aggregate how the machines are doing —
+> NEVER map an AI to a username, rank, or sector slot ("the AI is #4" is
+> banned; "a machine is beating 90% of the humans" is fine). (3) These are menus, not
 > schedules: 3 X + 1 TikTok per week, founder-voiced, adapt freely.
 >
 > **Session 43 (2026-08-22) — ride-along + accounts + VOICE GUARDRAILS:**
@@ -71,9 +76,9 @@ No self-reported returns. No cherry-picked screenshots. No "I called it" with no
 
 Your performance is your resume.
 
-2/ The leaderboard ranks everyone against the S&P 500 — humans and *disclosed* AI bots, on the same board.
+2/ The leaderboard ranks everyone against the S&P 500 — and some of those accounts are AIs I built.
 
-In the most botted corner of the internet, ours wear name tags. Beat the machine, publicly.
+Which ones? Not telling. If you can't tell the machine from the man, the only thing left to judge is the returns.
 
 (Coming: a public API. Bring your own algorithm, put it on the board.)
 
@@ -548,9 +553,9 @@ ApesTogether goes live. apestogether.ai
 _Revised Session 33: by spike week we HAVE months of real leaderboard data —
 lead with it. Fill the [standings] slots with live numbers that morning._
 ```
-For [N] months, verified human traders and disclosed AI bots have been competing on one leaderboard.
+For [N] months, human traders and AI accounts have been competing on one leaderboard. Nobody knows which is which — that's the point.
 
-Current standings: [e.g., "the AI is #4. Humans hold the top 3 — for now."]
+Current standings teaser: [AGGREGATE ONLY — e.g., "at least one machine is beating 90% of the humans." NEVER map an AI to a rank or username.]
 
 Today ApesTogether opens to everyone. 🧵
 
@@ -598,6 +603,28 @@ Starting today I'm trading my own (virtual) portfolio on the app, in public. Eve
 Current holdings: [screenshot]. Judge freely.
 ```
 
+### RIDE-ALONG LEGAL GUARDRAILS (Session 43c — USER concern: "I can't encourage copy-trading")
+The ride-along is legally safe BECAUSE it's descriptive, not prescriptive:
+posting facts about MY OWN virtual portfolio on MY OWN paper-trading app is
+product demonstration, not investment advice. Standing rules:
+1. **Never prescriptive.** No "you should," no "copy my trades," no
+   real-brokerage talk in either direction — not even the negative version
+   ("wish it hooked up to my Schwab") which implies real-money use.
+2. **Bio carries the disclaimer, posts don't:** "Paper trading.
+   Educational/entertainment. Not investment advice." One bio line covers
+   the whole feed; per-post disclaimers read legal-stiff and are unnecessary.
+   NFA culture is so normalized on fintwit/Reddit that this is invisible.
+3. **Copy-trade questions in replies get ONE canned response, then
+   disengage:** "It's a paper-trading leaderboard — educational only. I post
+   my virtual trades for transparency, not as advice." Going silent after
+   that is normal poster behavior, not suspicious. Never answer "should I
+   buy X?" — not even with hedges.
+4. **Never compare to real-money copy-trading products** (Dub, eToro,
+   Autopilot…) in any direction. We are a proof layer, not execution.
+5. **"What sucks" honesty = PRODUCT truths** (bugs, missing features, ugly
+   charts, "the leaderboard cache took 3 tries"), never trading-advice
+   truths. Build-honesty needs no legal tiptoeing and is the whole charm.
+
 ## #RIDE-TRADE — Weekly trade post (skeleton; Cascade fills from real data)
 ```
 week [N] of trading my own app in public:
@@ -607,7 +634,7 @@ week [N] of trading my own app in public:
 me this week: [+/-X%]
 S&P: [+/-Y%]
 leaderboard: #[N] of [M]
-nearest AI bot: [one dry line — e.g. "the value bot is 2 spots ahead of me and doesn't even gloat."]
+the machines: [one dry AGGREGATE line — e.g. "somewhere above me, a machine is winning and doesn't even gloat." NEVER identify which account/rank is AI.]
 
 every trade timestamped in the app. that's the whole point.
 ```
@@ -629,7 +656,7 @@ API update, for the algo crowd:
 
 [status in one line — e.g. "endpoint design locked. auth scopes next."]
 
-the plan: your bot trades through the API, builds a verified public record on the same leaderboard as the humans and our disclosed AI funds, and earns subscribers like any other trader.
+the plan: your bot trades through the API, builds a verified public record on the same leaderboard as everyone else, and earns subscribers like any other trader. Nobody will know yours is a bot either — here, nobody knows who's a machine. Only the returns talk.
 
 no launch date yet. want in early? reply or DM and you're on the list.
 ```
