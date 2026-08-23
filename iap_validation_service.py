@@ -792,7 +792,25 @@ async def validate_and_save_purchase(
     
     inf_payout = 0.0 if is_company_owned else result['influencer_payout']
     plat_rev = (result['platform_revenue'] + result['influencer_payout']) if is_company_owned else result['platform_revenue']
-    
+
+    # Free-trial periods collect $0 from the store, so they book $0 everywhere:
+    # ToS §5.2 pays creators 85% of revenue GENERATED, and a trial week generates
+    # none. Without this, the monthly pipeline (which sums InAppPurchase rows
+    # transaction-by-transaction) would accrue a $6.50 payout + $9.00 Xero gross
+    # for a week Apple/Google never charged. The paid conversion arrives later as
+    # its own DID_RENEW / SUBSCRIPTION_RENEWED row with full economics (see
+    # iap_webhooks._record_renewal_period, which re-derives pricing for trial
+    # templates instead of cloning their zeroed fields).
+    is_trial = bool(result.get('is_trial'))
+    if is_trial:
+        price_val = 0.0
+        store_fee_val = 0.0
+        inf_payout = 0.0
+        plat_rev = 0.0
+    else:
+        price_val = result['price']
+        store_fee_val = result['store_fee']
+
     # Create new purchase record
     purchase = InAppPurchase(
         subscriber_id=subscriber_id,
@@ -805,10 +823,11 @@ async def validate_and_save_purchase(
         status=result['status'],
         purchase_date=result['purchase_date'],
         expires_date=result.get('expires_date'),
-        price=result['price'],
+        price=price_val,
         influencer_payout=inf_payout,
         platform_revenue=plat_rev,
-        store_fee=result['store_fee'],
+        store_fee=store_fee_val,
+        is_trial=is_trial,
     )
     db.session.add(purchase)
     db.session.flush()  # Get the ID

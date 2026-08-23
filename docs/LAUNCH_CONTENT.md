@@ -24,6 +24,27 @@ Reference IDs match the Day-by-Day Calendar in `LAUNCH_PLAYBOOK.md`.
 > into content whenever there's real data — it's our one hook nobody can
 > copy, and by spike week it should headline. (3) These are menus, not
 > schedules: 3 X + 1 TikTok per week, founder-voiced, adapt freely.
+>
+> **Session 43 (2026-08-22) — ride-along + accounts + VOICE GUARDRAILS:**
+> the cadence is now framed as a founder ride-along (see §RIDE-ALONG SERIES
+> below). Accounts: X = the founder's existing **@BrooklynDad85** (8y-class
+> account age beats a fresh handle for DM deliverability + spam-classifier
+> trust; the everyman handle fits the David-vs-Goliath frame — keep it);
+> Reddit = the founder's real 8-year account (5.8k karma passes sub gates;
+> home-repair post history reads HUMAN, which is the asset).
+>
+> **VOICE GUARDRAILS (apply to every post, every platform — no exceptions):**
+> reads like a sharp person typing, not an assistant drafting. BANNED:
+> "delve," "dive into," "unlock," "elevate," "seamless," "robust,"
+> "game-changer," "empower," "supercharge," "revolutionize," "landscape,"
+> "in today's world," "Let's be honest/real," "Here's the thing,"
+> "It's not just X — it's Y," "The best part?", "thrilled/excited to
+> announce," rhetorical-question openers, stacked em-dashes, three perfectly
+> parallel clauses in a row, hashtag piles on X (0–1 max; TikTok captions
+> exempt), emoji beyond 🦍 and a rare 🧵. PREFER: specific numbers, plain
+> verbs, one idea per post, sentence fragments where natural, lowercase
+> where casual, screenshots over adjectives, losses reported as plainly as
+> wins. If a line could open a LinkedIn thinkpiece, cut it.
 
 ---
 
@@ -48,6 +69,8 @@ Your performance is your resume.
 2/ The leaderboard ranks everyone against the S&P 500 — humans and *disclosed* AI bots, on the same board.
 
 In the most botted corner of the internet, ours wear name tags. Beat the machine, publicly.
+
+(Coming: a public API. Bring your own algorithm, put it on the board.)
 
 3/ For traders: you keep 85% of what subscribers pay ($6.50 of every $9/mo).
 
@@ -85,7 +108,7 @@ They have no way to monetize that skill besides their own portfolio.
 
 We're building a platform where they can. No content grind. No courses. Just trades.
 
-apestogether.ai — beta opens [launch date].
+An API for running your bot on the leaderboard is on the roadmap. apestogether.ai — live now.
 ```
 
 ## #X-04 — The Trust Gap (Day 4)
@@ -550,6 +573,66 @@ apestogether.ai — built solo in NYC. No VC. No hype. Just math. 🦍
 
 ---
 
+# RIDE-ALONG SERIES (Session 43 — the spine of the weekly cadence)
+
+_The 3-posts/week X rhythm IS the ride-along: 1 trade post + 1 build post +
+1 leaderboard/AI beat. Founder trades his own portfolio on the app as
+creator #1 (company-owned account: no payouts, no Founding Trader badge, no
+prizes ever; founder status disclosed in the app profile + X bio). Trade
+results obviously can't be pre-written — Cascade drafts each week's posts
+from the real numbers the USER pastes in. These are the skeletons._
+
+## #RIDE-TRADE-01 — Day One (post the day founder trading starts)
+```
+day 1 of eating my own cooking.
+
+I built @ApesTogetherApp so traders would have to prove their calls instead of screenshotting them. Only fair that I go first.
+
+Starting today I'm trading my own (virtual) portfolio on the app, in public. Every buy and sell logged at live market price. My rank vs the S&P — and vs the AI bots I put on the leaderboard — updates whether I like it or not.
+
+Current holdings: [screenshot]. Judge freely.
+```
+
+## #RIDE-TRADE — Weekly trade post (skeleton; Cascade fills from real data)
+```
+week [N] of trading my own app in public:
+
+[1–2 lines, plain and honest — e.g. "sold half the NVDA position tuesday. looked smart wednesday. did not look smart friday."]
+
+me this week: [+/-X%]
+S&P: [+/-Y%]
+leaderboard: #[N] of [M]
+nearest AI bot: [one dry line — e.g. "the value bot is 2 spots ahead of me and doesn't even gloat."]
+
+every trade timestamped in the app. that's the whole point.
+```
+
+## #RIDE-BUILD — Weekly build post (skeleton)
+```
+build update, week [N]:
+
+shipped: [one concrete thing + why users care, one clause]
+broke: [the honest one — what went wrong or what's still ugly]
+next: [one thing]
+
+solo dev, no VC, live on iOS + Android. roadmap = whatever early users yell about loudest.
+```
+
+## #RIDE-API — Monthly API progress post (skeleton)
+```
+API update, for the algo crowd:
+
+[status in one line — e.g. "endpoint design locked. auth scopes next."]
+
+the plan: your bot trades through the API, builds a verified public record on the same leaderboard as the humans and our disclosed AI funds, and earns subscribers like any other trader.
+
+no launch date yet. want in early? reply or DM and you're on the list.
+```
+_Rules: never a date promise; UC-D (brokerage mirroring) never mentioned.
+Interested replies → tag their emails onto the waitlist as the API segment._
+
+---
+
 # TIKTOK CONTENT
 
 ## #TT-01 — "What If Finfluencers Had to Prove It?" (Day 2)
@@ -904,6 +987,40 @@ Learn more: apestogether.ai
 ---
 
 # REDDIT CONTENT
+
+> **Account strategy (Session 43):** post from the founder's REAL 8-year /
+> 5.8k-karma account — its age passes sub gates and its home-repair history
+> is proof-of-human, which no fresh "founder" account can buy. Rules: (1)
+> **90/10** — nine genuine comments/answers in a sub before one self-post;
+> warm up in each target sub for 1–2 weeks before posting. (2) ALWAYS
+> disclose founder status in the first line. (3) Never post the same link
+> twice in a sub; if a mod removes it, thank them and move on. (4) Read
+> each sub's self-promo rules the same day you post. Targets in order:
+> r/SideProject (R-03) → r/startups (R-01) → r/EntrepreneurRideAlong (R-04
+> monthly) → r/algotrading (R-02, API angle) → WSB at spike only (R-LAUNCH).
+> r/Daytrading + r/dividends are comment-participation recruitment channels
+> (waves 1–2), not self-post targets.
+
+## #R-04 — r/EntrepreneurRideAlong (monthly, first post ~week of 9/8)
+**Title:** "Solo dev, no funding, went live against a $30M-funded competitor — month [N] numbers"
+```
+Founder here (disclosure: this is my app). Building ApesTogether — traders prove they beat the S&P on a public leaderboard, subscribers pay $9/mo to follow their trades, trader keeps 85%. My competitor raised $30M. I've raised $0 and do my own laundry.
+
+Month [N] honestly:
+- Installs: [X]
+- Signups: [X]
+- Traders with live track records: [X]
+- Paying subs: [X]
+- MRR: $[X]
+- Dumbest mistake: [real one, e.g. "the app store rejected me twice for a login bug that only happened on devices with no Google account"]
+- Best decision: [real one]
+
+The weird twist: I put disclosed AI bots on the leaderboard so there's always someone to lose to. Currently [the AI is beating me / I'm beating the AI] which is [humbling / the only thing keeping me going].
+
+Happy to answer anything about the build, the app-store gauntlet, or fintech compliance as a solo dev.
+```
+_Fill every slot with REAL numbers, including bad ones — this sub rewards
+honest small numbers and torches vanity metrics._
 
 ## #R-01 — r/startups (Day 5)
 **Title:** "Building a fintech startup in NYC — lessons from the first 3 months"

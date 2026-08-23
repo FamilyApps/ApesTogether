@@ -716,6 +716,13 @@ class InAppPurchase(db.Model):
     influencer_payout = db.Column(db.Float, default=6.50)  # 85% of post-store ($7.65)
     platform_revenue = db.Column(db.Float, default=1.15)   # 15% of post-store ($7.65)
     store_fee = db.Column(db.Float, default=1.35)           # 15% of $9.00
+
+    # Free-trial marker: the store collects $0 for a trial period, so trial rows
+    # are booked with ALL money fields zeroed (price/payout/platform/store_fee).
+    # ToS §5.2 pays 85% of revenue GENERATED — a trial week generates none. The
+    # paid conversion arrives later as its own renewal row with full economics.
+    # (Migration: /admin/iap/add-trial-column)
+    is_trial = db.Column(db.Boolean, default=False)
     
     # Clawback bookkeeping: set when this row was refunded AFTER its period's
     # creator payout had already been PAID, and the refund has since been netted

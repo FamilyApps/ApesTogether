@@ -2234,6 +2234,79 @@ def admin_debug_user_snapshots():
     })
 
 
+@app.route('/admin/iap/add-trial-column')
+@admin_required
+def admin_iap_add_trial_column():
+    """Migration for the trial-payout fix (Session 43): adds is_trial to
+    in_app_purchase. Trial rows are booked with $0 money fields so the monthly
+    payout pipeline never accrues creator payouts / Xero revenue for a free
+    week (ToS §5.2 pays 85% of revenue GENERATED).
+
+    Usage:
+      ?                     preview (shows whether the column exists)
+      ?execute=true         ALTER TABLE in_app_purchase ADD COLUMN is_trial
+      ?execute=true&zero_row_id=N
+                            additionally zero one PRE-FIX trial row by id
+                            (price/influencer_payout/platform_revenue/store_fee
+                            -> 0, is_trial -> true). Surgical on purpose: no
+                            auto-detection, so no false positives.
+    """
+    from sqlalchemy import text, inspect
+
+    execute = request.args.get('execute') == 'true'
+    zero_row_id = request.args.get('zero_row_id')
+
+    try:
+        inspector = inspect(db.engine)
+        iap_cols = [col['name'] for col in inspector.get_columns('in_app_purchase')]
+        has_column = 'is_trial' in iap_cols
+
+        if not execute:
+            return jsonify({
+                'preview': True,
+                'is_trial_column_exists': has_column,
+                'execute_url': '/admin/iap/add-trial-column?execute=true',
+            })
+
+        added = False
+        if not has_column:
+            db.session.execute(text(
+                "ALTER TABLE in_app_purchase ADD COLUMN is_trial BOOLEAN DEFAULT FALSE"
+            ))
+            added = True
+
+        zeroed = None
+        if zero_row_id:
+            row = db.session.execute(text(
+                "SELECT id, platform, price, influencer_payout FROM in_app_purchase WHERE id = :rid"
+            ), {'rid': int(zero_row_id)}).fetchone()
+            if row is None:
+                db.session.rollback()
+                return jsonify({'error': f'in_app_purchase id {zero_row_id} not found'}), 404
+            if row.platform not in ('apple', 'google'):
+                db.session.rollback()
+                return jsonify({'error': f'row {zero_row_id} is platform={row.platform}, '
+                                         'not a store purchase — refusing to touch it'}), 400
+            db.session.execute(text(
+                "UPDATE in_app_purchase SET price = 0.0, influencer_payout = 0.0, "
+                "platform_revenue = 0.0, store_fee = 0.0, is_trial = TRUE WHERE id = :rid"
+            ), {'rid': int(zero_row_id)})
+            zeroed = {
+                'id': int(zero_row_id),
+                'was': {'price': float(row.price or 0),
+                        'influencer_payout': float(row.influencer_payout or 0)},
+            }
+
+        db.session.commit()
+        return jsonify({'success': True, 'column_added': added,
+                        'column_already_existed': has_column, 'row_zeroed': zeroed})
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"iap add-trial-column error: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/admin/recompute-user-snapshots')
 @admin_required
 def admin_recompute_user_snapshots():

@@ -482,7 +482,7 @@ no undisclosed paid posts, FTC #ad on anything sponsored.
 
 ---
 
-# Prizes & performance bonuses — RESEARCH VERDICT (Session 43, 2026-08-22; decision PENDING USER)
+# Prizes & performance bonuses — RESEARCH VERDICT (Session 43, 2026-08-22; ✅ DECIDED — USER concurred same session)
 
 **Question:** cash prizes for beating the S&P? Bonus payments for hitting
 subscriber counts?
@@ -523,22 +523,26 @@ subscriber counts?
   (`AdminSubscription.bonus_subscriber_count` pays $6.50/sub from company
   funds) — quieter and steerable, no contest framing.
 
-**RECOMMENDATION:**
+**DECISION (USER, Session 43):**
 1. **NO standing cash prizes for beating the S&P.** (Legal risk + variance
    incentive + undermines rev-share purity.)
 2. **NO sub-count cash bonuses at launch** — rev share already pays per
    sub; use gifted bonus subs case-by-case in recruitment offers instead.
-3. **YES to STATUS rewards (free, zero risk, on-message):** "Market
-   Beater" badge (beat SPY N consecutive months — Founding Trader chip
-   infra is the template), Ape of the Month featured placement,
-   leaderboard seasons. Status = competition; money = rev share.
-4. **MAYBE later:** one-off launch-window virtual-trading competition
-   (free entry, small fixed prizes, attorney-reviewed rules) as a Phase 3
-   acquisition event — the eToro pattern. Not before attorney sign-off.
+3. **YES to STATUS rewards — ON THE POST-LAUNCH TODO** (Dec row of the
+   EXECUTION_PLAN day-by-day): research best-in-class reward badges, then
+   build — "Market Beater" (beat SPY N consecutive months; Founding
+   Trader chip infra is the template), Ape of the Month featured
+   placement, leaderboard seasons. Status = competition; money = rev share.
+4. **📌 PARKED, NOT ON THE AGENDA — revisit ONLY if growth stalls:**
+   one-off free-entry launch competition (small fixed prizes,
+   attorney-reviewed rules, eToro pattern). Logged so it isn't forgotten;
+   explicitly NOT planned. Trigger to revisit: Phase 1/2 exit criteria
+   slipping badly despite cadence + recruitment being executed. Attorney
+   sign-off is a precondition, never optional.
 
 ---
 
-# Founder ride-along / build-in-public — VERDICT (Session 43; decision PENDING USER)
+# Founder ride-along / build-in-public — VERDICT (Session 43; ✅ APPROVED — see DECISIONS at end of section)
 
 **Research says (68-app + 20-founder cohort data, 2026):** build-in-public
 works as a TRUST AMPLIFIER, not a traffic channel; every >$1M app pairing
@@ -571,6 +575,27 @@ dev-audience catnip), 1 trade/portfolio update (the ride-along), 1
 leaderboard/AI-vs-human beat. Losses get posted — that's the credibility
 engine and it's also exactly our "verified, warts and all" product value.
 
+**DECISIONS (Session 43):**
+- **Timing: starts NOW, not at "launch."** The Nov spike is the launch
+  chapter of a story that needs 10 weeks of receipts behind it — warm
+  audience research says pre-launch priming is where the value is, and
+  the founder's own verified chart needs HISTORY to be content (a 30-day
+  chart requires 30 days). Founder trading starts Mon 8/25; #RIDE-TRADE-01
+  posts Tue 8/26 with the pinned X-01 thread.
+- **X account: @BrooklynDad85** (existing, aged) — age beats a fresh
+  handle for DM deliverability + spam-classifier trust, and the everyman
+  handle IS the David-vs-Goliath brand. Refresh bio (founder of
+  @ApesTogetherApp + "trading my own app in public" + disclosure), pin
+  X-01, buy Premium on THIS account (Sat 8/23 item).
+- **Reddit added as 4th channel** using the founder's real 8y/5.8k-karma
+  account (proof-of-human history). Playbook + templates:
+  LAUNCH_CONTENT §REDDIT (account strategy note + R-04 ride-along).
+- **All post language Cascade-generated** under LAUNCH_CONTENT §VOICE
+  GUARDRAILS (no Claudisms list); weekly trade posts drafted from real
+  numbers the USER pastes — results can't be pre-written.
+- Founder account: company-owned (no payouts), founder status disclosed,
+  excluded from Founding Trader + any future rewards.
+
 ---
 
 # Trader API in social language — GAP FOUND (Session 43)
@@ -582,12 +607,11 @@ calendar.** USER is right — for the AI-trading audience the API promise
 is a hook nobody else in copy-trading has: "your algo can compete on a
 public leaderboard against humans AND frontier AI models."
 
-**Placement (pending USER ok):** ① one bullet in the pinned X-01 thread
-("API coming: run your own bot on the leaderboard — waitlist in bio") ②
-a recurring monthly "API progress" build-update post (see ride-along
-rhythm) ③ HN/r/algotrading angle at Phase 3 (dev audience = the one
-place build-in-public converts hardest) ④ press positioning line for the
-AI-vs-human story. **Rules:** promise direction, never dates (UC-A is a
-Dec decision); collect emails via a simple API waitlist segment on the
-existing waitlist (zero build); UC-D (real-brokerage mirroring) is NEVER
-promised publicly — compliance-gated.
+**✅ EXECUTED (Session 43, USER approved "make it so"):** ① X-01 pinned
+thread now carries the API line (tweet 2) ② #RIDE-API monthly progress
+post template added (LAUNCH_CONTENT §RIDE-ALONG) ③ #X-03 re-anchored +
+API roadmap line ④ r/algotrading stays the Phase 3 dev-audience play
+(R-02). **Standing rules:** promise direction, never dates (UC-A is a
+Dec decision); interested replies → waitlist tagged as the API segment;
+UC-D (real-brokerage mirroring) is NEVER promised publicly —
+compliance-gated.

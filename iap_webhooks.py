@@ -238,6 +238,31 @@ def _record_renewal(db, platform: str, new_transaction_id: str,
                        f"— not fabricating a renewal row")
         return 0
 
+    # Renewal economics: cloned from the template EXCEPT when the template is a
+    # $0 free-trial row — the trial's money fields are deliberately zeroed (the
+    # store collected nothing that week), so a trial→paid conversion must
+    # re-derive full economics from the pricing table + the company-owned rule.
+    # Cloning the zeroed trial fields would book $0 revenue/payout forever.
+    # (Belt-and-braces: a $0-priced apple/google row is treated as a trial even
+    # if is_trial was never set — admin comp rows can't reach here because the
+    # template query filters on platform='apple'/'google'.)
+    if getattr(template, 'is_trial', False) or (template.price or 0.0) == 0.0:
+        from iap_validation_service import get_iap_service
+        from models import User
+        pricing = get_iap_service()._get_pricing(template.product_id)
+        owner = User.query.get(template.subscribed_to_id)
+        company_owned = bool(owner and owner.is_company_owned)
+        renewal_price = pricing['price']
+        renewal_store_fee = pricing['store_fee']
+        renewal_payout = 0.0 if company_owned else pricing['influencer_payout']
+        renewal_plat_rev = (pricing['platform_revenue'] + pricing['influencer_payout']) \
+            if company_owned else pricing['platform_revenue']
+    else:
+        renewal_price = template.price
+        renewal_store_fee = template.store_fee
+        renewal_payout = template.influencer_payout
+        renewal_plat_rev = template.platform_revenue
+
     renewal = InAppPurchase(
         subscriber_id=template.subscriber_id,
         subscribed_to_id=template.subscribed_to_id,
@@ -249,10 +274,11 @@ def _record_renewal(db, platform: str, new_transaction_id: str,
         status='active',
         purchase_date=purchase_date or datetime.utcnow(),
         expires_date=expires_date,
-        price=template.price,
-        influencer_payout=template.influencer_payout,
-        platform_revenue=template.platform_revenue,
-        store_fee=template.store_fee,
+        price=renewal_price,
+        influencer_payout=renewal_payout,
+        platform_revenue=renewal_plat_rev,
+        store_fee=renewal_store_fee,
+        is_trial=False,
     )
     db.session.add(renewal)
 
