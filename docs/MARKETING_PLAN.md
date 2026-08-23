@@ -433,6 +433,15 @@ exact moment of maximum scrutiny. Hence:
     also grows snapshot/close-table load — tonight's stale-close incident
     (LAUNCH_TODO #11) is the cautionary tale.
 
+### The whole cadence in one table (Session 43c — USER asked for it plainly)
+
+| Period | How many bots you create | The rule | Why |
+|---|---|---|---|
+| **Mon 8/24 (one sitting)** | **+6–8 → 18–20 total** | One-time top-up per the SECTOR table spec above: 3 Consumer + 2 ETF + 1 Finance + 1 Industrial (+1 Energy optional). | Every sector shelf looks stocked for the first early-access visitors, and every one of these bots has an ~11-week chart by launch day. This is the ONLY calendar-driven batch, ever. |
+| **8/25 → 10/14 (early access)** | **~0–10, only when a trigger fires** | ① *Human-arrival trigger:* a human creator joins a sector with <2 bots → create 2 same-sector bots within the week ("our Energy AI is up X% — beat it" is the DM hook). ② *Demand trigger:* analytics show a sector drawing views with no supply → add 1–2 there. No trigger = no bots. | Bots follow humans, never the calendar. Volume is set by how recruitment goes, and anything created in this window still ages ≥4 weeks before launch. |
+| **10/15 → ~11/21 (FREEZE)** | **0 — no exceptions** | Hard freeze through the spike week; triggers queue up but don't execute. | A bot created 10/20 has a 3-week chart on Nov 10; created 11/8, a 2-day one. Bots are DISCLOSED — press/WSB will click their profiles FIRST, and a house account with a baby chart at peak scrutiny reads as "they're padding the board." Also freezes fleet load (AV budget, crons) during the highest-traffic window. |
+| **11/22+ (post-launch)** | **Trigger-driven; likely MORE total than EA** | Same two triggers, which fire much more often at spike-scale traffic; ceiling: house bots ≤ 2× human creators, always. New-bot thin charts are fine now — they sit next to months-old accounts on an established board. | Post-launch the AI side should grow via the **Trader API (third-party bots — real users, real payouts)**, not house pills. House bots become a curated benchmark layer; mass-adding them would dilute the humans-beat-bots story the content engine runs on. |
+
 ## Gifted subscribers (Session 43b — USER: "gift people subscriptions to get them excited")
 
 **Already fully built — no new code needed** for the main case:
@@ -445,10 +454,24 @@ the company obligation split; triggers W-9 like real income; month-end
 tracking already on the ~10/3 calendar row).
 
 - **What it's FOR (creator-side excitement):** show a new Founding Trader
-  real earnings potential — e.g. gift 2–3 subs as a welcome ("your first
-  subscribers are on us"). Use sparingly and log a `reason` every time; each
-  gifted sub is a real recurring company cost ($6.50/mo) and a real 1099
-  number.
+  real earnings potential — e.g. gift 2–3 subs as a welcome. Use sparingly
+  and log a `reason` every time; each gifted sub is a real recurring company
+  cost ($6.50/mo) and a real 1099 number.
+- **DISCLOSURE TO CREATORS: NONE (USER decision, Session 43c).** Recipients
+  are never told subs were gifted — from their side every subscriber is
+  organic. (Demand-seeding; the money is real, the creator is genuinely
+  paid.) This decision creates FOUR standing guardrails:
+  ① **Never remove a gift abruptly** — a creator watching subs vanish with
+  no cancel-notification will investigate; treat every gift as a
+  multi-month commitment and let attrition happen only alongside real
+  churn.
+  ② **Keep gifts small (1–3/creator)** so no creator's public brag ("5 subs
+  in week 1!") is *mostly* company-manufactured — their posts become our
+  receipts by proxy.
+  ③ **We never cite subscriber/revenue aggregates in press or posts without
+  netting out gifted counts internally first.**
+  ④ **The admin `reason` field is now the ONLY paper trail — fill it every
+  single time.**
 - **What it's NOT:** it does not grant any recipient ACCESS to a portfolio
   (it's a counter, not a comp account). Gifting access to would-be
   SUBSCRIBERS = Apple Offer Codes / Google Play promo codes (store-native,
