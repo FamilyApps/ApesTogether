@@ -371,7 +371,7 @@ drift checks skip):
 | Diversified (copytrade) | 1 | n/a | — | CoastHillBear |
 | **Total** | **12** | **18–20** | **+6–8** | |
 
-**TOP-UP BATCH SPEC (execute Mon 8/25 per the day-by-day):** 3 Consumer +
+**TOP-UP BATCH SPEC (execute Mon 8/24 per the day-by-day):** 3 Consumer +
 2 ETF + 1 Finance + 1 Industrial (+1 Energy if going to 20). Vary
 strategy archetypes within each sector batch (momentum/value/swing mix —
 `generate_bot_batch(count, industry=...)` already diversifies unless
@@ -396,6 +396,70 @@ strategy archetypes within each sector batch (momentum/value/swing mix —
    shipped) and bots NEVER outnumber the front-page narrative — content
    always leads with the AI-vs-human standings, where humans beating bots
    is the story we want told.
+
+## Launch-window timing rules (Session 43b research — early access vs the Nov launch)
+
+USER asked whether we add "many more bots after the real launch than during
+early access." Research verdict: **the count may end up higher post-launch,
+but the CALENDAR logic is the reverse of the intuition, because track-record
+age cannot be manufactured retroactively.** A bot created in November has a
+3-day chart on launch day; a bot created in August has a 10-week one. Our
+bots are DISCLOSED — press and WSB will click their profiles (they're the
+hook), and thin charts on house accounts undermine the receipts brand at the
+exact moment of maximum scrutiny. Hence:
+
+6. **NO WIPE at publish/soft-launch.** Nothing resets — not bots, not the
+   founder's accounts, not test accounts. Continuity of verified history IS
+   the product; the bots' Mar–Aug charts are the launch-day proof that the
+   AI-vs-human experiment has been running for real. (A "fresh start" is
+   what a fake platform would do.) Junk test accounts just stay off
+   marketing surfaces — flag any account to exclude and we'll hide it.
+7. **Early access (now–Oct 14):** Mon 8/24 baseline top-up to 18–20, then
+   TRIGGER-DRIVEN ONLY (rules 2–3). Human-arrival adds during Sep–Oct
+   organically produce bots that are weeks old by launch.
+8. **BOT FREEZE Oct 15 → end of spike week (~Nov 21):** no new house bots.
+   Any bot on the board Nov 10 has ≥4 weeks of chart. Zero creations during
+   the spike itself.
+9. **Post-launch (Dec+):** demand triggers fire far more often at
+   spike-scale traffic, so total additions will likely exceed the EA period
+   — the USER's intuition, validated — but they stay demand-PULLED (rules
+   2–3), never calendar mass-adds, and the ≤2×-humans ceiling (rule 4)
+   holds. The real post-launch bot-scaling channel is the **Trader API
+   (UC-A, Dec build)**: third-party bots grow the AI side without house
+   pills. House bots trend toward a curated benchmark layer, not a growth
+   lever.
+10. **Capacity gate per batch:** after every batch, verify AV `no_calls`
+    headroom + cron durations (SCALING_TRIGGERS.md thresholds); the fleet
+    also grows snapshot/close-table load — tonight's stale-close incident
+    (LAUNCH_TODO #11) is the cautionary tale.
+
+## Gifted subscribers (Session 43b — USER: "gift people subscriptions to get them excited")
+
+**Already fully built — no new code needed** for the main case:
+`/admin/bot/gift-subscribers` (POST, admin-2FA; works for ANY user despite
+the name) + admin-panel gift modal. Increments
+`AdminSubscription.bonus_subscriber_count`; creator sees subscriber count
+rise and **gets paid the real $6.50/sub, company-funded** (no store fees, no
+platform cut; separate `bonus_payout` line in XeroPayoutRecord; panel shows
+the company obligation split; triggers W-9 like real income; month-end
+tracking already on the ~10/3 calendar row).
+
+- **What it's FOR (creator-side excitement):** show a new Founding Trader
+  real earnings potential — e.g. gift 2–3 subs as a welcome ("your first
+  subscribers are on us"). Use sparingly and log a `reason` every time; each
+  gifted sub is a real recurring company cost ($6.50/mo) and a real 1099
+  number.
+- **What it's NOT:** it does not grant any recipient ACCESS to a portfolio
+  (it's a counter, not a comp account). Gifting access to would-be
+  SUBSCRIBERS = Apple Offer Codes / Google Play promo codes (store-native,
+  auto-converts to paid — the better funnel anyway). ⚠ PRE-FLIGHT before
+  ever issuing codes: verify our webhook + `is_trial` pipeline handles
+  offer-code/promo redemptions ($0-revenue transactions — same bug class as
+  the Session-43 trial-payout fix). Parked until wanted; task in LAUNCH_TODO
+  #14.
+- **Disclosure rule:** gifted counts are commingled in public subscriber
+  counts by design (marketing), but NEVER claim revenue/subscriber numbers
+  in press or posts that lean on gifted counts — receipts brand.
 
 ## Human recruitment waves (sector-sequenced)
 
