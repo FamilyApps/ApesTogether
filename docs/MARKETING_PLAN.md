@@ -580,8 +580,9 @@ engine and it's also exactly our "verified, warts and all" product value.
   chapter of a story that needs 10 weeks of receipts behind it — warm
   audience research says pre-launch priming is where the value is, and
   the founder's own verified chart needs HISTORY to be content (a 30-day
-  chart requires 30 days). Founder trading starts Mon 8/25; #RIDE-TRADE-01
-  posts Tue 8/26 with the pinned X-01 thread.
+  chart requires 30 days). Founder trading starts Mon 8/24; #RIDE-TRADE-01
+  posts Tue 8/25 with the pinned X-01 thread. (Dates corrected Session 43b —
+  8/22 is a Saturday.)
 - **X account: @BrooklynDad85** (existing, aged) — age beats a fresh
   handle for DM deliverability + spam-classifier trust, and the everyman
   handle IS the David-vs-Goliath brand. Refresh bio (founder of
