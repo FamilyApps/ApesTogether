@@ -723,6 +723,109 @@ engine and it's also exactly our "verified, warts and all" product value.
 
 ---
 
+# SOCIAL ACCOUNT ARCHITECTURE (Session 43d — fork (b′) CONFIRMED by USER 8/23)
+
+**Decision:** ALL founder work happens from FRESH, DISCLOSED accounts.
+Legacy personal accounts (incl. the 8-yr Reddit acct) stay 100% civilian
+and NEVER touch app topics — no exceptions, ever (one app comment from a
+civilian account converts "separation" into "sock puppet"). Supersedes the
+Session-43 "@BrooklynDad85 as founder account" decision everywhere.
+
+## Account inventory
+
+| Account | Type | Created | Disclosed? | Role |
+|---|---|---|---|---|
+| Founder X (fresh handle) | personal-founder | 8/24 wk | Day 1 — bio says "Building ApesTogether" | THE voice: build-in-public, ride-along, DMs, launch thread |
+| @ApesTogetherApp (X) | brand | 8/24 wk (park) | n/a | referenced in X-01 copy; retweets founder; low-effort |
+| Founder Reddit (fresh) | personal-founder | 8/24 wk | **At Nov debut** — civilian during warm-up | trading-sub participation → Nov self-posts → monthly R-04 |
+| r/ApesTogether | brand sub | mid-Sep (acct hits 30d) | n/a | parked; community home post-launch |
+| TikTok / IG / YT brand handles | brand | 8/24 wk | n/a | TikTok #1 due 8/27 per calendar; cross-posts |
+| LinkedIn (real name) | personal | exists | inherently | headline flip at Publish; launch + press posts. NOTE: LinkedIn is the one place separation is impossible — founding a company is public record; that's normal and fine |
+| Personal Reddit/X legacy accts | civilian | — | never | ZERO app topics forever |
+
+## Fresh Reddit founder account — setup protocol (researched 8/23)
+
+**Gate reality (Reddit official + tracked automod data):** thresholds are
+deliberately undisclosed and vary per sub; Reddit's Poster Eligibility
+Guide blocks posts until per-sub age/karma/verified-email criteria are met.
+Tracked configs across marketing-relevant subs: age gates cluster at 3–30
+days, karma floors ~10–500 (strict subs check COMMENT karma specifically);
+builder subs like r/startups trend high (~300–500 karma, 30+ days).
+Target before Nov debut: **60+ days age, 300–500+ comment karma spread
+across 10+ subs, verified email** — the warm-up plan overshoots all gates.
+
+1. **Create (day 0):** on the Android phone, fresh email (dedicated, in
+   the password manager, 2FA on). Username rules: human-neutral, no brand,
+   no "AT/apes" reference, ZERO naming DNA shared with legacy handles (no
+   borough, no dad, no birth-year digits), no default `Word-Word-1234`
+   pattern (reads as throwaway). Usernames are permanent — pick once.
+   Verify email immediately. Join ~20 subs: target trading subs + 2–3
+   genuine hobby subs (authentic participation is easiest where he has
+   real knowledge — home repair etc. is FINE here; topic overlap with the
+   civilian account is not linkage, style/timing is what stylometry
+   catches, and a disclosed account has nothing to hide anyway).
+2. **Days 0–3: lurk only.** New accounts that post immediately trip spam
+   heuristics. Vote naturally while reading (comment-only accounts that
+   never vote look artificial).
+3. **Phase A (days 3–14):** 2–4 genuine comments/day in high-volume
+   non-trading subs + hobby subs; no links at all the first week. NEVER
+   touch r/FreeKarma4U-type subs — automods filter accounts with that
+   history. Target: 100–150 comment karma, 8+ subs by day 14.
+4. **Phase B (weeks 2–10, Sep–Oct):** shift weight to the trading subs
+   per the LAUNCH_CONTENT map: r/traders + small subs first (practice
+   reps), then r/Daytrading, r/swingtrading, r/options, r/StockMarket,
+   r/dividends. Real market takes, answered questions, paper-trading as a
+   practice topic is fine — **the app is never mentioned, in any phrasing,
+   period.** A few text self-posts (questions/discussions) so the account
+   isn't comment-only. Mid-Sep: create + park r/ApesTogether.
+5. **Nov debut (spike week):** bio flips to "building apestogether.ai" →
+   self-posts per LAUNCH_CONTENT §REDDIT order, disclosure in line 1 of
+   every app-related post/comment from then on, forever.
+6. **DM discipline:** trader-recruitment DMs stay on X/StockTwits until
+   the Reddit acct is aged (Oct+); fresh-account Reddit DMs get spam-binned
+   and reported.
+
+## Fresh founder X account — setup protocol
+
+1. Fresh email + phone verify; handle = personal-founder flavor (first
+   name or trading-flavored personal handle — it does NOT need to match
+   the Reddit handle); real first name in display; bio from day 1:
+   "Building ApesTogether (apestogether.ai) — humans vs algorithms vs AI,
+   every trade timestamped. No VC. Receipts or ban." Avatar: real photo
+   preferred (anti-astroturf), consistent across platforms.
+2. Buy Premium immediately (long-form posts for threads, edit, reply
+   boost; Premium+ upgrade decision stays mid-Oct per calendar).
+3. Day 1–2: follow 75–100 fintwit/build-in-public accounts; REPLY mode
+   only — thoughtful replies on large accounts are a day-old handle's
+   only distribution. Then pin #X-01 and start the cadence (Tue 8/25 row).
+4. X tolerates day-1 founder promo (build-in-public is a native genre) —
+   no warm-up legitimacy problem, only an algorithmic reach ramp (~1–2
+   wks). The DM cadence (3/day) works from day 1.
+
+## Why no warm-up is needed on X but is on Reddit (logged for the record)
+X: identity-forward, self-promo native, algorithmic reach. Reddit:
+pseudonymous, promo-hostile, gate-kept by per-sub automod + human mods who
+check account history the moment anything smells commercial. Same posture
+(disclosed founder), different runway lengths.
+
+## Master timeline (all accounts)
+
+| When | Founder X | Founder Reddit | Brand accts | LinkedIn |
+|---|---|---|---|---|
+| Wk 8/24 | create + Premium + follows/replies → pin X-01, RIDE-TRADE-01, DMs 3/day | create, verify, join subs, lurk; first comments ~Thu | park all handles; TikTok #1 Thu 8/27 | headline flip optional |
+| Sep | Phase-1 rhythm (3 posts/wk + ride-along + DMs) | Phase A→B: karma ramp, trading-sub participation, zero app talk; mid-Sep: park r/ApesTogether | 1 TikTok/wk cross-posted | quiet |
+| Oct | rhythm + press-kit beats; Premium+ decision mid-Oct | Phase B deepens; hits 60d + several hundred karma | rhythm | quiet |
+| Nov 10–19 SPIKE | launch thread + playbook | **disclosure flip + R-03/R-01/R-LAUNCH/app-listing posts** | launch content burst | launch + press post |
+| Dec+ | Phase-4 engine | monthly R-04 numbers; R-02 r/algotrading when UC-A keys open; 90/10 forever | sustain | quarterly AI-vs-humans hook |
+
+**[PLACEHOLDER — anon-review decision point (USER-OWNED, LAUNCH_TODO #17):
+slots ~2+ wks post-spike IF USER proceeds on his counsel's risk read.
+Cascade abstains from drafting/execution/evasion mechanics. Adjacent legal
+alternatives (disclosed comparison post / site comparison page) were
+offered and DECLINED by USER 8/23 — not slotted.]**
+
+---
+
 # Trader API in social language — GAP FOUND (Session 43)
 
 Audit result: the Trader API (UC-A) appears ONLY in eng docs

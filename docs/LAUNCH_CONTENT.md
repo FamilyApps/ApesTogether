@@ -168,7 +168,11 @@ them, plus possibly reveddit/Pushshift archives for a determined sleuth):
 the identity weld does NOT already exist — POSTING this screenshot is what
 creates it, since the username is visible in it. Cropping the username
 guts the receipt's credibility. So #X-ORIGIN is only usable under fork
-(a); publishing it IS the fork decision (LAUNCH_TODO #17)._
+(a); publishing it IS the fork decision (LAUNCH_TODO #17).
+**DEPRECATED (Session 43d): USER confirmed fork (b′) — all founder work
+from fresh disclosed accounts; the personal account stays civilian, so
+#X-ORIGIN is permanently shelved (posting it would weld the civilian
+account to the company). Kept for the record only — do not slot.**_
 ```
 6 years ago I posted this idea on r/wallstreetbets.
 
@@ -1044,17 +1048,24 @@ Learn more: apestogether.ai
 
 # REDDIT CONTENT
 
-> **Account strategy (Session 43):** post from the founder's REAL 8-year /
-> 5.8k-karma account — its age passes sub gates and its home-repair history
-> is proof-of-human, which no fresh "founder" account can buy. Rules: (1)
+> **Account strategy (Session 43d — SUPERSEDES Session 43): fork (b′)
+> confirmed. ALL Reddit founder work happens from a FRESH disclosed founder
+> account** (created ~8/24, warmed Sep–Oct per MARKETING_PLAN §SOCIAL
+> ACCOUNT ARCHITECTURE; the personal 8-yr account stays civilian and NEVER
+> touches app topics). Self-posts wait for the Nov spike — the account
+> banks ~75 days of age + genuine trading-sub karma first. Rules: (1)
 > **90/10** — nine genuine comments/answers in a sub before one self-post;
 > warm up in each target sub for 1–2 weeks before posting. (2) ALWAYS
 > disclose founder status in the first line. (3) Never post the same link
 > twice in a sub; if a mod removes it, thank them and move on. (4) Read
-> each sub's self-promo rules the same day you post. Self-post order:
-> r/SideProject (R-03) → r/startups (R-01) → r/EntrepreneurRideAlong (R-04
-> monthly) → r/algotrading (R-02, API angle) → WSB at spike only (R-LAUNCH).
-> Full purpose map below.
+> each sub's self-promo rules the same day you post. (5) Disclosure
+> protocol: bio flips to "building apestogether.ai" at the Nov debut;
+> before that flip the account NEVER mentions the app; after it, every
+> app-related comment/post discloses in line 1. Self-post order (ALL at
+> Nov spike, Session 43d reslot): r/SideProject (R-03) → r/startups (R-01)
+> → WSB (R-LAUNCH) → r/androidapps + r/iosapps listings → then monthly
+> r/EntrepreneurRideAlong (R-04) + r/algotrading (R-02, API angle, once
+> UC-A keys are public in Dec). Full purpose map below.
 
 ### SUBREDDIT MAP (Session 43c deep dive — one purpose per sub; USER's suggestions r/investing, r/RealDayTrading, r/traders folded in)
 
