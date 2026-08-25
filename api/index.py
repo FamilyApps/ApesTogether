@@ -3221,7 +3221,11 @@ def admin_audit_snapshot_stock_value():
             'MISSING_PRICE / STALE_WEEKDAY rows need a MarketData daily-close backfill for the '
             'listed ticker/date pairs FIRST (calculate_portfolio_value silently skips unpriced '
             'holdings), then re-run ?fix=true. Fixed users are auto-purged from '
-            'user_portfolio_chart_cache so charts regenerate from corrected snapshots.'
+            'user_portfolio_chart_cache so charts regenerate from corrected snapshots. '
+            'IMPORTANT: leaderboard_cache is a SEPARATE cache holding pre-fix gains -- after '
+            'any fix, rebuild it per period via /api/mobile/admin/rebuild-leaderboard-cache/'
+            '<period> (1D,5D,1M,3M,YTD,1Y) or wait for the 20:05 UTC market-close cron, or '
+            'charts and leaderboard gains will disagree until then.'
         ),
     })
 
@@ -4637,6 +4641,143 @@ def cron_map_dailybars_to_marketdata():
         'av_failed': av_failed or None,
         'av_skipped_budget': av_skipped or None,
         'elapsed_seconds': round(_time.time() - start_ts, 1),
+    })
+
+
+@app.route('/admin/debug-ticker-prices')
+@admin_required
+def admin_debug_ticker_prices():
+    """
+    Deep per-ticker price-source diagnostic (built 8/25/26 for the ORLA case:
+    its AV TIME_SERIES_DAILY response stopped ~8/1 while the backfill reported
+    'succeeded' -- get_historical_price's nearest-previous-day fallback returns
+    a price even when the response lacks the requested date, masking the gap).
+
+    Side-by-side, READ-ONLY (3 AV calls, writes nothing):
+      - market_data daily closes (timestamp IS NULL): latest rows + count
+      - market_data intraday rows (timestamp NOT NULL): count
+      - daily_price_bar (bot-universe source): latest rows + count
+      - LIVE AV TIME_SERIES_DAILY: 'Last Refreshed' metadata + latest dates
+      - LIVE AV GLOBAL_QUOTE: current price + latest trading day
+      - LIVE AV SYMBOL_SEARCH: what AV resolves this symbol to (catches ticker
+        changes, delistings, exchange-suffix mismatches)
+      - which users/bots currently hold the ticker (exit-decision context)
+
+    Interpretation: quote fresh + daily series stale => AV daily lag (retry
+    nightly); everything stale + search shows a different/foreign symbol =>
+    symbol change or delisting (bot should exit the position; carry-forward
+    valuation is the honest price until then). Params: ?ticker=XXX, ?rows=N.
+    """
+    import requests as _requests
+    from models import MarketData, DailyPriceBar, Stock as _Stock, User as _User
+    from portfolio_performance import _to_av_symbol
+
+    ticker = (request.args.get('ticker') or '').upper().strip()
+    if not ticker:
+        return jsonify({'error': 'ticker parameter required'}), 400
+    try:
+        rows = max(1, min(int(request.args.get('rows', '10')), 50))
+    except (TypeError, ValueError):
+        rows = 10
+
+    md_daily = MarketData.query.filter(
+        MarketData.ticker == ticker,
+        MarketData.timestamp.is_(None),
+    ).order_by(MarketData.date.desc()).limit(rows).all()
+    md_daily_count = MarketData.query.filter(
+        MarketData.ticker == ticker, MarketData.timestamp.is_(None)
+    ).count()
+    md_intraday_count = MarketData.query.filter(
+        MarketData.ticker == ticker, MarketData.timestamp.isnot(None)
+    ).count()
+    dpb = DailyPriceBar.query.filter_by(ticker=ticker).order_by(
+        DailyPriceBar.date.desc()
+    ).limit(rows).all()
+    dpb_count = DailyPriceBar.query.filter_by(ticker=ticker).count()
+
+    holders = [
+        {'user_id': u.id, 'username': u.username, 'role': u.role,
+         'quantity': round(float(s.quantity or 0.0), 4)}
+        for s, u in db.session.query(_Stock, _User)
+        .join(_User, _Stock.user_id == _User.id)
+        .filter(_Stock.ticker.ilike(ticker)).all()
+    ]
+
+    api_key = os.environ.get('ALPHA_VANTAGE_API_KEY')
+    av_symbol = _to_av_symbol(ticker)
+    av = {'symbol_sent': av_symbol, 'key_present': bool(api_key)}
+    if api_key:
+        base = 'https://www.alphavantage.co/query'
+        try:
+            r = _requests.get(base, params={
+                'function': 'TIME_SERIES_DAILY', 'symbol': av_symbol,
+                'outputsize': 'compact', 'apikey': api_key}, timeout=10).json()
+            series = r.get('Time Series (Daily)') or {}
+            latest = sorted(series.keys(), reverse=True)[:rows]
+            av['daily_series'] = {
+                'meta_last_refreshed': (r.get('Meta Data') or {}).get('3. Last Refreshed'),
+                'dates_returned': len(series),
+                'latest_dates': [
+                    {'date': d, 'close': float(series[d]['4. close'])} for d in latest
+                ],
+                'error_or_note': r.get('Error Message') or r.get('Note') or r.get('Information'),
+            }
+        except Exception as e:
+            av['daily_series'] = {'error_or_note': str(e)[:200]}
+        try:
+            r = _requests.get(base, params={
+                'function': 'GLOBAL_QUOTE', 'symbol': av_symbol,
+                'apikey': api_key}, timeout=10).json()
+            q = r.get('Global Quote') or {}
+            av['global_quote'] = {
+                'symbol': q.get('01. symbol'),
+                'price': q.get('05. price'),
+                'latest_trading_day': q.get('07. latest trading day'),
+                'previous_close': q.get('08. previous close'),
+                'empty': not q,
+                'error_or_note': r.get('Error Message') or r.get('Note') or r.get('Information'),
+            }
+        except Exception as e:
+            av['global_quote'] = {'error_or_note': str(e)[:200]}
+        try:
+            r = _requests.get(base, params={
+                'function': 'SYMBOL_SEARCH', 'keywords': ticker,
+                'apikey': api_key}, timeout=10).json()
+            av['symbol_search'] = [
+                {'symbol': m.get('1. symbol'), 'name': m.get('2. name'),
+                 'type': m.get('3. type'), 'region': m.get('4. region'),
+                 'currency': m.get('8. currency'), 'match_score': m.get('9. matchScore')}
+                for m in (r.get('bestMatches') or [])[:8]
+            ] or [{'note': r.get('Error Message') or r.get('Note') or r.get('Information') or 'no_matches'}]
+        except Exception as e:
+            av['symbol_search'] = [{'note': str(e)[:200]}]
+
+    return jsonify({
+        'ticker': ticker,
+        'holders': holders or None,
+        'market_data_daily': {
+            'total_rows': md_daily_count,
+            'intraday_rows': md_intraday_count,
+            'latest': [
+                {'date': m.date.isoformat(), 'close': float(m.close_price)} for m in md_daily
+            ],
+        },
+        'daily_price_bar': {
+            'total_rows': dpb_count,
+            'latest': [
+                {'date': b.date.isoformat(), 'close': float(b.close)} for b in dpb
+            ],
+        },
+        'alphavantage_live': av,
+        'interpretation': (
+            'Compare the newest dates across sources. If global_quote.latest_trading_day '
+            'is current but daily_series.latest_dates lag, AV daily data is behind for '
+            'this symbol (nightly cron keeps retrying). If BOTH AV views are stale or '
+            'empty and symbol_search resolves to a different/foreign listing, the ticker '
+            'changed or delisted -- the holding bot should exit; until then snapshots '
+            'honestly carry forward the last REAL close (no synthetic prices are ever '
+            'written).'
+        ),
     })
 
 
