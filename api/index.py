@@ -3220,7 +3220,13 @@ def admin_audit_bot_portfolio_integrity():
     Per bot, four INDEPENDENT, READ-ONLY checks:
       1. LEDGER COVERAGE: current Stock holdings vs transaction replay. Tickers held
          with zero replayed quantity (held but never transacted) are the add_stocks
-         signature -> 'untracked_holdings'. Also reports per-ticker qty mismatches.
+         signature -> 'untracked_holdings'. Also reports per-ticker qty mismatches,
+         and CLOSED-POSITION SEED GAPS: a ticker whose full-ledger replay nets
+         NEGATIVE while the Stock row is gone. That's a seeded lot that was only
+         partially ledgered and then fully sold -- the exit deleted the Stock row,
+         so current-holdings comparison can't see it (found 8/25/26: apex1575 sold
+         110 DXCM against ~19 ledgered shares, hiding a ~91-share seed gap).
+         implied_missing_seed = -replay_qty is exactly the 'initial' lot to backfill.
       2. LATEST SNAPSHOT vs LIVE HOLDINGS: price current Stock holdings at each
          ticker's most-recent MarketData close and compare to the newest snapshot's
          stock_value. Catches a corrupted value on the row users see on the
@@ -3274,7 +3280,9 @@ def admin_audit_bot_portfolio_integrity():
     bots_with_untracked = 0
     bots_with_latest_drift = 0
     bots_with_series_anomalies = 0
+    bots_with_closed_seed_gaps = 0
     total_untracked_holdings = 0
+    total_closed_seed_gaps = 0
     total_spike_days = 0
 
     for bot in bots:
@@ -3318,6 +3326,15 @@ def admin_audit_bot_portfolio_integrity():
                     'current_qty': round(q, 4),
                     'replay_qty': round(rq, 4),
                 })
+        closed_seed_gaps = sorted([
+            {
+                'ticker': tk,
+                'replay_qty': round(rq, 4),
+                'implied_missing_seed': round(-rq, 4),
+            }
+            for tk, rq in replay.items()
+            if rq < -1e-6 and current.get(tk, 0.0) <= 1e-9
+        ], key=lambda r: r['ticker'])
         ledger_explains_pct = (
             round(100.0 * (1 - len(untracked) / len(current)), 1) if current else None
         )
@@ -3414,12 +3431,17 @@ def admin_audit_bot_portfolio_integrity():
         if untracked:
             bots_with_untracked += 1
             total_untracked_holdings += len(untracked)
+        if closed_seed_gaps:
+            bots_with_closed_seed_gaps += 1
+            total_closed_seed_gaps += len(closed_seed_gaps)
 
         flags = []
         if untracked:
             flags.append('untracked_holdings')
         if qty_mismatches:
             flags.append('qty_mismatch')
+        if closed_seed_gaps:
+            flags.append('closed_position_seed_gap')
         if latest_info and latest_info['flagged']:
             flags.append('latest_snapshot_drift')
         if value_mismatch_count:
@@ -3442,6 +3464,7 @@ def admin_audit_bot_portfolio_integrity():
                 'untracked_holdings': untracked or None,
                 'untracked_count': len(untracked),
                 'qty_mismatches': qty_mismatches or None,
+                'closed_position_seed_gaps': closed_seed_gaps or None,
                 'ledger_explains_pct': ledger_explains_pct,
             },
             'latest_snapshot': latest_info,
@@ -3472,7 +3495,9 @@ def admin_audit_bot_portfolio_integrity():
         'bots_with_untracked_holdings': bots_with_untracked,
         'bots_with_latest_snapshot_drift': bots_with_latest_drift,
         'bots_with_series_anomalies': bots_with_series_anomalies,
+        'bots_with_closed_seed_gaps': bots_with_closed_seed_gaps,
         'total_untracked_holdings': total_untracked_holdings,
+        'total_closed_seed_gaps': total_closed_seed_gaps,
         'total_spike_revert_days': total_spike_days,
         'issues': results,
         'interpretation': (
@@ -3485,7 +3510,11 @@ def admin_audit_bot_portfolio_integrity():
             'neighbours which agree (chart-corruption signature, same family as the '
             'intraday read-skew). synthetic_history = snapshots predating the first '
             'transaction were backfilled (expected for bots; explains the replay audit '
-            '-100% rows). READ-ONLY: remediation is a separate, deliberate step.'
+            '-100% rows). closed_position_seed_gap = the ledger nets NEGATIVE for a '
+            'ticker no longer held: a partially-ledgered seed lot was fully sold, '
+            'deleting the Stock row that current-holdings checks compare against; '
+            'implied_missing_seed is the initial lot to backfill. READ-ONLY: '
+            'remediation is a separate, deliberate step.'
         ),
     })
 
@@ -3504,6 +3533,15 @@ def admin_backfill_bot_untracked_holdings():
     records the missing seed lot:
       missing_qty = current_qty - replay_qty
       seed_value  = missing_qty * Stock.purchase_price   (seeded cost basis)
+
+    CLOSED-POSITION GAPS (added 8/25/26, apex1575 DXCM incident): a ticker whose
+    full-ledger replay nets NEGATIVE and which is no longer in Stock was a
+    partially-ledgered seed lot that got fully sold -- the exit deleted the Stock
+    row, so the current-holdings loop above can't see it. We seed exactly the
+    negative (missing_qty = -replay_qty, netting replay to the true 0). No Stock
+    row survives to supply purchase_price, so the seed is priced from the
+    MarketData daily close on/before the backfill date, falling back to the
+    bot's earliest ledger price for the ticker.
 
     IMPORTANT - we DON'T route through process_transaction(). That path offsets
     a buy against current cash_proceeds, but the seed happened at t0 when
@@ -3528,7 +3566,7 @@ def admin_backfill_bot_untracked_holdings():
     On commit, affected users are purged from user_portfolio_chart_cache so any
     max_cash_deployed-derived returns regenerate.
     """
-    from models import db, User, Stock, Transaction, PortfolioSnapshot
+    from models import db, User, Stock, Transaction, PortfolioSnapshot, MarketData
     from sqlalchemy import text as _sql_text
 
     try:
@@ -3606,6 +3644,38 @@ def admin_backfill_bot_untracked_holdings():
             capital_recovered += value
             txns.append({'ticker': tk, 'quantity': missing, 'price': round(price, 4),
                          'value': round(value, 2), 'transaction_type': 'initial'})
+
+        # Closed-position seed gaps: negative net replay, no surviving Stock row
+        # (see docstring). Seeding -replay_qty makes the replay net to the true 0.
+        for tk, rq in sorted(replay.items()):
+            if rq >= -1e-6 or stocks.get(tk, 0.0) > 1e-9:
+                continue
+            missing = round(-rq, 6)
+            price = None
+            md = MarketData.query.filter(
+                MarketData.ticker == tk,
+                MarketData.timestamp.is_(None),
+                MarketData.date <= backfill_dt.date(),
+            ).order_by(MarketData.date.desc()).first()
+            if md and md.close_price and float(md.close_price) > 0:
+                price = float(md.close_price)
+            else:
+                first_priced = Transaction.query.filter(
+                    Transaction.user_id == bot.id,
+                    Transaction.ticker.ilike(tk),
+                    Transaction.price.isnot(None),
+                ).order_by(Transaction.timestamp.asc()).first()
+                if first_priced and first_priced.price and float(first_priced.price) > 0:
+                    price = float(first_priced.price)
+            if price is None:
+                skipped.append({'ticker': tk, 'missing_qty': missing,
+                                'reason': 'closed_position_no_seed_price'})
+                continue
+            value = missing * price
+            capital_recovered += value
+            txns.append({'ticker': tk, 'quantity': missing, 'price': round(price, 4),
+                         'value': round(value, 2), 'transaction_type': 'initial',
+                         'closed_position': True})
 
         if not txns:
             continue
