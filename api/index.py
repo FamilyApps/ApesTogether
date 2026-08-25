@@ -2954,6 +2954,15 @@ def admin_audit_snapshot_stock_value():
     tolerance the cash-drift audit uses -- so boundary timing never false-flags
     and, worse, never gets ?fix=true'd into a real value loss.
 
+    TODAY'S snapshot is SKIPPED until today's official closes land in market_data
+    (nightly 23:00 UTC map cron; SPY row's presence is the signal). Before that,
+    the replay would value today at YESTERDAY'S closes -- on 8/25/26 a 4:46 PM
+    run flagged exactly the 4 portfolios that had moved >1% that day as 'drift'
+    (their snapshots, priced at real closes by the 20:05 cron, were CORRECT;
+    ?fix=true would have overwritten them with yesterday-close valuations).
+    Reported in snapshots_skipped_todays_closes_pending; the row validates
+    normally on the next run once closes exist.
+
     Copytrade bots are skipped (their brokerage-migration holdings can't be rebuilt from a
     transaction replay — same rationale as the cash-drift audit).
 
@@ -3036,6 +3045,7 @@ def admin_audit_snapshot_stock_value():
     snapshots_with_stale_weekday = 0
     snapshots_with_absurd = 0
     skipped_null_stock_value = 0
+    skipped_closes_pending = 0
     skipped_copytrade = 0
     fix_count = 0
     fixed_user_ids = set()
@@ -3117,6 +3127,18 @@ def admin_audit_snapshot_stock_value():
             total_snapshots_checked += 1
             if snap.stock_value is None:
                 skipped_null_stock_value += 1
+                continue
+
+            # Today's closes land at the 23:00 UTC map cron; until then SPY has
+            # no row for today and the replay would use yesterday's closes --
+            # every portfolio that moved >1% today would false-flag (see
+            # docstring, 8/25/26). Skip; validates next run.
+            if (
+                snap.date >= datetime.utcnow().date()
+                and snap.date.weekday() < 5
+                and snap.date not in spy_trading_days
+            ):
+                skipped_closes_pending += 1
                 continue
 
             is_non_trading = snap.date.weekday() >= 5 or (
@@ -3261,6 +3283,7 @@ def admin_audit_snapshot_stock_value():
         'snapshots_with_stale_weekday_prices': snapshots_with_stale_weekday,
         'snapshots_with_absurd_prices': snapshots_with_absurd,
         'snapshots_skipped_null_stock_value': skipped_null_stock_value,
+        'snapshots_skipped_todays_closes_pending': skipped_closes_pending,
         'series_ended_carry_forward_tickers': series_ended_cf or None,
         'issues': issues,
         'next_steps': (
@@ -5015,18 +5038,20 @@ def admin_refresh_daily_closes():
     against official sources: DailyPriceBar first (free, written post-market by
     refresh-daily-bars), AV TIME_SERIES_DAILY as fallback (final after close).
 
-    Built 8/25/26: afternoon AV backfills ran DURING market hours, and AV's
-    daily series includes today valued at the as-of-fetch intraday price -- so
-    ~31 outside-universe tickers got ~18:53 UTC prices frozen as 8/25 'closes'.
-    The 20:05 EOD snapshots (priced at real closes) then false-flagged 1%+
-    drift for the 4 users holding them. THE SNAPSHOTS WERE RIGHT AND THE STORED
-    CLOSES WERE WRONG -- running audit ?fix=true would have corrupted correct
-    snapshots with stale intraday prices. get_historical_price now refuses to
-    persist today's provisional row before 21:05 UTC (root fix); this endpoint
-    repairs rows frozen before that fix deployed.
+    History: built 8/25/26 chasing a suspected pollution of that day's closes
+    by intraday AV backfills -- the first dry run DISPROVED it (rows_found=1:
+    only the synthetic SPY_SP500 benchmark row existed; the intraday fetches
+    had NOT persisted provisional today-rows). The 4 audit flags that day were
+    instead the audit valuing today's snapshots at YESTERDAY'S closes before
+    the 23:00 UTC map cron ran; the audit now skips today until closes land.
+    This endpoint remains the generic guardrail for any date whose stored
+    closes are suspect, and get_historical_price now refuses to persist a
+    same-day row before 21:05 UTC as insurance against the pollution scenario.
 
-    Refuses to run for the current date before 21:05 UTC (the official close
-    isn't final in AV until after 4 PM ET; 21:05 covers EDT and EST).
+    Synthetic tickers (underscore names, e.g. SPY_SP500 -- benchmark series,
+    not an AV symbol) are skipped. Refuses to run for the current date before
+    21:05 UTC (the official close isn't final in AV until after 4 PM ET;
+    21:05 covers EDT and EST).
 
     READ-ONLY DRY-RUN by default. Params:
       ?date=YYYY-MM-DD  required
@@ -5072,8 +5097,12 @@ def admin_refresh_daily_closes():
     import requests as _requests
 
     corrected, confirmed, av_calls, failed = [], 0, 0, []
+    skipped_synthetic = []
     for md in rows:
         tk = (md.ticker or '').upper()
+        if '_' in tk:
+            skipped_synthetic.append(tk)
+            continue
         stored = float(md.close_price)
         official = dpb_close.get(tk)
         source = 'daily_price_bar'
@@ -5120,6 +5149,7 @@ def admin_refresh_daily_closes():
         'corrected_count': len(corrected),
         'corrected': corrected,
         'av_fallback_calls': av_calls,
+        'skipped_synthetic': skipped_synthetic or None,
         'failed': failed or None,
         'next_steps': (
             'DRY-RUN: re-run with &commit=true to write corrections.' if not commit else
