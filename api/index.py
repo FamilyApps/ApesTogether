@@ -4515,6 +4515,131 @@ def admin_backfill_marketdata_av_fetch():
     })
 
 
+@app.route('/api/cron/map-dailybars-to-marketdata', methods=['GET', 'POST'])
+def cron_map_dailybars_to_marketdata():
+    """
+    Nightly MarketData daily-close maintenance. Scheduled 23:00 UTC weekdays,
+    after the 22:30/22:32 refresh-daily-bars crons land the day's DailyPriceBar
+    rows. Keeps the EOD snapshot stock-value audit authoritative and stops
+    stale_weekday_price flags from accumulating (8/24/26: DELL/ORLA/SHOP).
+
+    Two passes over a short recent window (default 7 days):
+      1. MAP (free, no API calls): copy DailyPriceBar.close into
+         MarketData(ticker, date, timestamp=None) for every (ticker, date) DPB
+         has but MarketData lacks -- same logic as
+         /admin/backfill-marketdata-from-dailybars.
+      2. AV FETCH (bounded): for held/transacted tickers missing a trading-day
+         close from BOTH MarketData and DailyPriceBar (names outside the
+         ~145-name bot universe), call get_historical_price(force_fetch=True)
+         once per ticker; AV returns ~100 days so one call closes the gap.
+         Caps: ?av_limit (default 10 tickers/night) + ?max_seconds (default 40).
+
+    Idempotent; manual equivalents remain /admin/backfill-marketdata-from-dailybars
+    and /admin/backfill-marketdata-av-fetch. Auth: CRON_SECRET bearer.
+    Params: ?days=N (default 7), ?av_limit=N (default 10), ?max_seconds=S.
+    """
+    auth_error = verify_cron_request()
+    if auth_error:
+        return auth_error
+
+    import time as _time
+    from models import MarketData
+    from portfolio_performance import PortfolioPerformanceCalculator
+
+    try:
+        days = max(1, min(int(request.args.get('days', '7')), 120))
+    except (TypeError, ValueError):
+        days = 7
+    try:
+        av_limit = max(0, min(int(request.args.get('av_limit', '10')), 50))
+    except (TypeError, ValueError):
+        av_limit = 10
+    try:
+        max_seconds = max(5.0, min(float(request.args.get('max_seconds', '40')), 55.0))
+    except (TypeError, ValueError):
+        max_seconds = 40.0
+
+    start_ts = _time.time()
+    (window_start, tickers, md_dates_by_ticker,
+     dpb_dates_by_ticker, dpb_close_by_ticker, calendar) = _marketdata_coverage_universe(days)
+
+    # --- Pass 1: free DPB -> MarketData map ---
+    now = datetime.utcnow()
+    mapped_rows = 0
+    mapped_tickers = []
+    for tk in sorted(tickers):
+        fillable = sorted(
+            dpb_dates_by_ticker.get(tk, set()) - md_dates_by_ticker.get(tk, set())
+        )
+        if not fillable:
+            continue
+        for d in fillable:
+            db.session.add(MarketData(
+                ticker=tk,
+                date=d,
+                timestamp=None,
+                close_price=dpb_close_by_ticker[tk][d],
+                created_at=now,
+            ))
+        md_dates_by_ticker.setdefault(tk, set()).update(fillable)
+        mapped_rows += len(fillable)
+        mapped_tickers.append({'ticker': tk, 'rows': len(fillable)})
+    if mapped_rows:
+        db.session.commit()
+
+    # --- Pass 2: bounded AV fetch for names missing from BOTH sources ---
+    av_targets = []
+    for tk in sorted(tickers):
+        missing = (
+            calendar
+            - md_dates_by_ticker.get(tk, set())
+            - dpb_dates_by_ticker.get(tk, set())
+        )
+        if missing:
+            av_targets.append((tk, max(missing), len(missing)))
+    av_targets.sort(key=lambda r: -r[2])
+
+    calculator = PortfolioPerformanceCalculator()
+    have_key = bool(getattr(calculator, 'alpha_vantage_api_key', None))
+    av_succeeded = []
+    av_failed = []
+    av_skipped = []
+    n_done = 0
+    for tk, latest_missing, _cnt in av_targets:
+        if not have_key or n_done >= av_limit or (_time.time() - start_ts) > max_seconds:
+            av_skipped.append(tk)
+            continue
+        try:
+            price = calculator.get_historical_price(tk, latest_missing, force_fetch=True)
+            if price and price > 0:
+                av_succeeded.append(tk)
+            else:
+                av_failed.append({'ticker': tk, 'reason': 'no_data_returned'})
+        except Exception as e:
+            av_failed.append({'ticker': tk, 'reason': str(e)[:200]})
+        n_done += 1
+        _time.sleep(0.1)
+
+    if av_failed or av_skipped:
+        logger.warning(
+            f"map-dailybars-to-marketdata: av_failed={av_failed} av_skipped={av_skipped}"
+        )
+
+    return jsonify({
+        'window_start': window_start.isoformat(),
+        'window_days': days,
+        'mapped_rows': mapped_rows,
+        'mapped_tickers': mapped_tickers,
+        'av_key_present': have_key,
+        'av_target_count': len(av_targets),
+        'av_fetched': n_done,
+        'av_succeeded': av_succeeded,
+        'av_failed': av_failed or None,
+        'av_skipped_budget': av_skipped or None,
+        'elapsed_seconds': round(_time.time() - start_ts, 1),
+    })
+
+
 @app.route('/admin/audit-snapshot-max-cash-drift')
 @admin_required
 def admin_audit_snapshot_max_cash_drift():

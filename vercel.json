@@ -72,6 +72,10 @@
       "schedule": "32 22 * * 1-5"
     },
     {
+      "path": "/api/cron/map-dailybars-to-marketdata",
+      "schedule": "0 23 * * 1-5"
+    },
+    {
       "path": "/api/cron/refresh-fundamentals?part=1&of=3",
       "schedule": "0 23 * * 0"
     },
