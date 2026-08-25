@@ -2947,6 +2947,13 @@ def admin_audit_snapshot_stock_value():
         so real coverage failures cannot hide behind this carve-out.
       - ABSURD_PRICE: a MarketData close <= 0.
 
+    Post-close trade tolerance: trades stamped >= 20:00 UTC on date D may or may
+    not be inside that day's 20:05 EOD snapshot (e.g. the 8/25/26 ORLA
+    halted_liquidation executed 20:22 UTC, after the snapshot was written). Their
+    summed |value| widens that date's drift threshold -- the same ambiguous-trade
+    tolerance the cash-drift audit uses -- so boundary timing never false-flags
+    and, worse, never gets ?fix=true'd into a real value loss.
+
     Copytrade bots are skipped (their brokerage-migration holdings can't be rebuilt from a
     transaction replay — same rationale as the cash-drift audit).
 
@@ -3049,6 +3056,19 @@ def admin_audit_snapshot_stock_value():
         if not txns or not snaps:
             continue
 
+        # Post-close (>= 20:00 UTC) trades: sum |value| per date to widen that
+        # date's drift threshold (see docstring; mirrors the cash-drift audit).
+        amb_tol_by_date = {}
+        for t in txns:
+            if t.timestamp is None:
+                continue
+            ts_n = t.timestamp.replace(tzinfo=None) if t.timestamp.tzinfo else t.timestamp
+            if ts_n.hour >= 20:
+                amb_tol_by_date[ts_n.date()] = (
+                    amb_tol_by_date.get(ts_n.date(), 0.0)
+                    + abs(float((t.quantity or 0) * (t.price or 0)))
+                )
+
         # Pre-load daily MarketData closes for every ticker this user ever held.
         tickers = sorted({(t.ticker or '').upper() for t in txns if t.ticker})
         price_index = {}
@@ -3137,7 +3157,7 @@ def admin_audit_snapshot_stock_value():
             drift = expected - actual
             denom = expected if expected > 0 else (actual if actual > 0 else 1.0)
             drift_pct = (drift / denom) * 100.0
-            effective_abs = max(abs_floor, rel_threshold * expected)
+            effective_abs = max(abs_floor, rel_threshold * expected) + amb_tol_by_date.get(snap.date, 0.0)
             is_drift = validatable and abs(drift) >= effective_abs
 
             if not (is_drift or has_missing or has_stale or has_absurd):
@@ -4566,6 +4586,12 @@ def cron_map_dailybars_to_marketdata():
          once per ticker; AV returns ~100 days so one call closes the gap.
          Caps: ?av_limit (default 10 tickers/night) + ?max_seconds (default 40).
 
+    3. DELISTING/HALT SENTRY: held tickers lagging >= 1 session are checked
+       against AV LISTING_STATUS (state=delisted). Confirmed delistings
+       AUTO-liquidate AGENT holdings at the last REAL close the same night;
+       real users are emailed to ADMIN, never auto-traded. Unconfirmed gaps
+       alert at >= 3 sessions (halts / data failures).
+
     Idempotent; manual equivalents remain /admin/backfill-marketdata-from-dailybars
     and /admin/backfill-marketdata-av-fetch. Auth: CRON_SECRET bearer.
     Params: ?days=N (default 7), ?av_limit=N (default 10), ?max_seconds=S.
@@ -4657,15 +4683,17 @@ def cron_map_dailybars_to_marketdata():
             f"map-dailybars-to-marketdata: av_failed={av_failed} av_skipped={av_skipped}"
         )
 
-    # --- Pass 3: halted/delisted early-warning on currently-HELD tickers ---
-    # A held name whose newest close (MarketData + DPB, re-checked in the DB so
-    # tonight's pass-2 inserts count) lags the trading calendar by >= 3 sessions
-    # is either a data-source failure or a stopped stock (halt / delisting /
-    # closed acquisition). Both need a human: ORLA sat frozen for 3.5 weeks
-    # (Equinox Gold all-stock acquisition closed 7/31/26) before the 8/25 audit
-    # surfaced it. Alerts email ADMIN with the runbook: confirm via
-    # /admin/debug-ticker-prices, then /admin/liquidate-halted-position.
+    # --- Pass 3: delisting / halt sentry on currently-HELD tickers ---
+    # Any held name lagging the calendar by >= 1 session gets checked against
+    # AV LISTING_STATUS (state=delisted). Confirmed delisting => AUTO-liquidate
+    # AGENT holdings at the last REAL close tonight -- no multi-day wait (ORLA
+    # sat frozen 3.5 weeks before detection; now it's caught the first session
+    # after AV publishes the delisting). Real users' self-reported portfolios
+    # are NEVER auto-traded: human holders are emailed to ADMIN. Gaps WITHOUT a
+    # LISTING_STATUS match (trading halts, AV data failures -- stock may resume,
+    # selling would be wrong) still alert at >= 3 sessions for manual handling.
     possibly_halted = []
+    lagging = []
     if calendar:
         cal_sorted = sorted(calendar)
         held = {
@@ -4678,7 +4706,7 @@ def cron_map_dailybars_to_marketdata():
             if not have:
                 continue  # brand-new position; pass 2 fills it next run
             last_have = max(have)
-            if sum(1 for d in cal_sorted if d > last_have) < 3:
+            if not any(d > last_have for d in cal_sorted):
                 continue
             # Re-check the DB: pass 2 may have just filled this ticker.
             db_latest = (
@@ -4688,7 +4716,75 @@ def cron_map_dailybars_to_marketdata():
             )
             last_close = max(filter(None, [last_have, db_latest[0] if db_latest else None]))
             gap = sum(1 for d in cal_sorted if d > last_close)
-            if gap >= 3:
+            if gap >= 1:
+                lagging.append((tk, last_close, gap))
+
+    delisted_map = {}
+    if lagging and have_key:
+        try:
+            import csv as _csv
+            import io as _io
+            import requests as _requests
+            resp = _requests.get('https://www.alphavantage.co/query', params={
+                'function': 'LISTING_STATUS', 'state': 'delisted',
+                'apikey': os.environ.get('ALPHA_VANTAGE_API_KEY')}, timeout=20)
+            for row in _csv.DictReader(_io.StringIO(resp.text)):
+                sym = (row.get('symbol') or '').upper()
+                if sym:
+                    delisted_map[sym] = row.get('delistingDate') or 'unknown'
+        except Exception as e:
+            logger.error(f"LISTING_STATUS fetch failed (falling back to 3-session alerting): {e}")
+
+    auto_liquidated = []
+    human_delisted = []
+    if lagging:
+        from portfolio_performance import _to_av_symbol
+        for tk, last_close, gap in lagging:
+            av_sym = _to_av_symbol(tk)
+            if av_sym in delisted_map:
+                last_md = MarketData.query.filter(
+                    MarketData.ticker == tk,
+                    MarketData.timestamp.is_(None),
+                ).order_by(MarketData.date.desc()).first()
+                if last_md is None:
+                    possibly_halted.append({
+                        'ticker': tk, 'last_close_date': last_close.isoformat(),
+                        'trading_days_without_close': gap,
+                        'note': f'DELISTED {delisted_map[av_sym]} but no market_data close; '
+                                'liquidate manually with ?price=',
+                    })
+                    continue
+                price = float(last_md.close_price)
+                try:
+                    acts = _liquidate_halted_holdings(tk, price, execute=True, only_agents=True)
+                    if acts:
+                        db.session.commit()
+                        auto_liquidated.append({
+                            'ticker': tk, 'delisting_date': delisted_map[av_sym],
+                            'price': price, 'price_date': last_md.date.isoformat(),
+                            'actions': acts,
+                        })
+                        logger.warning(f"AUTO-LIQUIDATED delisted {tk} @ {price}: {acts}")
+                except Exception as e:
+                    db.session.rollback()
+                    possibly_halted.append({
+                        'ticker': tk, 'last_close_date': last_close.isoformat(),
+                        'trading_days_without_close': gap,
+                        'note': f'auto_liquidation_failed: {str(e)[:150]}',
+                    })
+                for s, u in db.session.query(_Stock, User).join(
+                    User, _Stock.user_id == User.id
+                ).filter(
+                    _Stock.ticker.ilike(tk),
+                    User.role != 'agent',
+                    _Stock.quantity > 1e-9,
+                ).all():
+                    human_delisted.append({
+                        'ticker': tk, 'delisting_date': delisted_map[av_sym],
+                        'user_id': u.id, 'username': u.username,
+                        'quantity': round(float(s.quantity or 0.0), 4),
+                    })
+            elif gap >= 3:
                 possibly_halted.append({
                     'ticker': tk,
                     'last_close_date': last_close.isoformat(),
@@ -4696,9 +4792,16 @@ def cron_map_dailybars_to_marketdata():
                 })
 
     email_sent = None
-    if possibly_halted:
-        names = ', '.join(h['ticker'] for h in possibly_halted)
-        logger.warning(f"map-dailybars-to-marketdata: possibly halted/delisted held tickers: {possibly_halted}")
+    if possibly_halted or auto_liquidated or human_delisted:
+        names = ', '.join(sorted({
+            *(h['ticker'] for h in possibly_halted),
+            *(a['ticker'] for a in auto_liquidated),
+            *(h['ticker'] for h in human_delisted),
+        }))
+        logger.warning(
+            f"map-dailybars-to-marketdata sentry: auto_liquidated={auto_liquidated} "
+            f"human_delisted={human_delisted} possibly_halted={possibly_halted}"
+        )
         try:
             import smtplib
             from email.mime.text import MIMEText
@@ -4710,18 +4813,35 @@ def cron_map_dailybars_to_marketdata():
             smtp_user = os.environ.get('SMTP_USER')
             smtp_pass = os.environ.get('SMTP_PASS')
             if smtp_user and smtp_pass:
-                body = [
-                    'Currently-HELD tickers with no daily close for 3+ trading sessions',
-                    '(halt, delisting, closed acquisition, or persistent data failure):',
-                    '',
-                ]
-                for h in possibly_halted:
-                    body.append(
-                        f"  - {h['ticker']}: last close {h['last_close_date']} "
-                        f"({h['trading_days_without_close']} sessions behind)"
-                    )
+                body = []
+                if auto_liquidated:
+                    body.append('AUTO-LIQUIDATED (AV LISTING_STATUS-confirmed delistings; agent')
+                    body.append('holdings sold at last REAL close, price_source=halted_liquidation):')
+                    for a in auto_liquidated:
+                        body.append(
+                            f"  - {a['ticker']}: delisted {a['delisting_date']}, sold @ "
+                            f"{a['price']} ({a['price_date']} close), {len(a['actions'])} holder(s)"
+                        )
+                    body.append('')
+                if human_delisted:
+                    body.append('REAL-USER holders of confirmed-delisted tickers (NOT auto-traded;')
+                    body.append('their portfolios are self-reported -- follow up manually):')
+                    for h in human_delisted:
+                        body.append(
+                            f"  - {h['ticker']} (delisted {h['delisting_date']}): "
+                            f"{h['username']} holds {h['quantity']}"
+                        )
+                    body.append('')
+                if possibly_halted:
+                    body.append('Unconfirmed gaps -- halt or data failure (no LISTING_STATUS match):')
+                    for h in possibly_halted:
+                        body.append(
+                            f"  - {h['ticker']}: last close {h['last_close_date']} "
+                            f"({h['trading_days_without_close']} sessions behind)"
+                            + (f" -- {h['note']}" if h.get('note') else '')
+                        )
+                    body.append('')
                 body.extend([
-                    '',
                     'Runbook:',
                     '  1. /admin/debug-ticker-prices?ticker=X  (fresh AV quote => data gap,',
                     '     nightly cron keeps retrying; stale quote + dailies => stopped stock)',
@@ -4730,7 +4850,7 @@ def cron_map_dailybars_to_marketdata():
                     '     invented price (?price= override for known cash consideration).',
                 ])
                 msg = MIMEText('\n'.join(body))
-                msg['Subject'] = f'[ApesTogether] Possible halted/delisted held tickers: {names}'
+                msg['Subject'] = f'[ApesTogether] Delisted/halted held tickers: {names}'
                 msg['From'] = smtp_user
                 msg['To'] = notify_email
                 with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
@@ -4741,7 +4861,7 @@ def cron_map_dailybars_to_marketdata():
                 email_sent = False
         except Exception as ee:
             email_sent = False
-            logger.error(f"halted-ticker alert email failed: {ee}")
+            logger.error(f"delisting-sentry alert email failed: {ee}")
 
     return jsonify({
         'window_start': window_start.isoformat(),
@@ -4754,6 +4874,8 @@ def cron_map_dailybars_to_marketdata():
         'av_succeeded': av_succeeded,
         'av_failed': av_failed or None,
         'av_skipped_budget': av_skipped or None,
+        'auto_liquidated_delisted': auto_liquidated or None,
+        'delisted_human_holders': human_delisted or None,
         'possibly_halted': possibly_halted or None,
         'halted_alert_email_sent': email_sent,
         'elapsed_seconds': round(_time.time() - start_ts, 1),
@@ -4897,6 +5019,60 @@ def admin_debug_ticker_prices():
     })
 
 
+def _liquidate_halted_holdings(ticker, price, execute, only_agents=False, user_id=None):
+    """Shared executor for halted/delisted position liquidations at a REAL price.
+
+    Used by /admin/liquidate-halted-position (manual, any holder) and the
+    nightly map-dailybars-to-marketdata cron Pass 3 (automatic, AGENT holders
+    only, on AV LISTING_STATUS-confirmed delistings). Per holder: qty<=0 dust
+    rows are deleted; real positions get a sell Transaction stamped
+    price_source='halted_liquidation', a cash_proceeds credit, Stock row
+    deletion, and a chart-cache purge. Returns action dicts; caller must
+    db.session.commit() when execute=True.
+    """
+    from models import Stock as _Stock, User as _User, Transaction as _Txn
+    from sqlalchemy import text as _sql_text
+
+    q = db.session.query(_Stock, _User).join(_User, _Stock.user_id == _User.id).filter(
+        _Stock.ticker.ilike(ticker)
+    )
+    if only_agents:
+        q = q.filter(_User.role == 'agent')
+    if user_id is not None:
+        q = q.filter(_User.id == user_id)
+
+    actions = []
+    now = datetime.utcnow()
+    for s, u in q.all():
+        qty = float(s.quantity or 0.0)
+        if qty <= 1e-9:
+            actions.append({'user_id': u.id, 'username': u.username,
+                            'action': 'delete_dust_row', 'quantity': qty})
+            if execute:
+                db.session.delete(s)
+            continue
+        proceeds = round(qty * price, 2)
+        actions.append({
+            'user_id': u.id, 'username': u.username, 'action': 'liquidate',
+            'quantity': round(qty, 4), 'price': price, 'proceeds': proceeds,
+            'cash_proceeds_before': round(float(u.cash_proceeds or 0.0), 2),
+            'cash_proceeds_after': round(float(u.cash_proceeds or 0.0) + proceeds, 2),
+        })
+        if execute:
+            db.session.add(_Txn(
+                user_id=u.id, ticker=ticker, quantity=qty, price=price,
+                transaction_type='sell', timestamp=now,
+                price_source='halted_liquidation',
+            ))
+            u.cash_proceeds = float(u.cash_proceeds or 0.0) + proceeds
+            db.session.delete(s)
+            db.session.execute(
+                _sql_text('DELETE FROM user_portfolio_chart_cache WHERE user_id = :uid'),
+                {'uid': u.id},
+            )
+    return actions
+
+
 @app.route('/admin/liquidate-halted-position')
 @admin_required
 def admin_liquidate_halted_position():
@@ -4922,8 +5098,11 @@ def admin_liquidate_halted_position():
     auditable: SELECT * FROM stock_transaction WHERE price_source =
     'halted_liquidation'.
 
-    Detection feed: the nightly map-dailybars-to-marketdata cron emails
-    ADMIN when a held ticker has no close for 3+ sessions (see its Pass 3).
+    Detection feed: the nightly map-dailybars-to-marketdata cron (Pass 3)
+    AUTO-liquidates AGENT holdings the night AV LISTING_STATUS confirms a
+    delisting, emails ADMIN about real-user holders (never auto-trades a
+    self-reported portfolio), and alerts on unconfirmed 3+ session gaps
+    (halts / data failures) for manual handling via this endpoint.
 
     READ-ONLY DRY-RUN by default. Params:
       ?ticker=XXX   required
@@ -4931,8 +5110,7 @@ def admin_liquidate_halted_position():
       ?price=X      override (corporate-action cash consideration only)
       ?commit=true  actually execute
     """
-    from models import MarketData, Stock as _Stock, User as _User, Transaction as _Txn
-    from sqlalchemy import text as _sql_text
+    from models import MarketData
 
     ticker = (request.args.get('ticker') or '').upper().strip()
     if not ticker:
@@ -4963,44 +5141,14 @@ def admin_liquidate_halted_position():
                        'with the known corporate-action consideration.',
         }), 400
 
-    q = db.session.query(_Stock, _User).join(_User, _Stock.user_id == _User.id).filter(
-        _Stock.ticker.ilike(ticker)
-    )
+    uid = None
     if user_filter:
         try:
-            q = q.filter(_User.id == int(user_filter))
+            uid = int(user_filter)
         except (TypeError, ValueError):
             return jsonify({'error': 'invalid user_id'}), 400
 
-    actions = []
-    now = datetime.utcnow()
-    for s, u in q.all():
-        qty = float(s.quantity or 0.0)
-        if qty <= 1e-9:
-            actions.append({'user_id': u.id, 'username': u.username,
-                            'action': 'delete_dust_row', 'quantity': qty})
-            if commit:
-                db.session.delete(s)
-            continue
-        proceeds = round(qty * price, 2)
-        actions.append({
-            'user_id': u.id, 'username': u.username, 'action': 'liquidate',
-            'quantity': round(qty, 4), 'price': price, 'proceeds': proceeds,
-            'cash_proceeds_before': round(float(u.cash_proceeds or 0.0), 2),
-            'cash_proceeds_after': round(float(u.cash_proceeds or 0.0) + proceeds, 2),
-        })
-        if commit:
-            db.session.add(_Txn(
-                user_id=u.id, ticker=ticker, quantity=qty, price=price,
-                transaction_type='sell', timestamp=now,
-                price_source='halted_liquidation',
-            ))
-            u.cash_proceeds = float(u.cash_proceeds or 0.0) + proceeds
-            db.session.delete(s)
-            db.session.execute(
-                _sql_text('DELETE FROM user_portfolio_chart_cache WHERE user_id = :uid'),
-                {'uid': u.id},
-            )
+    actions = _liquidate_halted_holdings(ticker, price, execute=commit, user_id=uid)
 
     if commit and actions:
         try:
