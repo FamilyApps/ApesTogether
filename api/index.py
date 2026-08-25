@@ -4547,7 +4547,7 @@ def cron_map_dailybars_to_marketdata():
         return auth_error
 
     import time as _time
-    from models import MarketData
+    from models import MarketData, Stock as _Stock
     from portfolio_performance import PortfolioPerformanceCalculator
 
     try:
@@ -4629,6 +4629,92 @@ def cron_map_dailybars_to_marketdata():
             f"map-dailybars-to-marketdata: av_failed={av_failed} av_skipped={av_skipped}"
         )
 
+    # --- Pass 3: halted/delisted early-warning on currently-HELD tickers ---
+    # A held name whose newest close (MarketData + DPB, re-checked in the DB so
+    # tonight's pass-2 inserts count) lags the trading calendar by >= 3 sessions
+    # is either a data-source failure or a stopped stock (halt / delisting /
+    # closed acquisition). Both need a human: ORLA sat frozen for 3.5 weeks
+    # (Equinox Gold all-stock acquisition closed 7/31/26) before the 8/25 audit
+    # surfaced it. Alerts email ADMIN with the runbook: confirm via
+    # /admin/debug-ticker-prices, then /admin/liquidate-halted-position.
+    possibly_halted = []
+    if calendar:
+        cal_sorted = sorted(calendar)
+        held = {
+            (t[0] or '').upper()
+            for t in db.session.query(_Stock.ticker)
+            .filter(_Stock.quantity > 1e-9).distinct().all()
+        }
+        for tk in sorted(held & set(tickers)):
+            have = md_dates_by_ticker.get(tk, set()) | dpb_dates_by_ticker.get(tk, set())
+            if not have:
+                continue  # brand-new position; pass 2 fills it next run
+            last_have = max(have)
+            if sum(1 for d in cal_sorted if d > last_have) < 3:
+                continue
+            # Re-check the DB: pass 2 may have just filled this ticker.
+            db_latest = (
+                db.session.query(MarketData.date)
+                .filter(MarketData.ticker == tk, MarketData.timestamp.is_(None))
+                .order_by(MarketData.date.desc()).first()
+            )
+            last_close = max(filter(None, [last_have, db_latest[0] if db_latest else None]))
+            gap = sum(1 for d in cal_sorted if d > last_close)
+            if gap >= 3:
+                possibly_halted.append({
+                    'ticker': tk,
+                    'last_close_date': last_close.isoformat(),
+                    'trading_days_without_close': gap,
+                })
+
+    email_sent = None
+    if possibly_halted:
+        names = ', '.join(h['ticker'] for h in possibly_halted)
+        logger.warning(f"map-dailybars-to-marketdata: possibly halted/delisted held tickers: {possibly_halted}")
+        try:
+            import smtplib
+            from email.mime.text import MIMEText
+            notify_email = (
+                os.environ.get('ADMIN_NOTIFY_EMAIL')
+                or os.environ.get('ADMIN_EMAIL')
+                or 'bobford00@gmail.com'
+            )
+            smtp_user = os.environ.get('SMTP_USER')
+            smtp_pass = os.environ.get('SMTP_PASS')
+            if smtp_user and smtp_pass:
+                body = [
+                    'Currently-HELD tickers with no daily close for 3+ trading sessions',
+                    '(halt, delisting, closed acquisition, or persistent data failure):',
+                    '',
+                ]
+                for h in possibly_halted:
+                    body.append(
+                        f"  - {h['ticker']}: last close {h['last_close_date']} "
+                        f"({h['trading_days_without_close']} sessions behind)"
+                    )
+                body.extend([
+                    '',
+                    'Runbook:',
+                    '  1. /admin/debug-ticker-prices?ticker=X  (fresh AV quote => data gap,',
+                    '     nightly cron keeps retrying; stale quote + dailies => stopped stock)',
+                    '  2. If stopped: /admin/liquidate-halted-position?ticker=X  (dry-run),',
+                    '     then &commit=true -- sells at the last REAL close, never an',
+                    '     invented price (?price= override for known cash consideration).',
+                ])
+                msg = MIMEText('\n'.join(body))
+                msg['Subject'] = f'[ApesTogether] Possible halted/delisted held tickers: {names}'
+                msg['From'] = smtp_user
+                msg['To'] = notify_email
+                with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+                    server.login(smtp_user, smtp_pass)
+                    server.send_message(msg)
+                email_sent = True
+            else:
+                email_sent = False
+        except Exception as ee:
+            email_sent = False
+            logger.error(f"halted-ticker alert email failed: {ee}")
+
     return jsonify({
         'window_start': window_start.isoformat(),
         'window_days': days,
@@ -4640,6 +4726,8 @@ def cron_map_dailybars_to_marketdata():
         'av_succeeded': av_succeeded,
         'av_failed': av_failed or None,
         'av_skipped_budget': av_skipped or None,
+        'possibly_halted': possibly_halted or None,
+        'halted_alert_email_sent': email_sent,
         'elapsed_seconds': round(_time.time() - start_ts, 1),
     })
 
@@ -4777,6 +4865,137 @@ def admin_debug_ticker_prices():
             'changed or delisted -- the holding bot should exit; until then snapshots '
             'honestly carry forward the last REAL close (no synthetic prices are ever '
             'written).'
+        ),
+    })
+
+
+@app.route('/admin/liquidate-halted-position')
+@admin_required
+def admin_liquidate_halted_position():
+    """
+    Convert a halted/delisted holding into cash at its LAST REAL traded close.
+    Built 8/25/26 for ORLA: Equinox Gold's all-stock acquisition closed 7/31/26
+    and ORLA was delisted from NYSE American/TSX -- AV's quote AND dailies both
+    end 7/31, so the bot's 55.472 shares sat frozen at the 7/31 close forever.
+
+    Per holder of the ticker (ALL holders unless ?user_id= given):
+      - qty <= 0 dust rows: Stock row deleted, no transaction (e.g.
+        marblethehill72's zero-quantity ORLA row)
+      - real positions: INSERT Transaction(sell, qty, price=last real close,
+        price_source='halted_liquidation', timestamp=now), DELETE the Stock
+        row, ADD proceeds to user.cash_proceeds, purge the user's chart cache.
+        The next EOD snapshot then shows cash instead of the frozen position,
+        and the transaction-replay audits stay consistent by construction.
+
+    THE PRICE IS NEVER INVENTED: default is the newest timestamp-NULL
+    MarketData close for the ticker. ?price=X override exists ONLY for a known
+    corporate-action cash consideration (e.g. a merger's per-share payout).
+    The price_source='halted_liquidation' marker makes these permanently
+    auditable: SELECT * FROM stock_transaction WHERE price_source =
+    'halted_liquidation'.
+
+    Detection feed: the nightly map-dailybars-to-marketdata cron emails
+    ADMIN when a held ticker has no close for 3+ sessions (see its Pass 3).
+
+    READ-ONLY DRY-RUN by default. Params:
+      ?ticker=XXX   required
+      ?user_id=N    restrict to one holder (default: all holders)
+      ?price=X      override (corporate-action cash consideration only)
+      ?commit=true  actually execute
+    """
+    from models import MarketData, Stock as _Stock, User as _User, Transaction as _Txn
+    from sqlalchemy import text as _sql_text
+
+    ticker = (request.args.get('ticker') or '').upper().strip()
+    if not ticker:
+        return jsonify({'error': 'ticker parameter required'}), 400
+    commit = request.args.get('commit', 'false').lower() == 'true'
+    user_filter = request.args.get('user_id')
+
+    price_override = request.args.get('price')
+    last_md = MarketData.query.filter(
+        MarketData.ticker == ticker,
+        MarketData.timestamp.is_(None),
+    ).order_by(MarketData.date.desc()).first()
+    if price_override is not None:
+        try:
+            price = float(price_override)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'invalid price override'}), 400
+        if price <= 0:
+            return jsonify({'error': 'price override must be > 0'}), 400
+        price_basis = 'override_corporate_action'
+    elif last_md:
+        price = float(last_md.close_price)
+        price_basis = f'last_real_close_{last_md.date.isoformat()}'
+    else:
+        return jsonify({
+            'error': 'no_real_close_available',
+            'message': f'No daily close for {ticker} in market_data; supply ?price= '
+                       'with the known corporate-action consideration.',
+        }), 400
+
+    q = db.session.query(_Stock, _User).join(_User, _Stock.user_id == _User.id).filter(
+        _Stock.ticker.ilike(ticker)
+    )
+    if user_filter:
+        try:
+            q = q.filter(_User.id == int(user_filter))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'invalid user_id'}), 400
+
+    actions = []
+    now = datetime.utcnow()
+    for s, u in q.all():
+        qty = float(s.quantity or 0.0)
+        if qty <= 1e-9:
+            actions.append({'user_id': u.id, 'username': u.username,
+                            'action': 'delete_dust_row', 'quantity': qty})
+            if commit:
+                db.session.delete(s)
+            continue
+        proceeds = round(qty * price, 2)
+        actions.append({
+            'user_id': u.id, 'username': u.username, 'action': 'liquidate',
+            'quantity': round(qty, 4), 'price': price, 'proceeds': proceeds,
+            'cash_proceeds_before': round(float(u.cash_proceeds or 0.0), 2),
+            'cash_proceeds_after': round(float(u.cash_proceeds or 0.0) + proceeds, 2),
+        })
+        if commit:
+            db.session.add(_Txn(
+                user_id=u.id, ticker=ticker, quantity=qty, price=price,
+                transaction_type='sell', timestamp=now,
+                price_source='halted_liquidation',
+            ))
+            u.cash_proceeds = float(u.cash_proceeds or 0.0) + proceeds
+            db.session.delete(s)
+            db.session.execute(
+                _sql_text('DELETE FROM user_portfolio_chart_cache WHERE user_id = :uid'),
+                {'uid': u.id},
+            )
+
+    if commit and actions:
+        try:
+            db.session.commit()
+            logger.info(f"halted_liquidation {ticker}: {actions}")
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': 'commit_failed', 'message': str(e)}), 500
+
+    return jsonify({
+        'mode': 'commit' if commit else 'dry_run',
+        'ticker': ticker,
+        'price_used': price,
+        'price_basis': price_basis,
+        'holders_processed': len(actions),
+        'actions': actions,
+        'next_steps': (
+            'DRY-RUN: re-run with &commit=true to execute.' if not commit else
+            'Done. The sell is stamped price_source=halted_liquidation for '
+            'permanent auditability; chart caches purged for affected users. '
+            'leaderboard_cache refreshes at the next market-close cron (or '
+            'rebuild per period via /api/mobile/admin/rebuild-leaderboard-cache/'
+            '<period>).'
         ),
     })
 
