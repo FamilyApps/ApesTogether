@@ -2926,8 +2926,13 @@ def admin_audit_snapshot_stock_value():
         calculate_portfolio_value SILENTLY SKIPS unpriced holdings (price=None -> continue),
         undervaluing the snapshot. Needs a MarketData backfill, NOT an in-place recompute,
         so these are never auto-fixed.
-      - STALE_WEEKDAY: a weekday snapshot whose ticker lacks an exact-date close (only an
-        older one exists) — a MarketData coverage gap; reported, not drift-flagged.
+      - STALE_WEEKDAY: a snapshot on a TRADING DAY whose ticker lacks an exact-date
+        close (only an older one exists) — a MarketData coverage gap; reported, not
+        drift-flagged. Trading days come from SPY's daily-close calendar, so market
+        holidays (Good Friday, Memorial Day, Juneteenth, July-4th observance...)
+        correctly carry forward instead of false-flagging (8/25/26 full-history run
+        flagged exactly those four 2026 holidays). Caveat: a genuine SPY coverage
+        gap makes that date invisible to the stale check.
       - ABSURD_PRICE: a MarketData close <= 0.
 
     Copytrade bots are skipped (their brokerage-migration holdings can't be rebuilt from a
@@ -2941,6 +2946,7 @@ def admin_audit_snapshot_stock_value():
       ?limit_users=N     Audit only the first N users
       ?fix=true          Repair ONLY clean drift rows (fully priced, no missing/absurd):
                          stock_value=expected, total_value=expected+cash_proceeds.
+                         Fixed users are auto-purged from user_portfolio_chart_cache.
 
     Response: per-user flagged snapshots + aggregate counts by issue type.
     """
@@ -2995,6 +3001,15 @@ def admin_audit_snapshot_stock_value():
         except (TypeError, ValueError):
             pass
 
+    # Trading-day calendar from SPY daily closes: a weekday absent here is a
+    # market holiday, where carry-forward pricing is correct (not stale).
+    spy_trading_days = {
+        r[0] for r in db.session.query(MarketData.date).filter(
+            MarketData.ticker == 'SPY',
+            MarketData.timestamp.is_(None),
+        ).all()
+    }
+
     issues = []
     total_snapshots_checked = 0
     snapshots_with_drift = 0
@@ -3004,6 +3019,7 @@ def admin_audit_snapshot_stock_value():
     skipped_null_stock_value = 0
     skipped_copytrade = 0
     fix_count = 0
+    fixed_user_ids = set()
 
     for user in users:
         if _is_copytrade_bot(user):
@@ -3062,7 +3078,9 @@ def admin_audit_snapshot_stock_value():
                 skipped_null_stock_value += 1
                 continue
 
-            is_weekend = snap.date.weekday() >= 5
+            is_non_trading = snap.date.weekday() >= 5 or (
+                bool(spy_trading_days) and snap.date not in spy_trading_days
+            )
             expected = 0.0
             missing = []
             stale_weekday = []
@@ -3077,11 +3095,11 @@ def admin_audit_snapshot_stock_value():
                 if price is not None and price <= 0:
                     absurd.append({'ticker': tk, 'price': round(price, 4)})
                     continue
-                if kind == 'stale' and not is_weekend:
+                if kind == 'stale' and not is_non_trading:
                     stale_weekday.append(tk)
                     expected += qty * price  # included for context; row marked unvalidatable
                     continue
-                expected += qty * price  # 'exact', or 'stale' on a weekend (carry-forward)
+                expected += qty * price  # 'exact', or 'stale' on a non-trading day (carry-forward)
 
             actual = float(snap.stock_value)
             has_missing = len(missing) > 0
@@ -3132,6 +3150,7 @@ def admin_audit_snapshot_stock_value():
                     WHERE id = :sid
                 """), {'sv': new_stock, 'sid': snap.id})
                 fix_count += 1
+                fixed_user_ids.add(user.id)
 
             user_bad.append({
                 'date': snap.date.isoformat(),
@@ -3165,6 +3184,10 @@ def admin_audit_snapshot_stock_value():
 
     if apply_fix and fix_count:
         try:
+            db.session.execute(
+                _sql_text("DELETE FROM user_portfolio_chart_cache WHERE user_id = ANY(:ids)"),
+                {'ids': list(fixed_user_ids)},
+            )
             db.session.commit()
         except Exception as e:
             db.session.rollback()
@@ -3181,6 +3204,7 @@ def admin_audit_snapshot_stock_value():
         'days_scanned': days_param or 'all',
         'fix_applied': apply_fix,
         'fix_count': fix_count if apply_fix else 0,
+        'chart_cache_purged_user_ids': sorted(fixed_user_ids) if (apply_fix and fix_count) else None,
         'users_scanned': len(users),
         'copytrade_bots_skipped': skipped_copytrade,
         'users_with_issues': len(issues),
@@ -3196,7 +3220,7 @@ def admin_audit_snapshot_stock_value():
             '?fix=true (stock_value=expected, total_value=expected+cash_proceeds). '
             'MISSING_PRICE / STALE_WEEKDAY rows need a MarketData daily-close backfill for the '
             'listed ticker/date pairs FIRST (calculate_portfolio_value silently skips unpriced '
-            'holdings), then re-run ?fix=true. After any fix, DELETE the affected users from '
+            'holdings), then re-run ?fix=true. Fixed users are auto-purged from '
             'user_portfolio_chart_cache so charts regenerate from corrected snapshots.'
         ),
     })
