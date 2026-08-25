@@ -2933,6 +2933,18 @@ def admin_audit_snapshot_stock_value():
         correctly carry forward instead of false-flagging (8/25/26 full-history run
         flagged exactly those four 2026 holidays). Caveat: a genuine SPY coverage
         gap makes that date invisible to the stale check.
+        STOPPED-STOCK carve-out: a ticker whose price series ENDED >= 3 sessions
+        before the snapshot date (halt / delisting / closed acquisition) is NOT
+        stale -- its last real close IS its price, so it's valued at carry-forward,
+        the row stays validatable, and the ticker is logged in
+        series_ended_carry_forward_tickers. Canonical case: ORLA stopped trading
+        7/31/26 (Equinox Gold all-stock acquisition; delisted from NYSE American/
+        TSX), leaving 16 moon-cash2021 rows 8/3-8/24 that are correct carry-forward
+        history, not data gaps. Position liquidated 8/25/26 via
+        /admin/liquidate-halted-position (price_source='halted_liquidation').
+        A ticker lagging only 1-2 sessions still flags as stale, and the nightly
+        map-dailybars-to-marketdata cron alerts on 3+ session gaps independently,
+        so real coverage failures cannot hide behind this carve-out.
       - ABSURD_PRICE: a MarketData close <= 0.
 
     Copytrade bots are skipped (their brokerage-migration holdings can't be rebuilt from a
@@ -3020,6 +3032,7 @@ def admin_audit_snapshot_stock_value():
     skipped_copytrade = 0
     fix_count = 0
     fixed_user_ids = set()
+    series_ended_cf = {}
 
     for user in users:
         if _is_copytrade_bot(user):
@@ -3050,6 +3063,14 @@ def admin_audit_snapshot_stock_value():
                     price_index[tk] = ([], [])
                 price_index[tk][0].append(md.date)
                 price_index[tk][1].append(float(md.close_price))
+
+        # Stopped stocks: series ended >= 3 sessions ago (halt/delisting/closed
+        # acquisition, e.g. ORLA 7/31/26). Carry-forward is their CORRECT price.
+        series_ended = {}
+        if spy_trading_days:
+            for tk, (dts, _p) in price_index.items():
+                if dts and sum(1 for d in spy_trading_days if d > dts[-1]) >= 3:
+                    series_ended[tk] = dts[-1]
 
         # Walk snapshots ascending, advancing a transaction pointer to maintain
         # holdings as-of each snapshot date (same incremental technique as cash-drift).
@@ -3096,6 +3117,12 @@ def admin_audit_snapshot_stock_value():
                     absurd.append({'ticker': tk, 'price': round(price, 4)})
                     continue
                 if kind == 'stale' and not is_non_trading:
+                    if tk in series_ended and snap.date > series_ended[tk]:
+                        # Stopped stock: last real close IS the price. Row stays
+                        # validatable; treatment logged in the response summary.
+                        series_ended_cf[tk] = series_ended[tk].isoformat()
+                        expected += qty * price
+                        continue
                     stale_weekday.append(tk)
                     expected += qty * price  # included for context; row marked unvalidatable
                     continue
@@ -3214,6 +3241,7 @@ def admin_audit_snapshot_stock_value():
         'snapshots_with_stale_weekday_prices': snapshots_with_stale_weekday,
         'snapshots_with_absurd_prices': snapshots_with_absurd,
         'snapshots_skipped_null_stock_value': skipped_null_stock_value,
+        'series_ended_carry_forward_tickers': series_ended_cf or None,
         'issues': issues,
         'next_steps': (
             'DRIFT-only rows (no missing/stale/absurd) are safe to repair in place with '
