@@ -4737,18 +4737,28 @@ def cron_map_dailybars_to_marketdata():
         }
         for tk in sorted(held & set(tickers)):
             have = md_dates_by_ticker.get(tk, set()) | dpb_dates_by_ticker.get(tk, set())
-            if not have:
-                continue  # brand-new position; pass 2 fills it next run
-            last_have = max(have)
-            if not any(d > last_have for d in cal_sorted):
-                continue
-            # Re-check the DB: pass 2 may have just filled this ticker.
+            last_have = max(have) if have else None
+            # ALWAYS re-check the DB across ALL time: pass 2 may have just
+            # filled this ticker, and -- critically -- a series that ended
+            # BEFORE the window start has an empty window 'have'. The old
+            # 'if not have: continue' brand-new-position guard therefore
+            # silently exempted the MOST-stopped tickers from the sentry
+            # (8/25/26: AVB's series ended 8/17 with the 7-day window starting
+            # 8/18, so no LISTING_STATUS check ran and no alert email fired
+            # while blake2 held 45 frozen shares). Only a ticker with no
+            # close ANYWHERE is truly brand-new.
             db_latest = (
                 db.session.query(MarketData.date)
                 .filter(MarketData.ticker == tk, MarketData.timestamp.is_(None))
                 .order_by(MarketData.date.desc()).first()
             )
-            last_close = max(filter(None, [last_have, db_latest[0] if db_latest else None]))
+            known = [d for d in (last_have, db_latest[0] if db_latest else None) if d]
+            if not known:
+                continue  # no close anywhere; brand-new position, pass 2 fills it next run
+            last_close = max(known)
+            # gap is capped at the window's session count, which is fine for
+            # the >=1 (LISTING_STATUS check) and >=3 (alert) thresholds; the
+            # emailed last_close_date still shows the true series end.
             gap = sum(1 for d in cal_sorted if d > last_close)
             if gap >= 1:
                 lagging.append((tk, last_close, gap))
