@@ -748,7 +748,7 @@ Session-43 "@BrooklynDad85 as founder account" decision everywhere.
 | Account | Handle | Email |
 |---|---|---|
 | Founder Reddit | **u/Frodo_Baghodler** (registered 8/23; ~20 subs joined; lurk-only until ~8/26) | fordutilityapps@gmail.com |
-| Founder X | registered 8/24 — handle TBD (BobFordTrades-tier shortlist) | **apestogether.founder@gmail.com** |
+| Founder X | **@BobFordTrades** (registered 8/24; Premium purchase + follow-batch 1 next) | **apestogether.founder@gmail.com** |
 | Legacy personal (Reddit/X/Gmail) | civilian | bobford00@gmail.com — NEVER used for any founder/brand signup |
 | Brand handles (X/TikTok/IG/YT) | @ApesTogetherApp etc. | log here when registered |
 
