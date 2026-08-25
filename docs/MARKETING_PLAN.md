@@ -743,6 +743,19 @@ Session-43 "@BrooklynDad85 as founder account" decision everywhere.
 | LinkedIn (real name) | personal | exists | inherently | headline flip at Publish; launch + press posts. NOTE: LinkedIn is the one place separation is impossible — founding a company is public record; that's normal and fine |
 | Personal Reddit/X legacy accts | civilian | — | never | ZERO app topics forever |
 
+## Credential map (logged 8/24 — one email per account, never cross-login, all in password manager w/ 2FA)
+
+| Account | Handle | Email |
+|---|---|---|
+| Founder Reddit | **u/Frodo_Baghodler** (registered 8/23; ~20 subs joined; lurk-only until ~8/26) | fordutilityapps@gmail.com |
+| Founder X | registered 8/24 — handle TBD (BobFordTrades-tier shortlist) | **apestogether.founder@gmail.com** |
+| Legacy personal (Reddit/X/Gmail) | civilian | bobford00@gmail.com — NEVER used for any founder/brand signup |
+| Brand handles (X/TikTok/IG/YT) | @ApesTogetherApp etc. | log here when registered |
+
+Usage rule: `apestogether.founder@gmail.com` = X founder account ONLY (and its
+recovery); `fordutilityapps@gmail.com` = Reddit founder account ONLY. Brand
+handles get their own address(es) at registration — never reuse the two above.
+
 ## Fresh Reddit founder account — setup protocol (researched 8/23)
 
 **Gate reality (Reddit official + tracked automod data):** thresholds are
