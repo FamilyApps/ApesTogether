@@ -562,7 +562,22 @@ class PortfolioPerformanceCalculator:
                 try:
                     date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
                     close_price = float(price_data['4. close'])
-                    
+
+                    # AV's daily series includes TODAY as a row valued at the
+                    # as-of-fetch-time price while the market is open. The
+                    # insert-only logic below would freeze that intraday price
+                    # as the official close forever (8/25/26: afternoon
+                    # backfills stored ~18:53 UTC prices as 8/25 closes for ~31
+                    # tickers, so four users' CORRECT 20:05 EOD snapshots
+                    # false-flagged ~1% drift in the stock-value audit). Skip
+                    # today's row until it is final -- 21:05 UTC covers the
+                    # 4 PM ET close in both EDT and EST; the 23:00 UTC nightly
+                    # map/AV cron backfills it the same day. Repair tool for
+                    # already-frozen rows: /admin/refresh-daily-closes.
+                    _now_utc = datetime.utcnow()
+                    if date_obj >= _now_utc.date() and (_now_utc.hour, _now_utc.minute) < (21, 5):
+                        continue
+
                     # Check if already exists
                     existing = MarketData.query.filter_by(
                         ticker=ticker_upper,
