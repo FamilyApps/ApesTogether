@@ -12,9 +12,5 @@
 	<array>
 		<string>applinks:apestogether.ai</string>
 	</array>
-	<key>com.apple.developer.in-app-payments</key>
-	<array>
-		<string>merchant.com.apestogether.ApesTogether</string>
-	</array>
 </dict>
 </plist>

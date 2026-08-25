@@ -358,7 +358,7 @@ PRIVACY & SAFETY
 • No real-money execution — ApesTogether is not a brokerage
 • All trades on the platform are virtual, using real market data
 • No content on this app constitutes investment advice
-• Cancel anytime through your Apple ID / Google Play subscriptions
+• Cancel anytime through your Apple ID subscription settings
 
 PRICING
 $9.00 / month per trader, or $69.00 / year (save 36%).
@@ -380,6 +380,14 @@ metadata"* (Guideline 3.1.2 / Schedule 2). Apps with auto-renewable subs must
 link the ToU in the App Description (or upload a custom EULA in ASC — we use
 the description-link route with the attorney ToS). Must be present in EVERY
 localization's description (en-US + es-MX). Harmless on Play; optional there.
+
+**NO CROSS-STORE MENTIONS (added 8/25/26):** the iOS description must NEVER
+contain the words "Google Play" (and the Play description shouldn't mention
+the App Store). Build 1.0 (50) was rejected under **Guideline 2.3.10 —
+Accurate Metadata** because the PRIVACY & SAFETY bullet said "Apple ID /
+Google Play subscriptions." The bullet above is the corrected wording; the
+Play version swaps in its own store name (see Play mods below). Applies to
+EVERY localization (en-US + es-MX).
 
 Last paragraph before the links is the **Apple 5.2.1 / state-securities
 required disclaimer** per `LAUNCH_PLAYBOOK.md:243` — do not drop it. Reworked
@@ -447,7 +455,7 @@ so weave longtails in naturally — especially near the end of the body.
 
 Reuse the iOS description above with the following modifications:
 
-1. Replace `Apple ID / Google Play subscriptions` with just
+1. Replace `Apple ID subscription settings` with
    `Google Play subscriptions` in the PRIVACY & SAFETY section.
 2. Append this **closing paragraph** (replaces the Apple disclaimer
    paragraph) — this is where the longtails get woven in:
