@@ -5331,6 +5331,16 @@ def admin_convert_position():
         # sell leg (same qty/price -- only timestamp and label change), claw
         # the cash credit back, and add the buy leg. Idempotent: relabeled
         # sells no longer match the halted_liquidation filter.
+        #
+        # HARDENED 8/26/26 after a PARTIAL APPLY in production: the ORLA run's
+        # buy INSERT + cash clawback persisted but the ORM attribute updates
+        # on the existing sell row silently did NOT (cause undetermined --
+        # model has no validators/events; suspect serverless connection
+        # pooling). Three defenses: (1) the re-stamp is now a raw SQL UPDATE,
+        # (2) a resume guard skips the buy/cash legs when the corporate_action
+        # buy already exists at eff_ts so re-running repairs the sell without
+        # double-crediting, (3) post_commit_verification re-reads the sell
+        # rows AFTER commit and reports what the database actually contains.
         liq_q = _Txn.query.filter(
             _Txn.ticker.ilike(from_tk),
             _Txn.transaction_type == 'sell',
@@ -5344,6 +5354,7 @@ def admin_convert_position():
                                      'omit from_liquidation to convert live holdings'}), 400
         from_price = float(liq_txns[0].price)
         from_price_basis = 'liquidation_transaction_price'
+        verify_txn_ids = []
         for t in liq_txns:
             u = _User.query.get(t.user_id)
             qty = float(t.quantity or 0.0)
@@ -5351,40 +5362,57 @@ def admin_convert_position():
             new_qty = qty * ratio
             buy_price = price / ratio
             cost = round(qty * price, 2)
+            already_bought = _Txn.query.filter(
+                _Txn.user_id == t.user_id,
+                _Txn.ticker.ilike(to_tk),
+                _Txn.transaction_type == 'buy',
+                _Txn.price_source == 'corporate_action',
+                _Txn.timestamp == eff_ts,
+            ).first() is not None
+            verify_txn_ids.append(t.id)
             actions.append({
                 'user_id': u.id, 'username': u.username, 'role': u.role,
                 'action': 'retro_convert_liquidation',
+                'sell_txn_id': t.id,
+                'resuming_partial_conversion': already_bought,
                 'from_quantity': round(qty, 4), 'from_price': round(price, 4),
                 'to_quantity': round(new_qty, 4), 'to_price': round(buy_price, 4),
-                'cash_credit_reversed': cost,
-                'cash_proceeds_after': round(float(u.cash_proceeds or 0.0) - cost, 2),
+                'cash_credit_reversed': 0.0 if already_bought else cost,
+                'cash_proceeds_after': round(
+                    float(u.cash_proceeds or 0.0) - (0.0 if already_bought else cost), 2),
             })
             if commit:
-                t.timestamp = eff_ts
-                t.price_source = 'corporate_action'
-                db.session.add(_Txn(
-                    user_id=u.id, ticker=to_tk, quantity=new_qty, price=buy_price,
-                    transaction_type='buy', timestamp=eff_ts,
-                    price_source='corporate_action',
-                ))
-                u.cash_proceeds = float(u.cash_proceeds or 0.0) - cost
-                existing = _Stock.query.filter(
-                    _Stock.user_id == u.id, _Stock.ticker.ilike(to_tk)
-                ).first()
-                if existing:
-                    existing.quantity = float(existing.quantity or 0.0) + new_qty
-                else:
-                    db.session.add(_Stock(
-                        ticker=to_tk, quantity=new_qty, purchase_price=buy_price,
-                        purchase_date=eff_ts, user_id=u.id,
+                db.session.execute(
+                    _sql_text(
+                        'UPDATE stock_transaction SET timestamp = :ts, '
+                        "price_source = 'corporate_action' WHERE id = :tid"
+                    ),
+                    {'ts': eff_ts, 'tid': t.id},
+                )
+                if not already_bought:
+                    db.session.add(_Txn(
+                        user_id=u.id, ticker=to_tk, quantity=new_qty, price=buy_price,
+                        transaction_type='buy', timestamp=eff_ts,
+                        price_source='corporate_action',
                     ))
+                    u.cash_proceeds = float(u.cash_proceeds or 0.0) - cost
+                    existing = _Stock.query.filter(
+                        _Stock.user_id == u.id, _Stock.ticker.ilike(to_tk)
+                    ).first()
+                    if existing:
+                        existing.quantity = float(existing.quantity or 0.0) + new_qty
+                    else:
+                        db.session.add(_Stock(
+                            ticker=to_tk, quantity=new_qty, purchase_price=buy_price,
+                            purchase_date=eff_ts, user_id=u.id,
+                        ))
                 db.session.execute(
                     _sql_text('DELETE FROM user_portfolio_chart_cache WHERE user_id = :uid'),
                     {'uid': u.id},
                 )
         return _convert_position_response(
             commit, from_tk, to_tk, ratio, effective, from_price_basis,
-            from_price, actions)
+            from_price, actions, verify_txn_ids=verify_txn_ids)
 
     last_md = MarketData.query.filter(
         MarketData.ticker == from_tk,
@@ -5451,8 +5479,15 @@ def admin_convert_position():
 
 
 def _convert_position_response(commit, from_tk, to_tk, ratio, effective,
-                               from_price_basis, from_price, actions):
-    """Shared commit + JSON tail for /admin/convert-position's two modes."""
+                               from_price_basis, from_price, actions,
+                               verify_txn_ids=None):
+    """Shared commit + JSON tail for /admin/convert-position's two modes.
+
+    verify_txn_ids: sell rows to re-read from the DB AFTER commit so the
+    response PROVES the re-stamp landed (added 8/26/26 after an ORM update
+    silently failed to persist in production).
+    """
+    verified = None
     if commit and actions:
         try:
             db.session.commit()
@@ -5460,6 +5495,17 @@ def _convert_position_response(commit, from_tk, to_tk, ratio, effective,
         except Exception as e:
             db.session.rollback()
             return jsonify({'error': 'commit_failed', 'message': str(e)}), 500
+        if verify_txn_ids:
+            from models import Transaction as _TxnV
+            db.session.expire_all()
+            verified = [
+                {
+                    'id': tv.id, 'ticker': tv.ticker, 'type': tv.transaction_type,
+                    'timestamp': tv.timestamp.isoformat() if tv.timestamp else None,
+                    'price_source': tv.price_source,
+                }
+                for tv in _TxnV.query.filter(_TxnV.id.in_(verify_txn_ids)).all()
+            ]
 
     return jsonify({
         'mode': 'commit' if commit else 'dry_run',
@@ -5470,6 +5516,7 @@ def _convert_position_response(commit, from_tk, to_tk, ratio, effective,
         'to_price_implied': round(from_price / ratio, 4),
         'holders_processed': len(actions),
         'actions': actions,
+        'post_commit_verification': verified,
         'next_steps': (
             'DRY-RUN: re-run with &commit=true to execute.' if not commit else
             f'Converted. NOW: 1) /admin/backfill-marketdata-av-fetch?ticker={to_tk}&commit=true '
