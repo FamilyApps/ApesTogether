@@ -4858,6 +4858,13 @@ def cron_map_dailybars_to_marketdata():
                                 f"{act['action']} {act.get('quantity', 0)}"
                                 + (f" -> ${act['proceeds']} cash" if act.get('proceeds') else '')
                             )
+                        body.append(
+                            f"      CHECK THE DEAL TERMS (8-K / press release). Cash deal: done. "
+                            f"ALL-STOCK deal: retro-convert with /admin/convert-position?"
+                            f"from={a['ticker']}&to=SUCCESSOR&ratio=R"
+                            f"&effective={a['delisting_date']}&from_liquidation=true "
+                            f"(dry-run first; see endpoint docstring)"
+                        )
                     body.append('')
                 if possibly_halted:
                     body.append('Unconfirmed gaps -- halt or data failure (no LISTING_STATUS match):')
@@ -5204,10 +5211,26 @@ def admin_convert_position():
          (repairs snapshots since the effective date that carried FROM flat)
       3. rebuild leaderboard caches (see the audit's next_steps)
 
+    AUTOMATION LIMIT (asked 8/26/26): no data source we have exposes merger
+    TERMS. AV LISTING_STATUS says only that a symbol delisted -- not whether
+    holders got cash or shares, nor the successor or ratio (that lives in SEC
+    8-K/S-4 filings; no free API serves it structured). So the sentry
+    auto-liquidates the night a delisting is confirmed (value-neutral at the
+    boundary, therefore SAFE as a default) and its email carries a pre-filled
+    retro-conversion URL. When a human learns the deal was all-stock,
+    ?from_liquidation=true converts the ALREADY-LIQUIDATED position: each
+    halted_liquidation sell is re-stamped to the effective date as
+    corporate_action_conversion, its cash credit is reversed, and the buy leg
+    is added -- final ledger identical to a same-night conversion, and the
+    audit's fix=true then repairs the intervening snapshots. (ORLA -> EQX is
+    retro-fixable this way too, given its ratio.)
+
     READ-ONLY DRY-RUN by default. Params:
       ?from=AVB &to=VMRK &ratio=2.793 &effective=2026-08-18   all required
-      ?user_id=N     restrict to one holder
-      ?commit=true   execute
+      ?user_id=N              restrict to one holder
+      ?from_liquidation=true  retro mode: source halted_liquidation sells
+                              instead of live holdings
+      ?commit=true            execute
     """
     from models import MarketData, Stock as _Stock, User as _User, Transaction as _Txn
     from sqlalchemy import text as _sql_text
@@ -5227,6 +5250,70 @@ def admin_convert_position():
         return jsonify({'error': 'required: ?from=AVB&to=VMRK&ratio=2.793&effective=YYYY-MM-DD'}), 400
     commit = request.args.get('commit', 'false').lower() == 'true'
     only_user_id = request.args.get('user_id', type=int)
+    from_liq = request.args.get('from_liquidation', 'false').lower() == 'true'
+    eff_ts = datetime.combine(effective, _dt_time(13, 31))
+    actions = []
+
+    if from_liq:
+        # RETRO MODE: the position was already cash-liquidated (sentry or
+        # manual). Rewrite each halted_liquidation sell into the conversion's
+        # sell leg (same qty/price -- only timestamp and label change), claw
+        # the cash credit back, and add the buy leg. Idempotent: relabeled
+        # sells no longer match the halted_liquidation filter.
+        liq_q = _Txn.query.filter(
+            _Txn.ticker.ilike(from_tk),
+            _Txn.transaction_type == 'sell',
+            _Txn.price_source == 'halted_liquidation',
+        )
+        if only_user_id is not None:
+            liq_q = liq_q.filter(_Txn.user_id == only_user_id)
+        liq_txns = liq_q.all()
+        if not liq_txns:
+            return jsonify({'error': f'no halted_liquidation sells found for {from_tk}; '
+                                     'omit from_liquidation to convert live holdings'}), 400
+        from_price = float(liq_txns[0].price)
+        from_price_basis = 'liquidation_transaction_price'
+        for t in liq_txns:
+            u = _User.query.get(t.user_id)
+            qty = float(t.quantity or 0.0)
+            price = float(t.price or 0.0)
+            new_qty = qty * ratio
+            buy_price = price / ratio
+            cost = round(qty * price, 2)
+            actions.append({
+                'user_id': u.id, 'username': u.username, 'role': u.role,
+                'action': 'retro_convert_liquidation',
+                'from_quantity': round(qty, 4), 'from_price': round(price, 4),
+                'to_quantity': round(new_qty, 4), 'to_price': round(buy_price, 4),
+                'cash_credit_reversed': cost,
+                'cash_proceeds_after': round(float(u.cash_proceeds or 0.0) - cost, 2),
+            })
+            if commit:
+                t.timestamp = eff_ts
+                t.price_source = 'corporate_action_conversion'
+                db.session.add(_Txn(
+                    user_id=u.id, ticker=to_tk, quantity=new_qty, price=buy_price,
+                    transaction_type='buy', timestamp=eff_ts,
+                    price_source='corporate_action_conversion',
+                ))
+                u.cash_proceeds = float(u.cash_proceeds or 0.0) - cost
+                existing = _Stock.query.filter(
+                    _Stock.user_id == u.id, _Stock.ticker.ilike(to_tk)
+                ).first()
+                if existing:
+                    existing.quantity = float(existing.quantity or 0.0) + new_qty
+                else:
+                    db.session.add(_Stock(
+                        ticker=to_tk, quantity=new_qty, purchase_price=buy_price,
+                        purchase_date=eff_ts, user_id=u.id,
+                    ))
+                db.session.execute(
+                    _sql_text('DELETE FROM user_portfolio_chart_cache WHERE user_id = :uid'),
+                    {'uid': u.id},
+                )
+        return _convert_position_response(
+            commit, from_tk, to_tk, ratio, effective, from_price_basis,
+            from_price, actions)
 
     last_md = MarketData.query.filter(
         MarketData.ticker == from_tk,
@@ -5237,7 +5324,6 @@ def admin_convert_position():
         return jsonify({'error': f'no daily close for {from_tk} on/before {effective}'}), 400
     from_price = float(last_md.close_price)
     to_price = from_price / ratio
-    eff_ts = datetime.combine(effective, _dt_time(13, 31))
 
     q = db.session.query(_Stock, _User).join(_User, _Stock.user_id == _User.id).filter(
         _Stock.ticker.ilike(from_tk)
@@ -5245,7 +5331,6 @@ def admin_convert_position():
     if only_user_id is not None:
         q = q.filter(_User.id == only_user_id)
 
-    actions = []
     for s, u in q.all():
         qty = float(s.quantity or 0.0)
         if qty <= 1e-9:
@@ -5289,6 +5374,14 @@ def admin_convert_position():
                 {'uid': u.id},
             )
 
+    return _convert_position_response(
+        commit, from_tk, to_tk, ratio, effective,
+        f'last_real_close_{last_md.date.isoformat()}', from_price, actions)
+
+
+def _convert_position_response(commit, from_tk, to_tk, ratio, effective,
+                               from_price_basis, from_price, actions):
+    """Shared commit + JSON tail for /admin/convert-position's two modes."""
     if commit and actions:
         try:
             db.session.commit()
@@ -5301,9 +5394,9 @@ def admin_convert_position():
         'mode': 'commit' if commit else 'dry_run',
         'from': from_tk, 'to': to_tk, 'ratio': ratio,
         'effective': effective.isoformat(),
-        'from_price_basis': f'last_real_close_{last_md.date.isoformat()}',
+        'from_price_basis': from_price_basis,
         'from_price': round(from_price, 4),
-        'to_price_implied': round(to_price, 4),
+        'to_price_implied': round(from_price / ratio, 4),
         'holders_processed': len(actions),
         'actions': actions,
         'next_steps': (
