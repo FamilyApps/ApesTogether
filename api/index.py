@@ -4876,6 +4876,11 @@ def cron_map_dailybars_to_marketdata():
                             f"&effective={a['delisting_date']}&from_liquidation=true "
                             f"(dry-run first; see endpoint docstring)"
                         )
+                        body.append(
+                            f"      Deal terms usually live in the target's final 8-K: "
+                            f"https://efts.sec.gov/LATEST/search-index?q=%22{a['ticker']}%22&forms=8-K"
+                            f" -- human UI: https://www.sec.gov/edgar/search/#/q=%22{a['ticker']}%22&forms=8-K"
+                        )
                     body.append('')
                 if possibly_halted:
                     body.append('Unconfirmed gaps -- halt or data failure (no LISTING_STATUS match):')
@@ -5189,6 +5194,85 @@ def admin_refresh_daily_closes():
             'Corrections written. Re-run /admin/audit-snapshot-stock-value -- rows that '
             'flagged drift against the bad closes should now validate clean WITHOUT '
             'fix=true (the snapshots were correct; the stored closes were not).'
+        ),
+    })
+
+
+@app.route('/admin/debug-db-connection')
+@admin_required
+def admin_debug_db_connection():
+    """
+    Diagnose the database connection path. Built 8/26/26 after two anomalies
+    in one night: an ORM UPDATE that silently never persisted (ORLA sell
+    re-stamp, txn 1643) and a post-commit re-read that returned stale data
+    (post_commit_verification showed pre-UPDATE values while the very next
+    request saw the new ones). Both smell like pooler/replica routing.
+
+    Reports, over THREE deliberately separate connections (NullPool = each
+    engine.connect() is a fresh socket):
+      conn_a: server addr/port/pid, version, pg_is_in_recovery
+      conn_b (write probe): UPSERT a random token into admin_db_probe, COMMIT
+      conn_c (read-back):   fresh connection reads the token back
+    read_after_write_ok=false or any pg_is_in_recovery=true on a read
+    connection = replica lag is real and admin writes need the direct
+    (non-pooler) endpoint. Everything matching = the pooler path is
+    read-after-write consistent and the 8/26 anomalies were transient.
+    """
+    import uuid
+    from sqlalchemy import text as _sql_text
+
+    def _conn_info(conn):
+        row = conn.execute(_sql_text(
+            "SELECT inet_server_addr()::text AS addr, inet_server_port() AS port, "
+            "pg_backend_pid() AS pid, pg_is_in_recovery() AS in_recovery, "
+            "current_setting('server_version') AS version"
+        )).mappings().first()
+        return dict(row)
+
+    token = uuid.uuid4().hex
+    out = {}
+    try:
+        with db.engine.connect() as conn_a:
+            out['conn_a'] = _conn_info(conn_a)
+
+        with db.engine.connect() as conn_b:
+            out['conn_b'] = _conn_info(conn_b)
+            conn_b.execute(_sql_text(
+                'CREATE TABLE IF NOT EXISTS admin_db_probe '
+                '(id INT PRIMARY KEY, token TEXT, written_at TIMESTAMP)'
+            ))
+            conn_b.execute(_sql_text(
+                'INSERT INTO admin_db_probe (id, token, written_at) '
+                'VALUES (1, :tok, NOW()) '
+                'ON CONFLICT (id) DO UPDATE SET token = :tok, written_at = NOW()'
+            ), {'tok': token})
+            conn_b.commit()
+
+        with db.engine.connect() as conn_c:
+            out['conn_c'] = _conn_info(conn_c)
+            read_back = conn_c.execute(_sql_text(
+                'SELECT token FROM admin_db_probe WHERE id = 1'
+            )).scalar()
+    except Exception as e:
+        return jsonify({'error': 'probe_failed', 'message': str(e), 'partial': out}), 500
+
+    same_backend = len({c['pid'] for c in
+                        (out['conn_a'], out['conn_b'], out['conn_c'])}) < 3
+    return jsonify({
+        'connections': out,
+        'probe_token_written': token,
+        'probe_token_read_back': read_back,
+        'read_after_write_ok': read_back == token,
+        'any_connection_on_replica': any(
+            c['in_recovery'] for c in (out['conn_a'], out['conn_b'], out['conn_c'])),
+        'distinct_server_addrs': sorted({c['addr'] or 'null' for c in
+                                         (out['conn_a'], out['conn_b'], out['conn_c'])}),
+        'backend_pids_shared': same_backend,
+        'interpretation': (
+            'read_after_write_ok=false OR any replica flag = routing problem is real; '
+            'move admin writes to the direct endpoint. backend_pids_shared=true with '
+            'NullPool means a server-side pooler (pgbouncer/supavisor) is multiplexing. '
+            'Run this a few times, including right after heavy admin writes.'
         ),
     })
 
