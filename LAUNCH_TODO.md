@@ -57,7 +57,7 @@ Do in order; delete this block when consumed. Repo state: `fb7cb1a` (all of toni
 
 | Account | Platform | Email | Purpose / rules |
 |---|---|---|---|
-| `@BobFordTrades` | X | apestogether.founder@gmail.com | Founder trader persona (ride-along). X Premium goes HERE when purchased. Never posts product-account content. |
+| `@BobFordTrades` | X | apestogether.founder@gmail.com | Founder trader persona (ride-along). ✅ X Premium ACTIVE (confirmed 8/26). Never posts product-account content. |
 | `u/Frodo_Baghodler` | Reddit | fordutilityapps@gmail.com | Founder Reddit presence — **FORK DECISION (made ~8/24): new-account variant.** Personal account had no finance cred (mod-deleted posts), so nothing was sacrificed. Warm-up now: scroll/upvote quality content, non-promotional comments only; first self-post ~9/1 per plan. |
 | `BKdad85` | Reddit | bobford00@gmail.com | PERSONAL. Stays clean — no company/product/persona activity ever. |
 | — | (SendGrid BCC) | fordutilityapps@gmail.com | ⚠ Also the notification-monitoring BCC inbox (`notification_utils.BCC_EMAIL`). Double duty with the Reddit persona email — acceptable, but remember BCC traffic lands here. |
@@ -71,12 +71,13 @@ Do in order; delete this block when consumed. Repo state: `fb7cb1a` (all of toni
 ## 📋 SESSION 45 LOG (8/26 — overnight + daytime)
 
 - ✅ **Overnight data-integrity saga CLOSED:** AVB→VMRK conversion (2.793:1) + ORLA→EQX retro-conversion (1:1 over prior liquidation) fully applied; sentry hardened (all-time gap detection, pre-window stoppages); `/admin/convert-position` built (normal + retro modes, resume guard, post-commit verification); phantom double-ORLA removed; 24 snapshot rows repaired (12 phantom + 12 legacy sub-1% drift back to March, incl. real user bobford00); final audit: 1,271 snapshots / 45 users / ZERO issues, no carry-forwards. Leaderboards rebuilt.
-- ⚠ **DB infra anomalies (2, same night):** one silently lost ORM UPDATE + one stale post-commit read. Defenses shipped (raw-SQL re-stamp, resume guard, verification). `/admin/debug-db-connection` probe built — first partial run showed SAME backend PID on two fresh NullPool connections = server-side pooler multiplexing confirmed; write/read-back probe pending the SQLAlchemy-1.4 fix. Run it a few times; if `read_after_write_ok=false` ever → route admin writes via direct endpoint.
+- ⚠ **DB infra anomalies (2, same night):** one silently lost ORM UPDATE + one stale post-commit read. Defenses shipped (raw-SQL re-stamp, resume guard, verification). `/admin/debug-db-connection` probe built + RUN (8/26 ~12:30): `read_after_write_ok=TRUE`, all connections on primary, one shared backend PID (supavisor multiplexing confirmed). VERDICT: anomalies were transient, no direct-endpoint routing needed; re-run the probe whenever an admin write "doesn't stick."
 - ✅ **BCC leak FIXED:** newly created bots (8/25 top-up) defaulted `email_notifications_enabled=True` → every bot trade sent a self-confirmation email with the unconditional monitoring BCC. Fixes: self-confirmations never BCC; agents never get self-confirmations at all (quota + bounce reputation); subscriber-alert BCC now fires ONLY for store-paid subs (apple/google — admin-comped $0 subs excluded). Matches the original intent: BCC = verify PAYING customers get notifications.
 - ✅ **Sentry email now links EDGAR full-text search (8-K)** per delisted ticker — merger-terms suggester v1.
 - ✅ **Bot top-up batch confirmed done 8/25** (USER created the new bots; sector actuals in MARKETING_PLAN).
 - ⏳ **iOS Build 50:** no verdict yet (day 5 since 8/21 resubmit).
-- ❓ **Status to re-confirm in file next session** (USER says answered in prior conversations; not yet logged here): X Premium purchase on founder account (was slated Sat 8/23); max-cash reconciles for apex1575 + bobford00 (Monday list item ⑥).
+- ✅ **X Premium purchased** on @BobFordTrades (USER confirmed 8/26).
+- ❓ **Max-cash reconciles for apex1575 + bobford00 (Monday item ⑥) — status unknown; CHECK, don't guess:** run `/admin/audit-snapshot-max-cash-drift` (read-only). If neither appears → already done, close the item. If they appear → `/admin/cash-tracking/reconcile?username=apex1575` (preview, read-only) → re-run with `&execute=true` → same for bobford00 → re-run the audit to confirm clean → `/admin/invalidate-chart-cache?username=X&clear_leaderboard=1` for each (Monday item ⑦). Reconcile is safe to re-run — it recomputes from replay, so a second execute is a no-op if already correct.
 
 ---
 
