@@ -3161,8 +3161,19 @@ def admin_audit_snapshot_stock_value():
                 if kind == 'stale' and not is_non_trading:
                     if tk in series_ended and snap.date > series_ended[tk]:
                         # Stopped stock: last real close IS the price. Row stays
-                        # validatable; treatment logged in the response summary.
-                        series_ended_cf[tk] = series_ended[tk].isoformat()
+                        # validatable; treatment logged in the response summary
+                        # WITH attribution -- 8/26/26: a converted-away ORLA
+                        # kept appearing here and only holder/qty data could
+                        # distinguish a phantom fractional residue in some
+                        # user's txn history from a real still-held position.
+                        entry = series_ended_cf.setdefault(tk, {
+                            'last_close': series_ended[tk].isoformat(),
+                            'holders': {},
+                        })
+                        h = entry['holders'].setdefault(
+                            user.username, {'qty': None, 'snapshot_days': 0})
+                        h['qty'] = round(qty, 6)
+                        h['snapshot_days'] += 1
                         expected += qty * price
                         continue
                     stale_weekday.append(tk)
