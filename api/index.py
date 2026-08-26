@@ -5201,7 +5201,7 @@ def admin_convert_position():
     deal (ORLA -> Equinox was one; it was cash-liquidated before this tool
     existed).
 
-    Both legs are stamped price_source='corporate_action_conversion' at 13:31
+    Both legs are stamped price_source='corporate_action' at 13:31
     UTC on the effective date (inside that session, before the 20:00 UTC
     ambiguity boundary), so transaction-replay audits bucket the swap into the
     effective date's snapshot. AFTER committing, in order:
@@ -5220,7 +5220,7 @@ def admin_convert_position():
     retro-conversion URL. When a human learns the deal was all-stock,
     ?from_liquidation=true converts the ALREADY-LIQUIDATED position: each
     halted_liquidation sell is re-stamped to the effective date as
-    corporate_action_conversion, its cash credit is reversed, and the buy leg
+    corporate_action, its cash credit is reversed, and the buy leg
     is added -- final ledger identical to a same-night conversion, and the
     audit's fix=true then repairs the intervening snapshots. (ORLA -> EQX is
     retro-fixable this way too, given its ratio.)
@@ -5290,11 +5290,11 @@ def admin_convert_position():
             })
             if commit:
                 t.timestamp = eff_ts
-                t.price_source = 'corporate_action_conversion'
+                t.price_source = 'corporate_action'
                 db.session.add(_Txn(
                     user_id=u.id, ticker=to_tk, quantity=new_qty, price=buy_price,
                     transaction_type='buy', timestamp=eff_ts,
-                    price_source='corporate_action_conversion',
+                    price_source='corporate_action',
                 ))
                 u.cash_proceeds = float(u.cash_proceeds or 0.0) - cost
                 existing = _Stock.query.filter(
@@ -5351,12 +5351,12 @@ def admin_convert_position():
             db.session.add(_Txn(
                 user_id=u.id, ticker=from_tk, quantity=qty, price=from_price,
                 transaction_type='sell', timestamp=eff_ts,
-                price_source='corporate_action_conversion',
+                price_source='corporate_action',
             ))
             db.session.add(_Txn(
                 user_id=u.id, ticker=to_tk, quantity=new_qty, price=to_price,
                 transaction_type='buy', timestamp=eff_ts,
-                price_source='corporate_action_conversion',
+                price_source='corporate_action',
             ))
             existing = _Stock.query.filter(
                 _Stock.user_id == u.id, _Stock.ticker.ilike(to_tk)
