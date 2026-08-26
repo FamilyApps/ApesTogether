@@ -5193,6 +5193,66 @@ def admin_refresh_daily_closes():
     })
 
 
+@app.route('/admin/debug-user-transactions')
+@admin_required
+def admin_debug_user_transactions():
+    """
+    READ-ONLY: list one user's transactions for one ticker in timestamp order
+    (exactly the order the replay audits consume them), with a running net
+    position column. Built 8/26/26: after the ORLA retro-conversion, the
+    stock-value audit's carve-out attribution showed moon-cash2021's replay
+    still holding 55.47196 ORLA on 16 trading days PAST the 8/3 conversion
+    sell -- implying the buy side of the ledger sums to ~2x the real position
+    (a duplicate hidden for weeks just under the 1% drift threshold: phantom
+    55.47 x $9.44 = $523.66 vs a ~$540 threshold). This endpoint exposes the
+    raw rows so the duplicate can be identified and surgically removed.
+
+    Params: ?username=X or ?user_id=N, plus ?ticker=YYY (required).
+    """
+    from models import Transaction as _Txn, User as _User
+
+    ticker = (request.args.get('ticker') or '').upper().strip()
+    if not ticker:
+        return jsonify({'error': 'ticker parameter required'}), 400
+    user = None
+    if request.args.get('user_id', type=int) is not None:
+        user = _User.query.get(request.args.get('user_id', type=int))
+    elif request.args.get('username'):
+        user = _User.query.filter_by(username=request.args.get('username')).first()
+    if user is None:
+        return jsonify({'error': 'user not found; pass ?username= or ?user_id='}), 404
+
+    txns = _Txn.query.filter(
+        _Txn.user_id == user.id, _Txn.ticker.ilike(ticker)
+    ).order_by(_Txn.timestamp.asc(), _Txn.id.asc()).all()
+
+    rows = []
+    net = 0.0
+    for t in txns:
+        qty = float(t.quantity or 0.0)
+        if t.transaction_type in ('buy', 'initial'):
+            net += qty
+        elif t.transaction_type == 'sell':
+            net -= qty
+        rows.append({
+            'id': t.id,
+            'timestamp': t.timestamp.isoformat() if t.timestamp else None,
+            'type': t.transaction_type,
+            'quantity': round(qty, 6),
+            'price': round(float(t.price or 0.0), 4),
+            'price_source': t.price_source,
+            'running_net': round(net, 6),
+        })
+
+    return jsonify({
+        'user_id': user.id, 'username': user.username, 'role': user.role,
+        'ticker': ticker,
+        'transaction_count': len(rows),
+        'final_net_position': round(net, 6),
+        'transactions': rows,
+    })
+
+
 @app.route('/admin/convert-position')
 @admin_required
 def admin_convert_position():
