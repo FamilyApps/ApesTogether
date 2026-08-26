@@ -5175,6 +5175,146 @@ def admin_refresh_daily_closes():
     })
 
 
+@app.route('/admin/convert-position')
+@admin_required
+def admin_convert_position():
+    """
+    Corporate-action SHARE CONVERSION (stock-for-stock merger / ticker change):
+    every holder's FROM shares become qty * ratio TO shares. Cash is untouched
+    -- value-neutral at the boundary: the sell leg prices at the FROM ticker's
+    last real close <= effective date, the buy leg at from_price / ratio, so
+    proceeds == cost exactly and the holder's value from the effective date
+    onward tracks the successor's REAL market prices, exactly as a real
+    brokerage account would.
+
+    Built 8/25/26 for AVB -> VMRK: AvalonBay + Equity Residential merged into
+    Vivmark Residential (2.793 VMRK per AVB; AVB's last session 8/17, VMRK
+    trading from 8/18). A cash liquidation at 184.06 would have been WRONG --
+    holders received shares, not cash. Same lesson applies to any all-stock
+    deal (ORLA -> Equinox was one; it was cash-liquidated before this tool
+    existed).
+
+    Both legs are stamped price_source='corporate_action_conversion' at 13:31
+    UTC on the effective date (inside that session, before the 20:00 UTC
+    ambiguity boundary), so transaction-replay audits bucket the swap into the
+    effective date's snapshot. AFTER committing, in order:
+      1. /admin/backfill-marketdata-av-fetch?ticker=<TO>&commit=true
+         (the successor's daily closes must exist before the audit replays it)
+      2. /admin/audit-snapshot-stock-value?fix=true
+         (repairs snapshots since the effective date that carried FROM flat)
+      3. rebuild leaderboard caches (see the audit's next_steps)
+
+    READ-ONLY DRY-RUN by default. Params:
+      ?from=AVB &to=VMRK &ratio=2.793 &effective=2026-08-18   all required
+      ?user_id=N     restrict to one holder
+      ?commit=true   execute
+    """
+    from models import MarketData, Stock as _Stock, User as _User, Transaction as _Txn
+    from sqlalchemy import text as _sql_text
+    from datetime import time as _dt_time
+
+    from_tk = (request.args.get('from') or '').upper().strip()
+    to_tk = (request.args.get('to') or '').upper().strip()
+    try:
+        ratio = float(request.args.get('ratio'))
+    except (TypeError, ValueError):
+        ratio = 0.0
+    try:
+        effective = datetime.strptime(request.args.get('effective'), '%Y-%m-%d').date()
+    except (TypeError, ValueError):
+        effective = None
+    if not from_tk or not to_tk or from_tk == to_tk or ratio <= 0 or effective is None:
+        return jsonify({'error': 'required: ?from=AVB&to=VMRK&ratio=2.793&effective=YYYY-MM-DD'}), 400
+    commit = request.args.get('commit', 'false').lower() == 'true'
+    only_user_id = request.args.get('user_id', type=int)
+
+    last_md = MarketData.query.filter(
+        MarketData.ticker == from_tk,
+        MarketData.timestamp.is_(None),
+        MarketData.date <= effective,
+    ).order_by(MarketData.date.desc()).first()
+    if last_md is None:
+        return jsonify({'error': f'no daily close for {from_tk} on/before {effective}'}), 400
+    from_price = float(last_md.close_price)
+    to_price = from_price / ratio
+    eff_ts = datetime.combine(effective, _dt_time(13, 31))
+
+    q = db.session.query(_Stock, _User).join(_User, _Stock.user_id == _User.id).filter(
+        _Stock.ticker.ilike(from_tk)
+    )
+    if only_user_id is not None:
+        q = q.filter(_User.id == only_user_id)
+
+    actions = []
+    for s, u in q.all():
+        qty = float(s.quantity or 0.0)
+        if qty <= 1e-9:
+            actions.append({'user_id': u.id, 'username': u.username, 'role': u.role,
+                            'action': 'delete_dust_row', 'quantity': qty})
+            if commit:
+                db.session.delete(s)
+            continue
+        new_qty = qty * ratio
+        actions.append({
+            'user_id': u.id, 'username': u.username, 'role': u.role,
+            'action': 'convert',
+            'from_quantity': round(qty, 4), 'from_price': round(from_price, 4),
+            'to_quantity': round(new_qty, 4), 'to_price': round(to_price, 4),
+            'value_both_legs': round(qty * from_price, 2),
+        })
+        if commit:
+            db.session.add(_Txn(
+                user_id=u.id, ticker=from_tk, quantity=qty, price=from_price,
+                transaction_type='sell', timestamp=eff_ts,
+                price_source='corporate_action_conversion',
+            ))
+            db.session.add(_Txn(
+                user_id=u.id, ticker=to_tk, quantity=new_qty, price=to_price,
+                transaction_type='buy', timestamp=eff_ts,
+                price_source='corporate_action_conversion',
+            ))
+            existing = _Stock.query.filter(
+                _Stock.user_id == u.id, _Stock.ticker.ilike(to_tk)
+            ).first()
+            if existing:
+                existing.quantity = float(existing.quantity or 0.0) + new_qty
+            else:
+                db.session.add(_Stock(
+                    ticker=to_tk, quantity=new_qty, purchase_price=to_price,
+                    purchase_date=eff_ts, user_id=u.id,
+                ))
+            db.session.delete(s)
+            db.session.execute(
+                _sql_text('DELETE FROM user_portfolio_chart_cache WHERE user_id = :uid'),
+                {'uid': u.id},
+            )
+
+    if commit and actions:
+        try:
+            db.session.commit()
+            logger.warning(f"convert-position {from_tk}->{to_tk} x{ratio} eff {effective}: {actions}")
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': 'commit_failed', 'message': str(e)}), 500
+
+    return jsonify({
+        'mode': 'commit' if commit else 'dry_run',
+        'from': from_tk, 'to': to_tk, 'ratio': ratio,
+        'effective': effective.isoformat(),
+        'from_price_basis': f'last_real_close_{last_md.date.isoformat()}',
+        'from_price': round(from_price, 4),
+        'to_price_implied': round(to_price, 4),
+        'holders_processed': len(actions),
+        'actions': actions,
+        'next_steps': (
+            'DRY-RUN: re-run with &commit=true to execute.' if not commit else
+            f'Converted. NOW: 1) /admin/backfill-marketdata-av-fetch?ticker={to_tk}&commit=true '
+            f'2) /admin/audit-snapshot-stock-value?fix=true 3) rebuild leaderboard caches per '
+            f'the audit next_steps.'
+        ),
+    })
+
+
 def _liquidate_halted_holdings(ticker, price, execute, only_agents=False, user_id=None):
     """Shared executor for halted/delisted position liquidations at a REAL price.
 
