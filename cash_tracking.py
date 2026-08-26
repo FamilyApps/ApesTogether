@@ -175,7 +175,14 @@ def process_transaction(db, user_id, ticker, quantity, price, transaction_type, 
             # Email confirmation to the trader (if they have email notifications on).
             # Skipped when the caller sends its own trader email (queued-trade path)
             # so the trader doesn't get two emails for a single execution.
-            if not suppress_trader_email and getattr(user, 'email_notifications_enabled', True):
+            # Agents (bots) never get self-confirmations: their emails are not
+            # real inboxes, each send burns SendGrid quota (12+ bots x N
+            # trades/day vs the 1,600/hr global cap), and bounces hurt sender
+            # reputation. Found 8/26/26 -- newly created bots defaulted
+            # email_notifications_enabled=True and spammed the monitoring BCC.
+            if (not suppress_trader_email
+                    and getattr(user, 'role', None) != 'agent'
+                    and getattr(user, 'email_notifications_enabled', True)):
                 conf_result = send_trade_confirmation_email(user, transaction_type, ticker, quantity, price, position_pct)
                 logger.info(f"Trade confirmation email: {conf_result.get('status')}")
             # Email notifications to subscribers

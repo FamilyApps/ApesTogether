@@ -280,10 +280,14 @@ def send_trade_confirmation_email(user, action, ticker, quantity, price, positio
     subject, body, html_body = build_trade_confirmation_email(
         action, ticker, quantity, price, position_pct=position_pct,
     )
-    return send_email(user.email, subject, body, html_body=html_body)
+    # bcc=False (8/26/26): the monitoring BCC exists to verify PAYING
+    # subscribers receive their notifications. A trader's own confirmation
+    # is not that -- and with bot accounts carrying emails, every bot trade
+    # was BCC-spamming the monitoring inbox.
+    return send_email(user.email, subject, body, html_body=html_body, bcc=False)
 
 
-def send_trade_notification_to_subscriber(subscriber_email, trader_username, action, ticker, quantity, price, position_pct=None, scale_factor=None):
+def send_trade_notification_to_subscriber(subscriber_email, trader_username, action, ticker, quantity, price, position_pct=None, scale_factor=None, bcc=True):
     """
     Send trade alert email to a subscriber about a trader's activity.
     When the subscriber has set a scale for this creator, quantity is
@@ -307,7 +311,7 @@ def send_trade_notification_to_subscriber(subscriber_email, trader_username, act
         f"</div>"
     )
 
-    return send_email(subscriber_email, subject, body, html_body=html_body)
+    return send_email(subscriber_email, subject, body, html_body=html_body, bcc=bcc)
 
 
 def notify_subscribers_via_email(db, trader_user_id, action, ticker, quantity, price, position_pct=None):
@@ -346,9 +350,15 @@ def notify_subscribers_via_email(db, trader_user_id, action, ticker, quantity, p
         if getattr(subscriber, 'email_notifications_enabled', True) is False:
             continue
 
+        # Monitoring BCC only for STORE-PAID subscriptions (apple/google) --
+        # its purpose is verifying paying customers get their notifications.
+        # Admin-comped subs (platform='admin', $0 placeholder IAP) don't BCC.
+        _purchase = getattr(sub, 'in_app_purchase', None)
+        _is_paid = bool(_purchase and (_purchase.platform or '').lower() in ('apple', 'google'))
         result = send_trade_notification_to_subscriber(
             subscriber.email, trader_name, action, ticker, quantity, price, position_pct,
             scale_factor=getattr(sub, 'scale_factor', None),
+            bcc=_is_paid,
         )
         if result['status'] == 'sent':
             sent += 1

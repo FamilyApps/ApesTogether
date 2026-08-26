@@ -5235,7 +5235,7 @@ def admin_debug_db_connection():
         with db.engine.connect() as conn_a:
             out['conn_a'] = _conn_info(conn_a)
 
-        with db.engine.connect() as conn_b:
+        with db.engine.begin() as conn_b:  # begin(): COMMITs on scope exit (SQLAlchemy 1.4 -- Connection has no .commit())
             out['conn_b'] = _conn_info(conn_b)
             conn_b.execute(_sql_text(
                 'CREATE TABLE IF NOT EXISTS admin_db_probe '
@@ -5246,7 +5246,6 @@ def admin_debug_db_connection():
                 'VALUES (1, :tok, NOW()) '
                 'ON CONFLICT (id) DO UPDATE SET token = :tok, written_at = NOW()'
             ), {'tok': token})
-            conn_b.commit()
 
         with db.engine.connect() as conn_c:
             out['conn_c'] = _conn_info(conn_c)
