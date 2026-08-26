@@ -798,6 +798,16 @@ def register_cash_tracking_routes(app, db):
                 
                 if not txns:
                     continue
+
+                # SEEDED-BOT LOCK (8/26/26): bots seeded via the legacy set-cash +
+                # add-stocks path now carry backfill_seed 'initial' rows for the
+                # seed STOCK, but their seed CASH was never ledgered. A zero-cash
+                # replay misreads seed-cash spending as fresh capital (and before
+                # the backfill, it crushed real seed capital -- chart1658 lost
+                # $74,860.81 of true max-cash to exactly this on 8/22). Replay is
+                # not a valid max-cash/cash oracle for these accounts: preview
+                # still reports numbers for diagnostics, but execute is REFUSED.
+                is_seeded_bot = any(t.price_source == 'backfill_seed' for t in txns)
                 
                 # Replay to get correct final values
                 replay_cash = 0.0
@@ -838,9 +848,15 @@ def register_cash_tracking_routes(app, db):
                     'cash_drift': cash_drift,
                     'has_drift': abs(user_drift) > 0.01 or abs(cash_drift) > 0.01,
                     'transactions': len(txns),
+                    'seeded_bot': is_seeded_bot,
                 }
+
+                if execute and is_seeded_bot:
+                    result['execute_skipped'] = 'seeded_bot_locked'
+                    result['note'] = ('Seed cash is not in the ledger; replay targets are not '
+                                      'truth for this account. See LAUNCH_TODO Session 45.')
                 
-                if execute:
+                if execute and not is_seeded_bot:
                     # 1. Fix user model
                     db.session.execute(text("""
                         UPDATE "user"
@@ -1068,6 +1084,23 @@ def register_cash_tracking_routes(app, db):
 
         _MARKET_TZ = ZoneInfo('America/New_York')
         _UTC_TZ = ZoneInfo('UTC')
+
+        # SEEDED-BOT LOCK (8/26/26): unledgered seed cash makes replay targets
+        # wrong for backfill_seed accounts (see reconcile_cash_tracking).
+        _seed_probe = Transaction.query.filter_by(
+            user_id=user.id, price_source='backfill_seed').first()
+        if _seed_probe is not None:
+            return {
+                'username': user.username,
+                'user_id': user.id,
+                'seeded_bot_locked': True,
+                'snapshots_updated': 0,
+                'intraday_updated': 0,
+                'committed': False,
+                'note': ('Account has backfill_seed rows: seed cash was never ledgered, so a '
+                         'zero-cash replay cannot reconstruct max_cash_deployed/cash_proceeds. '
+                         'Full-rebuild refused (would repeat the 8/22 chart1658 crush).'),
+            }
 
         def _snapshot_effective_date(ts):
             """
@@ -1625,6 +1658,7 @@ def register_cash_tracking_routes(app, db):
             drift_users = []
             scanned = 0
             skipped_copytrade = 0
+            skipped_seeded = 0
 
             try:
                 from mobile_api import _is_copytrade_bot
@@ -1643,10 +1677,17 @@ def register_cash_tracking_routes(app, db):
                 txns = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.timestamp).all()
                 if not txns:
                     continue  # users with no transactions can't drift
+                # SEEDED-BOT LOCK (8/26/26): seed cash never ledgered -> replay
+                # targets are wrong for these accounts; alerting on them is pure
+                # noise and a fix link would corrupt them (see reconcile).
+                if any(t.price_source == 'backfill_seed' for t in txns):
+                    skipped_seeded += 1
+                    continue
                 scanned += 1
 
                 replay_max_cash = 0.0
                 replay_cash = 0.0
+                drift_sell_count = 0
                 for txn in txns:
                     val = (txn.quantity or 0) * (txn.price or 0)
                     if txn.transaction_type in ('buy', 'initial'):
@@ -1656,6 +1697,7 @@ def register_cash_tracking_routes(app, db):
                             replay_max_cash += val - replay_cash
                             replay_cash = 0
                     elif txn.transaction_type in ('sell', 'dividend'):
+                        drift_sell_count += 1
                         replay_cash += val
 
                 # Detect seeded baseline (same logic as full-rebuild)
@@ -1684,7 +1726,12 @@ def register_cash_tracking_routes(app, db):
                     if fsm > rmf + 0.01:
                         seeded_baseline = round(fsm - rmf, 2)
 
-                if seeded_baseline < 0.01:
+                if seeded_baseline < 0.01 and drift_sell_count == 0:
+                    # Cost-basis fallback ONLY for sell-free ledgers: realized
+                    # proceeds can be redeployed, so cost_basis > replay_max is
+                    # NOT evidence of seeding once sells exist (same guard as
+                    # _full_rebuild_for_user; the unguarded version here produced
+                    # the 8/23 chart1658 false-positive drift email).
                     stocks = Stock.query.filter_by(user_id=user.id).all()
                     cb = sum((s.quantity or 0) * (s.purchase_price or 0) for s in stocks)
                     derived = max(0.0, cb - replay_max_cash)
@@ -1748,6 +1795,7 @@ def register_cash_tracking_routes(app, db):
                 'timestamp': timestamp_str,
                 'users_scanned': scanned,
                 'copytrade_bots_skipped': skipped_copytrade,
+                'seeded_bots_skipped': skipped_seeded,
                 'drift_count': len(drift_users),
                 'threshold': threshold,
                 'drift_users': drift_users,

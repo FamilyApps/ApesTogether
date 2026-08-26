@@ -2567,6 +2567,7 @@ def admin_audit_snapshot_cash_drift():
     total_bad_snapshots = 0
     fix_count = 0
     skipped_copytrade = 0
+    skipped_seeded = 0
 
     for user in users:
         # Copytrade bots derive cash/holdings from brokerage-screenshot migrations
@@ -2583,6 +2584,13 @@ def admin_audit_snapshot_cash_drift():
             PortfolioSnapshot.date.asc()
         ).all()
         if not snaps or not txns:
+            continue
+
+        # SEEDED-BOT LOCK (8/26/26): backfill_seed accounts have unledgered seed
+        # CASH, so a zero-cash replay cannot reconstruct their cash_proceeds
+        # either -- see admin_audit_snapshot_max_cash_drift for the full note.
+        if any(t.price_source == 'backfill_seed' for t in txns):
+            skipped_seeded += 1
             continue
 
         # Pre-compute per-date ambiguous-trade tolerance for this user
@@ -2690,6 +2698,7 @@ def admin_audit_snapshot_cash_drift():
         'fix_count': fix_count if apply_fix else 0,
         'users_scanned': len(users),
         'copytrade_bots_skipped': skipped_copytrade,
+        'seeded_bots_skipped': skipped_seeded,
         'users_with_issues': len(issues),
         'total_snapshots_checked': total_snapshots_checked,
         'total_bad_snapshots': total_bad_snapshots,
@@ -5840,6 +5849,7 @@ def admin_audit_snapshot_max_cash_drift():
     total_bad_snapshots = 0
     fix_count = 0
     skipped_copytrade = 0
+    skipped_seeded = 0
 
     for user in users:
         # Copytrade bots derive cash/holdings from brokerage-screenshot migrations
@@ -5856,6 +5866,16 @@ def admin_audit_snapshot_max_cash_drift():
             PortfolioSnapshot.date.asc()
         ).all()
         if not snaps or not txns:
+            continue
+
+        # SEEDED-BOT LOCK (8/26/26): accounts with backfill_seed 'initial' rows
+        # were seeded via legacy set-cash + add-stocks -- the seed STOCK is now
+        # ledgered but the seed CASH never was, so a zero-cash replay misreads
+        # seed-cash spending as fresh capital. Their max-cash 'drift' here is
+        # structural noise, and ?fix=true would corrupt 400+ snapshots (the
+        # 8/22 chart1658 crush, in reverse). Skip like copytrade bots.
+        if any(t.price_source == 'backfill_seed' for t in txns):
+            skipped_seeded += 1
             continue
 
         # Pre-compute per-date ambiguous-trade tolerance for this user
@@ -5974,6 +5994,7 @@ def admin_audit_snapshot_max_cash_drift():
         'fix_count': fix_count if apply_fix else 0,
         'users_scanned': len(users),
         'copytrade_bots_skipped': skipped_copytrade,
+        'seeded_bots_skipped': skipped_seeded,
         'users_with_issues': len(issues),
         'total_snapshots_checked': total_snapshots_checked,
         'total_bad_snapshots': total_bad_snapshots,
@@ -6069,6 +6090,7 @@ def cron_snapshot_audit():
     users = User.query.order_by(User.id.asc()).all()
 
     skipped_copytrade = 0
+    skipped_seeded = 0
     for user in users:
         # Copytrade bots (CoastHillBear, marblethehill72) derive cash/holdings from
         # brokerage-screenshot migrations (price_source='phase_c_migration') that a
@@ -6084,6 +6106,13 @@ def cron_snapshot_audit():
             PortfolioSnapshot.date.asc()
         ).all()
         if not snaps or not txns:
+            continue
+
+        # SEEDED-BOT LOCK (8/26/26): unledgered seed cash -> replay targets are
+        # structurally wrong for backfill_seed accounts; alerting on them nightly
+        # is noise (see admin_audit_snapshot_max_cash_drift for the full note).
+        if any(t.price_source == 'backfill_seed' for t in txns):
+            skipped_seeded += 1
             continue
 
         # Pre-compute per-date ambiguous-trade tolerance for this user
@@ -6201,6 +6230,7 @@ def cron_snapshot_audit():
         'timestamp': timestamp_str,
         'users_scanned': len(users),
         'copytrade_bots_skipped': skipped_copytrade,
+        'seeded_bots_skipped': skipped_seeded,
         'total_snapshots_checked': total_snapshots_checked,
         'total_bad_snapshots': total_bad_snapshots,
         'users_with_issues': len(issues),
