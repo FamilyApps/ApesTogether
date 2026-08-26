@@ -5290,13 +5290,14 @@ def admin_debug_user_transactions():
     55.47 x $9.44 = $523.66 vs a ~$540 threshold). This endpoint exposes the
     raw rows so the duplicate can be identified and surgically removed.
 
-    Params: ?username=X or ?user_id=N, plus ?ticker=YYY (required).
+    Params: ?username=X or ?user_id=N, plus ?ticker=YYY and/or ?type=initial
+    (both optional since 8/26 max-cash investigation; at least one recommended
+    for high-churn bots -- otherwise expect hundreds of rows).
     """
     from models import Transaction as _Txn, User as _User
 
     ticker = (request.args.get('ticker') or '').upper().strip()
-    if not ticker:
-        return jsonify({'error': 'ticker parameter required'}), 400
+    type_filter = (request.args.get('type') or '').lower().strip()
     user = None
     if request.args.get('user_id', type=int) is not None:
         user = _User.query.get(request.args.get('user_id', type=int))
@@ -5305,33 +5306,46 @@ def admin_debug_user_transactions():
     if user is None:
         return jsonify({'error': 'user not found; pass ?username= or ?user_id='}), 404
 
-    txns = _Txn.query.filter(
-        _Txn.user_id == user.id, _Txn.ticker.ilike(ticker)
-    ).order_by(_Txn.timestamp.asc(), _Txn.id.asc()).all()
+    q = _Txn.query.filter(_Txn.user_id == user.id)
+    if ticker:
+        q = q.filter(_Txn.ticker.ilike(ticker))
+    if type_filter:
+        q = q.filter(_Txn.transaction_type == type_filter)
+    txns = q.order_by(_Txn.timestamp.asc(), _Txn.id.asc()).all()
 
     rows = []
     net = 0.0
+    total_buy_value = 0.0
+    total_sell_value = 0.0
     for t in txns:
         qty = float(t.quantity or 0.0)
+        val = qty * float(t.price or 0.0)
         if t.transaction_type in ('buy', 'initial'):
             net += qty
-        elif t.transaction_type == 'sell':
-            net -= qty
+            total_buy_value += val
+        elif t.transaction_type in ('sell', 'dividend'):
+            net -= qty if t.transaction_type == 'sell' else 0.0
+            total_sell_value += val
         rows.append({
             'id': t.id,
             'timestamp': t.timestamp.isoformat() if t.timestamp else None,
+            'ticker': t.ticker,
             'type': t.transaction_type,
             'quantity': round(qty, 6),
             'price': round(float(t.price or 0.0), 4),
             'price_source': t.price_source,
+            'value': round(val, 2),
             'running_net': round(net, 6),
         })
 
     return jsonify({
         'user_id': user.id, 'username': user.username, 'role': user.role,
-        'ticker': ticker,
+        'ticker': ticker or 'ALL',
+        'type_filter': type_filter or 'ALL',
         'transaction_count': len(rows),
         'final_net_position': round(net, 6),
+        'total_buy_or_initial_value': round(total_buy_value, 2),
+        'total_sell_or_dividend_value': round(total_sell_value, 2),
         'transactions': rows,
     })
 
