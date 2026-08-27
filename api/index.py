@@ -5359,6 +5359,112 @@ def admin_debug_user_transactions():
     })
 
 
+@app.route('/admin/debug-replay-orderings')
+@admin_required
+def admin_debug_replay_orderings():
+    """
+    READ-ONLY: replay one user's max-cash under FOUR transaction orderings to
+    separate replay ARTIFACTS from genuine capital. Built 8/26/26 for the
+    chart1658 restore: bots are seeded with stock only (zero cash mechanic),
+    yet the naive replay wanted $147,890.95 of 'capital'. Two distinct causes:
+      - ORDERING ARTIFACT: wave trades sharing a timestamp; if the replay
+        consumes a buy before the same-instant sell that funded it, the
+        shortfall is misread as new capital (and max-cash is monotonic, so
+        every mis-ordered wave ratchets it permanently).
+      - GENUINE OVERSPEND: race bugs historically let the engine spend cash it
+        didn't have; the shares bought that way are real, so honest Modified-
+        Dietz capital MUST include it. Ledger identity puts the floor at
+        sum(buys) - sum(sells) (final cash can't be negative).
+    The orderings, most-artifact-prone to most-generous:
+      a. timestamp only, DB tie order  (what reconcile historically did)
+      b. timestamp, then id            (insertion order within an instant)
+      c. per-TIMESTAMP batch, sells before buys
+      d. per-DAY batch, sells before buys (all of a day's proceeds fund all
+         of that day's buys -- the most generous realistic model)
+    Where (a)/(b) exceed (c)/(d) is artifact; where (d) still exceeds the
+    seed value is genuine overspend that belongs in the denominator.
+
+    Params: ?username=X or ?user_id=N.
+    """
+    from models import Transaction as _Txn, User as _User
+
+    user = None
+    if request.args.get('user_id', type=int) is not None:
+        user = _User.query.get(request.args.get('user_id', type=int))
+    elif request.args.get('username'):
+        user = _User.query.filter_by(username=request.args.get('username')).first()
+    if user is None:
+        return jsonify({'error': 'user not found; pass ?username= or ?user_id='}), 404
+
+    txns_db = _Txn.query.filter(_Txn.user_id == user.id).order_by(
+        _Txn.timestamp.asc()
+    ).all()
+    if not txns_db:
+        return jsonify({'error': 'user has no transactions'}), 404
+
+    def _replay(seq):
+        cash = 0.0
+        mx = 0.0
+        last_capital_ts = None
+        for t in seq:
+            v = float(t.quantity or 0.0) * float(t.price or 0.0)
+            if t.transaction_type in ('buy', 'initial'):
+                if cash >= v:
+                    cash -= v
+                else:
+                    mx += v - cash
+                    cash = 0.0
+                    last_capital_ts = t.timestamp
+            elif t.transaction_type in ('sell', 'dividend'):
+                cash += v
+        return {
+            'replay_max_cash': round(mx, 2),
+            'replay_final_cash': round(cash, 2),
+            'last_new_capital_at': last_capital_ts.isoformat() if last_capital_ts else None,
+        }
+
+    _is_sellish = lambda t: t.transaction_type in ('sell', 'dividend')
+
+    def _batched(key_fn):
+        # Stable-sort into batches; within each batch sells/dividends first,
+        # preserving id order inside each group.
+        return sorted(
+            txns_db,
+            key=lambda t: (key_fn(t), 0 if _is_sellish(t) else 1, t.id or 0),
+        )
+
+    ordered_b = sorted(txns_db, key=lambda t: (t.timestamp, t.id or 0))
+    ordered_c = _batched(lambda t: t.timestamp)
+    ordered_d = _batched(lambda t: t.timestamp.date() if t.timestamp else None)
+
+    total_buys = sum(float(t.quantity or 0.0) * float(t.price or 0.0)
+                     for t in txns_db if t.transaction_type in ('buy', 'initial'))
+    total_sells = sum(float(t.quantity or 0.0) * float(t.price or 0.0)
+                      for t in txns_db if t.transaction_type in ('sell', 'dividend'))
+    seed_value = sum(float(t.quantity or 0.0) * float(t.price or 0.0)
+                     for t in txns_db if t.price_source == 'backfill_seed')
+
+    return jsonify({
+        'user_id': user.id, 'username': user.username, 'role': user.role,
+        'transaction_count': len(txns_db),
+        'seed_value_backfill_seed_rows': round(seed_value, 2),
+        'total_buy_or_initial_value': round(total_buys, 2),
+        'total_sell_or_dividend_value': round(total_sells, 2),
+        'capital_floor_buys_minus_sells': round(total_buys - total_sells, 2),
+        'orderings': {
+            'a_timestamp_db_tie_order': _replay(txns_db),
+            'b_timestamp_then_id': _replay(ordered_b),
+            'c_per_timestamp_sells_first': _replay(ordered_c),
+            'd_per_day_sells_first': _replay(ordered_d),
+        },
+        'how_to_read': (
+            'Artifact = (a or b) minus (c or d). Genuine overspend = (d) minus '
+            'seed_value. The honest restore target for max_cash_deployed is (c) '
+            'or (d); it can never be below capital_floor_buys_minus_sells.'
+        ),
+    })
+
+
 @app.route('/admin/convert-position')
 @admin_required
 def admin_convert_position():
