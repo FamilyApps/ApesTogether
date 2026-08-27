@@ -13,7 +13,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/landing.css?v=13">
+    <link rel="stylesheet" href="/static/css/landing.css?v=14">
 </head>
 <body>
 
@@ -29,7 +29,7 @@
             <a href="#how-it-works">How It Works</a>
             <a href="#earn">Earn</a>
             <a href="#faq">FAQ</a>
-            <a href="#waitlist-anchor" class="btn-sm" style="color:#000 !important;">Join the Beta</a>
+            <a href="#get-app-anchor" class="btn-sm" style="color:#000 !important;">Get the App</a>
         </div>
     </div>
 </nav>
@@ -44,22 +44,17 @@
         <div class="orb"></div>
     </div>
     <div class="container hero-content">
-        <div id="waitlist-anchor"></div>
-        <div class="hero-badge">Join the Beta Waitlist</div>
+        <div id="get-app-anchor"></div>
+        <div class="hero-badge">Early Access Is Open</div>
         <h1>The Creator Economy<br>Comes for <span class="accent">Wall Street</span></h1>
         <p class="hero-sub">Follow top traders with verified track records. Get notified the moment they trade.</p>
-        <div id="waitlist" class="waitlist-form-wrap">
-            <form class="waitlist-form" id="hero-waitlist" onsubmit="return submitWaitlist(event, 'hero-waitlist')">
-                <input type="email" name="email" placeholder="Enter your email" required autocomplete="email">
-                <div class="waitlist-segment">
-                    <label class="seg-option"><input type="radio" name="role" value="investor" checked> I want to follow traders</label>
-                    <label class="seg-option"><input type="radio" name="role" value="trader"> I want to earn as a trader</label>
-                </div>
-                <button type="submit" class="btn-lg">Join the Beta Waitlist</button>
-            </form>
-            <div class="waitlist-msg" id="hero-waitlist-msg"></div>
-            <div class="waitlist-urgency">Now in private beta — join the waitlist for early access</div>
+        <div class="cta-row">
+            {% if ios_app_id %}
+            <a class="btn-lg" href="https://apps.apple.com/us/app/id{{ ios_app_id }}">Download for iPhone</a>
+            {% endif %}
+            <a class="btn-lg" href="https://play.google.com/store/apps/details?id=com.apestogether.app">Get it on Google Play</a>
         </div>
+        <div class="waitlist-urgency">Free to download — the first 100 traders earn the Founding Trader badge</div>
 
         <!-- App mockup -->
         <div class="mockup-wrap">
@@ -116,7 +111,7 @@
                     <li><span class="ck">&#10003;</span> Browse traders ranked by verified, on-platform performance</li>
                     <li><span class="ck">&#10003;</span> Get real-time notifications the moment they buy or sell</li>
                     <li><span class="ck">&#10003;</span> No self-reported returns &mdash; all data tracked transparently</li>
-                    <li><span class="ck">&#10003;</span> Trades shared for informational purposes &mdash; you make every decision</li>
+                    <li><span class="ck">&#10003;</span> Trades shared for informational and educational purposes only</li>
                 </ul>
             </div>
             <div class="aud-card">
@@ -172,8 +167,8 @@
             </div>
             <div class="step">
                 <div class="step-n">4</div>
-                <h4>Decide for Yourself</h4>
-                <p>Review the trade in your own brokerage. Your money, your call.</p>
+                <h4>Watch and Learn</h4>
+                <p>Follow the strategy as it unfolds. Everything is shared for educational purposes only.</p>
             </div>
         </div>
         <div id="steps-trader" class="steps-grid" style="display:none;">
@@ -232,7 +227,7 @@
     <div class="container">
         <div class="sec-center">
             <div class="sec-label">Why Now</div>
-            <h2 class="sec-title">Invest with receipts</h2>
+            <h2 class="sec-title">Receipts, not promises</h2>
             <p class="sec-sub">The old model is broken. ApesTogether is the fix.</p>
         </div>
         <div class="proof-grid">
@@ -327,12 +322,13 @@
         <div class="g1"></div>
     </div>
     <div class="container cta-banner-content">
+        <div id="waitlist-anchor"></div>
         <h2>Ready to join the movement?</h2>
-        <p>Spots are limited. Get on the list before we open the doors.</p>
+        <p>Early access is live in the app stores. Want launch news and what's next? Join the list.</p>
         <div class="waitlist-form-wrap">
             <form class="waitlist-form" id="cta-waitlist" onsubmit="return submitWaitlist(event, 'cta-waitlist')">
                 <input type="email" name="email" placeholder="Enter your email" required autocomplete="email">
-                <button type="submit" class="btn-lg">Join the Beta</button>
+                <button type="submit" class="btn-lg">Get Launch Updates</button>
             </form>
             <div class="waitlist-msg" id="cta-waitlist-msg"></div>
         </div>
@@ -345,7 +341,7 @@
         <div class="footer-top">
             <div class="footer-brand">
                 <div class="name"><img src="/static/images/logo.png" alt="ApesTogether" style="height:22px; width:22px; vertical-align:middle; margin-right:6px;">ApesTogether</div>
-                <div class="tl">Verified performance. Transparent trades. Your call.</div>
+                <div class="tl">Verified performance. Transparent trades. Zero hype.</div>
             </div>
             <div class="footer-cols">
                 <div class="footer-col">
@@ -425,18 +421,18 @@ async function submitWaitlist(e, formId) {
             if (data.message === 'already_on_list') {
                 msg.innerHTML = '<span class="wl-ok">You&#39;re already on the list! We&#39;ll be in touch soon.</span>';
             } else {
-                msg.innerHTML = '<span class="wl-ok">You&#39;re on the list! We&#39;ll email you when your beta access is ready.</span>';
+                msg.innerHTML = '<span class="wl-ok">You&#39;re on the list! We&#39;ll keep you posted.</span>';
             }
             form.style.display = 'none';
         } else {
             msg.innerHTML = '<span class="wl-err">' + (data.error || 'Something went wrong.') + '</span>';
             btn.disabled = false;
-            btn.textContent = 'Join the Beta';
+            btn.textContent = 'Get Launch Updates';
         }
     } catch {
         msg.innerHTML = '<span class="wl-err">Network error. Please try again.</span>';
         btn.disabled = false;
-        btn.textContent = 'Join the Beta';
+        btn.textContent = 'Get Launch Updates';
     }
     return false;
 }

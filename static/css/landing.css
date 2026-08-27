@@ -113,6 +113,7 @@ a:hover { text-decoration: underline; }
 
 /* ── WAITLIST FORM ── */
 #waitlist-anchor { scroll-margin-top: 80px; }
+#get-app-anchor { scroll-margin-top: 80px; }
 #waitlist { scroll-margin-top: 80px; }
 .waitlist-form-wrap { margin-top: 0; }
 .waitlist-form {

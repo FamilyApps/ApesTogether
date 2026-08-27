@@ -1952,7 +1952,11 @@ def index():
         waitlist_count = db_retry(lambda: BetaWaitlist.query.count(), max_retries=2)
     except Exception:
         waitlist_count = 0
-    return render_template('landing.html', waitlist_count=waitlist_count)
+    return render_template(
+        'landing.html',
+        waitlist_count=waitlist_count,
+        ios_app_id=os.environ.get('IOS_APP_STORE_ID', '').strip(),
+    )
 
 @app.route('/get-app')
 def get_app():
