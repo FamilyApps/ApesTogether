@@ -2567,7 +2567,6 @@ def admin_audit_snapshot_cash_drift():
     total_bad_snapshots = 0
     fix_count = 0
     skipped_copytrade = 0
-    skipped_seeded = 0
 
     for user in users:
         # Copytrade bots derive cash/holdings from brokerage-screenshot migrations
@@ -2584,13 +2583,6 @@ def admin_audit_snapshot_cash_drift():
             PortfolioSnapshot.date.asc()
         ).all()
         if not snaps or not txns:
-            continue
-
-        # SEEDED-BOT LOCK (8/26/26): backfill_seed accounts have unledgered seed
-        # CASH, so a zero-cash replay cannot reconstruct their cash_proceeds
-        # either -- see admin_audit_snapshot_max_cash_drift for the full note.
-        if any(t.price_source == 'backfill_seed' for t in txns):
-            skipped_seeded += 1
             continue
 
         # Pre-compute per-date ambiguous-trade tolerance for this user
@@ -2698,7 +2690,6 @@ def admin_audit_snapshot_cash_drift():
         'fix_count': fix_count if apply_fix else 0,
         'users_scanned': len(users),
         'copytrade_bots_skipped': skipped_copytrade,
-        'seeded_bots_skipped': skipped_seeded,
         'users_with_issues': len(issues),
         'total_snapshots_checked': total_snapshots_checked,
         'total_bad_snapshots': total_bad_snapshots,
@@ -5363,26 +5354,27 @@ def admin_debug_user_transactions():
 @admin_required
 def admin_debug_replay_orderings():
     """
-    READ-ONLY: replay one user's max-cash under FOUR transaction orderings to
-    separate replay ARTIFACTS from genuine capital. Built 8/26/26 for the
-    chart1658 restore: bots are seeded with stock only (zero cash mechanic),
-    yet the naive replay wanted $147,890.95 of 'capital'. Two distinct causes:
-      - ORDERING ARTIFACT: wave trades sharing a timestamp; if the replay
-        consumes a buy before the same-instant sell that funded it, the
-        shortfall is misread as new capital (and max-cash is monotonic, so
-        every mis-ordered wave ratchets it permanently).
-      - GENUINE OVERSPEND: race bugs historically let the engine spend cash it
-        didn't have; the shares bought that way are real, so honest Modified-
-        Dietz capital MUST include it. Ledger identity puts the floor at
-        sum(buys) - sum(sells) (final cash can't be negative).
-    The orderings, most-artifact-prone to most-generous:
-      a. timestamp only, DB tie order  (what reconcile historically did)
+    READ-ONLY: replay one user's max-cash under FOUR transaction orderings.
+
+    THE PRODUCT MODEL (paper trading, INFINITE capital -- cash_tracking.py:1-27):
+    users are never 'out of money'. A buy consumes cash_proceeds first; any
+    shortfall is NEW CAPITAL tacked onto max_cash_deployed, which Modified
+    Dietz then uses as the capital base. So a buy exceeding cash-on-hand is
+    NORMAL BEHAVIOR, not overspend, and the strict chronological replay
+    (a)/(b) is the exact mirror of process_transaction -- it IS the truth.
+
+    What this endpoint is actually for: detecting SAME-TIMESTAMP tie-order
+    sensitivity. process_transaction runs trades one at a time, but admin
+    tools (e.g. /admin/convert-position sell+buy legs) can insert multiple
+    rows at one timestamp; if (a) != (b) != (c), the replayed max depends on
+    tie order and reconcile targets are ambiguous for that user. For
+    chart1658 (8/26/26), a=b=c=147,890.95 exactly -- no ambiguity, and that
+    figure was thereby confirmed as the correct restore target.
+      a. timestamp only, DB tie order  (what reconcile uses)
       b. timestamp, then id            (insertion order within an instant)
       c. per-TIMESTAMP batch, sells before buys
-      d. per-DAY batch, sells before buys (all of a day's proceeds fund all
-         of that day's buys -- the most generous realistic model)
-    Where (a)/(b) exceed (c)/(d) is artifact; where (d) still exceeds the
-    seed value is genuine overspend that belongs in the denominator.
+      d. per-DAY batch, sells before buys (diagnostic curiosity only -- NOT
+         the engine's semantics; the engine is strictly chronological)
 
     Params: ?username=X or ?user_id=N.
     """
@@ -5458,9 +5450,10 @@ def admin_debug_replay_orderings():
             'd_per_day_sells_first': _replay(ordered_d),
         },
         'how_to_read': (
-            'Artifact = (a or b) minus (c or d). Genuine overspend = (d) minus '
-            'seed_value. The honest restore target for max_cash_deployed is (c) '
-            'or (d); it can never be below capital_floor_buys_minus_sells.'
+            'Infinite-capital model: buys beyond cash-on-hand are new capital by '
+            'design. (a)/(b) mirror process_transaction and are the truth; if '
+            '(a), (b), (c) disagree, same-timestamp rows make reconcile targets '
+            'tie-order-ambiguous for this user and need id-tiebreak ordering.'
         ),
     })
 
@@ -5955,7 +5948,6 @@ def admin_audit_snapshot_max_cash_drift():
     total_bad_snapshots = 0
     fix_count = 0
     skipped_copytrade = 0
-    skipped_seeded = 0
 
     for user in users:
         # Copytrade bots derive cash/holdings from brokerage-screenshot migrations
@@ -5972,16 +5964,6 @@ def admin_audit_snapshot_max_cash_drift():
             PortfolioSnapshot.date.asc()
         ).all()
         if not snaps or not txns:
-            continue
-
-        # SEEDED-BOT LOCK (8/26/26): accounts with backfill_seed 'initial' rows
-        # were seeded via legacy set-cash + add-stocks -- the seed STOCK is now
-        # ledgered but the seed CASH never was, so a zero-cash replay misreads
-        # seed-cash spending as fresh capital. Their max-cash 'drift' here is
-        # structural noise, and ?fix=true would corrupt 400+ snapshots (the
-        # 8/22 chart1658 crush, in reverse). Skip like copytrade bots.
-        if any(t.price_source == 'backfill_seed' for t in txns):
-            skipped_seeded += 1
             continue
 
         # Pre-compute per-date ambiguous-trade tolerance for this user
@@ -6100,7 +6082,6 @@ def admin_audit_snapshot_max_cash_drift():
         'fix_count': fix_count if apply_fix else 0,
         'users_scanned': len(users),
         'copytrade_bots_skipped': skipped_copytrade,
-        'seeded_bots_skipped': skipped_seeded,
         'users_with_issues': len(issues),
         'total_snapshots_checked': total_snapshots_checked,
         'total_bad_snapshots': total_bad_snapshots,
@@ -6196,7 +6177,6 @@ def cron_snapshot_audit():
     users = User.query.order_by(User.id.asc()).all()
 
     skipped_copytrade = 0
-    skipped_seeded = 0
     for user in users:
         # Copytrade bots (CoastHillBear, marblethehill72) derive cash/holdings from
         # brokerage-screenshot migrations (price_source='phase_c_migration') that a
@@ -6212,13 +6192,6 @@ def cron_snapshot_audit():
             PortfolioSnapshot.date.asc()
         ).all()
         if not snaps or not txns:
-            continue
-
-        # SEEDED-BOT LOCK (8/26/26): unledgered seed cash -> replay targets are
-        # structurally wrong for backfill_seed accounts; alerting on them nightly
-        # is noise (see admin_audit_snapshot_max_cash_drift for the full note).
-        if any(t.price_source == 'backfill_seed' for t in txns):
-            skipped_seeded += 1
             continue
 
         # Pre-compute per-date ambiguous-trade tolerance for this user
@@ -6336,7 +6309,6 @@ def cron_snapshot_audit():
         'timestamp': timestamp_str,
         'users_scanned': len(users),
         'copytrade_bots_skipped': skipped_copytrade,
-        'seeded_bots_skipped': skipped_seeded,
         'total_snapshots_checked': total_snapshots_checked,
         'total_bad_snapshots': total_bad_snapshots,
         'users_with_issues': len(issues),
