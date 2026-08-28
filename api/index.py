@@ -1952,10 +1952,18 @@ def index():
         waitlist_count = db_retry(lambda: BetaWaitlist.query.count(), max_retries=2)
     except Exception:
         waitlist_count = 0
+    ua = (request.headers.get('User-Agent') or '').lower()
+    if 'android' in ua:
+        ua_platform = 'android'
+    elif any(k in ua for k in ('iphone', 'ipad', 'ipod')):
+        ua_platform = 'ios'
+    else:
+        ua_platform = 'desktop'
     return render_template(
         'landing.html',
         waitlist_count=waitlist_count,
         ios_app_id=os.environ.get('IOS_APP_STORE_ID', '').strip(),
+        ua_platform=ua_platform,
     )
 
 @app.route('/get-app')

@@ -4,16 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ApesTogether — The Creator Economy Comes for Wall Street</title>
-    <meta name="description" content="Follow verified traders with real track records. Real-time trade notifications from top performers beating the S&P 500.">
+    <meta name="description" content="Follow top AI and human traders with verified track records. Real-time trade notifications from top performers beating the S&P 500.">
     <meta property="og:title" content="ApesTogether — The Creator Economy Comes for Wall Street">
-    <meta property="og:description" content="Follow verified traders beating the market. Real trades. Real-time notifications.">
+    <meta property="og:description" content="Follow verified AI and human traders beating the market. Real trades. Real-time notifications.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://apestogether.ai">
     <meta property="og:image" content="/static/images/og-image.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/landing.css?v=14">
+    <link rel="stylesheet" href="/static/css/landing.css?v=15">
 </head>
 <body>
 
@@ -29,7 +29,7 @@
             <a href="#how-it-works">How It Works</a>
             <a href="#earn">Earn</a>
             <a href="#faq">FAQ</a>
-            <a href="#get-app-anchor" class="btn-sm" style="color:#000 !important;">Get the App</a>
+            <a href="{% if ua_platform == 'android' %}https://play.google.com/store/apps/details?id=com.apestogether.app{% elif ua_platform == 'ios' and ios_app_id %}https://apps.apple.com/us/app/id{{ ios_app_id }}{% else %}#get-app{% endif %}" class="btn-sm" style="color:#000 !important;">Get the App</a>
         </div>
     </div>
 </nav>
@@ -44,17 +44,18 @@
         <div class="orb"></div>
     </div>
     <div class="container hero-content">
-        <div id="get-app-anchor"></div>
         <div class="hero-badge">Early Access Is Open</div>
         <h1>The Creator Economy<br>Comes for <span class="accent">Wall Street</span></h1>
-        <p class="hero-sub">Follow top traders with verified track records. Get notified the moment they trade.</p>
-        <div class="cta-row">
-            {% if ios_app_id %}
-            <a class="btn-lg" href="https://apps.apple.com/us/app/id{{ ios_app_id }}">Download for iPhone</a>
+        <p class="hero-sub">Follow top AI and human traders with verified track records. Get notified the moment they trade.</p>
+        <div class="store-badges" id="get-app">
+            {% if ios_app_id and ua_platform != 'android' %}
+            <a href="https://apps.apple.com/us/app/id{{ ios_app_id }}" aria-label="Download on the App Store"><img class="badge-apple" src="/static/images/badge-app-store.svg" alt="Download on the App Store"></a>
             {% endif %}
-            <a class="btn-lg" href="https://play.google.com/store/apps/details?id=com.apestogether.app">Get it on Google Play</a>
+            {% if ua_platform != 'ios' or not ios_app_id %}
+            <a href="https://play.google.com/store/apps/details?id=com.apestogether.app" aria-label="Get it on Google Play"><img class="badge-google" src="/static/images/badge-google-play.png" alt="Get it on Google Play"></a>
+            {% endif %}
         </div>
-        <div class="waitlist-urgency">Free to download — the first 100 traders earn the Founding Trader badge</div>
+        <div class="waitlist-urgency">Free to download. The first 100 traders earn the Founding Trader badge.</div>
 
         <!-- App mockup -->
         <div class="mockup-wrap">
@@ -99,8 +100,8 @@
     <div class="container">
         <div class="sec-center">
             <div class="sec-label">Two Sides, One Platform</div>
-            <h2 class="sec-title">Follow traders, not TikToks</h2>
-            <p class="sec-sub">Whether you want to follow proven strategies or monetize your own &mdash; ApesTogether is built for you.</p>
+            <h2 class="sec-title">Follow the best, or get paid to be one</h2>
+            <p class="sec-sub">Whether you want to follow proven strategies or monetize your own, ApesTogether is built for you.</p>
         </div>
         <div class="audience-grid">
             <div class="aud-card">
@@ -110,8 +111,7 @@
                 <ul>
                     <li><span class="ck">&#10003;</span> Browse traders ranked by verified, on-platform performance</li>
                     <li><span class="ck">&#10003;</span> Get real-time notifications the moment they buy or sell</li>
-                    <li><span class="ck">&#10003;</span> No self-reported returns &mdash; all data tracked transparently</li>
-                    <li><span class="ck">&#10003;</span> Trades shared for informational and educational purposes only</li>
+                    <li><span class="ck">&#10003;</span> No self-reported returns. All data is tracked transparently</li>
                 </ul>
             </div>
             <div class="aud-card">
@@ -119,10 +119,10 @@
                 <h3>For Traders</h3>
                 <p class="tagline">You already beat the market. Now get paid for it.</p>
                 <ul>
-                    <li><span class="ck">&#10003;</span> Keep 85%* of proceeds &mdash; no content grind required</li>
-                    <li><span class="ck">&#10003;</span> No credentials needed &mdash; your track record speaks for itself</li>
-                    <li><span class="ck">&#10003;</span> Algorithms and AI bots welcome &mdash; if it beats the S&amp;P, we want it</li>
-                    <li><span class="ck">&#10003;</span> Income that scales with subscribers &mdash; the more who follow, the more you earn</li>
+                    <li><span class="ck">&#10003;</span> Keep 85%* of proceeds. No content grind required</li>
+                    <li><span class="ck">&#10003;</span> No credentials needed. Your track record speaks for itself</li>
+                    <li><span class="ck">&#10003;</span> Algorithms and AI agents welcome. If it beats the S&amp;P, we want it</li>
+                    <li><span class="ck">&#10003;</span> Income that scales with subscribers. The more who follow, the more you earn</li>
                 </ul>
             </div>
         </div>
@@ -153,7 +153,7 @@
             <div class="step">
                 <div class="step-n">1</div>
                 <h4>Browse</h4>
-                <p>Explore the leaderboard of traders ranked by verified performance &mdash; not followers.</p>
+                <p>Explore the leaderboard of AI and human traders ranked by verified performance.</p>
             </div>
             <div class="step">
                 <div class="step-n">2</div>
@@ -168,7 +168,7 @@
             <div class="step">
                 <div class="step-n">4</div>
                 <h4>Watch and Learn</h4>
-                <p>Follow the strategy as it unfolds. Everything is shared for educational purposes only.</p>
+                <p>Follow the strategy as it unfolds.</p>
             </div>
         </div>
         <div id="steps-trader" class="steps-grid" style="display:none;">
@@ -190,7 +190,7 @@
             <div class="step">
                 <div class="step-n">4</div>
                 <h4>Get Paid Monthly</h4>
-                <p>Earn 85%* of proceeds. Fill out a W-9 and receive monthly checks.</p>
+                <p>Earn 85% of subscription proceeds, paid monthly by check*</p>
             </div>
         </div>
     </div>
@@ -227,13 +227,13 @@
     <div class="container">
         <div class="sec-center">
             <div class="sec-label">Why Now</div>
-            <h2 class="sec-title">Receipts, not promises</h2>
+            <h2 class="sec-title">Proof over promises</h2>
             <p class="sec-sub">The old model is broken. ApesTogether is the fix.</p>
         </div>
         <div class="proof-grid">
             <div class="proof-card">
-                <div class="qt">&ldquo;85% of investors aged 18&ndash;40 turn to social media for investment ideas &mdash; but only 20% of finfluencer recommendations include proper disclosure.&rdquo;</div>
-                <div class="src">&mdash; SEC &amp; Journal of Financial Economics research</div>
+                <div class="qt">&ldquo;The majority of finfluencers are &lsquo;anti-skilled&rsquo;: following their advice produces negative returns.&rdquo;</div>
+                <div class="src">&mdash; Swiss Finance Institute study of 29,000 finfluencers</div>
             </div>
             <div class="proof-card">
                 <div class="qt">&ldquo;On Reddit, dozens of people have algorithms that consistently beat the S&amp;P 500 with no way to monetize beyond their own portfolio. Until now.&rdquo;</div>
@@ -267,14 +267,14 @@
                     <span>How does ApesTogether know what trades I make?</span>
                     <div class="icon">+</div>
                 </div>
-                <div class="faq-a"><p>You place them in the app. Every buy and sell happens right in ApesTogether, so your track record is complete by design — nothing is self-reported and nothing can be left out.</p></div>
+                <div class="faq-a"><p>You place them in the app. Every buy and sell happens right in ApesTogether, so your track record is complete by design: nothing is self-reported and nothing can be left out.</p></div>
             </div>
             <div class="faq-item">
                 <div class="faq-q" onclick="toggleFaq(this)">
                     <span>The app only lets me choose a quantity, not the price. How is the price established?</span>
                     <div class="icon">+</div>
                 </div>
-                <div class="faq-a"><p>Every trade executes at the stock's real-time market price the moment you place it. You can't pick your price, backdate a trade, or cherry-pick an entry — that's the point.</p></div>
+                <div class="faq-a"><p>Every trade executes at the stock's real-time market price the moment you place it. You can't pick your price, backdate a trade, or cherry-pick an entry. That's the point.</p></div>
             </div>
             <div class="faq-item">
                 <div class="faq-q" onclick="toggleFaq(this)">
@@ -365,7 +365,7 @@
         </div>
         <div class="footer-bottom">
             <p class="footer-disc">
-                <sup>*</sup> Traders receive 85% of net proceeds after app store fees.
+                <sup>*</sup> Traders receive 85% of net proceeds after app store fees. Payment eligibility, timing, and requirements (including a completed W-9) are governed by our <a href="/terms-of-service" style="color:inherit; text-decoration:underline;">Terms of Service</a>.
                 ApesTogether does not provide financial advice. All trades and performance data are shared for informational purposes only.
                 Past performance does not guarantee future results. Users are solely responsible for their own investment decisions.
                 ApesTogether is operated by Family Apps LLC.
