@@ -35,10 +35,9 @@
                        data-bs-toggle="tooltip" title="Notification settings">
                         <i class="fas fa-bell"></i> Notifications
                     </a>
-                    <a href="{{ url_for('debug_env') }}" class="btn btn-outline-secondary"
-                       data-bs-toggle="tooltip" title="System diagnostics and troubleshooting (Admin only)">
-                        <i class="fas fa-bug"></i> Debug
-                    </a>
+                    {# Debug button removed: its `debug_env` endpoint was deleted
+                       in the 120-endpoint cleanup (6ad0a7c), and url_for() on a
+                       missing endpoint is a BuildError that 500s the whole page. #}
                 </div>
             </div>
             
