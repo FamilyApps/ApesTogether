@@ -130,7 +130,11 @@ fun RootApp() {
             AddStocksScreen(
                 onComplete = {
                     showAddStocksOverlay = false
+                    // Land in the portfolio they just subscribed to (via the
+                    // pending-slug deep-link path), not the leaderboard.
+                    val slug = subscribedToSlug
                     rootViewModel.clearSubscribedToUsername()
+                    if (!slug.isNullOrBlank()) rootViewModel.setPendingSlug(slug)
                 },
                 showSkip = true,
                 showBack = false,
@@ -142,7 +146,13 @@ fun RootApp() {
             EarnNudgeScreen(
                 subscribedToUsername = subscribedToUsername.orEmpty(),
                 onAddStocks = { showAddStocksOverlay = true },
-                onSkip = { rootViewModel.clearSubscribedToUsername() },
+                onSkip = {
+                    // Skip also lands in the just-subscribed portfolio — every
+                    // nudge exit path ends at the revealed holdings.
+                    val slug = subscribedToSlug
+                    rootViewModel.clearSubscribedToUsername()
+                    if (!slug.isNullOrBlank()) rootViewModel.setPendingSlug(slug)
+                },
                 // Users who already added their own stocks are creators —
                 // skip the "Add Your Stocks" pitch and offer to view the
                 // portfolio they just subscribed to instead.

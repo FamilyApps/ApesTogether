@@ -1840,6 +1840,7 @@ def _add_stocks_as_buys(stocks_list):
     from timezone_utils import is_market_hours
 
     # Normalize + validate
+    from restricted_tickers import is_restricted_ticker
     items = []
     errors = []
     for item in stocks_list:
@@ -1850,6 +1851,9 @@ def _add_stocks_as_buys(stocks_list):
             quantity = 0
         if not ticker or len(ticker) > 10 or quantity <= 0:
             errors.append("Missing or invalid ticker/quantity")
+            continue
+        if is_restricted_ticker(ticker):
+            errors.append(f"{ticker} is a leveraged/inverse ETF and can't be bought")
             continue
         items.append((ticker, quantity))
 
@@ -1978,6 +1982,12 @@ def add_stocks():
         
         if not ticker or not quantity:
             errors.append(f"Missing ticker or quantity")
+            continue
+        
+        # Restricted-ticker policy (same rule as /portfolio/trade buys)
+        from restricted_tickers import is_restricted_ticker
+        if is_restricted_ticker(ticker):
+            errors.append(f"{ticker} is a leveraged/inverse ETF and can't be added")
             continue
         
         try:
@@ -3408,7 +3418,18 @@ def get_auth_token():
 
         # Generate JWT token
         token = generate_jwt_token(user.id, user.email)
-        
+
+        # num_stocks lets the post-subscribe nudge tell creators (who already
+        # added holdings) from pure subscribers IN THE FIRST SESSION. Without
+        # it here, iOS only learns num_stocks on the next app relaunch
+        # (refreshUserData) and every fresh login sees the "Add Your Stocks"
+        # pitch regardless of holdings.
+        try:
+            from models import Stock
+            num_stocks = db_retry(lambda: Stock.query.filter_by(user_id=user.id).count())
+        except Exception:
+            num_stocks = 0
+
         return jsonify({
             'success': True,
             'token': token,
@@ -3417,7 +3438,8 @@ def get_auth_token():
                 'email': user.email,
                 'username': user.username,
                 'display_name': user.public_name,
-                'portfolio_slug': user.portfolio_slug
+                'portfolio_slug': user.portfolio_slug,
+                'num_stocks': num_stocks
             }
         })
         
@@ -4623,6 +4645,14 @@ def execute_trade():
         return jsonify({'error': 'quantity_too_large', 'max': MAX_SHARES_PER_ORDER}), 400
     if trade_type not in ('buy', 'sell'):
         return jsonify({'error': 'type_must_be_buy_or_sell'}), 400
+
+    # Restricted-ticker policy: block NEW exposure to leveraged/inverse ETFs.
+    # Sells are always allowed so anyone holding one can exit.
+    if trade_type == 'buy':
+        from restricted_tickers import is_restricted_ticker, RESTRICTED_TICKER_MESSAGE
+        if is_restricted_ticker(ticker):
+            return jsonify({'error': 'restricted_ticker', 'ticker': ticker,
+                            'message': RESTRICTED_TICKER_MESSAGE}), 400
     
     try:
         from cash_tracking import process_transaction
@@ -9084,6 +9114,44 @@ def admin_backfill_sectors():
 
 
 
+def _record_bonus_peak(user_id, count_now):
+    """Persist this month's gifted-sub HIGH-WATER MARK on user.extra_data.
+
+    Why: payout generation reads bonus_subscriber_count at month-end. Without
+    this, gifting a sub on the 5th and removing it on the 20th pays the
+    creator $0 for the month. Policy (USER, 8/30/26): a gift active at ANY
+    point in a month earns the FULL month — required for rotating gifts to
+    daily leaders. Called AFTER increments and BEFORE decrements.
+
+    Stored shape: extra_data['bonus_peak'] =
+        {'month': 'YYYY-MM', 'count': N, 'prev_month': 'YYYY-MM', 'prev_count': M}
+    prev_* preserves the just-finished month's peak across the rollover so
+    generation (which runs a few days into the next month) can still pay it.
+    """
+    try:
+        from models import User
+        from sqlalchemy.orm.attributes import flag_modified
+        user = User.query.get(user_id)
+        if not user:
+            return
+        month_key = datetime.utcnow().strftime('%Y-%m')
+        extra = dict(user.extra_data or {})
+        peak = dict(extra.get('bonus_peak') or {})
+        if peak.get('month') == month_key:
+            peak['count'] = max(int(peak.get('count') or 0), int(count_now))
+        else:
+            if peak.get('month'):
+                peak['prev_month'] = peak.get('month')
+                peak['prev_count'] = int(peak.get('count') or 0)
+            peak['month'] = month_key
+            peak['count'] = int(count_now)
+        extra['bonus_peak'] = peak
+        user.extra_data = extra
+        flag_modified(user, 'extra_data')
+    except Exception as e:
+        logger.warning(f"bonus-peak tracking failed for user {user_id}: {e}")
+
+
 @mobile_api.route('/admin/bot/gift-subscribers', methods=['POST'])
 @require_admin_2fa
 @with_db_retry
@@ -9159,6 +9227,10 @@ def bot_gift_subscribers():
             stats.has_fractional_holdings = user_stats.get('has_fractional_holdings', False)
         except Exception as stats_err:
             logger.warning(f"Non-blocking: failed to populate stats for user {user_id}: {stats_err}")
+        
+        # Month high-water mark: this gift earns the full current month even
+        # if removed before month-end (see _record_bonus_peak).
+        _record_bonus_peak(user_id, admin_sub.bonus_subscriber_count or 0)
         
         db.session.commit()
         
@@ -9341,6 +9413,11 @@ def bot_remove_subscribers():
         admin_sub = AdminSubscription.query.filter_by(portfolio_user_id=user_id).first()
         if not admin_sub or (admin_sub.bonus_subscriber_count or 0) == 0:
             return jsonify({'error': 'no_gifted_subscribers_to_remove'}), 400
+        
+        # BEFORE decrementing: lock in the pre-removal count as this month's
+        # high-water mark, so the creator is still paid the full month for a
+        # gift that was live at any point in it (see _record_bonus_peak).
+        _record_bonus_peak(user_id, admin_sub.bonus_subscriber_count or 0)
         
         # Don't remove more than exist
         actual_remove = min(count, admin_sub.bonus_subscriber_count or 0)
@@ -10150,12 +10227,29 @@ def _generate_payout_records_for_period(year, month):
             }
 
         # 2. Gifted/bonus subs (company-funded; no store fee, no subscriber refunds).
+        #    Pays the period's HIGH-WATER MARK, not the closing count: a gift
+        #    active at any point in the month earns the full month, even if it
+        #    was removed before month-end (rotating gifts to daily leaders).
+        #    Peak is tracked in user.extra_data['bonus_peak'] by the
+        #    gift/remove endpoints; rows with a peak but a zero closing count
+        #    still get paid — hence querying ALL AdminSubscription rows.
+        period_key = f'{year:04d}-{month:02d}'
         gifted_map = {}
-        gifted_rows = AdminSubscription.query.filter(
-            AdminSubscription.bonus_subscriber_count > 0
-        ).all()
-        for row in gifted_rows:
-            gifted_map[row.portfolio_user_id] = row.bonus_subscriber_count or 0
+        for row in AdminSubscription.query.all():
+            current = row.bonus_subscriber_count or 0
+            peak_count = 0
+            try:
+                peak_user = User.query.get(row.portfolio_user_id)
+                peak = ((peak_user.extra_data or {}).get('bonus_peak') or {}) if peak_user else {}
+                if peak.get('month') == period_key:
+                    peak_count = int(peak.get('count') or 0)
+                elif peak.get('prev_month') == period_key:
+                    peak_count = int(peak.get('prev_count') or 0)
+            except Exception:
+                peak_count = 0
+            effective = max(current, peak_count)
+            if effective > 0:
+                gifted_map[row.portfolio_user_id] = effective
 
         all_user_ids = set(gifted_map.keys()) | set(real_map.keys())
         payout_per_sub = AdminSubscription.INFLUENCER_PAYOUT_PER_SUB
@@ -11587,7 +11681,11 @@ def bot_batch_seed():
     created = []
     errors = []
     
-    personas = generate_bot_batch(count, industry=industry, strategy=strategy)
+    # Fleet-wide similarity guard: no new bot may share a name word with ANY
+    # existing account (SteelFire + RainFire both reading as bots = giveaway).
+    _existing_names = [r[0] for r in db.session.query(User.username).all()]
+    personas = generate_bot_batch(count, industry=industry, strategy=strategy,
+                                  existing_usernames=_existing_names)
     
     for i, persona in enumerate(personas):
         username = persona['username']
@@ -11925,7 +12023,11 @@ def bot_auto_create_run():
     if strategy and strategy not in STRATEGY_TEMPLATES:
         strategy = None
     
-    personas = generate_bot_batch(count, industry=industry, strategy=strategy)
+    # Fleet-wide similarity guard: no new bot may share a name word with ANY
+    # existing account (SteelFire + RainFire both reading as bots = giveaway).
+    _existing_names = [r[0] for r in db.session.query(User.username).all()]
+    personas = generate_bot_batch(count, industry=industry, strategy=strategy,
+                                  existing_usernames=_existing_names)
     created = []
     
     for persona in personas:

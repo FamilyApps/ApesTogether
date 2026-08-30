@@ -8,6 +8,7 @@ and attention universe.
 """
 
 import random
+import re
 import logging
 
 logger = logging.getLogger('bot_personas')
@@ -86,10 +87,10 @@ REAL_FIRST_NAMES = [
 ]
 
 
-def generate_username():
-    """
-    Generate a modern, trendy username matching Polymarket/Kalshi/StockTwits style.
-    No underscores, hyphens, or corporate suffixes.
+def _generate_username_with_parts():
+    """Generate a candidate username plus the lowercase word components it was
+    built from. Components feed the similarity guard: two bots must never
+    share a visible name word (SteelFire + RainFire both read as bots).
     """
     pattern = random.choices(
         ['camel', 'lowercase_fused', 'short_handle', 'real_name', 'real_num'],
@@ -101,19 +102,22 @@ def generate_username():
         # CamelCase: SilverFox, MidnightStar, CoastalBreezeView
         first = random.choice(CAMEL_FIRST)
         second = random.choice(CAMEL_SECOND)
+        parts = [first.lower(), second.lower()]
         # Sometimes add a third word or number
         extra = random.choices(
             ['', random.choice(CAMEL_SECOND), str(random.randint(1, 99))],
             weights=[50, 30, 20], k=1
         )[0]
-        return f"{first}{second}{extra}"
+        if extra and not extra.isdigit():
+            parts.append(extra.lower())
+        return f"{first}{second}{extra}", parts
 
     elif pattern == 'lowercase_fused':
         # Fused lowercase: reachingthesky, goldenoak7, quietstorm
         word = random.choice(LOWERCASE_WORDS)
         noun = random.choice(LOWERCASE_NOUNS)
         num = random.choice(['', str(random.randint(1, 99))])
-        return f"{word}{noun}{num}"
+        return f"{word}{noun}{num}", [word, noun]
 
     elif pattern == 'short_handle':
         # Short punchy: gatorr, sparky22, ace
@@ -122,7 +126,7 @@ def generate_username():
             ['', str(random.randint(1, 9)), str(random.randint(10, 99))],
             weights=[40, 30, 30], k=1
         )[0]
-        return f"{handle}{num}"
+        return f"{handle}{num}", [handle]
 
     elif pattern == 'real_name':
         # Just a name, maybe with a short number: alex, jordan7, reese42
@@ -132,13 +136,36 @@ def generate_username():
              str(random.randint(100, 999))],
             weights=[30, 25, 30, 15], k=1
         )[0]
-        return f"{name}{num}"
+        return f"{name}{num}", [name]
 
     else:  # real_num — just initials/letters + numbers
         # kch123 style
         letters = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz', k=random.randint(2, 4)))
         num = str(random.randint(1, 999))
-        return f"{letters}{num}"
+        return f"{letters}{num}", [letters]
+
+
+def generate_username():
+    """
+    Generate a modern, trendy username matching Polymarket/Kalshi/StockTwits style.
+    No underscores, hyphens, or corporate suffixes.
+    """
+    return _generate_username_with_parts()[0]
+
+
+def _components_of_existing(username):
+    """Best-effort decomposition of an EXISTING username into comparable
+    lowercase components. CamelCase splits cleanly; fused lowercase names
+    can't be split, so their digit-stripped blob is included whole (exact
+    word matches against it still catch e.g. 'golden' vs 'golden7').
+    """
+    if not username:
+        return set()
+    comps = {w.lower() for w in re.findall(r'[A-Z][a-z]+', username)}
+    blob = re.sub(r'[^a-z]', '', username.lower())
+    if blob:
+        comps.add(blob)
+    return comps
 
 
 def generate_email(username):
@@ -217,15 +244,27 @@ def generate_bot_persona(strategy_name=None, industry=None):
     }
 
 
-def generate_bot_batch(count, industry=None, strategy=None):
+def generate_bot_batch(count, industry=None, strategy=None, existing_usernames=None):
     """
     Generate a batch of bot personas.
     Ensures diverse strategies and industries across the batch.
+
+    existing_usernames: iterable of usernames already in the DB. Candidates
+    sharing a visible word component with ANY of them are rejected, so the
+    fleet never accumulates near-twins across creation batches.
     """
     from bot_strategies import STRATEGY_TEMPLATES, pick_random_strategy
 
     personas = []
     used_usernames = set()
+    # Similarity guard: track every WORD used in any name (this batch + the
+    # existing fleet) and reject candidates that reuse one. Prevents
+    # dead-giveaway near-twins like SteelFire/RainFire (shared 'Fire') both
+    # within a batch and against bots created in earlier batches.
+    used_components = set()
+    for existing in (existing_usernames or []):
+        used_usernames.add(existing.lower())
+        used_components |= _components_of_existing(existing)
 
     for i in range(count):
         persona = generate_bot_persona(
@@ -233,14 +272,30 @@ def generate_bot_batch(count, industry=None, strategy=None):
             industry=industry,
         )
 
-        # Ensure unique username
+        # Regenerate until the name is exact-unique AND shares no word
+        # component with any existing/batch name. Word lists are large
+        # enough (~4k camel combos alone) that 60 attempts practically
+        # always succeeds; the fallback keeps at least exact uniqueness.
+        candidate, parts = _generate_username_with_parts()
         attempts = 0
-        while persona['username'] in used_usernames and attempts < 10:
-            persona['username'] = generate_username()
-            persona['email'] = generate_email(persona['username'])
+        while attempts < 60 and (
+            candidate.lower() in used_usernames
+            or any(p in used_components for p in parts)
+        ):
+            candidate, parts = _generate_username_with_parts()
             attempts += 1
+        if attempts >= 60:
+            logger.warning(
+                f"Username similarity guard exhausted after {attempts} attempts; "
+                f"accepting '{candidate}' with possible shared component"
+            )
+            while candidate.lower() in used_usernames:
+                candidate = f"{candidate}{random.randint(1, 99)}"
 
-        used_usernames.add(persona['username'])
+        persona['username'] = candidate
+        persona['email'] = generate_email(candidate)
+        used_usernames.add(candidate.lower())
+        used_components.update(parts)
         personas.append(persona)
 
     # Log distribution

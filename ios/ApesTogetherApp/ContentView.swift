@@ -10,6 +10,21 @@ struct ContentView: View {
     @State private var subscribedToUsername: String = ""
     @State private var subscribedToSlug: String = ""
     
+    // Every EarnNudge exit path (skip, add-stocks completion, View Portfolio)
+    // lands in the portfolio the user just subscribed to — the whole point of
+    // subscribing is seeing the revealed holdings, not the leaderboard.
+    private func openSubscribedPortfolio() {
+        let slug = subscribedToSlug
+        guard !slug.isEmpty else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            NotificationCenter.default.post(
+                name: .openPortfolio,
+                object: nil,
+                userInfo: ["slug": slug]
+            )
+        }
+    }
+    
     var body: some View {
         Group {
             if authManager.isAuthenticated {
@@ -24,6 +39,7 @@ struct ContentView: View {
                         onSkip: {
                             showEarnNudge = false
                             deepLinkManager.completeOnboarding()
+                            openSubscribedPortfolio()
                         },
                         // Creators (users with their own stocks) skip the
                         // earn pitch and get a View-Portfolio button instead.
@@ -31,16 +47,7 @@ struct ContentView: View {
                         onViewPortfolio: {
                             showEarnNudge = false
                             deepLinkManager.completeOnboarding()
-                            let slug = subscribedToSlug
-                            if !slug.isEmpty {
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                    NotificationCenter.default.post(
-                                        name: .openPortfolio,
-                                        object: nil,
-                                        userInfo: ["slug": slug]
-                                    )
-                                }
-                            }
+                            openSubscribedPortfolio()
                         }
                     )
                 } else if showAddStocks {
@@ -52,6 +59,7 @@ struct ContentView: View {
                         onComplete: {
                             showAddStocks = false
                             deepLinkManager.completeOnboarding()
+                            openSubscribedPortfolio()
                         }
                     )
                     .environmentObject(authManager)
