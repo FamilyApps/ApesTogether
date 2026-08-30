@@ -4635,7 +4635,9 @@ def cron_map_dailybars_to_marketdata():
          close from BOTH MarketData and DailyPriceBar (names outside the
          ~145-name bot universe), call get_historical_price(force_fetch=True)
          once per ticker; AV returns ~100 days so one call closes the gap.
-         Caps: ?av_limit (default 10 tickers/night) + ?max_seconds (default 40).
+         Caps: ?av_limit (default 25 tickers/night; was 10 until 8/30/26 when
+         launch-week buying added ~40 non-universe names in a single day and
+         the backlog outran the cap) + ?max_seconds (default 40).
 
     3. DELISTING/HALT SENTRY: held tickers lagging >= 1 session are checked
        against AV LISTING_STATUS (state=delisted). Confirmed delistings
@@ -4662,9 +4664,9 @@ def cron_map_dailybars_to_marketdata():
     except (TypeError, ValueError):
         days = 7
     try:
-        av_limit = max(0, min(int(request.args.get('av_limit', '10')), 50))
+        av_limit = max(0, min(int(request.args.get('av_limit', '25')), 50))
     except (TypeError, ValueError):
-        av_limit = 10
+        av_limit = 25
     try:
         max_seconds = max(5.0, min(float(request.args.get('max_seconds', '40')), 55.0))
     except (TypeError, ValueError):
