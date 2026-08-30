@@ -1840,7 +1840,6 @@ def _add_stocks_as_buys(stocks_list):
     from timezone_utils import is_market_hours
 
     # Normalize + validate
-    from restricted_tickers import is_restricted_ticker
     items = []
     errors = []
     for item in stocks_list:
@@ -1851,9 +1850,6 @@ def _add_stocks_as_buys(stocks_list):
             quantity = 0
         if not ticker or len(ticker) > 10 or quantity <= 0:
             errors.append("Missing or invalid ticker/quantity")
-            continue
-        if is_restricted_ticker(ticker):
-            errors.append(f"{ticker} is a leveraged/inverse ETF and can't be bought")
             continue
         items.append((ticker, quantity))
 
@@ -1982,12 +1978,6 @@ def add_stocks():
         
         if not ticker or not quantity:
             errors.append(f"Missing ticker or quantity")
-            continue
-        
-        # Restricted-ticker policy (same rule as /portfolio/trade buys)
-        from restricted_tickers import is_restricted_ticker
-        if is_restricted_ticker(ticker):
-            errors.append(f"{ticker} is a leveraged/inverse ETF and can't be added")
             continue
         
         try:
@@ -4645,14 +4635,6 @@ def execute_trade():
         return jsonify({'error': 'quantity_too_large', 'max': MAX_SHARES_PER_ORDER}), 400
     if trade_type not in ('buy', 'sell'):
         return jsonify({'error': 'type_must_be_buy_or_sell'}), 400
-
-    # Restricted-ticker policy: block NEW exposure to leveraged/inverse ETFs.
-    # Sells are always allowed so anyone holding one can exit.
-    if trade_type == 'buy':
-        from restricted_tickers import is_restricted_ticker, RESTRICTED_TICKER_MESSAGE
-        if is_restricted_ticker(ticker):
-            return jsonify({'error': 'restricted_ticker', 'ticker': ticker,
-                            'message': RESTRICTED_TICKER_MESSAGE}), 400
     
     try:
         from cash_tracking import process_transaction

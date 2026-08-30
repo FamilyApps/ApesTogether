@@ -30,6 +30,17 @@ CAMEL_FIRST = [
     'Raven', 'Ridge', 'River', 'Sage', 'Shadow', 'Sierra', 'Silver',
     'Solar', 'South', 'Steel', 'Stone', 'Storm', 'Summit', 'Tidal',
     'Timber', 'Valley', 'Velvet', 'Vintage', 'Violet', 'Wild', 'Winter',
+    'Alpine', 'Amber', 'Arctic', 'Aspen', 'Atlas', 'Aurora', 'Basalt',
+    'Boulder', 'Briar', 'Bronze', 'Canvas', 'Cascade', 'Chrome', 'Cinder',
+    'Clover', 'Comet', 'Cosmic', 'Cotton', 'Coyote', 'Delta', 'Eclipse',
+    'Feather', 'Flint', 'Gale', 'Garnet', 'Glacier', 'Granite', 'Grizzly',
+    'Hazel', 'Heather', 'Hollow', 'Indigo', 'Juniper', 'Kodiak', 'Lagoon',
+    'Lantern', 'Laurel', 'Lava', 'Lilac', 'Mirage', 'Mojave', 'Monsoon',
+    'Mustang', 'Nebula', 'Neon', 'Nimbus', 'Nomad', 'Obsidian', 'Opal',
+    'Osprey', 'Otter', 'Pebble', 'Quartz', 'Rogue', 'Rustic', 'Saffron',
+    'Scarlet', 'Sequoia', 'Slate', 'Solstice', 'Spruce', 'Sterling',
+    'Tahoe', 'Teal', 'Tempest', 'Terra', 'Thunder', 'Topaz', 'Tundra',
+    'Twilight', 'Vapor', 'Vega', 'Vortex', 'Walnut', 'Willow', 'Zephyr',
 ]
 
 CAMEL_SECOND = [
@@ -41,6 +52,15 @@ CAMEL_SECOND = [
     'Path', 'Point', 'Rain', 'Reed', 'Rock', 'Rose', 'Run', 'Rush',
     'Sand', 'Sky', 'Spark', 'Spring', 'Star', 'Sun', 'Swift', 'Tide',
     'Trail', 'Vale', 'View', 'Wave', 'West', 'Wind', 'Wolf', 'Wren',
+    'Ash', 'Beam', 'Bend', 'Blade', 'Bluff', 'Branch', 'Breeze', 'Cairn',
+    'Cape', 'Cove', 'Crag', 'Dell', 'Den', 'Dove', 'Dune', 'Finch',
+    'Fjord', 'Flame', 'Foam', 'Ford', 'Fork', 'Gap', 'Gate', 'Glade',
+    'Gorge', 'Grain', 'Gull', 'Heron', 'Horn', 'Knoll', 'Ledge', 'Loch',
+    'Loon', 'Marsh', 'Mist', 'Nest', 'Notch', 'Pass', 'Perch', 'Petal',
+    'Pond', 'Quill', 'Reef', 'Roam', 'Roost', 'Root', 'Sail', 'Seed',
+    'Shade', 'Shard', 'Shore', 'Slope', 'Snow', 'Sparrow', 'Spire',
+    'Spur', 'Stag', 'Stream', 'Surf', 'Thorn', 'Trace', 'Trek', 'Vine',
+    'Wake', 'Whale', 'Wisp', 'Wood',
 ]
 
 # Lowercase fused words (Polymarket style: reachingthesky, beachboy4, swisstony)
@@ -53,6 +73,15 @@ LOWERCASE_WORDS = [
     'dusty', 'rusty', 'misty', 'cloudy', 'sunny', 'rainy', 'snowy',
     'blue', 'green', 'red', 'grey', 'dark', 'bright', 'deep',
     'tall', 'old', 'new', 'swift', 'slow', 'loud', 'calm',
+    'blazing', 'breezy', 'burning', 'crooked', 'curious', 'dancing',
+    'daring', 'dreaming', 'drifting', 'dusky', 'early', 'electric',
+    'endless', 'faded', 'feral', 'flying', 'foggy', 'gentle', 'gliding',
+    'glowing', 'hazy', 'howling', 'humble', 'icy', 'jagged', 'lazy',
+    'little', 'lonely', 'lost', 'mellow', 'mighty', 'moody', 'mossy',
+    'noble', 'pale', 'patient', 'purple', 'restless', 'roaming', 'rugged',
+    'sailing', 'salty', 'sandy', 'shady', 'silent', 'simple', 'sleepy',
+    'soaring', 'stray', 'sturdy', 'tiny', 'wandering', 'weary',
+    'whistling', 'windy',
 ]
 
 LOWERCASE_NOUNS = [
@@ -63,6 +92,11 @@ LOWERCASE_NOUNS = [
     'oak', 'pine', 'birch', 'cedar', 'maple', 'sage', 'fern',
     'stone', 'sand', 'clay', 'iron', 'frost', 'ember', 'spark',
     'boy', 'kid', 'dude', 'tony', 'mike', 'dave', 'sam', 'joe',
+    'badger', 'bison', 'crane', 'eagle', 'moose', 'seal', 'tiger',
+    'trout', 'cliffs', 'fields', 'woods', 'heath', 'colt', 'jed',
+    'moe', 'lou', 'ben', 'gus', 'hank', 'max', 'ned', 'pete', 'ray',
+    'stu', 'vic', 'wes', 'walt', 'tom', 'thecoast', 'thebay',
+    'thestorm', 'thefog', 'thedunes', 'thegrove', 'thepines', 'thetide',
 ]
 
 # Short punchy handles (Kalshi/StockTwits style: gatorr, cobybets1)
@@ -73,6 +107,12 @@ SHORT_HANDLES = [
     'sparky', 'rocky', 'lucky', 'stormy', 'dusty', 'rusty',
     'frosty', 'smoky', 'misty', 'buddy', 'scout', 'bandit',
     'rebel', 'maverick', 'blaze', 'flash', 'dash', 'ace',
+    'benny', 'biff', 'boomer', 'bruno', 'buzz', 'chip', 'cleo', 'dax',
+    'digby', 'duke', 'gizmo', 'goose', 'gumbo', 'hobbes', 'iggy',
+    'jinx', 'kip', 'koda', 'loki', 'murph', 'ollie', 'otis', 'ozzy',
+    'pablo', 'pippin', 'pogo', 'porter', 'quincy', 'rufus', 'scooter',
+    'simba', 'skippy', 'tank', 'teddy', 'toby', 'tucker', 'waldo',
+    'wally', 'yogi', 'zeke', 'zorro',
 ]
 
 # Real-ish first names (no suffixes, just the name + optional number)
@@ -84,6 +124,13 @@ REAL_FIRST_NAMES = [
     'rowan', 'sage', 'river', 'phoenix', 'kendall', 'devon',
     'hayden', 'peyton', 'rory', 'shay', 'tatum', 'lennox',
     'marley', 'oakley', 'harley', 'dallas', 'jules', 'nico',
+    'aaron', 'adrian', 'amara', 'andre', 'aria', 'asher', 'bella',
+    'bennett', 'carlos', 'carmen', 'chloe', 'cole', 'corey', 'dana',
+    'dante', 'elena', 'eli', 'ellis', 'emma', 'ethan', 'felix', 'hana',
+    'hugo', 'ian', 'ivy', 'jenna', 'joel', 'jonas', 'julian', 'kara',
+    'lena', 'leo', 'liam', 'luca', 'maya', 'mia', 'naomi', 'noel',
+    'omar', 'priya', 'ronan', 'ruby', 'sofia', 'theo', 'tessa', 'vera',
+    'yara', 'zane',
 ]
 
 
@@ -153,11 +200,43 @@ def generate_username():
     return _generate_username_with_parts()[0]
 
 
+# Union of every word the generator can draw, for decomposing EXISTING fused
+# lowercase names back into their constituent words (built lazily so list
+# edits above never need to touch this).
+_ALL_WORDS = None
+
+
+def _all_words():
+    global _ALL_WORDS
+    if _ALL_WORDS is None:
+        _ALL_WORDS = {
+            w.lower()
+            for lst in (CAMEL_FIRST, CAMEL_SECOND, LOWERCASE_WORDS,
+                        LOWERCASE_NOUNS, SHORT_HANDLES, REAL_FIRST_NAMES)
+            for w in lst
+        }
+    return _ALL_WORDS
+
+
+def _split_blob(blob):
+    """Try to split a fused lowercase blob into two known vocabulary words
+    (fused names are always built word+noun from our own pools). Returns
+    a list of (first, second) splits; empty if none match.
+    """
+    vocab = _all_words()
+    return [
+        (blob[:i], blob[i:])
+        for i in range(2, len(blob) - 1)
+        if blob[:i] in vocab and blob[i:] in vocab
+    ]
+
+
 def _components_of_existing(username):
     """Best-effort decomposition of an EXISTING username into comparable
     lowercase components. CamelCase splits cleanly; fused lowercase names
-    can't be split, so their digit-stripped blob is included whole (exact
-    word matches against it still catch e.g. 'golden' vs 'golden7').
+    are segmented against the generator vocabulary (jaggedthestorm22 ->
+    {'jagged', 'thestorm'}); the digit-stripped blob is always included
+    too so exact matches like 'golden' vs 'golden7' still catch.
     """
     if not username:
         return set()
@@ -165,7 +244,31 @@ def _components_of_existing(username):
     blob = re.sub(r'[^a-z]', '', username.lower())
     if blob:
         comps.add(blob)
+        for a, b in _split_blob(blob):
+            comps.add(a)
+            comps.add(b)
     return comps
+
+
+def _slots_of_existing(username):
+    """Positioned decomposition of an EXISTING username: {(index, word)}.
+    CamelCase words get their real positions; fused lowercase names get
+    vocabulary-based splits at positions 0/1, with the digit-stripped blob
+    at position 0 as a catch-all.
+    """
+    if not username:
+        return set()
+    words = re.findall(r'[A-Z][a-z]+', username)
+    if words:
+        return {(i, w.lower()) for i, w in enumerate(words)}
+    blob = re.sub(r'[^a-z]', '', username.lower())
+    if not blob:
+        return set()
+    slots = {(0, blob)}
+    for a, b in _split_blob(blob):
+        slots.add((0, a))
+        slots.add((1, b))
+    return slots
 
 
 def generate_email(username):
@@ -257,14 +360,23 @@ def generate_bot_batch(count, industry=None, strategy=None, existing_usernames=N
 
     personas = []
     used_usernames = set()
-    # Similarity guard: track every WORD used in any name (this batch + the
-    # existing fleet) and reject candidates that reuse one. Prevents
-    # dead-giveaway near-twins like SteelFire/RainFire (shared 'Fire') both
-    # within a batch and against bots created in earlier batches.
+    # Similarity guard, two tiers (batch + existing fleet):
+    #   Tier 1 (strict): no candidate may reuse ANY word already used in any
+    #     name -- prevents dead-giveaway near-twins like SteelFire/RainFire.
+    #   Tier 2 (position-aware, entered only when tier 1 stalls): a word may
+    #     reappear, but never in the SAME name position (blocks SteelFire vs
+    #     RainFire and chartwolf vs chartowl shapes) and at most ONE word of
+    #     the candidate may have been used anywhere before (blocks wholesale
+    #     recombination like SilverFox vs FoxSilver). SilverFox + foxridge7
+    #     style cross-position echoes are allowed -- real user populations
+    #     have them, and pools alone can't stay strictly word-unique at
+    #     500+ bots (~620 pooled words / ~1.5 words consumed per name).
     used_components = set()
+    used_slots = set()
     for existing in (existing_usernames or []):
         used_usernames.add(existing.lower())
         used_components |= _components_of_existing(existing)
+        used_slots |= _slots_of_existing(existing)
 
     for i in range(count):
         persona = generate_bot_persona(
@@ -272,30 +384,44 @@ def generate_bot_batch(count, industry=None, strategy=None, existing_usernames=N
             industry=industry,
         )
 
-        # Regenerate until the name is exact-unique AND shares no word
-        # component with any existing/batch name. Word lists are large
-        # enough (~4k camel combos alone) that 60 attempts practically
-        # always succeeds; the fallback keeps at least exact uniqueness.
         candidate, parts = _generate_username_with_parts()
         attempts = 0
-        while attempts < 60 and (
-            candidate.lower() in used_usernames
-            or any(p in used_components for p in parts)
-        ):
+        accepted = False
+        while attempts < 90:
+            if candidate.lower() not in used_usernames:
+                if attempts < 45:
+                    if not any(p in used_components for p in parts):
+                        accepted = True
+                        break
+                else:
+                    reused = sum(1 for p in parts if p in used_components)
+                    same_slot = any((j, p) in used_slots for j, p in enumerate(parts))
+                    if reused <= 1 and not same_slot:
+                        accepted = True
+                        break
             candidate, parts = _generate_username_with_parts()
             attempts += 1
-        if attempts >= 60:
+        if not accepted:
+            # Never accept a possibly twin-y compound: fall back to a neutral
+            # letters+digits handle (kch123 style), which reads natural and
+            # can't visually twin a word-based name.
+            while True:
+                letters = ''.join(random.choices(
+                    'abcdefghijklmnopqrstuvwxyz', k=random.randint(2, 4)))
+                candidate = f"{letters}{random.randint(1, 999)}"
+                parts = [letters]
+                if candidate.lower() not in used_usernames:
+                    break
             logger.warning(
                 f"Username similarity guard exhausted after {attempts} attempts; "
-                f"accepting '{candidate}' with possible shared component"
+                f"fell back to neutral handle '{candidate}'"
             )
-            while candidate.lower() in used_usernames:
-                candidate = f"{candidate}{random.randint(1, 99)}"
 
         persona['username'] = candidate
         persona['email'] = generate_email(candidate)
         used_usernames.add(candidate.lower())
         used_components.update(parts)
+        used_slots.update((j, p) for j, p in enumerate(parts))
         personas.append(persona)
 
     # Log distribution
