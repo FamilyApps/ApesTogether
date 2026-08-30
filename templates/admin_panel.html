@@ -665,7 +665,7 @@ const BotManagement = ({ api }) => {
       </Modal>
 
       <OtpModal open={!!showOtp} onClose={() => setShowOtp(null)} onConfirm={handleOtpAction} title={showOtp ? `Confirm ${showOtp.action}` : ''} />
-      <UserDetailDrawer api={api} userId={selectedUserId} onClose={() => setSelectedUserId(null)} />
+      <UserDetailDrawer api={api} userId={selectedUserId} onClose={() => setSelectedUserId(null)} onChanged={load} />
     </div>
   );
 };
@@ -778,7 +778,7 @@ const RevenuePage = ({ api }) => {
 };
 
 // ─── Shared: User Detail Drawer ─────────────────────────────────────────────
-const UserDetailDrawer = ({ api, userId, onClose }) => {
+const UserDetailDrawer = ({ api, userId, onClose, onChanged }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [giftCount, setGiftCount] = useState(5);
@@ -798,8 +798,9 @@ const UserDetailDrawer = ({ api, userId, onClose }) => {
     setGiftLoading(true); setGiftMsg(null);
     try {
       const res = await api('/admin/bot/gift-subscribers', { method: 'POST', body: { user_id: userId, count: giftCount } });
-      setGiftMsg({ ok: true, text: `Gifted ${res.gifted || giftCount} subscribers (total: ${res.new_total || '?'})` });
+      setGiftMsg({ ok: true, text: `Gifted ${res.gifted || giftCount} subscribers (new total: ${res.new_subscriber_count ?? '?'})` });
       reload();
+      onChanged && onChanged();
     } catch (e) { setGiftMsg({ ok: false, text: e.message }); }
     setGiftLoading(false);
   };
@@ -808,8 +809,9 @@ const UserDetailDrawer = ({ api, userId, onClose }) => {
     setGiftLoading(true); setGiftMsg(null);
     try {
       const res = await api('/admin/bot/remove-subscribers', { method: 'POST', body: { user_id: userId, count: removeCount } });
-      setGiftMsg({ ok: true, text: `Removed ${res.removed || removeCount} gifted subscribers` });
+      setGiftMsg({ ok: true, text: `Removed ${res.removed ?? removeCount} gifted subscribers (new total: ${res.new_subscriber_count ?? '?'})` });
       reload();
+      onChanged && onChanged();
     } catch (e) { setGiftMsg({ ok: false, text: e.message }); }
     setGiftLoading(false);
   };
@@ -957,7 +959,7 @@ const UsersPage = ({ api }) => {
           ]} data={filtered} onRowClick={row => setSelectedUserId(row.id)} />
         )}
       </Card>
-      <UserDetailDrawer api={api} userId={selectedUserId} onClose={() => setSelectedUserId(null)} />
+      <UserDetailDrawer api={api} userId={selectedUserId} onClose={() => setSelectedUserId(null)} onChanged={load} />
     </div>
   );
 };

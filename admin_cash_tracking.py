@@ -1231,23 +1231,12 @@ def register_cash_tracking_routes(app, db):
             'committed': False,
         }
 
-        if not execute:
-            result['preview'] = True
-            return result
-
-        # 4. Update user model
-        db.session.execute(text("""
-            UPDATE "user"
-            SET max_cash_deployed = :max_cash,
-                cash_proceeds = :cash_proc
-            WHERE id = :user_id
-        """), {
-            'max_cash': target_user_max_cash,
-            'cash_proc': target_user_cash,
-            'user_id': user.id,
-        })
-
-        # 5. Daily snapshots
+        # Diff pass — runs for BOTH preview and execute so the preview shows
+        # REAL would-change counts. Until Session 46 the preview returned the
+        # hardcoded zeros above, which read as "nothing to fix" but actually
+        # meant "not computed" — the 8/30 previews were misread exactly that
+        # way while chasing the chart1658 intraday cliff (the intraday repair
+        # below is the fix for that cliff, and it had never been executed).
         snapshots = PortfolioSnapshot.query.filter_by(user_id=user.id).order_by(
             PortfolioSnapshot.date.asc()
         ).all()
@@ -1264,6 +1253,66 @@ def register_cash_tracking_routes(app, db):
                     break
             return rmax, rcash
 
+        def _needs_update(cur_max, cur_cash, cur_total, cur_stock, new_max, new_cash):
+            # Mirrors the SQL guard in the UPDATE statements below exactly.
+            return (
+                abs((cur_max or 0) - new_max) > 0.01
+                or abs((cur_cash or 0) - new_cash) > 0.01
+                or abs((cur_total or 0) - ((cur_stock or 0) + new_cash)) > 0.01
+            )
+
+        snapshots_needing = 0
+        for snap in snapshots:
+            rmax, rcash = replay_at(snap.date)
+            if _needs_update(snap.max_cash_deployed, snap.cash_proceeds,
+                             snap.total_value, snap.stock_value,
+                             round(seeded_baseline + rmax, 2), round(rcash, 2)):
+                snapshots_needing += 1
+
+        intraday_snapshots = PortfolioSnapshotIntraday.query.filter_by(
+            user_id=user.id
+        ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
+
+        intraday_needing = 0
+        _idx = 0
+        _rmax = 0.0
+        _rcash = 0.0
+        for isnap in intraday_snapshots:
+            snap_ts = _to_naive_utc(isnap.timestamp)
+            if snap_ts is None:
+                continue
+            while _idx < len(txn_timeline) and txn_timeline[_idx][0] <= snap_ts:
+                _ts, _max, _cash = txn_timeline[_idx]
+                _rmax = _max
+                _rcash = _cash
+                _idx += 1
+            if _needs_update(isnap.max_cash_deployed, isnap.cash_proceeds,
+                             isnap.total_value, isnap.stock_value,
+                             round(seeded_baseline + _rmax, 2), round(_rcash, 2)):
+                intraday_needing += 1
+
+        result['snapshots_total'] = len(snapshots)
+        result['snapshots_updated'] = snapshots_needing
+        result['intraday_total'] = len(intraday_snapshots)
+        result['intraday_updated'] = intraday_needing
+
+        if not execute:
+            result['preview'] = True
+            return result
+
+        # 4. Update user model
+        db.session.execute(text("""
+            UPDATE "user"
+            SET max_cash_deployed = :max_cash,
+                cash_proceeds = :cash_proc
+            WHERE id = :user_id
+        """), {
+            'max_cash': target_user_max_cash,
+            'cash_proc': target_user_cash,
+            'user_id': user.id,
+        })
+
+        # 5. Daily snapshots (already loaded by the diff pass above)
         snapshots_updated = 0
         for snap in snapshots:
             rmax, rcash = replay_at(snap.date)
@@ -1302,10 +1351,7 @@ def register_cash_tracking_routes(app, db):
         #
         # Fix: walk transactions and snapshots in chronological order. For each
         # snapshot at timestamp T, apply only transactions with txn_ts <= T.
-        intraday_snapshots = PortfolioSnapshotIntraday.query.filter_by(
-            user_id=user.id
-        ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
-
+        # (intraday_snapshots already loaded by the diff pass above.)
         intraday_updated = 0
         # txn_timeline is already sorted chronologically (insertion order).
         # Walk it via an index pointer that advances monotonically.
