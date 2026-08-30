@@ -576,14 +576,29 @@ try:
         client_kwargs={'scope': 'name email'},
     )
 
-    # Initialize SQLAlchemy
-    db = SQLAlchemy(app)
+    # SINGLE SQLAlchemy instance (Session 46 consolidation, 8/30/26).
+    # models.py owns the one true `db`; every Model.query in the codebase runs
+    # on ITS session. This line previously created a SECOND instance
+    # (`db = SQLAlchemy(app)`) with five shadow model classes, which meant all
+    # of this file's DB-recovery machinery (db_retry session nukes,
+    # before_request session.remove, teardown, the handle_error listener
+    # below) targeted an instance most queries never used — and rollbacks
+    # after errors landed on the wrong session (the migrate-gifted 500).
+    # init_app applies this app's config (NullPool, pre_ping, keepalives,
+    # statement_timeout) to the canonical engine.
+    from models import db
+    db.init_app(app)
     migrate = Migrate(app, db)
     
     # Global engine event: on any disconnect error, invalidate the connection
-    # so SQLAlchemy doesn't try to reuse a broken TCP socket
+    # so SQLAlchemy doesn't try to reuse a broken TCP socket.
+    # NOTE: db.engine needs an app context now that `db` is the shared
+    # models instance (init_app doesn't set db.app). Engine creation here is
+    # lazy metadata only — no DB connection is opened at import time.
     from sqlalchemy import event
-    @event.listens_for(db.engine, "handle_error")
+    with app.app_context():
+        _engine = db.engine
+    @event.listens_for(_engine, "handle_error")
     def handle_db_error(context):
         """Invalidate connections on SSL/connection errors so next query gets a fresh one."""
         if context.original_exception:
@@ -699,129 +714,19 @@ except Exception as e:
     logger.error(f"Failed to initialize database: {str(e)}")
     # Continue without database to allow basic functionality
 
-# Define database models
-class User(db.Model, UserMixin):
-    __tablename__ = 'user'  # Explicitly set for PostgreSQL compatibility
-    
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    password_hash = db.Column(db.String(200), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    stripe_customer_id = db.Column(db.String(120), nullable=True)
-    oauth_provider = db.Column(db.String(20), nullable=True)
-    oauth_id = db.Column(db.String(100), nullable=True)
-    stripe_price_id = db.Column(db.String(255), nullable=True)
-    subscription_price = db.Column(db.Float, nullable=True)
-    
-    # Cash tracking
-    max_cash_deployed = db.Column(db.Float, default=0.0, nullable=False)
-    cash_proceeds = db.Column(db.Float, default=0.0, nullable=False)
-    
-    # Portfolio sharing & GDPR
-    portfolio_slug = db.Column(db.String(20), unique=True, nullable=True)
-    deleted_at = db.Column(db.DateTime, nullable=True)
-    
-    # SMS/Email trading and notifications
-    phone_number = db.Column(db.String(20), nullable=True)  # E.164 format: +12125551234
-    default_notification_method = db.Column(db.String(10), default='email')  # 'email', 'sms', or 'both'
-    
-    stocks = db.relationship('Stock', backref='user', lazy=True)
-    transactions = db.relationship('Transaction', backref='user', lazy=True)
-    # We'll use subscriptions_made and subscribers relationships defined in the Subscription model
-    
-    def set_password(self, password):
-        self.password_hash = generate_password_hash(password)
-        
-    def check_password(self, password):
-        return check_password_hash(self.password_hash, password)
-        
-    @property
-    def is_admin(self):
-        return self.email == ADMIN_EMAIL or self.username == ADMIN_USERNAME
-
-    def __repr__(self):
-        return f'<User {self.username}>'
-
-class Stock(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    ticker = db.Column(db.String(10), nullable=False)
-    quantity = db.Column(db.Float, nullable=False)
-    purchase_price = db.Column(db.Float, nullable=False)
-    purchase_date = db.Column(db.DateTime, default=datetime.utcnow)
-
-    def __repr__(self):
-        return f'<Stock {self.ticker}>'
-        
-    def current_value(self):
-        # Get real stock data from Alpha Vantage
-        stock_data = get_stock_data(self.ticker)
-        current_price = stock_data.get('price', self.purchase_price)
-        return current_price * self.quantity
-        
-    def profit_loss(self):
-        return self.current_value() - (self.purchase_price * self.quantity)
-
-class Transaction(db.Model):
-    __tablename__ = 'stock_transaction'  # Use same table name as models.py to avoid conflicts
-    
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    ticker = db.Column(db.String(10), nullable=False)
-    quantity = db.Column(db.Float, nullable=False)
-    price = db.Column(db.Float, nullable=False)
-    transaction_type = db.Column(db.String(4), nullable=False)  # 'buy' or 'sell'
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
-    
-    def __repr__(self):
-        return f'<Transaction {self.transaction_type} {self.ticker}>'
-
-class Subscription(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    subscriber_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    subscribed_to_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    stripe_subscription_id = db.Column(db.String(255), unique=True, nullable=False)
-    status = db.Column(db.String(20), nullable=False, default='active')  # 'active', 'canceled', etc.
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    start_date = db.Column(db.DateTime, default=datetime.utcnow)
-    end_date = db.Column(db.DateTime, nullable=True)
-    
-    # Define relationships to get User objects with explicit foreign keys
-    # backref creates a 'subscriptions_made' collection on the User model (for the subscriber)
-    subscriber = db.relationship(
-        'User', 
-        foreign_keys=[subscriber_id], 
-        backref=db.backref('subscriptions_made', lazy=True),
-        lazy=True
-    )
-    
-    # backref creates a 'subscribers' collection on the User model (for the user being subscribed to)
-    subscribed_to = db.relationship(
-        'User', 
-        foreign_keys=[subscribed_to_id], 
-        backref=db.backref('subscribers', lazy=True),
-        lazy=True
-    )
-
-    def __repr__(self):
-        return f'<Subscription {self.subscriber_id} to {self.subscribed_to_id} - {self.status}>'
-
-class UserPortfolioChartCache(db.Model):
-    """Pre-generated portfolio charts for leaderboard users only"""
-    __tablename__ = 'user_portfolio_chart_cache'
-    
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    period = db.Column(db.String(10), nullable=False)  # '1D', '5D', '3M', 'YTD', '1Y', '5Y', 'MAX'
-    chart_data = db.Column(db.Text, nullable=False)  # JSON string of chart data
-    generated_at = db.Column(db.DateTime, nullable=False)
-    
-    # Ensure one cache entry per user per period
-    __table_args__ = (db.UniqueConstraint('user_id', 'period', name='unique_user_period_chart'),)
-    
-    def __repr__(self):
-        return f"<UserPortfolioChartCache user_id={self.user_id} {self.period} generated at {self.generated_at}>"
+# Database models: the canonical definitions live in models.py.
+# HISTORY (Session 46 consolidation, 8/30/26): this file used to define its
+# OWN User/Stock/Transaction/Subscription/UserPortfolioChartCache classes on
+# its OWN SQLAlchemy instance — five shadow mappings of the same tables that
+# had drifted from models.py (the local User lacked role/created_by/
+# extra_data/display_name; the bot-creation route only worked because it
+# re-imported the models version). Module-level code got the shadows on one
+# session while any function doing `from models import ...` got the real
+# classes on another. Auth helpers the shadows carried (set_password/
+# check_password/is_admin) were moved onto models.User. Function-local
+# `from models import ...` statements throughout this file are now harmless
+# re-imports of these same classes.
+from models import User, Stock, Transaction, Subscription, UserPortfolioChartCache
 
 # Secret key is already set in app.config
 
@@ -4388,12 +4293,11 @@ def admin_migrate_gifted_subscriptions():
     READ-ONLY DRY-RUN by default. Params:
       ?commit=true   create table + insert rows
     """
-    # IMPORTANT: this app has TWO SQLAlchemy instances (api/index.py's `db`
-    # and models.py's `db`); Model.query runs on the MODELS session, so all
-    # session/engine work here must use models.db or a rollback lands on the
-    # wrong session (learned the hard way: an UndefinedTable probe error
-    # left the models session in InFailedSqlTransaction). Table existence is
-    # checked via catalog introspection — never by provoking an error.
+    # Table existence is checked via catalog introspection — never by
+    # provoking an error (an UndefinedTable probe poisons the transaction:
+    # Postgres InFailedSqlTransaction until rollback). The models_db alias
+    # predates the Session 46 single-instance consolidation; it's now the
+    # same object as this module's `db`.
     from models import AdminSubscription, GiftedSubscription, db as models_db
     from sqlalchemy import inspect as sa_inspect
 

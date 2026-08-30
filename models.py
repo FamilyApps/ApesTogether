@@ -1,9 +1,11 @@
 """
 Database models for the stock portfolio application.
 """
+import os
 from flask_login import UserMixin
 from datetime import datetime
 from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import generate_password_hash, check_password_hash
 from crypto_utils import EncryptedString
 
 # Initialize SQLAlchemy without binding to app yet
@@ -91,6 +93,20 @@ class User(UserMixin, db.Model):
         if self.role == 'agent':
             return True
         return (self.email or '').strip().lower() in OWNER_EMAILS | REVIEW_EMAILS
+
+    # Auth helpers — moved here from api/index.py's (now-deleted) shadow User
+    # class during the Session 46 SQLAlchemy consolidation, so the canonical
+    # model keeps the API the OAuth-signup and login routes rely on.
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+    @property
+    def is_admin(self):
+        return (self.email == os.environ.get('ADMIN_EMAIL', 'admin@apestogether.ai')
+                or self.username == os.environ.get('ADMIN_USERNAME', 'admin'))
 
 
 class Stock(db.Model):
