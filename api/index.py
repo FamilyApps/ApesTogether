@@ -4388,19 +4388,21 @@ def admin_migrate_gifted_subscriptions():
     READ-ONLY DRY-RUN by default. Params:
       ?commit=true   create table + insert rows
     """
-    from models import AdminSubscription, GiftedSubscription
+    # IMPORTANT: this app has TWO SQLAlchemy instances (api/index.py's `db`
+    # and models.py's `db`); Model.query runs on the MODELS session, so all
+    # session/engine work here must use models.db or a rollback lands on the
+    # wrong session (learned the hard way: an UndefinedTable probe error
+    # left the models session in InFailedSqlTransaction). Table existence is
+    # checked via catalog introspection — never by provoking an error.
+    from models import AdminSubscription, GiftedSubscription, db as models_db
+    from sqlalchemy import inspect as sa_inspect
 
     commit = request.args.get('commit', 'false').lower() == 'true'
 
     if commit:
-        GiftedSubscription.__table__.create(db.engine, checkfirst=True)
+        GiftedSubscription.__table__.create(models_db.engine, checkfirst=True)
 
-    table_exists = True
-    try:
-        GiftedSubscription.query.limit(1).all()
-    except Exception:
-        table_exists = False
-        db.session.rollback()
+    table_exists = sa_inspect(models_db.engine).has_table('gifted_subscription')
 
     now = datetime.utcnow()
     per_user = []
@@ -4422,7 +4424,7 @@ def admin_migrate_gifted_subscriptions():
         })
         if commit and deficit:
             for _ in range(deficit):
-                db.session.add(GiftedSubscription(
+                models_db.session.add(GiftedSubscription(
                     portfolio_user_id=legacy.portfolio_user_id,
                     granted_at=now,
                     note='migration seed 8/30/26 (original gift date unrecorded)',
@@ -4430,7 +4432,7 @@ def admin_migrate_gifted_subscriptions():
         total_seeded += deficit
 
     if commit:
-        db.session.commit()
+        models_db.session.commit()
 
     return jsonify({
         'mode': 'commit' if commit else 'dry_run',
