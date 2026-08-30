@@ -610,6 +610,41 @@ class AdminSubscription(db.Model):
     def __repr__(self):
         return f"<AdminSubscription user={self.portfolio_user_id} bonus={self.bonus_subscriber_count} payout=${self.payout_amount:.2f}>"
 
+
+class GiftedSubscription(db.Model):
+    """ONE ROW PER GIFTED SUB — 30-day anniversary billing (Session 46 #2).
+
+    Each gifted sub behaves like a real subscription: $6.50 is earned at every
+    30-day cycle START (granted_at, granted_at+30d, ...) that occurs while the
+    row is active (removed_at is NULL or cycle start < removed_at). Owner
+    policy 8/30/26: 6 gifted 9/5 + 4 removed 9/10 + 6 gifted 9/20 pays 12 in
+    September; a gift surviving a month BOUNDARY earns nothing extra — only
+    surviving to its own ANNIVERSARY does. Payout generation derives payments
+    purely from (granted_at, removed_at), so any past month is replayable and
+    no renewal cron exists to miss.
+
+    AdminSubscription.bonus_subscriber_count is kept as a denormalized MIRROR
+    of this table's active-row count (gift/remove endpoints update both in the
+    same transaction) so every existing display path keeps working unchanged.
+    Removal is FIFO (oldest active rows stamped first) — owner pick 8/30/26.
+    """
+    __tablename__ = 'gifted_subscription'
+
+    id = db.Column(db.Integer, primary_key=True)
+    portfolio_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    granted_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    removed_at = db.Column(db.DateTime, nullable=True)
+    note = db.Column(db.String(200), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    portfolio_user = db.relationship('User', foreign_keys=[portfolio_user_id],
+                                     backref='gifted_subscriptions')
+
+    def __repr__(self):
+        state = 'active' if self.removed_at is None else f'removed {self.removed_at:%Y-%m-%d}'
+        return f"<GiftedSubscription user={self.portfolio_user_id} granted={self.granted_at:%Y-%m-%d} {state}>"
+
+
 class NotificationPreferences(db.Model):
     """User preferences for notifications per subscription"""
     __tablename__ = 'notification_preferences'

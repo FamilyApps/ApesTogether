@@ -4373,6 +4373,79 @@ def admin_audit_marketdata_coverage():
     })
 
 
+@app.route('/admin/migrate-gifted-subscriptions')
+@admin_required
+def admin_migrate_gifted_subscriptions():
+    """One-shot migration to per-sub anniversary billing (Session 46 #2).
+
+    Creates the `gifted_subscription` table if missing, then for every
+    AdminSubscription whose bonus_subscriber_count exceeds that user's count
+    of ACTIVE GiftedSubscription rows, inserts the DEFICIT as new active rows
+    with granted_at = now (owner decision 8/30/26: original gift dates were
+    never recorded; legacy gifts are all to company bots, so exact backdating
+    doesn't matter). Idempotent — re-runs insert nothing once counts match.
+
+    READ-ONLY DRY-RUN by default. Params:
+      ?commit=true   create table + insert rows
+    """
+    from models import AdminSubscription, GiftedSubscription
+
+    commit = request.args.get('commit', 'false').lower() == 'true'
+
+    if commit:
+        GiftedSubscription.__table__.create(db.engine, checkfirst=True)
+
+    table_exists = True
+    try:
+        GiftedSubscription.query.limit(1).all()
+    except Exception:
+        table_exists = False
+        db.session.rollback()
+
+    now = datetime.utcnow()
+    per_user = []
+    total_seeded = 0
+    for legacy in AdminSubscription.query.all():
+        mirror = legacy.bonus_subscriber_count or 0
+        if mirror <= 0:
+            continue
+        active = 0
+        if table_exists:
+            active = GiftedSubscription.query.filter_by(
+                portfolio_user_id=legacy.portfolio_user_id, removed_at=None).count()
+        deficit = max(0, mirror - active)
+        per_user.append({
+            'user_id': legacy.portfolio_user_id,
+            'mirror_count': mirror,
+            'active_rows': active,
+            'rows_to_seed': deficit,
+        })
+        if commit and deficit:
+            for _ in range(deficit):
+                db.session.add(GiftedSubscription(
+                    portfolio_user_id=legacy.portfolio_user_id,
+                    granted_at=now,
+                    note='migration seed 8/30/26 (original gift date unrecorded)',
+                ))
+        total_seeded += deficit
+
+    if commit:
+        db.session.commit()
+
+    return jsonify({
+        'mode': 'commit' if commit else 'dry_run',
+        'table_existed_before': table_exists,
+        'users': per_user,
+        'total_rows_seeded': total_seeded,
+        'next_steps': (
+            'Rows seeded; gift/remove endpoints and payout generation now run on '
+            'per-sub anniversary billing. Each seeded row bills from today.'
+            if commit else
+            'DRY-RUN: re-run with ?commit=true to create the table and seed rows.'
+        ),
+    })
+
+
 @app.route('/admin/backfill-marketdata-from-dailybars')
 @admin_required
 def admin_backfill_marketdata_from_dailybars():
@@ -13095,7 +13168,11 @@ def auto_create_bots_cron():
         if strategy and strategy not in STRATEGY_TEMPLATES:
             strategy = None
         
-        personas = generate_bot_batch(count, industry=industry, strategy=strategy)
+        # Fleet-wide similarity guard: pass ALL existing usernames so this
+        # path can't mint near-twins (same as the mobile_api creation routes).
+        _existing_names = [r[0] for r in db.session.query(User.username).all()]
+        personas = generate_bot_batch(count, industry=industry, strategy=strategy,
+                                      existing_usernames=_existing_names)
         created = []
         
         for persona in personas:

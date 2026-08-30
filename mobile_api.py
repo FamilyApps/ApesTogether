@@ -9096,42 +9096,27 @@ def admin_backfill_sectors():
 
 
 
-def _record_bonus_peak(user_id, count_now):
-    """Persist this month's gifted-sub HIGH-WATER MARK on user.extra_data.
+def _gifted_cycle_payments(granted_at, removed_at, start_dt, end_dt):
+    """Number of $6.50 payments ONE gifted sub earns inside [start_dt, end_dt].
 
-    Why: payout generation reads bonus_subscriber_count at month-end. Without
-    this, gifting a sub on the 5th and removing it on the 20th pays the
-    creator $0 for the month. Policy (USER, 8/30/26): a gift active at ANY
-    point in a month earns the FULL month — required for rotating gifts to
-    daily leaders. Called AFTER increments and BEFORE decrements.
-
-    Stored shape: extra_data['bonus_peak'] =
-        {'month': 'YYYY-MM', 'count': N, 'prev_month': 'YYYY-MM', 'prev_count': M}
-    prev_* preserves the just-finished month's peak across the rollover so
-    generation (which runs a few days into the next month) can still pay it.
+    A gifted sub bills like a real one: a payment is earned at every 30-day
+    cycle START (granted_at, granted_at+30d, ...) that falls in the period
+    while the sub is active (removed_at is NULL or cycle start strictly
+    before removal). Consequences (owner policy 8/30/26):
+      - gift on the 5th, remove on the 10th  -> 1 payment (cycle started);
+      - gift 9/30, still active 10/1         -> 1 payment, NOT 2 — the second
+        accrues only if it survives to the 10/30 anniversary;
+      - re-gifting after removal is a NEW row -> a NEW payment. 6 gifted 9/5
+        + 4 removed 9/10 + 6 gifted 9/20 = 12 September payments.
+    Pure function of the row's timestamps — any past period is replayable.
     """
-    try:
-        from models import User
-        from sqlalchemy.orm.attributes import flag_modified
-        user = User.query.get(user_id)
-        if not user:
-            return
-        month_key = datetime.utcnow().strftime('%Y-%m')
-        extra = dict(user.extra_data or {})
-        peak = dict(extra.get('bonus_peak') or {})
-        if peak.get('month') == month_key:
-            peak['count'] = max(int(peak.get('count') or 0), int(count_now))
-        else:
-            if peak.get('month'):
-                peak['prev_month'] = peak.get('month')
-                peak['prev_count'] = int(peak.get('count') or 0)
-            peak['month'] = month_key
-            peak['count'] = int(count_now)
-        extra['bonus_peak'] = peak
-        user.extra_data = extra
-        flag_modified(user, 'extra_data')
-    except Exception as e:
-        logger.warning(f"bonus-peak tracking failed for user {user_id}: {e}")
+    payments = 0
+    cycle_start = granted_at
+    while cycle_start <= end_dt:
+        if cycle_start >= start_dt and (removed_at is None or cycle_start < removed_at):
+            payments += 1
+        cycle_start += timedelta(days=30)
+    return payments
 
 
 @mobile_api.route('/admin/bot/gift-subscribers', methods=['POST'])
@@ -9210,9 +9195,18 @@ def bot_gift_subscribers():
         except Exception as stats_err:
             logger.warning(f"Non-blocking: failed to populate stats for user {user_id}: {stats_err}")
         
-        # Month high-water mark: this gift earns the full current month even
-        # if removed before month-end (see _record_bonus_peak).
-        _record_bonus_peak(user_id, admin_sub.bonus_subscriber_count or 0)
+        # One GiftedSubscription row PER gifted sub — each starts its own
+        # 30-day billing cycle now and earns $6.50 immediately (payout
+        # generation counts cycle starts; see _gifted_cycle_payments).
+        # bonus_subscriber_count above stays as the denormalized mirror.
+        from models import GiftedSubscription
+        now = datetime.utcnow()
+        for _ in range(count):
+            db.session.add(GiftedSubscription(
+                portfolio_user_id=user_id,
+                granted_at=now,
+                note=reason or None,
+            ))
         
         db.session.commit()
         
@@ -9396,14 +9390,28 @@ def bot_remove_subscribers():
         if not admin_sub or (admin_sub.bonus_subscriber_count or 0) == 0:
             return jsonify({'error': 'no_gifted_subscribers_to_remove'}), 400
         
-        # BEFORE decrementing: lock in the pre-removal count as this month's
-        # high-water mark, so the creator is still paid the full month for a
-        # gift that was live at any point in it (see _record_bonus_peak).
-        _record_bonus_peak(user_id, admin_sub.bonus_subscriber_count or 0)
-        
         # Don't remove more than exist
         actual_remove = min(count, admin_sub.bonus_subscriber_count or 0)
         admin_sub.bonus_subscriber_count = (admin_sub.bonus_subscriber_count or 0) - actual_remove
+        
+        # Stamp removed_at on the OLDEST active GiftedSubscription rows (FIFO,
+        # owner pick 8/30/26). Cycles already started stay earned — removal
+        # only stops FUTURE anniversaries. A row-count shortfall vs the mirror
+        # means /admin/migrate-gifted-subscriptions hasn't seeded this user.
+        from models import GiftedSubscription
+        now = datetime.utcnow()
+        active_rows = (GiftedSubscription.query
+                       .filter_by(portfolio_user_id=user_id, removed_at=None)
+                       .order_by(GiftedSubscription.granted_at.asc(),
+                                 GiftedSubscription.id.asc())
+                       .limit(actual_remove).all())
+        for row in active_rows:
+            row.removed_at = now
+        if len(active_rows) < actual_remove:
+            logger.warning(
+                f"remove-subscribers: user {user_id} mirror had {actual_remove} "
+                f"to remove but only {len(active_rows)} active gifted_subscription "
+                f"rows exist — run /admin/migrate-gifted-subscriptions")
         
         # Update stats
         stats = UserPortfolioStats.query.filter_by(user_id=user_id).first()
@@ -10208,30 +10216,30 @@ def _generate_payout_records_for_period(year, month):
                 'platform_revenue': float(plat), 'influencer_payout': float(payout),
             }
 
-        # 2. Gifted/bonus subs (company-funded; no store fee, no subscriber refunds).
-        #    Pays the period's HIGH-WATER MARK, not the closing count: a gift
-        #    active at any point in the month earns the full month, even if it
-        #    was removed before month-end (rotating gifts to daily leaders).
-        #    Peak is tracked in user.extra_data['bonus_peak'] by the
-        #    gift/remove endpoints; rows with a peak but a zero closing count
-        #    still get paid — hence querying ALL AdminSubscription rows.
-        period_key = f'{year:04d}-{month:02d}'
+        # 2. Gifted/bonus subs (company-funded; no store fee, no subscriber
+        #    refunds). Per-sub 30-DAY ANNIVERSARY billing: each
+        #    GiftedSubscription row earns one $6.50 payment for every 30-day
+        #    cycle START inside this period while active — pure computation
+        #    from (granted_at, removed_at), replayable for any past month
+        #    (see _gifted_cycle_payments). gifted_map values are PAYMENT
+        #    counts (paid sub-months), which is also what the record's
+        #    bonus_subscriber_count should report for the period.
+        from models import GiftedSubscription
         gifted_map = {}
-        for row in AdminSubscription.query.all():
-            current = row.bonus_subscriber_count or 0
-            peak_count = 0
-            try:
-                peak_user = User.query.get(row.portfolio_user_id)
-                peak = ((peak_user.extra_data or {}).get('bonus_peak') or {}) if peak_user else {}
-                if peak.get('month') == period_key:
-                    peak_count = int(peak.get('count') or 0)
-                elif peak.get('prev_month') == period_key:
-                    peak_count = int(peak.get('prev_count') or 0)
-            except Exception:
-                peak_count = 0
-            effective = max(current, peak_count)
-            if effective > 0:
-                gifted_map[row.portfolio_user_id] = effective
+        migrated_user_ids = set()
+        for row in GiftedSubscription.query.all():
+            migrated_user_ids.add(row.portfolio_user_id)
+            n = _gifted_cycle_payments(row.granted_at, row.removed_at, start_dt, end_dt)
+            if n:
+                gifted_map[row.portfolio_user_id] = gifted_map.get(row.portfolio_user_id, 0) + n
+        # Loud guard: a non-zero mirror with NO per-sub rows means the one-shot
+        # migration hasn't seeded this user — they would silently earn $0.
+        for legacy in AdminSubscription.query.all():
+            if (legacy.bonus_subscriber_count or 0) > 0 and legacy.portfolio_user_id not in migrated_user_ids:
+                logger.error(
+                    f"payout generation: user {legacy.portfolio_user_id} has "
+                    f"bonus_subscriber_count={legacy.bonus_subscriber_count} but zero "
+                    f"gifted_subscription rows — run /admin/migrate-gifted-subscriptions")
 
         all_user_ids = set(gifted_map.keys()) | set(real_map.keys())
         payout_per_sub = AdminSubscription.INFLUENCER_PAYOUT_PER_SUB
