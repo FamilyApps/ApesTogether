@@ -14053,6 +14053,151 @@ def admin_inspect_intraday():
     })
 
 
+@app.route('/admin/inspect-daily')
+@admin_required
+def admin_inspect_daily():
+    """
+    READ-ONLY per-day decomposition of one user's DAILY snapshots (the 1M/3M/
+    YTD/1Y chart source), same idea as /admin/inspect-intraday plus one extra
+    weapon: for every flagged day it replays the transaction ledger to
+    reconstruct the holdings as of that date and reports which held tickers had
+    NO market_data close that day -- the snapshot writer silently skips
+    unpriced holdings, so a big drop with `unpriced_held_tickers` populated
+    (e.g. MBGL's 40-day May-June gap) is a data artifact, not a real loss.
+
+    Query params:
+      ?username=X          (required)
+      ?start=YYYY-MM-DD    default: end - 120 days
+      ?end=YYYY-MM-DD      default: today ET
+      ?flag_pct=2.0        flag any day whose |total_value move| exceeds this %
+    """
+    from models import User, PortfolioSnapshot, Transaction, MarketData
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from zoneinfo import ZoneInfo
+
+    _MTZ = ZoneInfo('America/New_York')
+    username = request.args.get('username')
+    if not username:
+        return jsonify({'error': 'username required'}), 400
+    user = User.query.filter_by(username=username).first()
+    if not user:
+        return jsonify({'error': 'user_not_found'}), 404
+
+    try:
+        end_date = _dt.strptime(request.args.get('end', ''), '%Y-%m-%d').date()
+    except (TypeError, ValueError):
+        end_date = _dt.now(_MTZ).date()
+    try:
+        start_date = _dt.strptime(request.args.get('start', ''), '%Y-%m-%d').date()
+    except (TypeError, ValueError):
+        start_date = end_date - _td(days=120)
+    try:
+        flag_pct = float(request.args.get('flag_pct', '2.0'))
+    except (TypeError, ValueError):
+        flag_pct = 2.0
+
+    snaps = PortfolioSnapshot.query.filter(
+        PortfolioSnapshot.user_id == user.id,
+        PortfolioSnapshot.date >= start_date,
+        PortfolioSnapshot.date <= end_date,
+    ).order_by(PortfolioSnapshot.date.asc()).all()
+
+    # Full ledger up to the window end, for holdings replay.
+    txns = Transaction.query.filter(
+        Transaction.user_id == user.id,
+    ).order_by(Transaction.timestamp.asc()).all()
+
+    def _txn_et_date(t):
+        ts = t.timestamp
+        if ts is None:
+            return None
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=_tz.utc)
+        return ts.astimezone(_MTZ).date()
+
+    rows = []
+    flagged = []
+    prev = None
+    holdings = {}
+    txn_idx = 0
+    for s in snaps:
+        # Advance holdings replay through every txn on or before this date.
+        while txn_idx < len(txns):
+            td = _txn_et_date(txns[txn_idx])
+            if td is None or td <= s.date:
+                t = txns[txn_idx]
+                q = float(t.quantity or 0)
+                if (t.transaction_type or '').lower() == 'sell':
+                    q = -q
+                holdings[t.ticker] = holdings.get(t.ticker, 0.0) + q
+                txn_idx += 1
+            else:
+                break
+        held = sorted(k for k, v in holdings.items() if v > 1e-6)
+
+        stock = float(s.stock_value or 0)
+        cash = float(s.cash_proceeds or 0)
+        total = float(s.total_value or 0)
+        row = {
+            'date': s.date.isoformat(),
+            'stock_value': round(stock, 2),
+            'cash_proceeds': round(cash, 2),
+            'max_cash_deployed': round(float(s.max_cash_deployed or 0), 2),
+            'total_value': round(total, 2),
+            'held_count': len(held),
+        }
+        if prev is not None:
+            p_total = float(prev.total_value or 0)
+            d_stock = round(stock - float(prev.stock_value or 0), 2)
+            d_cash = round(cash - float(prev.cash_proceeds or 0), 2)
+            d_total = round(total - p_total, 2)
+            pct = round((d_total / p_total) * 100, 3) if p_total else None
+            row.update({'d_stock': d_stock, 'd_cash': d_cash, 'd_total': d_total, 'd_total_pct': pct})
+            if pct is not None and abs(pct) >= flag_pct:
+                row['flag'] = 'stock_driven' if abs(d_stock) >= abs(d_cash) else 'cash_driven'
+                flagged.append({
+                    'date': row['date'], 'd_total_pct': pct, 'driver': row['flag'],
+                    'd_stock': d_stock, 'd_cash': d_cash, 'held': held,
+                })
+        rows.append(row)
+        prev = s
+
+    # For flagged days: which held tickers had NO market_data close that day?
+    if flagged:
+        all_tickers = sorted({t for f in flagged for t in f['held']})
+        all_dates = sorted({_dt.strptime(f['date'], '%Y-%m-%d').date() for f in flagged})
+        priced = set()
+        if all_tickers and all_dates:
+            md = MarketData.query.filter(
+                MarketData.ticker.in_(all_tickers),
+                MarketData.date.in_(all_dates),
+            ).all()
+            priced = {(m.ticker, m.date) for m in md}
+        for f in flagged:
+            d = _dt.strptime(f['date'], '%Y-%m-%d').date()
+            f['unpriced_held_tickers'] = [t for t in f['held'] if (t, d) not in priced]
+            del f['held']
+
+    return jsonify({
+        'username': user.username,
+        'window': f'{start_date} .. {end_date}',
+        'flag_pct': flag_pct,
+        'snapshot_count': len(rows),
+        'snapshots': rows,
+        'flagged_moves': flagged,
+        'how_to_read': (
+            "Day-over-day total_value moves split into d_stock vs d_cash. For "
+            "each flagged day, holdings are replayed from the transaction "
+            "ledger and cross-checked against market_data: a big stock_driven "
+            "drop whose `unpriced_held_tickers` is NON-EMPTY means the snapshot "
+            "writer had no close for those held names that day and silently "
+            "valued them at zero/stale -- an artifact, not a real loss. A big "
+            "move with unpriced_held_tickers=[] is either a real market move "
+            "or a cash artifact (check d_cash and the trade log)."
+        ),
+    })
+
+
 @app.route('/admin/check-intraday-data')
 @admin_2fa_required
 def check_intraday_data():
