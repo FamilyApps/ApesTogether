@@ -792,6 +792,7 @@ const UserDetailDrawer = ({ api, userId, onClose, onChanged }) => {
     api(`/admin/user/${userId}`).then(d => { setData(d); setLoading(false); }).catch(() => setLoading(false));
   }, [api, userId]);
 
+  useEffect(() => { setData(null); setGiftMsg(null); }, [userId]);
   useEffect(() => { reload(); }, [reload]);
 
   const handleGift = async () => {
@@ -827,7 +828,7 @@ const UserDetailDrawer = ({ api, userId, onClose, onChanged }) => {
         <div style={{ fontSize: 16, fontWeight: 700 }}>{loading ? 'Loading...' : u?.username || 'User'}</div>
         <Btn small variant="secondary" onClick={onClose}>{Icons.close || 'X'} Close</Btn>
       </div>
-      {loading ? <div style={{ padding: 40, textAlign: 'center' }}><Spinner /></div> : data ? (
+      {loading && !data ? <div style={{ padding: 40, textAlign: 'center' }}><Spinner /></div> : data ? (
         <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
           <Card>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: 13 }}>

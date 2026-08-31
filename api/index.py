@@ -13920,6 +13920,139 @@ def collect_intraday_data():
         logger.error(f"Unexpected error in intraday collection: {str(e)}")
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
+@app.route('/admin/inspect-intraday')
+@admin_required
+def admin_inspect_intraday():
+    """
+    READ-ONLY per-tick decomposition of one user's intraday snapshots, built to
+    answer "is this chart jump legit?": every total_value move is attributed to
+    its stock_value component (market move / holdings change -- usually legit)
+    vs its cash_proceeds component (should only move on a trade -- a cash jump
+    with NO transaction in the same interval is an artifact).
+
+    Query params:
+      ?username=X   (required)
+      ?date=YYYY-MM-DD   ET calendar date to inspect (default: today ET)
+      ?days=N       extend window back N calendar days total (default 2, so you
+                    get the prior day's close ticks as overnight baseline)
+      ?flag_pct=1.0 flag any tick whose |total_value move| exceeds this percent
+    """
+    from models import User, PortfolioSnapshotIntraday, Transaction
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from zoneinfo import ZoneInfo
+
+    _MTZ = ZoneInfo('America/New_York')
+    username = request.args.get('username')
+    if not username:
+        return jsonify({'error': 'username required'}), 400
+    user = User.query.filter_by(username=username).first()
+    if not user:
+        return jsonify({'error': 'user_not_found'}), 404
+
+    try:
+        end_date = _dt.strptime(request.args.get('date', ''), '%Y-%m-%d').date()
+    except (TypeError, ValueError):
+        end_date = _dt.now(_MTZ).date()
+    try:
+        days = max(1, int(request.args.get('days', '2')))
+    except (TypeError, ValueError):
+        days = 2
+    try:
+        flag_pct = float(request.args.get('flag_pct', '1.0'))
+    except (TypeError, ValueError):
+        flag_pct = 1.0
+    start_date = end_date - _td(days=days - 1)
+
+    def _to_et(ts):
+        if ts is None:
+            return None
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=_tz.utc)
+        return ts.astimezone(_MTZ)
+
+    # Buffered UTC query, exact ET-date filter in Python.
+    q_start = _dt.combine(start_date - _td(days=1), _dt.min.time())
+    q_end = _dt.combine(end_date + _td(days=2), _dt.min.time())
+    snaps = PortfolioSnapshotIntraday.query.filter(
+        PortfolioSnapshotIntraday.user_id == user.id,
+        PortfolioSnapshotIntraday.timestamp >= q_start,
+        PortfolioSnapshotIntraday.timestamp < q_end,
+    ).order_by(PortfolioSnapshotIntraday.timestamp.asc()).all()
+
+    rows = []
+    prev = None
+    flagged = []
+    for s in snaps:
+        et = _to_et(s.timestamp)
+        if et is None or not (start_date <= et.date() <= end_date):
+            prev = s  # still advances the baseline for the first in-window row
+            continue
+        stock = float(s.stock_value or 0)
+        cash = float(s.cash_proceeds or 0)
+        total = float(s.total_value or 0)
+        row = {
+            'ts_et': et.strftime('%Y-%m-%d %H:%M'),
+            'stock_value': round(stock, 2),
+            'cash_proceeds': round(cash, 2),
+            'max_cash_deployed': round(float(s.max_cash_deployed or 0), 2),
+            'total_value': round(total, 2),
+        }
+        if prev is not None:
+            p_stock = float(prev.stock_value or 0)
+            p_cash = float(prev.cash_proceeds or 0)
+            p_total = float(prev.total_value or 0)
+            d_stock = round(stock - p_stock, 2)
+            d_cash = round(cash - p_cash, 2)
+            d_total = round(total - p_total, 2)
+            pct = round((d_total / p_total) * 100, 3) if p_total else None
+            row.update({'d_stock': d_stock, 'd_cash': d_cash, 'd_total': d_total, 'd_total_pct': pct})
+            if pct is not None and abs(pct) >= flag_pct:
+                row['flag'] = 'stock_driven' if abs(d_stock) >= abs(d_cash) else 'cash_driven'
+                flagged.append({'ts_et': row['ts_et'], 'd_total_pct': pct, 'driver': row['flag'],
+                                'd_stock': d_stock, 'd_cash': d_cash})
+        rows.append(row)
+        prev = s
+
+    txns = Transaction.query.filter(
+        Transaction.user_id == user.id,
+        Transaction.timestamp >= q_start,
+        Transaction.timestamp < q_end,
+    ).order_by(Transaction.timestamp.asc()).all()
+    txn_rows = []
+    for t in txns:
+        tet = _to_et(t.timestamp)
+        if tet is None or not (start_date <= tet.date() <= end_date):
+            continue
+        txn_rows.append({
+            'ts_et': tet.strftime('%Y-%m-%d %H:%M:%S'),
+            'type': t.transaction_type,
+            'ticker': t.ticker,
+            'quantity': t.quantity,
+            'price': t.price,
+            'price_source': t.price_source,
+        })
+
+    return jsonify({
+        'username': user.username,
+        'window_et': f'{start_date} .. {end_date}',
+        'flag_pct': flag_pct,
+        'snapshots': rows,
+        'flagged_moves': flagged,
+        'transactions_in_window': txn_rows,
+        'how_to_read': (
+            "Each row shows the tick-over-tick move split into d_stock (holdings "
+            "value: market moves and buys/sells shifting value between cash and "
+            "stock) and d_cash (sale proceeds pool). LEGIT patterns: stock_driven "
+            "moves during market hours; paired d_stock/-d_cash on a tick with a "
+            "matching transaction. ARTIFACT patterns: cash_driven move with NO "
+            "transaction in the same interval, or a total_value step at a cron "
+            "boundary. Overnight gaps (prior close -> 9:30) are usually real "
+            "market gaps -- check the holdings' actual open prices before "
+            "suspecting the data."
+        ),
+    })
+
+
 @app.route('/admin/check-intraday-data')
 @admin_2fa_required
 def check_intraday_data():
