@@ -337,6 +337,48 @@ SHA-1, so the warning has zero functional impact.
 2. *(Optional)* **remove the debug SHA-1 (`29:56...`) from the Firebase Android app** to silence the 8F
    warning. FCM doesn't need it and Sign-In is unaffected (it lives in `#654567882865`, not Firebase).
    `google-services.json` has `oauth_client: 0`, so re-downloading it after is optional (no behavior change).
-</CodeContent>
-<EmptyFile>false</EmptyFile>
-</invoke>
+
+---
+
+## 9. Performance methodology — decided conventions & WHY (Sessions 46–47, 2026-08-30/31)
+
+Read this before touching charts, gains, snapshots, or leaderboard math. Full play-by-play in
+`LAUNCH_TODO.md` Session 45–47 entries; this is the distilled read-in.
+
+### 9A. Snapshot date convention: plain UTC calendar date (decided 8/30)
+
+All daily accounting (cash replay, stock valuation, audits) buckets a transaction to its **plain UTC
+calendar date** — NOT the 20:05-UTC cron boundary, NOT ET-16:00. After-close trades (e.g. 16:49 ET =
+20:49 UTC) stay on the SAME UTC date. Evidence: real txn timestamps never cross UTC midnight; the
+cron-boundary convention manufactured phantom spike/unwind pairs (chart1658's June 3M cliff).
+Enforced in `_snapshot_effective_date` (admin_cash_tracking.py), reconcile, drift-check `_eff_date`.
+**Pairing rule (law):** any full-rebuild/reconcile execute → `/admin/audit-snapshot-stock-value?strict=true&fix=true`
+→ rebuild-all-caches + leaderboard cache. Strict mode exists because never-rewritten live-cron rows
+hold PRE-trade stock on after-close-trade days and the audit's ≥20:00-UTC tolerance otherwise shields
+them (Session 46: 14 rows, 11 users, all launch-week).
+
+### 9B. Displayed gains: Modified Dietz today → chain-linked TWR (decided 8/31, gated)
+
+- **Current production** (verified live, don't re-diagnose): charts = `generate_chart_from_snapshots` →
+  `calculate_portfolio_performance` → `_generate_chart_points` (**per-point Modified Dietz**);
+  leaderboard = `_compute_all_user_metrics` → same window Dietz → `LeaderboardCache`. Capital deploys
+  are already flow-subtracted — deposits do NOT render as gains in any live path.
+- **⚠ Dead-code trap:** `generate_chart_from_snapshots_OLD_DEPRECATED` (leaderboard_utils.py) contains a
+  plain `(total−first)/first` formula with ZERO callers. It was once mis-cited as the live 3M path and
+  produced a false "deposits render as gains" bug report. **Verify callers before citing a formula as live.**
+- **Owner decision — switch to TWR (`calculate_twr_return`, performance_calculator.py):** the product
+  promise is that a subscriber copying trades experiences the advertised %. TWR IS the day-one copier's
+  return (copier mirrors allocation with their own pot; creator deposits never enter their math). Dietz
+  answers "what did the CREATOR earn on average deployed capital" and diverges under our bots' large
+  mid-window deploys — the AutoPilot "+80% shown / +60% received" criticism. Worked example (docstring):
+  $100k flat 10 weeks, +$100k deploy, book +10% in final 2 weeks → copier +10%, TWR +10%, Dietz +17.1%.
+- **Flow definition:** F_t = that day's INCREASE in `max_cash_deployed` (only-increases invariant = new
+  outside capital; redeploying internal `cash_proceeds` is NOT a flow). Flow gets start-of-day weight.
+- **Status/gate:** owner reviews READ-ONLY `/admin/compare-dietz-twr` (dietz vs twr per user×period)
+  BEFORE the flip. On approval: `_generate_chart_points` + headline `portfolio_return` → TWR; route the
+  legacy flow-blind `calculate_performance_metrics` (plain endpoint %, reachable only via mobile
+  leaderboard's both-caches-empty fallback + `/leaderboard/update/<period>`) through the same helper;
+  then rebuild-all-caches + rebuild-leaderboard-cache per period.
+- **Unrelated:** the 10:00 UTC drift emails are ledger-integrity write-path checks (e.g. moon-cash2021's
+  live-engine corruption). Methodology changes cannot cause or cure them.
+

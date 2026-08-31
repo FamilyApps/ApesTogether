@@ -2817,6 +2817,141 @@ def admin_audit_intraday_anomalies():
     })
 
 
+@app.route('/admin/compare-dietz-twr')
+@admin_required
+def admin_compare_dietz_twr():
+    """
+    READ-ONLY: Modified Dietz (current production headline + per-chart-point
+    methodology) vs chain-linked TWR for every user x EOD period, so the owner
+    sees exactly what the approved TWR switch will change BEFORE it ships.
+
+    WHY (owner decision 2026-08-31, Session 47): the product promise is that a
+    subscriber copying trades experiences the % the chart advertises. TWR is
+    mathematically the day-one copier's return; Dietz is the creator's
+    money-weighted return and diverges under large mid-window capital deploys
+    (the AutoPilot "+80% shown / +60% received" criticism). Full rationale and
+    worked example: performance_calculator.calculate_twr_return docstring.
+    CORRECTION also logged that day: the earlier "EOD charts render deposits as
+    gains" bug report cited generate_chart_from_snapshots_OLD_DEPRECATED (dead
+    code); live chart points and leaderboard gains already flow-adjust via
+    Dietz. The switch is an accuracy upgrade to the copier-experience number,
+    not a fix for phantom spikes.
+
+    Query params:
+      ?periods=1M,3M   Restrict periods (default 1M,3M,YTD,1Y; also allows 5Y,MAX)
+      ?username=X      Single user
+      ?min_delta=0.5   Only report rows with |twr - dietz| >= this many points (default 0)
+
+    Nothing is written. Dietz numbers come from calculate_portfolio_performance
+    (the exact production path); TWR from calculate_twr_return over the same
+    period's daily snapshots.
+    """
+    from models import User, PortfolioSnapshot
+    from performance_calculator import (
+        calculate_portfolio_performance, calculate_twr_return, get_period_dates,
+    )
+
+    allowed_periods = ['1M', '3M', 'YTD', '1Y', '5Y', 'MAX']
+    periods_param = request.args.get('periods')
+    if periods_param:
+        periods = [p.strip().upper() for p in periods_param.split(',') if p.strip()]
+        bad = [p for p in periods if p not in allowed_periods]
+        if bad:
+            return jsonify({'error': f'invalid periods: {bad}', 'allowed': allowed_periods}), 400
+    else:
+        periods = ['1M', '3M', 'YTD', '1Y']
+
+    try:
+        min_delta = float(request.args.get('min_delta', '0'))
+    except (TypeError, ValueError):
+        min_delta = 0.0
+
+    username_param = request.args.get('username')
+    users_q = User.query.filter(User.deleted_at.is_(None))
+    if username_param:
+        users_q = users_q.filter(User.username == username_param)
+    users = users_q.order_by(User.id.asc()).all()
+    if username_param and not users:
+        return jsonify({'error': f'user not found: {username_param}'}), 404
+
+    rows = []
+    summary = {}
+    for period in periods:
+        deltas = []
+        for u in users:
+            try:
+                start_date, end_date = get_period_dates(period, user_id=u.id)
+                dietz_result = calculate_portfolio_performance(u.id, start_date, end_date)
+                snapshots = PortfolioSnapshot.query.filter(
+                    PortfolioSnapshot.user_id == u.id,
+                    PortfolioSnapshot.date >= start_date,
+                    PortfolioSnapshot.date <= end_date,
+                ).order_by(PortfolioSnapshot.date.asc()).all()
+                twr_result = calculate_twr_return(snapshots)
+                if twr_result is None:
+                    continue
+                dietz_pct = dietz_result['portfolio_return']
+                twr_pct = twr_result['twr_return']
+                delta = round(twr_pct - dietz_pct, 2)
+                deltas.append(abs(delta))
+                if abs(delta) >= min_delta:
+                    rows.append({
+                        'username': u.username,
+                        'user_id': u.id,
+                        'role': getattr(u, 'role', None),
+                        'period': period,
+                        'dietz_pct': dietz_pct,
+                        'twr_pct': twr_pct,
+                        'delta_pct_points': delta,
+                        'net_capital_deployed': dietz_result['metadata'].get('net_capital_deployed'),
+                        'flow_days': twr_result['flow_days'],
+                        'flows_total': twr_result['flows_total'],
+                        'snapshots': twr_result['points'],
+                    })
+            except Exception as e:
+                rows.append({
+                    'username': u.username,
+                    'user_id': u.id,
+                    'period': period,
+                    'error': str(e),
+                })
+        if deltas:
+            summary[period] = {
+                'users_compared': len(deltas),
+                'max_abs_delta': round(max(deltas), 2),
+                'avg_abs_delta': round(sum(deltas) / len(deltas), 2),
+                'rows_over_1pt': sum(1 for d in deltas if d >= 1.0),
+                'rows_over_5pt': sum(1 for d in deltas if d >= 5.0),
+            }
+
+    rows.sort(key=lambda r: abs(r.get('delta_pct_points', 0.0)), reverse=True)
+
+    return jsonify({
+        'nothing_written': True,
+        'periods': periods,
+        'min_delta': min_delta,
+        'users_scanned': len(users),
+        'summary': summary,
+        'rows': rows,
+        'interpretation': (
+            'delta_pct_points = TWR minus Dietz. Positive: Dietz UNDERSTATES the '
+            'copier experience (gains happened before/without flows); negative: Dietz '
+            'OVERSTATES it (big deploys shortly before gains -- the AutoPilot failure '
+            'mode). Deltas concentrate on users with large flow_days/flows_total '
+            'relative to portfolio size; users with zero flows in the window should '
+            'show delta ~0 (formulas coincide). Copytrade bots (role) rely on '
+            'migration-seeded max_cash_deployed -- eyeball their rows before trusting.'
+        ),
+        'next_steps': (
+            'If deltas look sane (near-zero for flow-less users, explainable for '
+            'heavy deployers), approve the switch: charts + headline + leaderboard '
+            'move to calculate_twr_return, legacy flow-blind '
+            'calculate_performance_metrics gets routed through the same math, then '
+            'rebuild-all-caches + rebuild-leaderboard-cache per period.'
+        ),
+    })
+
+
 @app.route('/admin/audit-snapshot-stock-value')
 @admin_required
 def admin_audit_snapshot_stock_value():

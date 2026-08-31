@@ -892,6 +892,78 @@ def _generate_chart_points(
     return chart_data
 
 
+def calculate_twr_return(snapshots) -> Optional[Dict]:
+    """
+    Chain-linked time-weighted return (TWR) over ordered snapshot-like objects
+    (requires .total_value and .max_cash_deployed).
+
+    DECISION (owner, 2026-08-31 Session 47): TWR is the number a copy-trading
+    subscriber actually experiences, and matching the subscriber's experience to
+    the advertised % is the product promise. A day-one copier mirrors the
+    creator's ALLOCATION with their own fixed pot, so their gain is the
+    creator's daily portfolio returns compounded — the creator's deposits never
+    enter the copier's math. Modified Dietz (current headline) instead answers
+    "what did the CREATOR earn on their average deployed capital"; with our
+    bots' large mid-window deploys the two diverge exactly like the AutoPilot
+    "+80% shown / +60% received" criticism. Worked example: $100k flat for 10
+    weeks, +$100k deployed, whole book +10% over the final 2 weeks ->
+    copier +10%, TWR +10%, Dietz (220k-100k-100k)/(100k + (2/12)*100k) = +17.1%.
+
+    Math: r_t = (V_t - V_{t-1} - F_t) / (V_{t-1} + F_t), compounded; F_t = that
+    day's INCREASE in max_cash_deployed (only-increases invariant = new outside
+    capital; redeploying internal cash_proceeds is not a flow). The flow gets
+    start-of-day weight (denominator includes F_t): deploys execute intraday,
+    so the new capital was at work during day t, and this keeps day-t itself
+    from overstating gains earned by the new money.
+
+    Robustness: zero/None total_value rows are skipped (pre-activity);
+    None/zero max_cash_deployed carries the previous value forward (unknown,
+    flow 0) so one unbackfilled row cannot fabricate a phantom flow.
+
+    Returns {'twr_return': pct, 'points': n, 'flow_days': n, 'flows_total': $}
+    or None if no usable (positive-value) baseline exists.
+    """
+    baseline = None
+    baseline_idx = -1
+    for idx, s in enumerate(snapshots):
+        if s.total_value and s.total_value > 0:
+            baseline = s
+            baseline_idx = idx
+            break
+    if baseline is None:
+        return None
+
+    prev_v = float(baseline.total_value)
+    prev_mcd = float(baseline.max_cash_deployed or 0.0)
+    cumulative = 1.0
+    points = 1
+    flow_days = 0
+    flows_total = 0.0
+
+    for s in snapshots[baseline_idx + 1:]:
+        if not s.total_value or s.total_value <= 0:
+            continue
+        raw_mcd = s.max_cash_deployed
+        mcd = float(raw_mcd) if (raw_mcd and raw_mcd > 0) else prev_mcd
+        flow = max(0.0, mcd - prev_mcd)
+        denom = prev_v + flow
+        if denom > 0:
+            cumulative *= 1.0 + ((float(s.total_value) - prev_v - flow) / denom)
+            points += 1
+            if flow > 0:
+                flow_days += 1
+                flows_total += flow
+        prev_v = float(s.total_value)
+        prev_mcd = mcd
+
+    return {
+        'twr_return': round((cumulative - 1.0) * 100, 2),
+        'points': points,
+        'flow_days': flow_days,
+        'flows_total': round(flows_total, 2),
+    }
+
+
 _sp500_benchmark_cache: Dict[tuple, float] = {}
 
 def _calculate_sp500_benchmark(start_date: date, end_date: date) -> float:
