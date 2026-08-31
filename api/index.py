@@ -2871,6 +2871,17 @@ def admin_audit_snapshot_stock_value():
     tolerance the cash-drift audit uses -- so boundary timing never false-flags
     and, worse, never gets ?fix=true'd into a real value loss.
 
+    ?strict=true DISABLES that tolerance. Use it (Session 46) whenever the cash
+    side has been rebuilt to the calendar-day convention: live-cron rows on
+    after-close-trade days hold PRE-trade stock, so calendar-day cash + pre-trade
+    stock double-counts the traded value (panther2585 8/26/26: sell proceeds
+    +5,591 credited same-day while the sold shares stayed in stock_value ->
+    phantom +8.1% day, unwinding -7.9% the next). The tolerance shields exactly
+    those rows from ?fix, so strict mode is the ONLY way to normalize them to
+    the post-trade (calendar-day) valuation the rest of the pipeline uses.
+    Pairing rule: after any full-rebuild/reconcile execute, run
+    ?strict=true (report) then ?strict=true&fix=true, then rebuild caches.
+
     TODAY'S snapshot is SKIPPED until today's official closes land in market_data
     (nightly 23:00 UTC map cron; SPY row's presence is the signal). Before that,
     the replay would value today at YESTERDAY'S closes -- on 8/25/26 a 4:46 PM
@@ -2892,6 +2903,8 @@ def admin_audit_snapshot_stock_value():
       ?fix=true          Repair ONLY clean drift rows (fully priced, no missing/absurd):
                          stock_value=expected, total_value=expected+cash_proceeds.
                          Fixed users are auto-purged from user_portfolio_chart_cache.
+      ?strict=true       Disable the post-close ambiguity tolerance so after-close-day
+                         rows with pre-trade stock_value flag (and fix) as drift.
 
     Response: per-user flagged snapshots + aggregate counts by issue type.
     """
@@ -2917,6 +2930,7 @@ def admin_audit_snapshot_stock_value():
     role_filter = request.args.get('role')
     limit_users_param = request.args.get('limit_users')
     apply_fix = request.args.get('fix', 'false').lower() == 'true'
+    strict_mode = request.args.get('strict', 'false').lower() == 'true'
     days_param = request.args.get('days')
     since_date = None
     if days_param:
@@ -3107,7 +3121,9 @@ def admin_audit_snapshot_stock_value():
             drift = expected - actual
             denom = expected if expected > 0 else (actual if actual > 0 else 1.0)
             drift_pct = (drift / denom) * 100.0
-            effective_abs = max(abs_floor, rel_threshold * expected) + amb_tol_by_date.get(snap.date, 0.0)
+            effective_abs = max(abs_floor, rel_threshold * expected) + (
+                0.0 if strict_mode else amb_tol_by_date.get(snap.date, 0.0)
+            )
             is_drift = validatable and abs(drift) >= effective_abs
 
             if not (is_drift or has_missing or has_stale or has_absurd):
@@ -3199,6 +3215,7 @@ def admin_audit_snapshot_stock_value():
         'relative_threshold_pct': round(rel_threshold * 100, 3),
         'abs_floor': abs_floor,
         'days_scanned': days_param or 'all',
+        'strict_mode': strict_mode,
         'fix_applied': apply_fix,
         'fix_count': fix_count if apply_fix else 0,
         'chart_cache_purged_user_ids': sorted(fixed_user_ids) if (apply_fix and fix_count) else None,
