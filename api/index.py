@@ -2821,9 +2821,9 @@ def admin_audit_intraday_anomalies():
 @admin_required
 def admin_compare_dietz_twr():
     """
-    READ-ONLY: Modified Dietz (current production headline + per-chart-point
-    methodology) vs chain-linked TWR for every user x EOD period, so the owner
-    sees exactly what the approved TWR switch will change BEFORE it ships.
+    READ-ONLY: Modified Dietz (RETIRED 2026-08-31 -- production headline +
+    chart points now serve chain-linked TWR) vs TWR for every user x EOD
+    period. Originally the pre-switch review gate; retained as a diff tool.
 
     WHY (owner decision 2026-08-31, Session 47): the product promise is that a
     subscriber copying trades experiences the % the chart advertises. TWR is
@@ -2842,13 +2842,13 @@ def admin_compare_dietz_twr():
       ?username=X      Single user
       ?min_delta=0.5   Only report rows with |twr - dietz| >= this many points (default 0)
 
-    Nothing is written. Dietz numbers come from calculate_portfolio_performance
-    (the exact production path); TWR from calculate_twr_return over the same
-    period's daily snapshots.
+    Nothing is written. Dietz numbers come from calculate_dietz_return (the
+    retired pre-8/31 headline formula, preserved for this tool); TWR from
+    calculate_twr_return -- both over the same period's daily snapshots.
     """
     from models import User, PortfolioSnapshot
     from performance_calculator import (
-        calculate_portfolio_performance, calculate_twr_return, get_period_dates,
+        calculate_dietz_return, calculate_twr_return, get_period_dates,
     )
 
     allowed_periods = ['1M', '3M', 'YTD', '1Y', '5Y', 'MAX']
@@ -2881,7 +2881,6 @@ def admin_compare_dietz_twr():
         for u in users:
             try:
                 start_date, end_date = get_period_dates(period, user_id=u.id)
-                dietz_result = calculate_portfolio_performance(u.id, start_date, end_date)
                 snapshots = PortfolioSnapshot.query.filter(
                     PortfolioSnapshot.user_id == u.id,
                     PortfolioSnapshot.date >= start_date,
@@ -2890,7 +2889,7 @@ def admin_compare_dietz_twr():
                 twr_result = calculate_twr_return(snapshots)
                 if twr_result is None:
                     continue
-                dietz_pct = dietz_result['portfolio_return']
+                dietz_pct = calculate_dietz_return(snapshots, end_date)
                 twr_pct = twr_result['twr_return']
                 delta = round(twr_pct - dietz_pct, 2)
                 deltas.append(abs(delta))
@@ -2903,7 +2902,7 @@ def admin_compare_dietz_twr():
                         'dietz_pct': dietz_pct,
                         'twr_pct': twr_pct,
                         'delta_pct_points': delta,
-                        'net_capital_deployed': dietz_result['metadata'].get('net_capital_deployed'),
+                        'net_capital_deployed': round(max(0.0, snapshots[-1].max_cash_deployed - snapshots[0].max_cash_deployed), 2),
                         'flow_days': twr_result['flow_days'],
                         'flows_total': twr_result['flows_total'],
                         'snapshots': twr_result['points'],
@@ -2943,11 +2942,10 @@ def admin_compare_dietz_twr():
             'migration-seeded max_cash_deployed -- eyeball their rows before trusting.'
         ),
         'next_steps': (
-            'If deltas look sane (near-zero for flow-less users, explainable for '
-            'heavy deployers), approve the switch: charts + headline + leaderboard '
-            'move to calculate_twr_return, legacy flow-blind '
-            'calculate_performance_metrics gets routed through the same math, then '
-            'rebuild-all-caches + rebuild-leaderboard-cache per period.'
+            'SWITCH EXECUTED 2026-08-31: production charts/headline/leaderboard now '
+            'serve twr_pct; dietz_pct here is the retired formula, kept for '
+            'historical diffing. Expect displayed numbers to match the twr_pct '
+            'column after cache rebuilds.'
         ),
     })
 

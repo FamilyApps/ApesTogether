@@ -201,17 +201,18 @@ def calculate_portfolio_performance(
     period: str = None
 ) -> Dict:
     """
-    Calculate portfolio performance using Modified Dietz with max_cash_deployed.
+    Calculate portfolio performance using chain-linked TWR over snapshots.
     
     This is THE SINGLE SOURCE OF TRUTH for all performance calculations.
     Called by: Dashboard, Leaderboard, Market-close cron, Admin tools.
     
-    Formula (from migration 20251005_add_snapshot_cash_fields.py):
-        V_start = total_value at start
-        V_end = total_value at end
-        CF_net = max_cash_deployed_end - max_cash_deployed_start
-        W = weighted average (based on timing of CF)
-        Return = (V_end - V_start - CF_net) / (V_start + W * CF_net)
+    METHODOLOGY (owner-approved switch 2026-08-31, Session 47):
+        Headline + chart points = chain-linked TWR (calculate_twr_return) — the
+        return a day-one copy-trading subscriber actually experiences. Replaced
+        window Modified Dietz, which mis-stated the copier experience around
+        large mid-window capital deploys (fleet compare 8/31: chart1658 YTD
+        +44.39% Dietz vs +37.42% TWR; zero-flow users bit-identical).
+        Dietz preserved in calculate_dietz_return for /admin/compare-dietz-twr.
     
     Args:
         user_id: User ID to calculate performance for
@@ -423,69 +424,35 @@ def calculate_portfolio_performance(
     
     logger.debug(f"User {user_id}: V_start=${V_start:.2f}, V_end=${V_end:.2f}, CF_net=${CF_net:.2f}")
     
-    # Calculate time-weighted cash flows (W factor)
     # Use the user's ACTUAL active period (from first snapshot to end)
     actual_period_days = (end_date - first_snapshot.date).days
     
-    if actual_period_days == 0:
-        # Same-day period (1D) or user just joined today
-        W = 0.0
-        weighted_cf = 0.0
-    else:
-        # Calculate weighted cash flows based on when capital was deployed
-        # during the user's active period
-        weighted_cf = 0.0
-        prev_deployed = first_snapshot.max_cash_deployed
-        
-        # Track capital deployed after user's first snapshot
-        for snapshot in snapshots[1:]:
-            capital_added = snapshot.max_cash_deployed - prev_deployed
-            if capital_added > 0:
-                # Weight by remaining days in user's active period
-                days_remaining = (end_date - snapshot.date).days
-                weight = days_remaining / actual_period_days
-                weighted_cf += capital_added * weight
-                logger.debug(f"Date {snapshot.date}: Added ${capital_added:.2f}, weight={weight:.3f}, weighted=${capital_added * weight:.2f}")
-            prev_deployed = snapshot.max_cash_deployed
-        
-        # W is used in denominator: (V_start + W * CF_net)
-        # For Modified Dietz, W represents the time-weighted average of when flows occurred
-        if CF_net != 0:
-            W = weighted_cf / CF_net
-            logger.debug(f"User {user_id}: W={W:.3f} (weighted_cf=${weighted_cf:.2f} / CF_net=${CF_net:.2f})")
-        else:
-            # When CF_net = 0, W is mathematically irrelevant (multiplied by 0)
-            # Set to 0.5 for consistency in logging, but any value would give same result
-            W = 0.5
-            logger.debug(f"User {user_id}: W={W:.3f} (irrelevant - CF_net=0)")
-    
-    # Modified Dietz formula: Return = (V_end - V_start - CF_net) / (V_start + W * CF_net)
-    # Validated by Grok (Oct 26, 2025): Mathematically correct, adapted for snapshot-based data
-    denominator = V_start + (W * CF_net)
-    
-    # Edge case: Zero denominator (rare: V_start=0 and CF_net=0)
-    if denominator == 0:
-        logger.warning(f"Zero denominator for user {user_id}: V_start={V_start}, W={W:.3f}, CF_net={CF_net}")
+    # ── METHODOLOGY SWITCH (owner-approved 2026-08-31, Session 47) ──
+    # Chain-linked TWR: the return a day-one copy-trading subscriber actually
+    # experiences (full rationale in calculate_twr_return's docstring). The
+    # retired window Modified Dietz lives on in calculate_dietz_return, used
+    # only by the read-only /admin/compare-dietz-twr diff tool.
+    twr_result = calculate_twr_return(snapshots)
+    if twr_result is None:
+        logger.warning(f"No usable baseline for user {user_id}: all snapshots zero-value")
         portfolio_return = 0.0
+        twr_series = None
     else:
-        numerator = V_end - V_start - CF_net
-        portfolio_return = (numerator / denominator) * 100
-        logger.debug(
-            f"User {user_id} Modified Dietz: "
-            f"({V_end:.2f} - {V_start:.2f} - {CF_net:.2f}) / ({V_start:.2f} + {W:.3f}*{CF_net:.2f}) = "
-            f"{numerator:.2f} / {denominator:.2f} = {portfolio_return:.2f}%"
-        )
+        portfolio_return = twr_result['twr_return']
+        twr_series = twr_result['series']
     
     logger.info(
-        f"Portfolio return: {portfolio_return:.2f}% "
-        f"(V_start=${V_start:.2f}, V_end=${V_end:.2f}, CF_net=${CF_net:.2f}, W={W:.3f})"
+        f"Portfolio TWR: {portfolio_return:.2f}% "
+        f"(V_start=${V_start:.2f}, V_end=${V_end:.2f}, CF_net=${CF_net:.2f}, "
+        f"flow_days={twr_result['flow_days'] if twr_result else 0})"
     )
     
-    # Generate chart data if requested (uses simple per-point formula for speed)
+    # Generate chart data if requested (per-point cumulative TWR — the chart's
+    # final point equals the headline portfolio_return by construction)
     chart_data = None
     if include_chart_data:
         _tc = _time.time()
-        chart_data = _generate_chart_points(snapshots, start_date, end_date, period)
+        chart_data = _generate_chart_points(snapshots, start_date, end_date, period, twr_series=twr_series)
         logger.info(f"[PERF-TIMING] user={user_id} chart_points: {round(_time.time()-_tc,2)}s, {len(chart_data) if chart_data else 0} points")
     
     # Calculate S&P 500 benchmark (simple percentage, not time-weighted)
@@ -518,21 +485,23 @@ def _generate_chart_points(
     snapshots: List[PortfolioSnapshot],
     period_start: date,
     period_end: date,
-    period: Optional[str] = None
+    period: Optional[str] = None,
+    twr_series: Optional[List] = None
 ) -> List[Dict]:
     """
-    Generate point-by-point chart data using simple per-point formula.
-    
-    Uses simple percentage from baseline for performance (Grok recommendation):
-        pct = ((value_at_point - baseline) / baseline) * 100
-    
-    This is O(n) efficient vs O(n²) for full Modified Dietz per point.
-    The final summary return uses full Modified Dietz, but chart progression uses simple.
+    Generate point-by-point chart data using cumulative chain-linked TWR
+    (Session 47 methodology switch — rationale in calculate_twr_return).
+    Each point is the compounded flow-adjusted return from the window baseline,
+    so the last chart point equals the headline portfolio_return exactly.
+    O(n): the whole progression falls out of one pass.
     
     Args:
         snapshots: List of PortfolioSnapshot objects
         period_start: Period start date
         period_end: Period end date
+        period: Period label (drives sampling + axis labels)
+        twr_series: Optional precomputed calculate_twr_return(snapshots)['series']
+                    (aligned to snapshots); computed here if not supplied
         
     Returns:
         List of chart points: [{'date': 'Oct 25', 'portfolio': 28.57, 'sp500': 15.32}, ...]
@@ -540,6 +509,13 @@ def _generate_chart_points(
     import time as _time
     _tcp0 = _time.time()
     chart_data = []
+    
+    if twr_series is None:
+        _twr = calculate_twr_return(snapshots)
+        twr_series = _twr['series'] if _twr else None
+    if not twr_series:
+        logger.warning("No TWR series computable for chart generation")
+        return []
     
     # Find first non-zero snapshot as baseline
     baseline_snapshot = None
@@ -722,42 +698,9 @@ def _generate_chart_points(
             
             sp500_pct = ((sp500_value - baseline_sp500) / baseline_sp500) * 100
             
-            # Calculate Modified Dietz for this snapshot
-            V_start = baseline_value
-            V_end = snapshot.total_value
-            CF_net = snapshot.max_cash_deployed - baseline_snapshot.max_cash_deployed
-            
-            if CF_net <= 0:
-                if V_start > 0:
-                    portfolio_pct = ((V_end - V_start) / V_start) * 100
-                else:
-                    portfolio_pct = 0.0
-            else:
-                weighted_cf = 0.0
-                prev_deployed = baseline_snapshot.max_cash_deployed
-                period_days = (snapshot.date - baseline_snapshot.date).days
-                
-                for s in snapshots:
-                    if s.date > snapshot.date:
-                        break
-                    if s.date <= baseline_snapshot.date:
-                        continue
-                    
-                    capital_added = s.max_cash_deployed - prev_deployed
-                    if capital_added > 0 and period_days > 0:
-                        days_remaining = (snapshot.date - s.date).days
-                        weight = days_remaining / period_days
-                        weighted_cf += capital_added * weight
-                    prev_deployed = s.max_cash_deployed
-                
-                W = weighted_cf / CF_net if CF_net > 0 else 0.5
-                denominator = V_start + (W * CF_net)
-                
-                if denominator > 0:
-                    numerator = V_end - V_start - CF_net
-                    portfolio_pct = (numerator / denominator) * 100
-                else:
-                    portfolio_pct = 0.0
+            # Cumulative chain-linked TWR up to this snapshot (Session 47)
+            pct = twr_series[idx] if idx < len(twr_series) else None
+            portfolio_pct = pct if pct is not None else 0.0
             
             chart_data.append({
                 'date': date_str,
@@ -785,34 +728,13 @@ def _generate_chart_points(
         if sp500_data and sampled_sp500[-1] != sp500_data[-1]:
             sampled_sp500.append(sp500_data[-1])
         
-        # Helper: calculate Modified Dietz portfolio return from baseline to a target snapshot
-        def _calc_portfolio_pct(target_snapshot):
-            V_start = baseline_value
-            V_end = target_snapshot.total_value
-            CF_net = target_snapshot.max_cash_deployed - baseline_snapshot.max_cash_deployed
-            
-            if CF_net <= 0:
-                return ((V_end - V_start) / V_start) * 100 if V_start > 0 else 0.0
-            
-            weighted_cf = 0.0
-            prev_deployed = baseline_snapshot.max_cash_deployed
-            period_days = (target_snapshot.date - baseline_snapshot.date).days
-            
-            for s in snapshots:
-                if s.date > target_snapshot.date:
-                    break
-                if s.date <= baseline_snapshot.date:
-                    continue
-                capital_added = s.max_cash_deployed - prev_deployed
-                if capital_added > 0 and period_days > 0:
-                    days_remaining = (target_snapshot.date - s.date).days
-                    weight = days_remaining / period_days
-                    weighted_cf += capital_added * weight
-                prev_deployed = s.max_cash_deployed
-            
-            W = weighted_cf / CF_net if CF_net > 0 else 0.5
-            denominator = V_start + (W * CF_net)
-            return ((V_end - V_start - CF_net) / denominator) * 100 if denominator > 0 else 0.0
+        # Cumulative TWR per snapshot date (Session 47): series is aligned to
+        # `snapshots`; later duplicates for a date win (matches snapshot_map).
+        twr_by_date = {}
+        for _i, _s in enumerate(snapshots):
+            if _i < len(twr_series) and twr_series[_i] is not None:
+                twr_by_date[_s.date] = twr_series[_i]
+        twr_dates_desc = sorted(twr_by_date.keys(), reverse=True)
         
         last_known_pct = 0.0  # Track last known portfolio % for gap-filling
 
@@ -867,15 +789,14 @@ def _generate_chart_points(
             sp500_value = float(sp500_record.close_price)
             sp500_pct = ((sp500_value - baseline_sp500) / baseline_sp500) * 100
             
-            # Portfolio percentage using Modified Dietz (accounts for cash flows)
-            if sp500_record.date in snapshot_map:
-                last_known_pct = _calc_portfolio_pct(snapshot_map[sp500_record.date])
+            # Portfolio percentage: cumulative chain-linked TWR (flow-adjusted)
+            if sp500_record.date in twr_by_date:
+                last_known_pct = twr_by_date[sp500_record.date]
             else:
-                # No snapshot for this date — use last known value (gap-fill)
-                # Find previous snapshot for more accurate gap-fill
-                for s in reversed(snapshots):
-                    if s.date < sp500_record.date and s.total_value > 0:
-                        last_known_pct = _calc_portfolio_pct(s)
+                # No snapshot for this date — gap-fill from most recent prior date
+                for s_date in twr_dates_desc:
+                    if s_date < sp500_record.date:
+                        last_known_pct = twr_by_date[s_date]
                         break
             
             chart_data.append({
@@ -890,6 +811,46 @@ def _generate_chart_points(
         logger.info(f"Chart dates: FIRST={dates_generated[0]}, LAST={dates_generated[-1]}")
         logger.info(f"All dates: {dates_generated}")
     return chart_data
+
+
+def calculate_dietz_return(snapshots: List[PortfolioSnapshot], end_date: date) -> float:
+    """
+    RETIRED window Modified Dietz (production headline until 2026-08-31,
+    Session 47). Kept ONLY for the read-only /admin/compare-dietz-twr diff
+    tool; production charts/headline/leaderboard use calculate_twr_return
+    (TWR = the day-one copier's experienced return — see its docstring).
+    Formula: (V_end - V_start - CF_net) / (V_start + W * CF_net), W =
+    day-weighted average timing of max_cash_deployed increases.
+    """
+    if not snapshots:
+        return 0.0
+    first_snapshot = snapshots[0]
+    last_snapshot = snapshots[-1]
+    V_start = first_snapshot.total_value
+    V_end = last_snapshot.total_value
+    CF_net = max(0.0, last_snapshot.max_cash_deployed - first_snapshot.max_cash_deployed)
+    actual_period_days = (end_date - first_snapshot.date).days
+
+    if actual_period_days == 0:
+        W = 0.0
+    elif CF_net == 0:
+        W = 0.5
+    else:
+        weighted_cf = 0.0
+        prev_deployed = first_snapshot.max_cash_deployed
+        for snapshot in snapshots[1:]:
+            capital_added = snapshot.max_cash_deployed - prev_deployed
+            if capital_added > 0:
+                days_remaining = (end_date - snapshot.date).days
+                weight = days_remaining / actual_period_days
+                weighted_cf += capital_added * weight
+            prev_deployed = snapshot.max_cash_deployed
+        W = weighted_cf / CF_net
+
+    denominator = V_start + (W * CF_net)
+    if denominator == 0:
+        return 0.0
+    return round(((V_end - V_start - CF_net) / denominator) * 100, 2)
 
 
 def calculate_twr_return(snapshots) -> Optional[Dict]:
@@ -920,8 +881,10 @@ def calculate_twr_return(snapshots) -> Optional[Dict]:
     None/zero max_cash_deployed carries the previous value forward (unknown,
     flow 0) so one unbackfilled row cannot fabricate a phantom flow.
 
-    Returns {'twr_return': pct, 'points': n, 'flow_days': n, 'flows_total': $}
+    Returns {'twr_return': pct, 'points': n, 'flow_days': n, 'flows_total': $,
+    'series': cumulative pct aligned to snapshots (None = unusable row)}
     or None if no usable (positive-value) baseline exists.
+    PRODUCTION as of Session 47: this IS the headline + chart methodology.
     """
     baseline = None
     baseline_idx = -1
@@ -933,6 +896,8 @@ def calculate_twr_return(snapshots) -> Optional[Dict]:
     if baseline is None:
         return None
 
+    series: List[Optional[float]] = [None] * len(snapshots)
+    series[baseline_idx] = 0.0
     prev_v = float(baseline.total_value)
     prev_mcd = float(baseline.max_cash_deployed or 0.0)
     cumulative = 1.0
@@ -940,7 +905,8 @@ def calculate_twr_return(snapshots) -> Optional[Dict]:
     flow_days = 0
     flows_total = 0.0
 
-    for s in snapshots[baseline_idx + 1:]:
+    for i in range(baseline_idx + 1, len(snapshots)):
+        s = snapshots[i]
         if not s.total_value or s.total_value <= 0:
             continue
         raw_mcd = s.max_cash_deployed
@@ -953,6 +919,7 @@ def calculate_twr_return(snapshots) -> Optional[Dict]:
             if flow > 0:
                 flow_days += 1
                 flows_total += flow
+        series[i] = round((cumulative - 1.0) * 100, 2)
         prev_v = float(s.total_value)
         prev_mcd = mcd
 
@@ -961,6 +928,7 @@ def calculate_twr_return(snapshots) -> Optional[Dict]:
         'points': points,
         'flow_days': flow_days,
         'flows_total': round(flows_total, 2),
+        'series': series,
     }
 
 
@@ -1164,7 +1132,9 @@ def calculate_modified_dietz_return(user_id: int, start_date: date, end_date: da
     """
     DEPRECATED: Use calculate_portfolio_performance() instead.
     
-    Kept for backward compatibility during migration.
+    Kept for backward compatibility during migration. NOTE (Session 47): the
+    headline this wraps is now chain-linked TWR, no longer Modified Dietz —
+    the name is historical. For actual window Dietz use calculate_dietz_return.
     """
     logger.warning(
         "calculate_modified_dietz_return() is deprecated. "

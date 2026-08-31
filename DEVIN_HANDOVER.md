@@ -357,12 +357,19 @@ Enforced in `_snapshot_effective_date` (admin_cash_tracking.py), reconcile, drif
 hold PRE-trade stock on after-close-trade days and the audit's ≥20:00-UTC tolerance otherwise shields
 them (Session 46: 14 rows, 11 users, all launch-week).
 
-### 9B. Displayed gains: Modified Dietz today → chain-linked TWR (decided 8/31, gated)
+### 9B. Displayed gains: chain-linked TWR (switch EXECUTED 8/31 ~3pm after fleet compare)
 
-- **Current production** (verified live, don't re-diagnose): charts = `generate_chart_from_snapshots` →
-  `calculate_portfolio_performance` → `_generate_chart_points` (**per-point Modified Dietz**);
-  leaderboard = `_compute_all_user_metrics` → same window Dietz → `LeaderboardCache`. Capital deploys
-  are already flow-subtracted — deposits do NOT render as gains in any live path.
+- **Current production**: charts = `generate_chart_from_snapshots` → `calculate_portfolio_performance`
+  → `_generate_chart_points`, ALL driven by **`calculate_twr_return`** — one chain computed per window,
+  headline = series tail = last chart point by construction. Leaderboard = `_compute_all_user_metrics` →
+  same headline → `LeaderboardCache`. Legacy `calculate_performance_metrics` routes through the same
+  helper (was the last flow-blind path). Window Dietz is preserved ONLY in `calculate_dietz_return`
+  for the `/admin/compare-dietz-twr` diff tool — do NOT wire it back into production, and do NOT point
+  the compare tool at `calculate_portfolio_performance` (it would self-compare TWR vs TWR).
+- **Fleet compare that cleared the gate (8/31)**: zero-flow users delta exactly 0.00; 1M avg |Δ| 0.01;
+  chart1658 YTD +44.39 Dietz vs +37.42 TWR (advertised number was overstating the copier experience);
+  YTD≡1Y everywhere (fleet <1yr, both clamp to first snapshot); `flows_total` 0.00–0.01 rows = penny
+  `max_cash_deployed` residue from the August rebuilds, harmless.
 - **⚠ Dead-code trap:** `generate_chart_from_snapshots_OLD_DEPRECATED` (leaderboard_utils.py) contains a
   plain `(total−first)/first` formula with ZERO callers. It was once mis-cited as the live 3M path and
   produced a false "deposits render as gains" bug report. **Verify callers before citing a formula as live.**

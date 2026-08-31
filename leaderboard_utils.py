@@ -217,6 +217,12 @@ def calculate_performance_metrics(user_id, period):
     """
     Calculate performance metrics using existing portfolio snapshots - no API calls needed
     Returns performance percentage
+
+    Session 47 (2026-08-31): routed through chain-linked TWR. This was the last
+    flow-blind plain-endpoint-% path (deposits counted as gains). Only reachable
+    via the mobile leaderboard's both-caches-empty fallback and the legacy
+    /leaderboard/update/<period> route, but no code path may serve
+    deposit-inflated numbers.
     """
     from datetime import datetime, date, timedelta
     
@@ -227,8 +233,6 @@ def calculate_performance_metrics(user_id, period):
         
         if not latest_snapshot:
             return 0.0
-        
-        current_value = latest_snapshot.total_value
         
         # Calculate start date based on period
         end_date = latest_snapshot.date
@@ -258,20 +262,15 @@ def calculate_performance_metrics(user_id, period):
         else:
             return 0.0
         
-        # Get snapshot closest to start date
-        start_snapshot = PortfolioSnapshot.query.filter_by(user_id=user_id)\
+        # Chain-linked TWR over all snapshots in the window (same math as
+        # charts + headline, so this fallback can never disagree with them)
+        from performance_calculator import calculate_twr_return
+        snapshots = PortfolioSnapshot.query.filter_by(user_id=user_id)\
             .filter(PortfolioSnapshot.date >= start_date)\
-            .order_by(PortfolioSnapshot.date.asc()).first()
+            .order_by(PortfolioSnapshot.date.asc()).all()
         
-        if not start_snapshot:
-            return 0.0
-        
-        start_value = start_snapshot.total_value
-        
-        if start_value > 0:
-            return ((current_value - start_value) / start_value) * 100
-        else:
-            return 0.0
+        result = calculate_twr_return(snapshots)
+        return result['twr_return'] if result else 0.0
                 
     except Exception as e:
         current_app.logger.error(f"Error calculating performance for user {user_id}, period {period}: {str(e)}")
