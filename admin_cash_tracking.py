@@ -1071,51 +1071,39 @@ def register_cash_tracking_routes(app, db):
 
         def _snapshot_effective_date(ts):
             """
-            For EOD daily snapshots: a transaction applies to the snapshot
-            written by the next EOD cron firing AFTER the transaction commits.
+            For EOD daily snapshots: a transaction applies to the snapshot of
+            its **UTC calendar date** ("Option B" in the route docstring).
 
-            The EOD market-close cron (`5 20 * * 1-5` in vercel.json) fires at
-            **20:05 UTC** every weekday. So:
-              - trade at ts <  20:05 UTC on date D  -> applies to D's snapshot
-                  (the cron at D's 20:05 UTC saw the committed trade)
-              - trade at ts >= 20:05 UTC on date D  -> applies to D+1's snapshot
-                  (the cron at D's 20:05 UTC ran before the trade committed,
-                   so the trade waits for the next day's cron)
+            WHY plain UTC date and not the 20:05-UTC market-close-cron boundary
+            a previous version used (Session 46, 8/30-31): the stored
+            stock_value series follows the CALENDAR-day convention -- the
+            snapshot-value audit (api/index.py audit-snapshot-stock-value)
+            replays holdings by UTC date (with an ambiguity tolerance for
+            >=20:00 UTC trades) and today reports the entire fleet clean on
+            that basis, and reconcile's per-date replay also keys by plain
+            .date(). The cron-boundary convention here was the lone dissenter,
+            and it manufactured phantom day-pairs on exactly the after-close
+            trades: chart1658's 6/1 buys at 16:49 ET (20:49 UTC -- after the
+            20:05 cron but same UTC date) were counted in 6/1's stock_value
+            but this replay pushed their cash deduction to 6/2, inflating 6/1
+            total_value by ~$53k (+39.6%/-28.1% pair). The 3M chart window
+            baselined on that phantom row -> the "massive drop at account
+            creation". Twin pair on 6/8|6/9 (16:15 ET batch).
 
-            UTC anchoring handles DST automatically (the cron always fires at
-            the same UTC moment regardless of EDT/EST).
-
-            This matches the actual behavior of the EOD market-close cron in
-            `api/index.py:market_close_cron`, which:
-              - reads stock_value from live `Stock` holdings (whatever state
-                exists at 20:05 UTC)
-              - reads cash_proceeds via replay through `today_et` (which
-                includes any transaction whose UTC date <= today_et)
-            For trades < 20:05 UTC, both fields reflect post-trade state.
-            For trades >= 20:05 UTC, both fields reflect pre-trade state on D
-            and post-trade state on D+1.
-
-            The previous 16:00 ET cutoff was 5 minutes too early — it
-            misclassified trades at 16:00-16:04 ET (which the cron at 16:05 ET
-            DID see) as next-day trades, causing snapshot.cash_proceeds to
-            disagree with snapshot.stock_value on after-close-sell days.
-            That mismatch produced phantom chart drops.
+            Verified against real timestamps: bot after-close trades land
+            16:05-17:00 ET (20:05-21:00 UTC) -- same UTC date -- never past
+            midnight UTC, so plain UTC date matches the stock side for every
+            observed case, and the nightly 21:00 UTC snapshot-audit enforces
+            the same convention going forward.
 
             Intraday snapshots use TIMESTAMP-granular replay further below
             (txn_timeline + snap_ts comparison) — unaffected by this logic.
             """
             if ts is None:
                 return None
-            # Normalize to naive UTC for direct comparison with the cron time.
             if ts.tzinfo is not None:
-                ts_utc = ts.astimezone(_UTC_TZ).replace(tzinfo=None)
-            else:
-                ts_utc = ts
-            # Cron fires at 20:05 UTC each weekday (see vercel.json: "5 20 * * 1-5")
-            cron_firing = datetime.combine(ts_utc.date(), _dt_time(20, 5))
-            if ts_utc < cron_firing:
-                return ts_utc.date()
-            return ts_utc.date() + _td(days=1)
+                return ts.astimezone(_UTC_TZ).replace(tzinfo=None).date()
+            return ts.date()
 
         # 1. Compute current cost basis from holdings
         stocks = Stock.query.filter_by(user_id=user.id).all()
@@ -1156,13 +1144,15 @@ def register_cash_tracking_routes(app, db):
                 sell_count += 1
                 replay_cash += val
             eff_date = _snapshot_effective_date(txn.timestamp)
+            ts_naive = _to_naive_utc(txn.timestamp)
             if eff_date:
-                raw_date = txn.timestamp.date() if txn.timestamp else None
-                if raw_date and eff_date != raw_date:
+                # Diagnostic only (no longer shifts the effective date):
+                # trades after the 20:05 UTC market-close cron are the
+                # after-close ambiguity window this function's docstring covers.
+                if ts_naive is not None and ts_naive >= datetime.combine(eff_date, _dt_time(20, 5)):
                     after_close_count += 1
                 per_date_max_cash[eff_date] = replay_max_cash
                 per_date_cash[eff_date] = replay_cash
-            ts_naive = _to_naive_utc(txn.timestamp)
             if ts_naive is not None:
                 txn_timeline.append((ts_naive, replay_max_cash, replay_cash))
 
@@ -1654,12 +1644,18 @@ def register_cash_tracking_routes(app, db):
         _UTC_TZ = ZoneInfo('UTC')
 
         def _eff_date(ts):
+            # UTC calendar date — MUST match _full_rebuild_for_user's
+            # _snapshot_effective_date and the snapshot-value audit's replay
+            # convention (Session 46: this function's old ET-16:00 next-day
+            # shift was a THIRD date convention in the codebase; see the
+            # _snapshot_effective_date docstring for why calendar-day won).
+            # Only used for seeded-baseline estimation here, but conventions
+            # must not fork again.
             if ts is None:
                 return None
-            ts_et = (ts.replace(tzinfo=_UTC_TZ) if ts.tzinfo is None else ts).astimezone(_MARKET_TZ)
-            if ts_et.time() >= _dt_time(16, 0):
-                return ts_et.date() + _td(days=1)
-            return ts_et.date()
+            if ts.tzinfo is not None:
+                return ts.astimezone(_UTC_TZ).replace(tzinfo=None).date()
+            return ts.date()
 
         # ---- Query users ----
         try:
