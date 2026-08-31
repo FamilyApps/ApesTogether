@@ -1430,13 +1430,40 @@ def register_cash_tracking_routes(app, db):
         if not username and not do_all:
             return jsonify({'error': 'username or all=true required'}), 400
 
+        # Copytrade bots (CoastHillBear, marblethehill72) derive cash/holdings
+        # from brokerage-screenshot migrations (price_source='phase_c_migration')
+        # that a transaction replay CANNOT reproduce — rebuilding them writes
+        # WRONG values (e.g. CoastHillBear's phantom −207.37 max_cash "drift",
+        # 8/30 fleet preview). Drift-check and the snapshot audit already skip
+        # them; full-rebuild must too.
+        try:
+            from mobile_api import _is_copytrade_bot
+        except Exception:
+            def _is_copytrade_bot(_u):
+                return False
+
         # Single-user path
         if username:
             try:
                 user = User.query.filter_by(username=username).first()
                 if not user:
                     return jsonify({'error': f'User {username} not found'}), 404
+                if _is_copytrade_bot(user) and execute and request.args.get('force') != 'true':
+                    return jsonify({
+                        'error': 'copytrade_bot_protected',
+                        'message': (
+                            f'{username} is a copytrade bot: its cash/holdings come from a '
+                            'brokerage migration that transaction replay cannot reproduce, so '
+                            'a rebuild would write WRONG values. Add &force=true only if you '
+                            'are certain.'
+                        ),
+                    }), 400
                 result = _full_rebuild_for_user(user, execute=execute)
+                if _is_copytrade_bot(user):
+                    result['warning'] = (
+                        'COPYTRADE BOT: replay cannot reproduce migration-seeded state; '
+                        'the targets above are unreliable. Execute is blocked without force=true.'
+                    )
                 if execute:
                     db.session.commit()
                     result['committed'] = True
@@ -1467,6 +1494,7 @@ def register_cash_tracking_routes(app, db):
             users_with_changes = 0
             users_without_changes = 0
             users_with_drift_only = 0  # preview mode: had changes if executed
+            skipped_copytrade = 0
             errors = []
             stopped_early = False
             last_username_processed = None
@@ -1475,6 +1503,10 @@ def register_cash_tracking_routes(app, db):
                 if _t.time() - start > timeout_seconds:
                     stopped_early = True
                     break
+                if _is_copytrade_bot(user):
+                    skipped_copytrade += 1
+                    last_username_processed = user.username
+                    continue
                 try:
                     res = _full_rebuild_for_user(user, execute=execute)
                     last_username_processed = user.username
@@ -1510,15 +1542,26 @@ def register_cash_tracking_routes(app, db):
                             users_without_changes += 1
                             db.session.rollback()  # nothing to commit, clear session
                     else:
-                        # Preview: detect drift without writing
+                        # Preview: detect drift without writing. MUST include the
+                        # snapshot-level diff counts — filtering on user-record
+                        # drift alone hid chart1658's 4 pending daily-row flips
+                        # in the 8/30 fleet preview (user record was already
+                        # correct; only snapshot rows needed the convention fix),
+                        # while execute would have silently applied them.
                         max_drift = abs(res['target_user_max_cash_deployed'] - res['current_user_max_cash_deployed'])
                         cash_drift = abs(res['target_user_cash_proceeds'] - res['current_user_cash_proceeds'])
-                        if max_drift > 0.01 or cash_drift > 0.01:
+                        snap_changes = (
+                            (res.get('snapshots_updated') or 0) > 0
+                            or (res.get('intraday_updated') or 0) > 0
+                        )
+                        if max_drift > 0.01 or cash_drift > 0.01 or snap_changes:
                             users_with_drift_only += 1
                             results.append({
                                 'username': res['username'],
                                 'user_id': res['user_id'],
                                 'transactions': res['transactions'],
+                                'snapshots_updated': res.get('snapshots_updated', 0),
+                                'intraday_updated': res.get('intraday_updated', 0),
                                 'after_close_count': res['after_close_count'],
                                 'seeded_source': res['seeded_source'],
                                 'current_max_cash': res['current_user_max_cash_deployed'],
@@ -1550,6 +1593,7 @@ def register_cash_tracking_routes(app, db):
                                     (len(users) - users_with_drift_only)),
                 'users_with_changes': users_with_changes if execute else users_with_drift_only,
                 'users_without_changes': users_without_changes if execute else None,
+                'skipped_copytrade': skipped_copytrade,
                 'errors': errors,
                 'elapsed_seconds': elapsed,
                 'stopped_early': stopped_early,
