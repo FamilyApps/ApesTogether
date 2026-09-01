@@ -834,6 +834,8 @@ check account history the moment anything smells commercial. Same posture
 
 ## Master timeline (all accounts)
 
+**Day-level view: `docs/CALENDAR_SEPTEMBER_2026.md`** (added 2026-09-01) — merges this timeline with events (`docs/research/NYC_EVENTS_AND_GUERRILLA.md`), Wave-1 DMs, university outreach, writers warm-up, and guerrilla ops into one dated September grid. Rebuild monthly.
+
 | When | Founder X | Founder Reddit | Brand accts | LinkedIn |
 |---|---|---|---|---|
 | Wk 8/24 | create + Premium + follows/replies → pin X-01, RIDE-TRADE-01, DMs 3/day | create, verify, join subs, lurk; first comments ~Thu | park all handles; TikTok #1 Thu 8/27 | headline flip optional |
