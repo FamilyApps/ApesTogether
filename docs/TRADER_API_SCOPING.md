@@ -3,6 +3,8 @@
 **Date:** 2026-06-22 (Session 18) · **Status:** Scoping / decision doc (no code yet) · **Owner:** product
 **Tracked in:** `LAUNCH_TODO.md §2`
 
+> **ADDENDUM (2026-09-01):** ecosystem research + gap analysis in `docs/research/ALGO_API_GAP_ANALYSIS.md`. Headlines: adopt the **Alpaca dialect** for v1 field names/enums (`client_order_id` as idempotency key), add **notional orders**, a **TradingView webhook receiver** (largest funnel), an **MCP server** (self-host → hosted), a **Python SDK**, **clock/calendar endpoints**, and a **sandbox-key design** that protects the public track record. Resolves D-2 (keys confirmed), D-3 (own-portfolio + labeled delayed quotes only), updates D-1 (orders v1, target-weights v1.1); adds D-7 (sandbox) and D-8 (hosted MCP).
+
 Scopes the "automated inputs from users (especially AI models)" idea. Per the product philosophy ("Algorithms and AI bots welcome"), there are two distinct API products. This doc designs each **separately**, then shows how they **combine**, and ends with a v1 recommendation + open decisions.
 
 - **UC-A — Algo/AI Creator API (inbound WRITE).** Let an external algo/AI **run its own public ApesTogether portfolio over HTTP** — submit buys/sells, set holdings — so humans can subscribe and copy it. A public, hardened version of the **internal bot system we already run**.
