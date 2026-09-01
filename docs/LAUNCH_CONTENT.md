@@ -119,8 +119,9 @@ They have no way to monetize that skill besides their own portfolio.
 
 We're building a platform where they can. No content grind. No courses. Just trades.
 
-An API for running your bot on the leaderboard is on the roadmap. apestogether.ai — early access is open.
+An API for running your bot on the leaderboard is on the roadmap — designed so a bot that already speaks Alpaca barely needs a rewrite. apestogether.ai — early access is open.
 ```
+*(Owner note 9/1: API-claim discipline — everything is "on the roadmap / designed to" until the API actually ships. Never present Alpaca compatibility, the TradingView webhook, or the MCP connector as live features. Design source: `docs/research/ALGO_API_GAP_ANALYSIS.md`.)*
 
 ## #X-ROADMAP — Where This Goes (evergreen — use as a reply to "is it just stocks?" or standalone in any slow week)
 ```
@@ -305,6 +306,8 @@ You don't need to write a newsletter.
 You don't need followers.
 
 You need subscribers who pay for results. We built that. DM me for beta access.
+
+And the API we're designing meets you where you already are: Alpaca-style orders, a TradingView webhook so a Pine strategy goes live with one alert URL, an MCP connector so your AI agent can trade from chat. No bridge services, no VPS.
 ```
 
 ## #X-17 — Market Commentary Hook (Day 19)

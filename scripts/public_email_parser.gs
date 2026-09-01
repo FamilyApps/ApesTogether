@@ -224,9 +224,15 @@ function parseTradesFromEmail(plainBody, htmlBody) {
   }
 
   // Pattern 1: "Bought 10 shares of AAPL at $150.00"
+  // MERGE with any existing entry for the same ticker+action instead of
+  // pushing a second copy: Public's 2026-09 template contains BOTH a
+  // dollar-summary line (matched priceless by Pattern 0a) and a
+  // shares-at-price line (matched here). An unconditional push duplicated
+  // every trade in an email (batch bfa8933c-34a) — the priced detail line
+  // should UPGRADE the summary entry, not clone it.
   const boughtPattern = /(?:bought|purchased)\s+(\d+(?:\.\d+)?)\s+shares?\s+(?:of\s+)?([A-Z]{1,5}(?:\.[A-Z]{1,2})?)\s+(?:at\s+)?\$?([\d,.]+)/gi;
   while ((match = boughtPattern.exec(text)) !== null) {
-    trades.push({
+    mergeTrade(trades, {
       action: 'buy',
       ticker: match[2].toUpperCase(),
       quantity: parseFloat(match[1]),
@@ -234,10 +240,10 @@ function parseTradesFromEmail(plainBody, htmlBody) {
     });
   }
 
-  // Pattern 2: "Sold 10 shares of AAPL at $150.00"
+  // Pattern 2: "Sold 10 shares of AAPL at $150.00" (merge — see Pattern 1 note)
   const soldPattern = /(?:sold|selling)\s+(\d+(?:\.\d+)?)\s+shares?\s+(?:of\s+)?([A-Z]{1,5}(?:\.[A-Z]{1,2})?)\s+(?:at\s+)?\$?([\d,.]+)/gi;
   while ((match = soldPattern.exec(text)) !== null) {
-    trades.push({
+    mergeTrade(trades, {
       action: 'sell',
       ticker: match[2].toUpperCase(),
       quantity: parseFloat(match[1]),
@@ -303,6 +309,25 @@ function parseTradesFromEmail(plainBody, htmlBody) {
   }
 
   return trades;
+}
+
+/**
+ * Merge a parsed trade into the list: if the same ticker+action already
+ * exists (e.g. from the priceless dollar-summary Pattern 0a), fill in the
+ * missing price/quantity from the richer match instead of duplicating.
+ */
+function mergeTrade(trades, t) {
+  const existing = trades.find(e => e.ticker === t.ticker && e.action === t.action);
+  if (!existing) {
+    trades.push(t);
+    return;
+  }
+  if (existing.price == null && t.price != null && !isNaN(t.price)) {
+    existing.price = t.price;
+  }
+  if ((!existing.quantity || existing.quantity === 1) && t.quantity) {
+    existing.quantity = t.quantity;
+  }
 }
 
 // ── API Submission ─────────────────────────────────────────────────────────

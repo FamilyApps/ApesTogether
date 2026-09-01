@@ -8075,6 +8075,32 @@ def bot_email_trade():
     if not trades:
         return jsonify({'error': 'No trades specified'}), 400
 
+    # ── Collapse intra-email duplicates ──────────────────────────────────
+    # The GAS parser can extract the same trade twice from ONE email when
+    # Public's template carries both a dollar-summary line (no price) and a
+    # shares-at-price line (2026-09-01, batch bfa8933c-34a: all 8 trades
+    # duplicated as a priceless + priced pair). Public sends one email per
+    # fill, so identical ticker+action+quantity within a single message is
+    # a parse artifact, never two real trades. Keep the priced copy.
+    _seen = {}
+    for t in trades:
+        try:
+            _qty_key = round(float(t.get('quantity') or 1), 6)
+        except (TypeError, ValueError):
+            _qty_key = str(t.get('quantity'))
+        key = ((t.get('ticker') or '').upper(), (t.get('action') or '').lower(), _qty_key)
+        prev = _seen.get(key)
+        if prev is None:
+            _seen[key] = t
+        elif t.get('price') not in (None, '') and prev.get('price') in (None, ''):
+            _seen[key] = t
+    if len(_seen) < len(trades):
+        logger.warning(
+            f"bot_email_trade: collapsed {len(trades) - len(_seen)} intra-email "
+            f"duplicate trade(s) (summary+detail double-parse) msg_id={email_message_id or 'n/a'}"
+        )
+        trades = list(_seen.values())
+
     try:
         # ── Explicit bot username path (manual admin / test calls) ───
         if bot_username != 'auto':
