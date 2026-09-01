@@ -49,6 +49,17 @@ starts it (see the playbook below).
 ## Highest-ROI, budget-agnostic
 App Preview video · Apple Search Ads · referral loop · in-app ratings prompt.
 
+## NYC in-person + guerrilla channel (added 2026-09-01, research track C)
+Full event inventory, founder script, shirt/Money-Bike specs, QR measurement scheme, and phase sequencing: **`docs/research/NYC_EVENTS_AND_GUERRILLA.md`**. The skeleton:
+
+- **Anchor event: Stocktoberfest NYC (Stocktwits), Oct 5–7** — traders + finance creators + retail analysts, five weeks before the Nov launch window. Decide/buy by mid-Sep (VERIFY ticket price).
+- **Recurring reps:** QWAFAxNEW (quant society — **Sep 5 event is imminent**), NYC Algorithmic Trading meetup (5.2k members — the #X-03 persona), Day Traders of New York (Friday nights). Attend first, pitch organizers a technical talk later; never sell from the audience mic.
+- **University window is NOW (September):** club-fair season; one email per NYC quant/fintech club offering a "get paid for a track record without AUM" talk.
+- **Guerrilla:** receipt-motif shirts (≤10 first run, in hand before Stocktoberfest; gift only to signed-up traders) + Money Bike with QR signage (FiDi/campus routes; film it — the content out-reaches the bike).
+- **Measurement or it didn't happen:** one short-link per surface (`/shirt`, `/bike`, `/nyc`, `/talk`) via Vercel redirects; kill any surface silent for 60 days.
+- **Budget:** ~$400 ex-Stocktoberfest; fits the $1,000 tier without touching the ASA allocation. Missed for 2026 (calendar for 2027): WOLF Summit (Aug, co-hosted by Public.com), Finimize Modern Investor Summit (May), NY Fintech Week (Apr).
+- **Claim discipline travels:** roadmap items stay "on the roadmap," bots stay "clearly labeled company accounts" — same rules in person as in posts.
+
 ---
 
 # Demand & Scarcity Strategy (added Session 26, 2026-07-13)
