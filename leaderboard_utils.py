@@ -542,6 +542,24 @@ def _compute_all_user_metrics(period='YTD'):
         _sub_count_map = {uid: cnt for uid, cnt in sub_counts}
     except Exception as e:
         logger.warning(f"Batch subscriber count failed: {e}")
+
+    # 3b) Mobile (IAP) subscriber counts. The single-user stats path
+    # (calculate_user_portfolio_stats) has always included MobileSubscription,
+    # but this batch path only counted web Stripe Subscriptions — so a
+    # creator's mobile subscriber showed in their portfolio header yet was
+    # missing from the leaderboard/Top Creators count (2026-09-01,
+    # fund.finance2024: 4 vs 3).
+    try:
+        from models import MobileSubscription
+        msub_counts = db.session.query(
+            MobileSubscription.subscribed_to_id,
+            sqla_func.count(MobileSubscription.id).label('cnt')
+        ).filter(MobileSubscription.status == 'active').group_by(
+            MobileSubscription.subscribed_to_id).all()
+        for uid, cnt in msub_counts:
+            _sub_count_map[uid] = _sub_count_map.get(uid, 0) + cnt
+    except Exception as e:
+        logger.warning(f"Batch mobile subscriber count failed: {e}")
     
     # 4) Admin (gifted) subscriber bonuses
     _admin_bonus_map = {}

@@ -297,31 +297,10 @@ def add_transaction(user_id):
         db.session.add(transaction)
         
         try:
-            # CRITICAL FIX: Rebuild cash tracking from scratch for backdated transactions
-            # Get all transactions for this user in chronological order
-            all_transactions = Transaction.query.filter_by(user_id=user.id).order_by(Transaction.timestamp).all()
-            
-            # Rebuild max_cash_deployed and cash_proceeds
-            max_cash_deployed = 0.0
-            cash_proceeds = 0.0
-            
-            for txn in all_transactions:
-                transaction_value = txn.quantity * txn.price
-                
-                if txn.transaction_type in ('buy', 'initial'):
-                    # Use cash proceeds first, then deploy new capital
-                    if cash_proceeds >= transaction_value:
-                        cash_proceeds -= transaction_value
-                    else:
-                        new_capital = transaction_value - cash_proceeds
-                        cash_proceeds = 0
-                        max_cash_deployed += new_capital
-                elif txn.transaction_type == 'sell':
-                    cash_proceeds += transaction_value
-            
-            # Update user's cash tracking
-            user.max_cash_deployed = max_cash_deployed
-            user.cash_proceeds = cash_proceeds
+            # CRITICAL FIX: Rebuild cash tracking from scratch for backdated
+            # transactions. Shared helper (also used by delete_transaction);
+            # unlike the old inline version it preserves dividend proceeds.
+            max_cash_deployed, cash_proceeds = _rebuild_cash_tracking(user)
             
             db.session.commit()
             flash(
@@ -406,6 +385,40 @@ def edit_transaction(user_id, transaction_id):
     return render_template('admin/edit_transaction.html', user=user, transaction=transaction, now=datetime.now())
 
 
+def _rebuild_cash_tracking(user):
+    """Replay the user's full transaction ledger (chronological) to recompute
+    max_cash_deployed and cash_proceeds. Same FIFO rules as add_transaction's
+    inline rebuild: buys/initials consume cash_proceeds before deploying new
+    capital; sells credit cash_proceeds. Call AFTER mutating the ledger and
+    BEFORE commit — flush pending deletes first so the query sees them.
+
+    Added 2026-09-01: delete_transaction restored share quantities but left
+    cash tracking stale — deleting a duplicate SELL left its phantom proceeds
+    in user.cash_proceeds (Wolff IREN/SGOV double-sell repair).
+    """
+    db.session.flush()
+    all_transactions = Transaction.query.filter_by(user_id=user.id).order_by(
+        Transaction.timestamp).all()
+    max_cash_deployed = 0.0
+    cash_proceeds = 0.0
+    for txn in all_transactions:
+        transaction_value = txn.quantity * txn.price
+        if txn.transaction_type in ('buy', 'initial'):
+            if cash_proceeds >= transaction_value:
+                cash_proceeds -= transaction_value
+            else:
+                new_capital = transaction_value - cash_proceeds
+                cash_proceeds = 0
+                max_cash_deployed += new_capital
+        elif txn.transaction_type == 'sell':
+            cash_proceeds += transaction_value
+        elif txn.transaction_type == 'dividend':
+            cash_proceeds += transaction_value
+    user.max_cash_deployed = max_cash_deployed
+    user.cash_proceeds = cash_proceeds
+    return max_cash_deployed, cash_proceeds
+
+
 @admin_bp.route('/users/<int:user_id>/transactions/<int:transaction_id>/delete', methods=['POST'])
 @admin_required
 def delete_transaction(user_id, transaction_id):
@@ -445,8 +458,15 @@ def delete_transaction(user_id, transaction_id):
     db.session.delete(transaction)
     
     try:
+        # Recompute cash tracking from the corrected ledger — without this,
+        # deleting a sell restored the shares but kept the sale's cash.
+        max_deployed, proceeds = _rebuild_cash_tracking(user)
         db.session.commit()
-        flash(f'Transaction deleted and stock position updated', 'success')
+        flash(
+            f'Transaction deleted, stock position updated. Rebuilt cash tracking: '
+            f'Max deployed=${max_deployed:.2f}, Cash proceeds=${proceeds:.2f}',
+            'success'
+        )
     except Exception as e:
         db.session.rollback()
         flash(f'Error deleting transaction: {str(e)}', 'danger')

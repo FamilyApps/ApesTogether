@@ -17,6 +17,36 @@ This is the first dedicated pass requested in `LAUNCH_TODO.md §1` (the USER fla
 | S-3 | Legacy `app.py` runs Flask `debug=True` (NOT the deployed entrypoint) | **Low / Info** | Fixed |
 | S-4 | No dependency-vulnerability scan in CI (`pip-audit`/Dependabot) | **Low / Process** | Open |
 | S-5 | No centralized request-body size / input-validation guard | **Low** | Fixed (body size) |
+| S-6 | Supabase Data API exposes `public` schema tables with RLS disabled (2026-08-31 Supabase advisory) | **Critical** | Runbook below — USER must run in dashboard |
+
+---
+
+## S-6 — Supabase RLS advisory (added 2026-09-01)
+
+**What Supabase flagged (email, 31 Aug 2026, project `apestogether-prod` / `rtszhrqjirnfynnxeeky`):** `rls_disabled_in_public` + `sensitive_columns_exposed` — i.e. every table in the `public` schema (including `"user"` with `email`, `password_hash`, `phone_number`, `oauth_id`) is reachable through Supabase's auto-generated PostgREST **Data API** with no row-level security. Anyone holding the project URL + the **anon key** could read/write them. The anon key is designed to be public in Supabase's model; we must assume it is not a secret.
+
+**Why the app itself is unaffected by the fix:** Flask/SQLAlchemy connects via the direct Postgres connection string as the table-owning role. RLS does not apply to the table owner (we are not using `FORCE ROW LEVEL SECURITY`), and the owner role bypasses PostgREST entirely. Enabling RLS with **no policies** simply makes the tables invisible to the `anon`/`authenticated` PostgREST roles — exactly what we want, since NOTHING in this codebase or the Android app uses the Supabase Data API or supabase-js.
+
+**Runbook (both steps, ~3 minutes, zero app impact):**
+
+1. **Enable RLS on every public table** — Supabase Dashboard → SQL Editor → run:
+```sql
+DO $$
+DECLARE r RECORD;
+BEGIN
+  FOR r IN SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+  LOOP
+    EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', r.tablename);
+  END LOOP;
+END $$;
+```
+Add **no policies** — deny-all is the goal. New tables created later by SQLAlchemy also need this; re-run the block after any migration that adds a table (or add `ENABLE ROW LEVEL SECURITY` to the migration itself).
+
+2. **Close the front door too:** Dashboard → Settings → API → **Exposed schemas** → remove `public` (leave `graphql_public` off as well if unused). With no exposed schemas, PostgREST serves nothing regardless of future RLS mistakes. If the dashboard offers "Disable Data API" outright, that's equivalent and preferred.
+
+**Verify:** `curl "https://rtszhrqjirnfynnxeeky.supabase.co/rest/v1/user?select=email&limit=1" -H "apikey: <anon key>"` must return an error (401/404/permission denied), not rows. Then re-run the Security Advisor in the dashboard — both findings should clear.
+
+**Post-fix follow-up:** if the advisor previously showed these tables as publicly readable for an unknown period, rotating the anon/service keys (Settings → API → "Reset") is cheap insurance; nothing in our stack references them, so rotation is free for us.
 
 **Session 18 remediation (commit pending):** S-1 — `rate_limit` now uses a shared Postgres fixed-window counter (`_rate_limit_db_hit` + `mobile_rate_limit` table via `scripts/migrations/2026_06_22_rate_limit.sql`) with in-memory fallback; `@rate_limit(10,60)` applied to `/auth/token`. S-2 — `/webhooks/google/rtdn` honors optional `RTDN_WEBHOOK_TOKEN` (`?token=`). S-3 — `app.py` debug gated behind `FLASK_DEBUG=1`. S-5 — `MAX_CONTENT_LENGTH = 1 MB`. Plus a separate price-integrity fix: `execute_trade` now fetches price server-side (see `LAUNCH_TODO.md` W3). **Still TODO:** free-text field validation (display name / W-9) and S-4 CI scanning.
 
