@@ -3,6 +3,15 @@
 **Built:** 2026-09-01 · **Sources merged:** `MARKETING_PLAN.md` (master timeline, Phase-1 rhythm, sector-supply rules), `LAUNCH_CONTENT.md` (post IDs), `LAUNCH_PLAYBOOK.md`, `TRADER_RECRUITMENT.md` (Wave-1 DMs), `docs/research/NYC_EVENTS_AND_GUERRILLA.md`, `docs/research/gme_amc_writers_outreach.csv`, `PRESS_KIT.md`
 **USER absence:** London **Fri 9/4 → Mon 9/7** (Labor Day 9/7, market closed — nothing missed). QWAFAxNEW Sep 5 = SKIPPED (away); their October Petter Kolm event is the replacement — RSVP the day it posts.
 
+**Companion months:** `CALENDAR_OCTOBER_2026.md` (Phase 2 → press ignition) · `CALENDAR_NOVEMBER_2026.md` (countdown → launch → spike). Launch anchor Tue Nov 10, slip rule in the October header.
+
+## Standard times (ET) — apply to every row unless stated
+- **X original post:** 9:15am · **reply blocks** 12:30pm + 8:30pm (15 min each) · **Sun recap** 5:00pm
+- **TikTok:** 7:00pm (cross-post IG Reels + YT Shorts)
+- **Reddit:** karma comments 12–1pm · posts 9:30am
+- **DMs:** 10:30am block · **Waitlist/club emails:** Tue/Thu 10:00am
+- **Metrics note:** Fri 5:00pm
+
 ## Standing rules this calendar obeys
 - **Sep = Phase-1 rhythm** (master timeline): founder X 3 posts/wk + weekly ride-along + DMs 3/day · Reddit = karma ramp, ZERO app talk (only exception: R-04 in r/EntrepreneurRideAlong, where build-in-public is the norm) · 1 TikTok/wk cross-posted · LinkedIn quiet.
 - **Post IDs continue in library sequence at 3/wk pace** — the old "Day N" tags are date-broken (Session 33); sequence order is preserved, dates are not. Beta/store/stunt content (#X-19+, #TT-07+, $2-bill) stays **trigger-gated** — none of it fires in September.

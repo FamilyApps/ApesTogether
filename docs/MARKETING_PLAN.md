@@ -834,7 +834,7 @@ check account history the moment anything smells commercial. Same posture
 
 ## Master timeline (all accounts)
 
-**Day-level view: `docs/CALENDAR_SEPTEMBER_2026.md`** (added 2026-09-01) — merges this timeline with events (`docs/research/NYC_EVENTS_AND_GUERRILLA.md`), Wave-1 DMs, university outreach, writers warm-up, and guerrilla ops into one dated September grid. Rebuild monthly.
+**Day-level view (added 2026-09-01): `docs/CALENDAR_SEPTEMBER_2026.md` · `docs/CALENDAR_OCTOBER_2026.md` · `docs/CALENDAR_NOVEMBER_2026.md`** — every day through hard launch with content-ID references (LAUNCH_CONTENT/LAUNCH_OUTREACH/TRADER_RECRUITMENT), times of day, events, and ops deadlines. Launch anchor Tue Nov 10 with a +7-day slip rule decided at the Fri 10/9 Phase-2 gate review.
 
 | When | Founder X | Founder Reddit | Brand accts | LinkedIn |
 |---|---|---|---|---|

@@ -721,3 +721,47 @@ human or AI, actually beat the market where everyone can watch?"**
 
 The WSJ-exclusive-first sequencing (above) is unchanged; this table
 feeds Tier 1–2 AFTER the exclusive window closes.
+
+---
+
+# #J-GME — GME/AMC-era chroniclers (added 2026-09-01)
+
+Pairs with `docs/research/gme_amc_writers_outreach.csv` (33 writers + contact
+columns). **Send window: T-10 → T-7 (embargo wave), never before the WSJ
+exclusive window closes.** The 5 rows marked TOP TARGET (Levine, Kawa,
+Phillips, Banerji, Kochkodin) get fully bespoke first paragraphs, not this
+template with blanks. Levine also appears in the Tier-1 influencer list —
+he gets ONE email (this one), never both.
+
+Personalization is mechanical from the CSV: `[2021_piece]` ←
+`gme_amc_coverage_2021`, `[current_hook]` ← `recent_relevant_coverage`.
+
+```
+Subject: Five years after GameStop — the apes built a scoreboard
+
+Hi [name],
+
+You wrote [2021_piece — cite the actual headline] when retail trading was
+a mob with rocket emojis. The question underneath that story — can retail
+actually trade, or was it all luck and leverage? — still has no scoreboard.
+I built one.
+
+ApesTogether (yes, the name is a deliberate callback) is a verified
+track-record layer: every trade logged at live market price, timestamped,
+impossible to backfill. Public leaderboard vs. the S&P. Traders earn 85% of
+$9/mo subscriptions — the creator economy where the content is a track
+record. And frontier AI models run portfolios on the same board, so the
+standings double as a live retail-vs-machines experiment.
+
+Saw your recent [current_hook] — this is the same story with a
+measurement instrument attached.
+
+Launching [launch date]. Happy to give you early access, the data, or a
+demo (I'm in Manhattan). One-pager + screenshots: apestogether.ai/press
+
+[Your name] · Founder, Family Apps LLC · [phone]
+```
+
+Follow-up: use the standard journalist follow-up (§JOURNALIST FOLLOW-UP),
+5–7 days later, once. Tips inboxes (`tips@sherwood.news`) get the same body
+with "For: [name]" as the first line.
