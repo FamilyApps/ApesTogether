@@ -2,6 +2,8 @@
 
 **Built:** 2026-09-01 · Phase 2 (proof) → Phase 3 ignition (press pitches T-21). **Launch anchor: Tue Nov 10** (T-labels count back from it). **Slip rule:** Phase-2 exit-gate review Fri 10/9 — if gates fail, launch slips to Tue Nov 17 and every T-labeled row below moves +7 days; date-fixed rows (events, freeze) do NOT move.
 
+**SEQUENCE RULE (recalibrated 9/1):** September restarted the library at #X-01 and hands October **#X-11 as next-unposted**. For rhythm slots below, post the NEXT UNPOSTED ID rather than the listed one. Rows paired to an event (`#X-19` beta w/ E-BETA waves, `#X-22` shoutout, `#X-29` milestone, all November countdown IDs) stay pinned to their dates — skip ahead when needed and use skipped IDs as filler for spare slots.
+
 ## Standard times (ET) — apply to every row unless a time is given
 - **X original post:** 9:15am (pre-open) · **reply blocks** 12:30pm + 8:30pm (15 min each, 10 replies/day min)
 - **TikTok:** 7:00pm (cross-post IG Reels + YT Shorts same hour)

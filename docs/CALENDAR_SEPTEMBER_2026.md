@@ -5,6 +5,8 @@
 
 **Companion months:** `CALENDAR_OCTOBER_2026.md` (Phase 2 → press ignition) · `CALENDAR_NOVEMBER_2026.md` (countdown → launch → spike). Launch anchor Tue Nov 10, slip rule in the October header.
 
+**RECALIBRATED 9/1 EVENING (v2 — supersedes the morning draft, which also had weekday labels off by one).** Actual state as of 9/1: only `apestogether.social@gmail.com` registered — **no brand handles reserved, nothing posted anywhere**. Founder X (@BobFordTrades) warming via likes/replies from the Pixel ✓. Reddit (Frodo_Baghodler) lurk/upvotes only — **upvoting builds zero karma; comments start this week**. Content sequence therefore restarts at **#X-01**; October picks up at #X-11.
+
 ## Standard times (ET) — apply to every row unless stated
 - **X original post:** 9:15am · **reply blocks** 12:30pm + 8:30pm (15 min each) · **Sun recap** 5:00pm
 - **TikTok:** 7:00pm (cross-post IG Reels + YT Shorts)
@@ -22,53 +24,56 @@
 
 ---
 
-## Week 1 — Tue 9/2 → Sun 9/7 (short week; London Fri–Mon)
+## Week 1 — Wed 9/2 → Mon 9/7 (short week; London Fri 9/4 → Mon 9/7)
 
-| Day | Founder X | TikTok/brand | Reddit (karma acct) | DMs / outreach | Events + ops |
+| Day | Founder X | TikTok/brand | Reddit (Frodo_Baghodler) | DMs / outreach | Events + ops |
 |---|---|---|---|---|---|
-| **Tue 9/2** | **#X-07 AI/Bots Welcome** (evening) | — | 2–3 comments, trading subs | 3 Wave-1 DMs | **Supabase RLS runbook (S-6) — TODAY** · paste fixed GAS parser into Apps Script · Wolff dup-txn repair after Vercel deploy · YTD tab spot-check |
-| **Wed 9/3** | **#X-08 Contrarian Take** | **#TT-03 Earnings Math** (Thu slot pulled a day early — travel) | 2–3 comments | 3 DMs | Pack; pre-draft Friday's RIDE-TRADE skeleton |
-| **Thu 9/4** ✈ | — (fly) | — | — | — | London |
-| **Fri 9/5** | **#RIDE-TRADE wk1** from phone — angle: "checking my bots' week from London; they don't know I left" | — | — | — | London (QWAFAxNEW skipped) |
-| **Sat–Sun 9/6–7** | optional: 1 casual London reply-guy session | — | — | — | Labor Day Mon; market closed |
+| **Tue 9/1 (tonight)** | — | — | — | — | Wolff dup deletes (txn 1829 + 1830) · GAS parser paste · Supabase ✓ done |
+| **Wed 9/2** | 9:15am **PIN #X-01 launch thread** (fill [N]/100 badge count with the real number) | **7–9pm: register ALL brand handles** — exec plan §0.1 one-sitting list (X @apestogether, TikTok, IG, YT, LinkedIn page) using apestogether.social@gmail.com; park all; then tell Cascade to restore footer links | **First 2–3 COMMENTS** in trading subs (upvotes earn nothing — karma ramp starts now) | 3 Wave-1 DMs (Template A/B) | YTD tab spot-check vs Public |
+| **Thu 9/3** | 9:15am **#X-02 The Problem** · 12:30pm **#RIDE-TRADE-01 Day One** (founder account's first trades — make them, then post) | — | 2–3 comments | 3 DMs | Pack for London |
+| **Fri 9/4** ✈ | — (fly) | — | — | — | London (QWAFAxNEW Sat 9/5 skipped) |
+| **Sat 9/5 – Mon 9/7** | optional: 1 casual reply session from phone | — | optional upvote-scroll | — | Labor Day Mon 9/7, market closed — nothing missed |
 
-## Week 2 — Mon 9/8 → Sun 9/14
+## Week 2 — Tue 9/8 → Sun 9/13
 
 | Day | Founder X | TikTok/brand | Reddit | DMs / outreach | Events + ops |
 |---|---|---|---|---|---|
-| **Mon 9/8** | — (travel recovery; DM catch-up instead) | — | 2–3 comments | 6 DMs (catch-up) | **University club emails batch 1 (#E-CAMPUS ×5)** — club-fair season |
-| **Tue 9/9** | reply-guy hour | — | 2–3 comments | 3 DMs | **NYC Finance & Investment Networking Night, 6pm (Tier-2 event)** — first IRL reps, cards w/ `/nyc` QR |
-| **Wed 9/10** | **#X-09 Creator Economy Angle** | — | **#R-04 r/EntrepreneurRideAlong #1** (monthly build-numbers post — the planned "week of 9/8" slot) | 3 DMs | Writers CSV: follow first 8, engage 2 posts each |
-| **Thu 9/11** | — | **#TT-04 The Stat** | 2–3 comments | 3 DMs | Day Traders of NY (Fri) go/no-go check |
-| **Fri 9/12** | **#RIDE-TRADE wk2** (real weekly numbers) | — | 2–3 comments | 3 DMs | Optional: Day Traders of NY Friday night |
-| **Sun 9/14** | **#RIDE-BUILD #1** (what shipped this week — parser fix, RLS, leaderboard fix are all legit material) | — | — | — | **Order shirts (receipt motif ×10) — hard deadline for pre-Stocktoberfest delivery** |
+| **Tue 9/8** | 9:15am **#X-03 Algo Traders** | — | daily comments resume (2–3/day from here on) | 6 DMs (catch-up) | 10am **university batch 1 (#E-CAMPUS ×5)** — club-fair season |
+| **Wed 9/9** | reply blocks only | — | comments | 3 DMs | **NYC Finance & Investment Networking Night, 6pm (Tier-2 event)** — first IRL reps, cards w/ `/nyc` QR |
+| **Thu 9/10** | 9:15am **#X-04 The Trust Gap** | 7pm **#TT-01** — brand accounts' first content (needs Wed 9/2 handles) | comments | 3 DMs | Day Traders of NY (Fri) go/no-go |
+| **Fri 9/11** | 9:15am **#RIDE-TRADE wk2** (real weekly numbers) | — | comments | 3 DMs | Metrics note 5pm · optional: Day Traders Friday night |
+| **Sat 9/12** | engage only | — | — | — | — |
+| **Sun 9/13** | 5pm weekly recap (#X-06 skeleton, real numbers) | — | — | — | **Order shirts (receipt motif ×10)** — 2-wk production, needed for Stocktoberfest 10/5 |
 
-## Week 3 — Mon 9/15 → Sun 9/21
-
-| Day | Founder X | TikTok/brand | Reddit | DMs / outreach | Events + ops |
-|---|---|---|---|---|---|
-| **Mon 9/15** | **#X-10 Social Proof** (real numbers only) | — | 2–3 comments | 3 DMs | **Stocktoberfest DECISION: verify price, buy pass** · mid-Sep task: park r/ApesTogether sub |
-| **Tue 9/16** | reply-guy hour | — | 2–3 comments | 3 DMs | University batch 2 (#E-CAMPUS ×5) |
-| **Wed 9/17** | **#X-ORIGIN — the 6-year receipt** (quote-tweet of pinned X-01; the wk-2–3 slot) | — | 2–3 comments | 3 DMs | Writers CSV: follow next 8, engage |
-| **Thu 9/18** | — | **#TT-05 Wall St vs Finfluencers vs Us** | 2–3 comments | 3 DMs | NYC Algo Trading meetup — RSVP if a September date posted |
-| **Fri 9/19** | **#RIDE-TRADE wk3** | — | 2–3 comments | 3 DMs | Optional: Day Traders of NY |
-| **Sun 9/21** | — | — | — | — | Buffer/family day |
-
-## Week 4 — Mon 9/22 → Wed 9/30
+## Week 3 — Mon 9/14 → Sun 9/20
 
 | Day | Founder X | TikTok/brand | Reddit | DMs / outreach | Events + ops |
 |---|---|---|---|---|---|
-| **Mon 9/22** | **#X-11 NYC Founder Story** (pairs with the IRL push) | — | 2–3 comments | 3 DMs | Bike signage ordered (coroplast + QR `/bike`) |
-| **Wed 9/24** | **#X-12 recap** (rewrite with REAL month-to-date numbers) | **#TT-06 POV: Tracking Performance** (Thu 9/25 ok too) | 2–3 comments | 3 DMs | Writers CSV: follow final 8, engage |
-| **Fri 9/26** | **#RIDE-TRADE wk4** | — | 2–3 comments | 3 DMs | Optional: Day Traders of NY · shirts should arrive ≈now — QC the QR |
-| **Sun 9/28** | **#RIDE-BUILD #2** | — | — | — | First Money Bike ride w/ signage (weekend afternoon, FiDi) — film for TikTok raw material |
-| **Mon 9/29** | **#X-13 The $9 Model** | — | 2–3 comments | 3 DMs | University batch 3 (#E-CAMPUS ×5) |
-| **Wed 9/30** | **#X-14 Paper Trading Defense** | — | 2–3 comments | 3 DMs | Month-end: netted sub/gift numbers logged internally; Xero payout tracking lands ~10/3 |
+| **Mon 9/14** | 9:15am **#X-05 The Earnings Math** | — | comments | 3 DMs | Shirt order HARD deadline if Sunday slipped |
+| **Tue 9/15** | reply blocks | — | comments · park r/ApesTogether (create, minimal setup, no posts) | 3 DMs | **Stocktoberfest DECISION: verify price, buy pass** |
+| **Wed 9/16** | 9:15am **#X-07 AI/Bots Welcome** | — | 9:30am **#R-04 #1 r/EntrepreneurRideAlong** (build-numbers post; fresh-ish account is normal in that sub) | 3 DMs | Writers CSV: follow first 8 on X, engage 2 posts each |
+| **Thu 9/17** | — | 7pm **#TT-02 How We Verify** | comments | 3 DMs | University batch 2 (#E-CAMPUS ×5) · NYC Algo Trading meetup — RSVP if Sept date posted |
+| **Fri 9/18** | 9:15am **#RIDE-TRADE wk3** | — | comments | 3 DMs | Metrics note · optional Day Traders |
+| **Sat 9/19 – Sun 9/20** | Sun 5pm recap + **#RIDE-BUILD #1** (parser fix, RLS, leaderboard fix = legit material) | — | — | — | Buffer/family |
+
+## Week 4 — Mon 9/21 → Wed 9/30
+
+| Day | Founder X | TikTok/brand | Reddit | DMs / outreach | Events + ops |
+|---|---|---|---|---|---|
+| **Mon 9/21** | 9:15am **#X-08 Contrarian Take** | — | comments | 3 DMs | Order bike signage (coroplast + QR `/bike`) |
+| **Tue 9/22** | reply blocks | — | comments | 3 DMs | Writers CSV: follow next 8 |
+| **Wed 9/23** | 9:15am **#X-09 Creator Economy Angle** | — | comments | 3 DMs | — |
+| **Thu 9/24** | — | 7pm **#TT-03 The Earnings Math** | comments | 3 DMs | — |
+| **Fri 9/25** | 9:15am **#RIDE-TRADE wk4** | — | comments | 3 DMs | Metrics note · shirts arrive ≈now — QC the QR · optional Day Traders |
+| **Sat 9/26 – Sun 9/27** | Sun 5pm recap + **#RIDE-BUILD #2** | — | — | — | **First Money Bike ride** w/ signage (Sat afternoon, FiDi) — film for TikTok raw material |
+| **Mon 9/28** | 9:15am **#X-ORIGIN — the 6-year receipt** (quote-tweet of pinned X-01) | — | comments | 3 DMs | University batch 3 (#E-CAMPUS ×5) |
+| **Tue 9/29** | reply blocks | — | comments | 3 DMs | Writers CSV: follow final 8 |
+| **Wed 9/30** | 9:15am **#X-10 Social Proof** (real numbers only) | — | comments | 3 DMs | Month-end: netted sub/gift numbers logged; Xero payout tracking lands ~10/3 |
 
 ---
 
 ## Monthly totals (sanity check vs Phase-1 spec)
-9 sequenced X posts + 4 RIDE-TRADE + 2 RIDE-BUILD + 1 X-ORIGIN ≈ 3–4/wk ✓ · 4 TikToks ✓ · Reddit: daily-ish karma comments + one R-04 ✓ · ~60 Wave-1 DMs ✓ · 15 university club emails · 24 writers warmed (zero pitched) ✓ · 2 IRL events + 2–3 optional Fridays · shirts + bike live by month-end.
+#X-01 pinned + #X-02–#X-10 + #X-ORIGIN + #RIDE-TRADE-01 + 3 weekly RIDE-TRADEs + 2 RIDE-BUILDs + Sunday recaps ≈ 3–4 posts/wk ✓ · 3 TikToks (first one 9/10 — handle registration gated) · Reddit: comments daily from 9/2 + one R-04 ✓ · ~55 Wave-1 DMs ✓ · 15 university club emails · 24+ writers warmed (zero pitched) ✓ · 2 IRL events + optional Fridays · shirts + bike live by month-end. **Sequence handoff to October: next unposted = #X-11.**
 
 ## Deliberately NOT in September (trigger- or month-gated)
 - **#X-19+ beta-day posts, #TT-07+ walkthroughs, $2-bill stunt, all #E-COUNTDOWN/#E-PRELAUNCH** — launch-window triggers
