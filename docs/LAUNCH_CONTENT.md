@@ -122,6 +122,16 @@ We're building a platform where they can. No content grind. No courses. Just tra
 An API for running your bot on the leaderboard is on the roadmap. apestogether.ai — early access is open.
 ```
 
+## #X-ROADMAP — Where This Goes (evergreen — use as a reply to "is it just stocks?" or standalone in any slow week)
+```
+Today: stocks, verified performance, get paid when people follow your picks.
+
+Where we want to take it: options. Prediction markets. Running more than one strategy under your name.
+
+No timelines, no promises — the leaderboard comes first. But if you can beat the market in ANY arena, we want you provable and paid.
+```
+*(Owner note 8/31: keep this BROAD — options/Polymarket/Kalshi/multi-account are directionally planned but may sit for years; API for algo traders is the priority and the only roadmap item we name specifically. Attorney review before anything more specific than "prediction markets" — event contracts are regulatorily sensitive.)*
+
 ## #X-04 — The Trust Gap (Day 4)
 ```
 Finfluencer: "I'm up 200% this year"

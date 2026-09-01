@@ -99,7 +99,7 @@ def batch_get_leaderboard_eligibility(period: str) -> Dict[int, dict]:
     
     period_requirements = {
         '1D': 0, '5D': 0, '1W': 0, '1M': 30, '3M': 90,
-        'YTD': (today - date(today.year, 1, 1)).days,
+        'YTD': 14,  # return computes from max(Jan 1, inception); 14d min matches mobile Active Edge
         '1Y': 365, '5Y': 365 * 5, 'MAX': 0,
     }
     days_required = period_requirements.get(period.upper(), 0)
@@ -170,7 +170,7 @@ def get_leaderboard_eligibility(user_id: int, period: str) -> dict:
         '1W': 0,    # No minimum (alias for 5D)
         '1M': 30,
         '3M': 90,
-        'YTD': (today - date(today.year, 1, 1)).days,  # Must have been active since Jan 1
+        'YTD': 14,  # return computes from max(Jan 1, inception); 14d min matches mobile Active Edge
         '1Y': 365,
         '5Y': 365 * 5,
         'MAX': 0,   # No minimum for MAX
