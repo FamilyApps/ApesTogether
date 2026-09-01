@@ -13499,49 +13499,76 @@ def get_public_portfolio_chart(username, period):
         
         if chart_cache_data:
             try:
-                # Return Chart.js format directly for public portfolio pages
                 cached_data = json.loads(chart_cache_data)
-                cached_data['data_source'] = 'pre_rendered_cache_PRIMARY'
-                cached_data['username'] = username
                 
-                logger.info(f"Using pre-rendered chart data (PRIMARY) for public view: {username}, period {period_upper}")
-                return jsonify(cached_data)
+                # Canonical cache shape (post TWR switch): Chart.js format from
+                # leaderboard_utils.generate_chart_from_snapshots — labels +
+                # datasets of cumulative % returns, plus portfolio_return /
+                # sp500_return headline values. Convert to this endpoint's
+                # {date, portfolio, sp500} contract (values are percentages).
+                if 'datasets' in cached_data and 'labels' in cached_data:
+                    labels = cached_data.get('labels', [])
+                    datasets = cached_data.get('datasets', [])
+                    portfolio_vals = datasets[0].get('data', []) if len(datasets) > 0 else []
+                    sp500_vals = datasets[1].get('data', []) if len(datasets) > 1 else []
+                    
+                    chart_points = []
+                    for i in range(min(len(labels), len(portfolio_vals))):
+                        chart_points.append({
+                            'date': labels[i],
+                            'portfolio': portfolio_vals[i],
+                            'sp500': sp500_vals[i] if i < len(sp500_vals) else 0
+                        })
+                    
+                    response_data = {
+                        'chart_data': chart_points,
+                        'portfolio_return': cached_data.get('portfolio_return'),
+                        'sp500_return': cached_data.get('sp500_return'),
+                        'period': period_upper,
+                        'values_are': 'cumulative_pct_return',
+                        'data_source': 'pre_rendered_cache_PRIMARY',
+                        'username': username
+                    }
+                    logger.info(f"Using pre-rendered TWR chart data (PRIMARY) for public view: {username}, period {period_upper}")
+                    return jsonify(response_data)
+                
+                # Legacy raw-dollar cache shape — flow-blind (deposits render as
+                # gains). Do NOT serve it; fall through to live calculation.
+                logger.warning(f"Stale legacy-shape chart cache for {username} {period_upper} - ignoring, using live calculation")
                 
             except Exception as e:
                 logger.warning(f"Failed to parse pre-rendered chart data for {username}: {e}")
         
-        # Fallback: Generate chart on-demand for non-leaderboard users
-        from portfolio_performance import PortfolioPerformanceCalculator
-        calculator = PortfolioPerformanceCalculator()
+        # Fallback: Generate chart on-demand via the unified TWR calculator
+        # (same path as dashboard/mobile/public-portfolio endpoints).
+        from leaderboard_utils import generate_chart_from_snapshots
         
-        logger.info(f"Generating chart on-demand for public view: {username}, period {period_upper}")
-        performance_data = calculator.get_performance_data(user.id, period_upper)
+        logger.info(f"Generating TWR chart on-demand for public view: {username}, period {period_upper}")
+        chart_result = generate_chart_from_snapshots(user.id, period_upper)
         
-        # Convert to Chart.js format for consistency
-        if 'chart_data' in performance_data:
-            chart_js_format = {
-                'labels': [item['date'] for item in performance_data['chart_data']],
-                'datasets': [
-                    {
-                        'label': f'{username} Portfolio',
-                        'data': [item['portfolio'] for item in performance_data['chart_data']],
-                        'borderColor': 'rgb(75, 192, 192)',
-                        'backgroundColor': 'rgba(75, 192, 192, 0.2)',
-                        'tension': 0.1
-                    },
-                    {
-                        'label': 'S&P 500',
-                        'data': [item['sp500'] for item in performance_data['chart_data']],
-                        'borderColor': 'rgb(255, 99, 132)',
-                        'backgroundColor': 'rgba(255, 99, 132, 0.2)',
-                        'tension': 0.1
-                    }
-                ],
-                'period': period,
-                'username': username,
-                'data_source': 'live_calculation'
-            }
-            return jsonify(chart_js_format)
+        if chart_result:
+            labels = chart_result.get('labels', [])
+            datasets = chart_result.get('datasets', [])
+            portfolio_vals = datasets[0].get('data', []) if len(datasets) > 0 else []
+            sp500_vals = datasets[1].get('data', []) if len(datasets) > 1 else []
+            
+            chart_points = []
+            for i in range(min(len(labels), len(portfolio_vals))):
+                chart_points.append({
+                    'date': labels[i],
+                    'portfolio': portfolio_vals[i],
+                    'sp500': sp500_vals[i] if i < len(sp500_vals) else 0
+                })
+            
+            return jsonify({
+                'chart_data': chart_points,
+                'portfolio_return': chart_result.get('portfolio_return'),
+                'sp500_return': chart_result.get('sp500_return'),
+                'period': period_upper,
+                'values_are': 'cumulative_pct_return',
+                'data_source': 'live_calculation_twr',
+                'username': username
+            })
         
         return jsonify({'error': 'No chart data available'}), 404
         
@@ -15098,117 +15125,31 @@ def admin_rebuild_user_cache(user_id):
                 'message': f'User {user_id} ({user.username}) has no stocks - no caches to generate'
             })
         
-        portfolio_start_date = min(user_stocks, key=lambda s: s.purchase_date).purchase_date.date()
+        # METHODOLOGY FIX (2026-08-31): route through the unified TWR calculator
+        # (leaderboard_utils.update_user_chart_cache -> generate_chart_from_snapshots
+        # -> calculate_portfolio_performance). The old inline generator plotted raw
+        # snapshot dollars and computed (last-first)/first, which rendered every
+        # deposit as a gain (chart1658 YTD showed +122% vs +37.42% TWR).
+        from leaderboard_utils import update_user_chart_cache
         
         periods = ['1D', '5D', '1M', '3M', 'YTD', '1Y']
         
         for period in periods:
             try:
-                # Calculate date range
-                end_date = date.today()
-                
-                if period == '1D':
-                    start_date = end_date
-                elif period == '5D':
-                    start_date = end_date - timedelta(days=7)
-                elif period == '1M':
-                    start_date = end_date - timedelta(days=30)
-                elif period == '3M':
-                    start_date = end_date - timedelta(days=90)
-                elif period == 'YTD':
-                    start_date = date(end_date.year, 1, 1)
-                elif period == '1Y':
-                    start_date = end_date - timedelta(days=365)
-                
-                start_date = max(start_date, portfolio_start_date)
-                
-                # Get snapshots
-                snapshots = PortfolioSnapshot.query.filter(
-                    PortfolioSnapshot.user_id == user_id,
-                    PortfolioSnapshot.date >= start_date,
-                    PortfolioSnapshot.date <= end_date
-                ).order_by(PortfolioSnapshot.date).all()
-                
-                # Get S&P 500 data
-                sp500_data = MarketData.query.filter(
-                    MarketData.ticker == "SPY_SP500",
-                    MarketData.date >= start_date,
-                    MarketData.date <= end_date
-                ).order_by(MarketData.date).all()
-                
-                # Generate chart data
-                snapshot_dict = {s.date: s.total_value for s in snapshots}
-                sp500_dict = {s.date: s.close_price for s in sp500_data}
-                
-                chart_data_points = []
-                current_date = start_date
-                while current_date <= end_date:
-                    if period == '1D' or current_date.weekday() < 5:
-                        portfolio_value = snapshot_dict.get(current_date, 0)
-                        sp500_value = sp500_dict.get(current_date, 0)
-                        
-                        if portfolio_value > 0 or sp500_value > 0:
-                            chart_data_points.append({
-                                'date': current_date.isoformat(),
-                                'portfolio': portfolio_value,
-                                'sp500': sp500_value
-                            })
-                    
-                    current_date += timedelta(days=1)
-                
-                # Calculate returns
-                portfolio_return = 0
-                sp500_return = 0
-                
-                if len(chart_data_points) >= 2:
-                    first_portfolio = next((p['portfolio'] for p in chart_data_points if p['portfolio'] > 0), 0)
-                    last_portfolio = chart_data_points[-1]['portfolio']
-                    
-                    first_sp500 = next((p['sp500'] for p in chart_data_points if p['sp500'] > 0), 0)
-                    last_sp500 = chart_data_points[-1]['sp500']
-                    
-                    if first_portfolio > 0:
-                        portfolio_return = ((last_portfolio - first_portfolio) / first_portfolio) * 100
-                    
-                    if first_sp500 > 0:
-                        sp500_return = ((last_sp500 - first_sp500) / first_sp500) * 100
-                
-                chart_cache_data = {
-                    'chart_data': chart_data_points,
-                    'portfolio_return': round(portfolio_return, 2),
-                    'sp500_return': round(sp500_return, 2),
-                    'period': period,
-                    'start_date': start_date.isoformat(),
-                    'end_date': end_date.isoformat()
-                }
-                
-                # Update or create cache
-                cache_entry = UserPortfolioChartCache.query.filter_by(
-                    user_id=user_id,
-                    period=period
-                ).first()
-                
-                if cache_entry:
-                    cache_entry.chart_data = json.dumps(chart_cache_data)
-                    cache_entry.generated_at = datetime.now()
+                if update_user_chart_cache(user_id, period):
+                    results['charts_fixed'] += 1
+                    logger.info(f"User {user_id} {period}: TWR chart cache rebuilt")
                 else:
-                    cache_entry = UserPortfolioChartCache(
-                        user_id=user_id,
-                        period=period,
-                        chart_data=json.dumps(chart_cache_data),
-                        generated_at=datetime.now()
-                    )
-                    db.session.add(cache_entry)
-                
-                results['charts_fixed'] += 1
-                results['data_points_generated'] += len(chart_data_points)
-                
-                logger.info(f"User {user_id} {period}: {len(chart_data_points)} points, {portfolio_return:.2f}% return")
+                    results['errors'].append(f"{period}: no chart data (no snapshots in range)")
                 
             except Exception as e:
                 error_msg = f"{period}: {str(e)}"
                 results['errors'].append(error_msg)
                 logger.error(f"Error generating {period} cache for user {user_id}: {e}")
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
         
         # Single commit for this user
         db.session.commit()
