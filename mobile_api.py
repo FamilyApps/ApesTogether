@@ -2280,16 +2280,20 @@ def get_leaderboard():
             ).group_by(Stock.user_id).all()
             stock_count_map = {uid: cnt for uid, cnt in stock_counts}
         
-        # Batch load subscriber counts (real + gifted)
+        # Batch load subscriber counts (real = mobile IAP + gifted). Web
+        # Stripe `Subscription` is deprecated and its table is empty
+        # (verified 2026-09-02) — this block previously counted ONLY web
+        # subs, so mobile subscribers were invisible here.
         sub_count_map = {}
         if raw_user_ids:
+            from models import MobileSubscription
             sub_counts = db.session.query(
-                Subscription.subscribed_to_id,
-                sqla_func.count(Subscription.id).label('cnt')
+                MobileSubscription.subscribed_to_id,
+                sqla_func.count(MobileSubscription.id).label('cnt')
             ).filter(
-                Subscription.subscribed_to_id.in_(raw_user_ids),
-                Subscription.status == 'active'
-            ).group_by(Subscription.subscribed_to_id).all()
+                MobileSubscription.subscribed_to_id.in_(raw_user_ids),
+                MobileSubscription.status == 'active'
+            ).group_by(MobileSubscription.subscribed_to_id).all()
             sub_count_map = {uid: cnt for uid, cnt in sub_counts}
             # Add gifted (admin) subscribers
             try:
@@ -4198,24 +4202,10 @@ def get_top_influencers():
         except Exception:
             pass
 
-        # 1b. Web (Stripe) subscriptions. This endpoint historically only
-        # counted MobileSubscription + admin bonuses, while the leaderboard
-        # batch path and the portfolio-header stats count web Subscription
-        # rows too — so a creator with only web subs appeared everywhere
-        # EXCEPT Top Creators (2026-09-02). Same source set everywhere now:
-        # Subscription (web) + MobileSubscription (IAP) + AdminSubscription.
-        try:
-            from models import Subscription
-            web_counts = db.session.query(
-                Subscription.subscribed_to_id,
-                db.func.count(Subscription.id)
-            ).filter_by(status='active').group_by(
-                Subscription.subscribed_to_id
-            ).all()
-            for uid, cnt in web_counts:
-                sub_totals[uid] = sub_totals.get(uid, 0) + cnt
-        except Exception:
-            pass
+        # NOTE: web Stripe `Subscription` rows are NOT counted — Stripe is
+        # deprecated (IAP-only app) and the table is empty (verified
+        # 2026-09-02). Real-sub source set everywhere is
+        # MobileSubscription(active) + AdminSubscription bonuses.
 
         try:
             for asub in AdminSubscription.query.filter(AdminSubscription.bonus_subscriber_count > 0).all():
@@ -5984,14 +5974,11 @@ def admin_user_detail(user_id):
     
     extra = user.extra_data or {}
     
-    # Subscriber counts (real vs gifted)
-    from models import Subscription, MobileSubscription
+    # Subscriber counts (real = mobile IAP vs gifted = admin bonus; web
+    # Stripe deprecated/empty, not counted — 2026-09-02)
+    from models import MobileSubscription
     real_subs = 0
     gifted_subs = 0
-    try:
-        real_subs += Subscription.query.filter_by(subscribed_to_id=user.id, status='active').count()
-    except Exception:
-        pass
     try:
         real_subs += MobileSubscription.query.filter_by(subscribed_to_id=user.id, status='active').count()
     except Exception:

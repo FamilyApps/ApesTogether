@@ -473,7 +473,7 @@ def _compute_all_user_metrics(period='YTD'):
     """
     from datetime import datetime, date, timedelta
     from performance_calculator import calculate_portfolio_performance, get_period_dates, batch_get_leaderboard_eligibility
-    from models import Subscription, Transaction
+    from models import Transaction
     import time as _time
     
     _t0 = _time.time()
@@ -532,23 +532,12 @@ def _compute_all_user_metrics(period='YTD'):
     except Exception as e:
         logger.warning(f"Batch stats load failed: {e}")
     
-    # 3) Subscriber counts (real subscriptions)
+    # 3) Subscriber counts (real subscriptions = mobile IAP; includes $0
+    # admin-comped rows). Web Stripe `Subscription` is deprecated — the app is
+    # IAP-only and the table is empty (verified 2026-09-02), so it is no
+    # longer counted anywhere. Real-sub source set everywhere is
+    # MobileSubscription(active) + AdminSubscription bonuses.
     _sub_count_map = {}
-    try:
-        sub_counts = db.session.query(
-            Subscription.subscribed_to_id,
-            sqla_func.count(Subscription.id).label('cnt')
-        ).filter(Subscription.status == 'active').group_by(Subscription.subscribed_to_id).all()
-        _sub_count_map = {uid: cnt for uid, cnt in sub_counts}
-    except Exception as e:
-        logger.warning(f"Batch subscriber count failed: {e}")
-
-    # 3b) Mobile (IAP) subscriber counts. The single-user stats path
-    # (calculate_user_portfolio_stats) has always included MobileSubscription,
-    # but this batch path only counted web Stripe Subscriptions — so a
-    # creator's mobile subscriber showed in their portfolio header yet was
-    # missing from the leaderboard/Top Creators count (2026-09-01,
-    # fund.finance2024: 4 vs 3).
     try:
         from models import MobileSubscription
         msub_counts = db.session.query(
@@ -556,10 +545,9 @@ def _compute_all_user_metrics(period='YTD'):
             sqla_func.count(MobileSubscription.id).label('cnt')
         ).filter(MobileSubscription.status == 'active').group_by(
             MobileSubscription.subscribed_to_id).all()
-        for uid, cnt in msub_counts:
-            _sub_count_map[uid] = _sub_count_map.get(uid, 0) + cnt
+        _sub_count_map = {uid: cnt for uid, cnt in msub_counts}
     except Exception as e:
-        logger.warning(f"Batch mobile subscriber count failed: {e}")
+        logger.warning(f"Batch subscriber count failed: {e}")
     
     # 4) Admin (gifted) subscriber bonuses
     _admin_bonus_map = {}
@@ -1577,7 +1565,7 @@ def calculate_user_portfolio_stats(user_id):
     Called during market close cron
     Returns dict of stats
     """
-    from models import Stock, Transaction, Subscription, StockInfo
+    from models import Stock, Transaction, StockInfo
     from datetime import datetime, timedelta
     
     stats = {}
@@ -1618,11 +1606,9 @@ def calculate_user_portfolio_stats(user_id):
     industry_mix = calculate_industry_mix(user_id)
     stats['industry_mix'] = industry_mix
     
-    # 5. SUBSCRIBER COUNT (real + gifted from all sources)
-    subscriber_count = Subscription.query.filter_by(
-        subscribed_to_id=user_id,
-        status='active'
-    ).count()
+    # 5. SUBSCRIBER COUNT (real = mobile IAP + gifted = admin bonus; web
+    # Stripe deprecated/empty, not counted — 2026-09-02)
+    subscriber_count = 0
     try:
         from models import MobileSubscription
         subscriber_count += MobileSubscription.query.filter_by(
