@@ -9,6 +9,25 @@ This document is the single source of truth for what's still open before launch.
 
 ---
 
+## 📌 OPS LOG — 2026-09-01 (evening) — DONE means DONE, do not re-ask
+
+**✅ COMPLETED BY USER TODAY (verified in-session):**
+- **Supabase lockdown COMPLETE:** RLS enabled on all public tables (SQL ran clean) + Data API fully disabled (`public` AND `graphql_public` deselected from exposed schemas) + **Security Advisor re-run: 0 errors, 0 warnings**. S-6 in SECURITY_AUDIT.md is CLOSED. Note: new-style keys — "Publishable key" IS the anon key; app unaffected (direct Postgres only).
+- **GAS parser paste COMPLETE:** repo `scripts/public_email_parser.gs` (mergeTrade dup fix) pasted into the Apps Script project, saved; Triggers tab confirms `checkForTradeEmails` timer intact. `testParseLatestEmail` said "No matching emails" — that was the TEST HELPER's stale subject query (fixed in repo same night, re-paste optional); NOT a paste failure. Real verification = next Public.com email produces single (non-duplicated) pending trades.
+- **CoastHillBear/marblethehill72 "subscribers" RESOLVED:** rows belong to `apestogether_review` (store-reviewer demo account, 1-yr expiries, created 7/7) — intentional fixtures, LEAVE THEM. Not TestFlight leftovers.
+- ⚠ **First real subscriber (TRVAZ27 → fund.finance2024) has auto_renew=FALSE** — trial lapses 9/7 without converting unless they re-enable. Don't count the revenue.
+
+**✅ SHIPPED BY CASCADE TODAY:** leaderboard batch-path mobile-sub count fix + delete_transaction cash rebuild (`1028681`) · admin user-detail page Delete button (was edit-only — route existed, no UI) · Sep/Oct/Nov marketing calendars (Sep recalibrated: sequence restarts at #X-01 Wed 9/2; launch anchor Tue Nov 10) · #J-GME press template · GAS test-helper query fix.
+
+**⏳ PENDING QUEUE (in order):**
+1. **Wolff duplicate deletes** — admin → Users → Wolff (14) → delete transactions **1829** (IREN sell @ $37.075) and **1830** (SGOV sell @ $100.40) — needs the Delete-button deploy that shipped tonight; verify IREN/SGOV share counts vs. Public afterwards.
+2. Optional: `UPDATE mobile_subscription SET status='expired' WHERE status='active' AND expires_at < now();` (cosmetic; only touches already-lapsed rows — Cascade review query output first).
+3. **Wed 9/2:** pin #X-01 (9:15am) · register ALL brand handles (evening, exec-plan §0.1) · first Reddit COMMENTS (upvotes ≠ karma) · 3 DMs.
+
+**Social account reality (for future sessions):** @BobFordTrades (founder X) warming via likes/replies from Pixel since ~8/29 ✓ · Frodo_Baghodler (Reddit) upvote-scrolling only, ZERO comments/posts yet · brand handles NOT registered (only apestogether.social@gmail.com exists) · nothing posted anywhere as of 9/1.
+
+---
+
 ## ⏭ NEXT SESSION — step-by-step (written 8/17 ~00:25 ET; Build 50 archived + uploaded to ASC at session end)
 
 Do in order; delete this block when consumed. Repo state: `fb7cb1a` (all of tonight's fixes pushed; Mac already pulled it — Build 50 was archived FROM it).

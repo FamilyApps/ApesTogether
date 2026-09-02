@@ -406,8 +406,13 @@ function setupTrigger() {
  * Test function — manually process the most recent matching email
  */
 function testParseLatestEmail() {
+  // Same subject variants as checkForTradeEmails — the old single-subject
+  // query ("Your trade executed") predates Public's template change and
+  // reported "No matching emails" even on days trades flowed (2026-09-01).
   const config = getConfig();
-  const threads = GmailApp.search('from:mail.public.com subject:"Your trade executed"', 0, 3);
+  const threads = GmailApp.search(
+    'from:mail.public.com (subject:"trade" OR subject:"bought" OR subject:"sold" OR subject:"executed" OR subject:"order" OR subject:"rebalanced") newer_than:7d',
+    0, 3);
   if (threads.length > 0) {
     for (const thread of threads) {
       const message = thread.getMessages()[0];
