@@ -2447,6 +2447,71 @@ const SystemHealth = ({ api }) => {
   );
 };
 
+// ─── Page: Legacy Tools ─────────────────────────────────────────────────────
+// Directory of the old-design (Bootstrap/inline-HTML) admin pages and the
+// URL-parameterized diagnostic endpoints, so none of them have to be
+// memorized. Links open in a new tab and ride the same admin session/2FA.
+// The per-user ledger pages are the ONLY UI for manual stock/transaction
+// add/edit/delete — do not remove them until /admin-panel absorbs that.
+const LegacyTools = () => {
+  const [uid, setUid] = useState('');
+  const [uname, setUname] = useState('');
+  const inp = { background: 'var(--bg-hover)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', color: 'inherit', fontSize: 13, width: 180 };
+  const Row = ({ href, label, desc }) => (
+    <div style={{ padding: '7px 0', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'baseline' }}>
+      <a href={href} target="_blank" rel="noopener" style={{ color: 'var(--accent)', fontSize: 13, textDecoration: 'none', whiteSpace: 'nowrap' }}>{label}</a>
+      <span style={{ color: 'var(--text-muted)', fontSize: 12, textAlign: 'right' }}>{desc}</span>
+    </div>
+  );
+  const H = ({ children }) => <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{children}</div>;
+  const id = uid.trim() || 'USER_ID';
+  const nm = uname.trim() ? encodeURIComponent(uname.trim()) : 'USERNAME';
+  return (
+    <div>
+      <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>Legacy Tools</h2>
+      <div style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 20 }}>
+        Every old-design admin page and repair endpoint in one place. Fill the inputs to build ready-to-click URLs.
+      </div>
+
+      <Card style={{ marginBottom: 16 }}>
+        <H>Per-user ledger editing (old Bootstrap UI — only place to add/edit/delete stocks &amp; transactions)</H>
+        <input style={{ ...inp, marginBottom: 10 }} placeholder="User ID (e.g. 14 = Wolff)" value={uid} onChange={e => setUid(e.target.value)} />
+        <Row href={`/admin/users/${id}`} label="User detail" desc="holdings + transaction history with Edit/Delete buttons" />
+        <Row href={`/admin/users/${id}/edit`} label="Edit user" desc="username / email / subscription price" />
+        <Row href={`/admin/users/${id}/stocks/add`} label="Add stock" desc="manual position add (updates cash tracking)" />
+        <Row href={`/admin/users/${id}/transactions/add`} label="Add transaction" desc="manual trade entry" />
+        <Row href="/admin/users" label="User list (old)" desc="all users w/ portfolio values — SLOW, prices every holding" />
+      </Card>
+
+      <Card style={{ marginBottom: 16 }}>
+        <H>Global tables &amp; reports (old inline-HTML pages)</H>
+        <Row href="/admin/transactions" label="All transactions" desc="filterable by user / symbol / type" />
+        <Row href="/admin/stocks" label="All stock positions" desc="every holding across users" />
+        <Row href="/admin/metrics" label="Metrics" desc="legacy platform metrics page" />
+        <Row href="/admin/subscription-analytics" label="Subscription analytics" desc="legacy subscription report" />
+        <Row href="/admin/waitlist" label="Waitlist" desc="waitlist signups" />
+      </Card>
+
+      <Card>
+        <H>Diagnostics &amp; repair (JSON endpoints — parameters ride in the URL)</H>
+        <input style={{ ...inp, marginBottom: 10 }} placeholder="Username (e.g. bot username)" value={uname} onChange={e => setUname(e.target.value)} />
+        <Row href={`/admin/debug-user-transactions?username=${nm}`} label="Debug transactions" desc="full ledger + cash replay for a user" />
+        <Row href={`/admin/debug-user-snapshots?username=${nm}`} label="Debug snapshots" desc="daily values + trades (add &start=YYYY-MM-DD&end=…)" />
+        <Row href={`/admin/cash-tracking/reconcile?username=${nm}`} label="Cash reconcile" desc="preview; add &execute=true to fix user + snapshot rows" />
+        <Row href={`/admin/recompute-user-snapshots?username=${nm}`} label="Recompute snapshots" desc="rebuild a user's snapshot rows from the ledger" />
+        <Row href={`/admin/invalidate-chart-cache?username=${nm}&clear_leaderboard=1`} label="Invalidate chart cache" desc="after any ledger/snapshot repair" />
+        <Row href={`/admin/compare-dietz-twr?username=${nm}`} label="Dietz vs TWR" desc="return-methodology comparison for a user" />
+        <Row href="/admin/audit-snapshot-max-cash-drift" label="Audit: max-cash drift" desc="snapshots vs replay denominator (add &fix=true)" />
+        <Row href="/admin/audit-snapshot-stock-value?days=30" label="Audit: snapshot stock value" desc="snapshots vs deterministic closes" />
+        <Row href="/admin/audit-intraday-anomalies?days=30&fingerprint_only=true" label="Audit: intraday anomalies" desc="spike-and-revert artifact scan" />
+        <Row href="/admin/audit-bot-portfolio-integrity" label="Audit: bot portfolios" desc="holdings vs ledger integrity, all bots" />
+        <Row href="/admin/audit-marketdata-coverage" label="Audit: market-data coverage" desc="daily-close table gaps / staleness" />
+        <Row href="/admin/market-close-status" label="Market-close status" desc="EOD snapshot cron health" />
+      </Card>
+    </div>
+  );
+};
+
 // ─── Sidebar ────────────────────────────────────────────────────────────────
 const navItems = [
   { id: 'command', label: 'Command Center', icon: Icons.command },
@@ -2458,6 +2523,7 @@ const navItems = [
   { id: 'growth', label: 'Platform Growth', icon: Icons.chart },
   { id: 'api', label: 'API Usage', icon: Icons.database },
   { id: 'health', label: 'System Health', icon: Icons.activity },
+  { id: 'legacy', label: 'Legacy Tools', icon: Icons.command },
 ];
 
 const Sidebar = ({ active, onNav, onLogout }) => (
@@ -2530,6 +2596,7 @@ const App = () => {
     growth: <PlatformGrowth api={api} />,
     api: <AlphaVantageUsage api={api} />,
     health: <SystemHealth api={api} />,
+    legacy: <LegacyTools />,
   };
 
   return (
