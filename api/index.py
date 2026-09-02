@@ -6034,6 +6034,141 @@ def admin_liquidate_halted_position():
     })
 
 
+@app.route('/api/cron/daily-admin-digest')
+def cron_daily_admin_digest():
+    """Nightly admin activity digest (Vercel cron, ~9PM ET).
+
+    Emails ADMIN_NOTIFY_EMAIL a snapshot of today's platform activity:
+      - total trades executed today (ET calendar day)
+      - bots that traded today (count + % of all bots)
+      - real users that traded today (count + % of all humans, usernames)
+      - bots with no trades in 7-30 days (count + %)
+      - bots with no trades in 30+ days OR never (count + % + username list)
+
+    Query params: ?send=false returns the JSON stats without emailing
+    (manual preview). Auth: CRON_SECRET bearer, same as other crons.
+    """
+    auth_error = verify_cron_request()
+    if auth_error:
+        return auth_error
+    from models import db as _db, User, Transaction
+    try:
+        try:
+            from zoneinfo import ZoneInfo
+            _now_et = datetime.now(ZoneInfo('America/New_York'))
+            _midnight_et = _now_et.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_start_utc = _midnight_et.astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
+            day_label = _now_et.strftime('%A, %B %-d, %Y') if os.name != 'nt' else _now_et.strftime('%A, %B %d, %Y')
+        except Exception:
+            # tzdata unavailable — assume EDT (UTC-4); off by 1h in winter, harmless
+            _now_et = datetime.utcnow() - timedelta(hours=4)
+            day_start_utc = _now_et.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(hours=4)
+            day_label = _now_et.strftime('%A, %B %d, %Y')
+
+        now_utc = datetime.utcnow()
+
+        # Populations (soft-deleted accounts excluded)
+        bots = {u.id: u.username for u in User.query.filter(
+            User.role == 'agent', User.deleted_at.is_(None)).all()}
+        humans = {u.id: u.username for u in User.query.filter(
+            User.role == 'user', User.deleted_at.is_(None)).all()}
+
+        # Today's trades (one aggregate query)
+        day_rows = _db.session.query(
+            Transaction.user_id, _db.func.count(Transaction.id)
+        ).filter(Transaction.timestamp >= day_start_utc).group_by(Transaction.user_id).all()
+        total_trades = sum(cnt for _, cnt in day_rows)
+        traded_today = {uid for uid, _ in day_rows}
+        bots_traded = sorted(bots[uid] for uid in traded_today if uid in bots)
+        humans_traded = sorted(humans[uid] for uid in traded_today if uid in humans)
+
+        # Last trade per bot (one aggregate query) → inactivity buckets
+        last_trade = dict(_db.session.query(
+            Transaction.user_id, _db.func.max(Transaction.timestamp)
+        ).filter(Transaction.user_id.in_(list(bots.keys()) or [0])).group_by(Transaction.user_id).all())
+        stale_7_30, dormant_30 = [], []
+        for uid, uname in bots.items():
+            lt = last_trade.get(uid)
+            if lt is None:
+                dormant_30.append(f"{uname} (never traded)")
+            elif lt < now_utc - timedelta(days=30):
+                dormant_30.append(f"{uname} (last: {lt.strftime('%m/%d')})")
+            elif lt < now_utc - timedelta(days=7):
+                stale_7_30.append(uname)
+        dormant_30.sort()
+        stale_7_30.sort()
+
+        def pct(n, d):
+            return round(100.0 * n / d, 1) if d else 0.0
+
+        stats = {
+            'date_et': day_label,
+            'total_trades_today': total_trades,
+            'bots_total': len(bots),
+            'bots_traded_today': len(bots_traded),
+            'bots_traded_pct': pct(len(bots_traded), len(bots)),
+            'humans_total': len(humans),
+            'humans_traded_today': len(humans_traded),
+            'humans_traded_pct': pct(len(humans_traded), len(humans)),
+            'humans_traded_usernames': humans_traded,
+            'bots_stale_7_30d': len(stale_7_30),
+            'bots_stale_7_30d_pct': pct(len(stale_7_30), len(bots)),
+            'bots_dormant_30d': len(dormant_30),
+            'bots_dormant_30d_pct': pct(len(dormant_30), len(bots)),
+            'bots_dormant_30d_list': dormant_30,
+        }
+
+        if request.args.get('send', 'true').lower() == 'false':
+            return jsonify({'sent': False, 'preview': True, **stats})
+
+        subj = (f"ApesTogether daily digest — {total_trades} trades · "
+                f"{len(bots_traded)}/{len(bots)} bots · {len(humans_traded)}/{len(humans)} humans")
+        lines = [
+            f"Activity digest for {day_label} (ET)", "",
+            f"TRADES TODAY: {total_trades}", "",
+            f"BOTS THAT TRADED: {len(bots_traded)} of {len(bots)} ({stats['bots_traded_pct']}%)",
+            f"REAL USERS THAT TRADED: {len(humans_traded)} of {len(humans)} ({stats['humans_traded_pct']}%)"
+            + (f" — {', '.join(humans_traded)}" if humans_traded else ""), "",
+            f"BOTS QUIET 7-30 DAYS: {len(stale_7_30)} ({stats['bots_stale_7_30d_pct']}%)"
+            + (f" — {', '.join(stale_7_30)}" if stale_7_30 else ""), "",
+            f"BOTS DORMANT 30+ DAYS: {len(dormant_30)} ({stats['bots_dormant_30d_pct']}%)",
+        ] + [f"  - {b}" for b in dormant_30]
+        plain = "\n".join(lines)
+
+        def _rows(pairs):
+            return "".join(
+                f"<tr><td style='padding:6px 14px 6px 0;color:#555'>{k}</td>"
+                f"<td style='padding:6px 0;font-weight:600'>{v}</td></tr>" for k, v in pairs)
+        html = (
+            f"<div style='font-family:sans-serif;max-width:640px'>"
+            f"<h2 style='margin-bottom:2px'>Daily activity digest</h2>"
+            f"<div style='color:#888;margin-bottom:14px'>{day_label} (ET)</div>"
+            f"<table style='border-collapse:collapse;font-size:14px'>"
+            + _rows([
+                ('Trades today', total_trades),
+                ('Bots that traded', f"{len(bots_traded)} / {len(bots)} ({stats['bots_traded_pct']}%)"),
+                ('Real users that traded', f"{len(humans_traded)} / {len(humans)} ({stats['humans_traded_pct']}%)"
+                    + (f"<br><span style='font-weight:400;color:#555'>{', '.join(humans_traded)}</span>" if humans_traded else "")),
+                ('Bots quiet 7\u201330 days', f"{len(stale_7_30)} ({stats['bots_stale_7_30d_pct']}%)"
+                    + (f"<br><span style='font-weight:400;color:#555'>{', '.join(stale_7_30)}</span>" if stale_7_30 else "")),
+                ('Bots dormant 30+ days', f"{len(dormant_30)} ({stats['bots_dormant_30d_pct']}%)"),
+            ])
+            + "</table>"
+            + ("<div style='margin-top:10px;font-size:13px;color:#b00'><b>Dormant bots:</b><br>"
+               + "<br>".join(dormant_30) + "</div>" if dormant_30 else "")
+            + "</div>")
+
+        admin_to = (os.environ.get('ADMIN_NOTIFY_EMAIL')
+                    or os.environ.get('ADMIN_EMAIL')
+                    or 'bobford00@gmail.com')
+        from services.notification_utils import send_email as _send
+        result = _send(admin_to, subj, plain, html_body=html, bcc=False)
+        return jsonify({'sent': True, 'to': admin_to, 'email_result': str(result), **stats})
+    except Exception as e:
+        logger.error(f"daily-admin-digest failed: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/admin/audit-snapshot-max-cash-drift')
 @admin_required
 def admin_audit_snapshot_max_cash_drift():

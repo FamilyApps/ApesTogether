@@ -4197,7 +4197,26 @@ def get_top_influencers():
                 sub_totals[uid] = sub_totals.get(uid, 0) + cnt
         except Exception:
             pass
-        
+
+        # 1b. Web (Stripe) subscriptions. This endpoint historically only
+        # counted MobileSubscription + admin bonuses, while the leaderboard
+        # batch path and the portfolio-header stats count web Subscription
+        # rows too — so a creator with only web subs appeared everywhere
+        # EXCEPT Top Creators (2026-09-02). Same source set everywhere now:
+        # Subscription (web) + MobileSubscription (IAP) + AdminSubscription.
+        try:
+            from models import Subscription
+            web_counts = db.session.query(
+                Subscription.subscribed_to_id,
+                db.func.count(Subscription.id)
+            ).filter_by(status='active').group_by(
+                Subscription.subscribed_to_id
+            ).all()
+            for uid, cnt in web_counts:
+                sub_totals[uid] = sub_totals.get(uid, 0) + cnt
+        except Exception:
+            pass
+
         try:
             for asub in AdminSubscription.query.filter(AdminSubscription.bonus_subscriber_count > 0).all():
                 sub_totals[asub.portfolio_user_id] = sub_totals.get(asub.portfolio_user_id, 0) + (asub.bonus_subscriber_count or 0)
